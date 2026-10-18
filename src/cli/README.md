@@ -50,6 +50,7 @@ Run sequential native document operations against an isolated editing context:
 
 ```bash
 bun run cli -- document recipe recipe.json
+bun run cli -- document recipe --output compact recipe.json
 bun run cli -- document recipe --help
 ```
 
@@ -195,6 +196,39 @@ sketch (the publish result whose `discovery.sketch.sketchId` equals
 `owner.sketchId`). Alternatively use a candidate's `target` directly in the same
 document (for example after `document.open` of a saved file, where identities
 are stable).
+
+### Compact output
+
+`--output detailed` (the default, unchanged envelope) prints every result's
+full canonical discovery. `--output compact` (before the recipe path) prints
+the same envelope plus `"output": { "mode": "compact", "version": 1 }`, and
+is validated against that versioned shape before printing. It is presentation
+only: execution, alias resolution and validation always use full discovery, so
+both modes select the same targets, stop at the same operation and exit with
+the same code. Every result keeps its `correlation`, `outcome`, `completion`
+receipts (live, handoff, geometry, persistence, file), `diagnostics` and
+`changedTargets`; `unexecuted`, `cleanup` (including failures) and the additive structured
+`error` (see [Errors and exit codes](#errors-and-exit-codes)) are kept verbatim.
+Initialization failure keeps its `initialization` receipt with `results: []`.
+Only discovery shrinks, always explicitly:
+
+- Every result except the last one with discovery prints
+  `{ "detail": "omitted", "state": ... }`, which keeps its exact basis and draft.
+- The last discovery prints `"detail": "included"` with every labelled typed
+  reference and all other discovery fields, but each body's exact topology
+  signatures become `{ "detail": "omitted", "entries": N }`. `topology: null`
+  still means unavailable (not empty), and `entries: 0` an empty list.
+  Omission does not certify geometry; bounds are reported as computed.
+- `discovery: null` (failed handoff) stays `null`.
+
+Use detailed output to pick faces/edges by geometry, read private sketch
+points from intermediate steps, or debug. Compact output only changes what is
+printed: the runtime still computes full discovery, including exact topology,
+so it does not make native work faster. Measured with the release bundle,
+opening a public example and running ten `document.inspect` operations printed
+1.09/3.30/5.75 MB detailed and 59/137/250 KB compact (bracket/wheel/enclosure),
+with no consistent difference in wall time. `examples/compact-summary.ts`
+consumes compact output: `bun examples/compact-summary.ts examples/plate.json`.
 
 ### Feature lifecycle and rollback timeline
 

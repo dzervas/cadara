@@ -30,6 +30,13 @@ import {
   type RecipeCliError,
 } from "@/cli/commands/recipe-diagnostics";
 
+import {
+  compactInitializationOutput,
+  compactRecipeOutput,
+  type CompactRecipeOutput,
+} from "@/cli/commands/compact-output";
+import { validateCompactRecipeOutput } from "@/cli/commands/compact-output.runtime-schema";
+
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string; sketch?: string };
 type RecipeGeometryEdit<T = import("@/contracts/semantic/schema").SemanticSketchGeometryEdit> = T extends { target: infer R } ? Omit<T, "target" | "destination" | "boundary"> & { target: R | TargetAlias } & (T extends { destination: infer D } ? { destination: D | TargetAlias } : unknown) & (T extends { boundary: infer B } ? { boundary: B | TargetAlias } : unknown) : never;
@@ -387,7 +394,7 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
     };
   });
 }
-const usage = "Usage: cadara document recipe <recipe.json>";
+const usage = "Usage: cadara document recipe [--output detailed|compact] <recipe.json>";
 
 function help() {
   const families = new Map<string, string[]>();
@@ -405,6 +412,8 @@ function help() {
     "Exit 2 invalid invocation or recipe (nothing ran, kernel never started): stdout empty; the first stderr",
     "  line is JSON (version, error) with command index/ID, field path and expected schema, then a summary.",
     "",
+    "--output compact      versioned compact discovery; preserves receipts, diagnostics and structured errors.",
+    "--output detailed     full canonical discovery (default).",
     "--schema              machine-readable catalog: every operation's exact input schema (generated from the",
     "                      closed contract), execution/preview capability, angle units and recipe selectors.",
     "--schema <operation>  one operation with only the schema components it references.",
@@ -472,11 +481,27 @@ export const documentRecipesCommand: CommandModule = {
       io.stdout(JSON.stringify(output) + "\n");
       return { ok: true };
     }
-    if (argv.length !== 1)
+    const [, mode, ...path] =
+      argv[0] === "--output" ? argv : [null, "detailed", ...argv];
+    if (path.length !== 1 || (mode !== "detailed" && mode !== "compact"))
       return refuse(io, recipeError("usage", "preflight", usage, { help: "cadara document recipe --help" }).error);
+    // Presentation only: execution, aliases and validation never see the mode.
+    const print = (
+      envelope: Record<string, unknown>,
+      compact: () => CompactRecipeOutput,
+    ) => {
+      if (mode === "detailed")
+        return io.stdout(JSON.stringify(envelope) + "\n");
+      const validated = validateCompactRecipeOutput(compact());
+      if (!validated.success)
+        throw new Error(
+          `CLI produced an invalid compact output envelope: ${validated.issues.map((issue) => issue.path).join(", ")}`,
+        );
+      io.stdout(JSON.stringify(validated.data) + "\n");
+    };
     let input: unknown;
     try {
-      input = JSON.parse(await readFile(argv[0]!, "utf8"));
+      input = JSON.parse(await readFile(path[0]!, "utf8"));
     } catch (error) {
       return refuse(io, recipeError("recipe-unreadable", "preflight", error instanceof Error ? error.message : String(error)).error);
     }
@@ -495,9 +520,9 @@ export const documentRecipesCommand: CommandModule = {
     const opened = await createHeadlessSessionFactory().open();
     if (opened.kind !== "ready") {
       const error = recipeError("initialization", "initialization", "Document initialization failed.");
-      io.stdout(
-        JSON.stringify({ version: 1, initialization: opened, results: [], error: error.error }) +
-          "\n",
+      print(
+        { version: 1, initialization: opened, results: [], error: error.error },
+        () => compactInitializationOutput(opened, error.error),
       );
       return {
         ok: false,
@@ -938,16 +963,12 @@ export const documentRecipesCommand: CommandModule = {
     } finally {
       const cleanup = await opened.session.close();
       succeeded &&= cleanup.kind === "closed";
-      io.stdout(
-        JSON.stringify({
-          version: 1,
-          results,
-          unexecuted: operations
-            .slice(results.length)
-            .map((operation) => operation.command.commandId),
-          cleanup,
-          ...(stopped ? { error: stopped } : {}),
-        }) + "\n",
+      const unexecuted = operations
+        .slice(results.length)
+        .map((operation) => operation.command.commandId);
+      print(
+        { version: 1, results, unexecuted, cleanup, ...(stopped ? { error: stopped } : {}) },
+        () => compactRecipeOutput(results, unexecuted, cleanup, stopped),
       );
     }
     return succeeded
