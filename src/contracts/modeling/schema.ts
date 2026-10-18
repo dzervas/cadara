@@ -275,6 +275,7 @@ export interface LinearUpToOffset {
 }
 
 export interface AngularUpToOffset {
+  /** @x-unit radian */
   angle: AuthoredValue<number>;
   direction: UpToOffsetDirection;
 }
@@ -328,12 +329,14 @@ export type ExtrudeEndCondition =
       kind: "blind";
       direction: LinearExtentDirection;
       distance: AuthoredValue<number>;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "upToNext";
       direction: LinearExtentDirection;
       offset?: LinearUpToOffset;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     }
   | {
@@ -341,6 +344,7 @@ export type ExtrudeEndCondition =
       direction: LinearExtentDirection;
       target: { kind: "face"; bodyId: BodyId; faceId: FaceId };
       offset?: LinearUpToOffset;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     }
   | {
@@ -348,6 +352,7 @@ export type ExtrudeEndCondition =
       direction: LinearExtentDirection;
       target: { kind: "body"; bodyId: BodyId };
       offset?: LinearUpToOffset;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     }
   | {
@@ -355,11 +360,13 @@ export type ExtrudeEndCondition =
       direction: LinearExtentDirection;
       target: UpToVertexTarget;
       offset?: LinearUpToOffset;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     }
   | {
       kind: "throughAll";
       direction: LinearExtentDirection;
+      /** Draft angle in radians. @x-unit radian */
       draftAngle?: AuthoredValue<number>;
     };
 
@@ -385,6 +392,7 @@ export type RevolveEndCondition =
   | {
       kind: "blind";
       direction: AngularExtentDirection;
+      /** Revolution angle in radians. @x-unit radian */
       angle: AuthoredValue<number>;
     }
   | {
@@ -564,7 +572,10 @@ export interface RevolveSolidFeatureParameters {
   profiles: NonEmptyReadonlyArray<RevolveSolidProfileRef>;
   /** Explicit axis reference used by the revolve. */
   axis: RevolveAxisRef;
-  /** Explicit start angle in radians from the profile's zero-angle pose. */
+  /**
+   * Explicit start angle in radians from the profile's zero-angle pose.
+   * @x-unit radian
+   */
   startAngle: AuthoredValue<number>;
   /** Explicit angular end controls for all active revolve sides. */
   extent: RevolveFeatureExtent;
@@ -585,7 +596,10 @@ export interface RevolveSurfaceFeatureParameters {
   profiles: NonEmptyReadonlyArray<RevolveSurfaceProfileRef>;
   /** Explicit axis reference used by the revolve. */
   axis: RevolveAxisRef;
-  /** Explicit start angle in radians from the profile's zero-angle pose. */
+  /**
+   * Explicit start angle in radians from the profile's zero-angle pose.
+   * @x-unit radian
+   */
   startAngle: AuthoredValue<number>;
   /** Explicit angular end controls for all active revolve sides. */
   extent: RevolveFeatureExtent;

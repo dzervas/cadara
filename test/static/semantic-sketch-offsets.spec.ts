@@ -78,7 +78,7 @@ test("relationship label aliases resolve only in the terminal client, not shared
     "offsets.filter(offset => offset.label === target.label)",
   );
   expect(client).toContain(
-    'matches.length !== 1) throw new Error("Offset target alias is missing or ambiguous.")',
+    'throw selectionError("Offset target alias is missing or ambiguous."',
   );
   for (const path of [
     "src/domain/editor/sketch-session/editing.ts",

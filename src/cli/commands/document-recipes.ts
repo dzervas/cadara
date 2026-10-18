@@ -12,6 +12,23 @@ import {
 
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 import { isValidSketchOwner, scopeSketchOwners } from "./sketch-owner-targets";
+import {
+  contractSchemaAt,
+  recipeCatalog,
+  recipeLengthUnit,
+  recipeOperationCatalog,
+  recipeOperationNames,
+  suggestOperations,
+  summarizeSchema,
+} from "@/cli/commands/recipe-catalog";
+import {
+  invalidRecipe,
+  pathOf,
+  RecipeError,
+  recipeError,
+  selectionError,
+  type RecipeCliError,
+} from "@/cli/commands/recipe-diagnostics";
 
 type Alias = { alias: string };
 type TargetAlias = Alias & { label: string; sketch?: string };
@@ -134,9 +151,10 @@ const example = {
     },
   ],
 };
-function parseRecipe(input: unknown): RecipeOperation[] {
+/** `position.index` tracks the operation being parsed, to locate preflight errors. */
+function parseRecipe(input: unknown, position: { index: number }): RecipeOperation[] {
   if (!input || typeof input !== "object" || Array.isArray(input))
-    throw new Error("Recipe must be an object.");
+    throw invalidRecipe("Recipe must be an object.", { path: "" });
   const recipe = input as Record<string, unknown>;
   if (
     Object.keys(recipe).some(
@@ -146,25 +164,32 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     !Array.isArray(recipe.operations) ||
     !recipe.operations.length
   )
-    throw new Error("Expected version:1 and nonempty operations.");
+    throw invalidRecipe("Expected version:1 and nonempty operations.", { path: "" });
   const ids = new Set<string>();
   const aliases = new Set<string>();
-  return recipe.operations.map((value: unknown) => {
+  return recipe.operations.map((value: unknown, index: number) => {
+    position.index = index;
     if (!value || typeof value !== "object" || Array.isArray(value))
-      throw new Error("Operation must be an object.");
+      throw invalidRecipe("Operation must be an object.", { path: "" });
     const { as: alias, ...command } = value as Record<string, unknown>;
     if (
       alias !== undefined &&
       (typeof alias !== "string" || !alias || aliases.has(alias))
     )
-      throw new Error("Aliases must be nonempty and unique.");
+      throw invalidRecipe("Aliases must be nonempty and unique.", { path: "as", knownAliases: [...aliases] });
     if (
       typeof command.commandId !== "string" ||
       !command.commandId ||
       ids.has(command.commandId)
     )
-      throw new Error("Command IDs must be nonempty and unique.");
+      throw invalidRecipe("Command IDs must be nonempty and unique.", { path: "commandId" });
     ids.add(command.commandId);
+    if (typeof command.operation !== "string" || !recipeOperationNames.includes(command.operation))
+      throw recipeError("unknown-operation", "preflight", `Unknown operation ${JSON.stringify(command.operation)}.`, {
+        path: "operation",
+        suggestions: typeof command.operation === "string" ? suggestOperations(command.operation) : [],
+        help: "cadara document recipe --schema",
+      });
     const validationCommand = { ...command };
     for (const key of ["basis", "draft"] as const) {
       const value = command[key];
@@ -174,7 +199,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
         typeof value.alias !== "string" ||
         !aliases.has(value.alias)
       )
-        throw new Error(key === "basis" ? "Unknown or ambiguous document alias." : "Unknown or ambiguous draft alias.");
+        throw invalidRecipe(key === "basis" ? "Unknown or ambiguous document alias." : "Unknown or ambiguous draft alias.", { path: key, selector: value, knownAliases: [...aliases] });
       validationCommand[key] =
         key === "basis"
           ? {
@@ -187,7 +212,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     function validateTarget(value: unknown, placeholder: string) {
       if (!isAlias(value)) return value;
       if (Object.keys(value).length !== ("sketch" in value ? 3 : 2) || !isValidSketchOwner(value, aliases) || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
-        throw new Error("Unknown or ambiguous target alias.");
+        throw invalidRecipe("Unknown or ambiguous target alias.", { selector: value, knownAliases: [...aliases] });
       return placeholder;
     }
     if ((command.operation === "featureReplay.create" || command.operation === "featureReplay.update") && command.parameters && typeof command.parameters === "object") {
@@ -326,7 +351,7 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       const edit: Record<string, unknown> = { ...command.edit };
       if (isAlias(edit.target)) {
         validateTarget(edit.target, "sketch_point_validation");
-        if (!edit.kind || edit.kind === "tangent") throw new Error("Tangent edits require a typed handle reference.");
+        if (!edit.kind || edit.kind === "tangent") throw invalidRecipe("Tangent edits require a typed handle reference.", { path: "edit.target" });
         edit.target = edit.kind === "point" || edit.kind === "mergePoints" ? { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" } : { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" };
       }
       if (isAlias(edit.boundary)) {
@@ -343,8 +368,18 @@ function parseRecipe(input: unknown): RecipeOperation[] {
       validateTarget(command.primitive.source, "sketch_entity_validation");
       validationCommand.primitive = { ...command.primitive, source: { kind: "sketchEntity", sketchId: "sketch_validation", entityId: "sketch_entity_validation" } };
     }
-    if (!validateSemanticCommand(validationCommand).success)
-      throw new Error("Invalid semantic operation.");
+    const validation = validateSemanticCommand(validationCommand);
+    if (!validation.success) {
+      const issues = validation.issues.map(({ path, expected, value }) => ({ path, expected, value, ...contractSchemaAt(command.operation as string, path, validationCommand) }));
+      const [first] = issues as [(typeof issues)[number]];
+      const expected = first.schema ? summarizeSchema(first.schema) : first.expected;
+      const detail = first.allowed ? `unknown field ${first.path}; allowed: ${first.allowed.join(", ")}` : `${first.path || "operation"} expected ${expected.length > 240 ? `${expected.slice(0, 240)}...` : expected}`;
+      throw invalidRecipe(`Invalid semantic operation: ${detail}.`, {
+        path: issues[0]!.path,
+        issues,
+        help: `cadara document recipe --schema ${command.operation as string}`,
+      });
+    }
     if (typeof alias === "string") aliases.add(alias);
     return {
       command: command as RecipeOperation["command"],
@@ -352,71 +387,151 @@ function parseRecipe(input: unknown): RecipeOperation[] {
     };
   });
 }
+const usage = "Usage: cadara document recipe <recipe.json>";
+
+function help() {
+  const families = new Map<string, string[]>();
+  for (const operation of recipeOperationNames) {
+    const [family] = operation.split(".");
+    families.set(family!, [...(families.get(family!) ?? []), operation.slice(family!.length + 1)]);
+  }
+  return [
+    usage,
+    "       cadara document recipe --schema [operation]",
+    "",
+    "Runs a sequential JSON recipe of semantic operations in an isolated document.",
+    "Exit 0 success; 1 semantic, selection or initialization failure: stdout is one JSON envelope",
+    "  (version, results, unexecuted, cleanup, plus initialization/error when present); stderr a summary.",
+    "Exit 2 invalid invocation or recipe (nothing ran, kernel never started): stdout empty; the first stderr",
+    "  line is JSON (version, error) with command index/ID, field path and expected schema, then a summary.",
+    "",
+    "--schema              machine-readable catalog: every operation's exact input schema (generated from the",
+    "                      closed contract), execution/preview capability, angle units and recipe selectors.",
+    "--schema <operation>  one operation with only the schema components it references.",
+    "",
+    "Recipe extras: `as` names an operation's discovery; `basis`/`draft` accept an object with `alias`; typed",
+    "targets accept `alias` + `label` (the unique eligible discovered label), optionally `sketch` (an earlier alias",
+    "naming the owning sketch). Lengths are " + `${recipeLengthUnit}s; every`,
+    "angle field states its unit (radian or degree) in the schema `x-unit` and the operation's `units`.",
+    "",
+    `Operations (${recipeOperationNames.length}):`,
+    ...[...families].map(([family, names]) => `  ${family}: ${names.join(", ")}`),
+    "",
+    "Example (the JSON below runs as is; it is the only JSON in this help):",
+    JSON.stringify(example, null, 2),
+    "",
+  ].join("\n");
+}
+
+/**
+ * Preflight refusals (exit 2) keep stdout empty, as for every usage error. The
+ * machine-readable error is the first stderr line; the dispatcher prints the
+ * human summary after it.
+ */
+function refuse(io: import("@/cli/types").CliIO, error: RecipeCliError) {
+  io.stderr(JSON.stringify({ version: 1, error }) + "\n");
+  return { ok: false, kind: "usage", message: error.message } as const;
+}
+
+/** Attach the operation position (and a selector's path) to an error. */
+function locate(error: RecipeCliError, commandIndex: number, operation: unknown): RecipeCliError {
+  if (commandIndex < 0) return error;
+  const record = operation && typeof operation === "object" ? (operation as Record<string, unknown>) : {};
+  const commandId = typeof record.commandId === "string" && record.commandId ? record.commandId : null;
+  const name = typeof record.operation === "string" ? record.operation : null;
+  const path = error.path ?? (error.selector === undefined ? null : pathOf(operation, error.selector));
+  const expected = error.expected ?? (path && name && !error.issues ? contractSchemaAt(name, path, operation).schema : undefined);
+  const where = [`operations[${commandIndex}]`, commandId && JSON.stringify(commandId), name, path && `at ${path}`].filter(Boolean).join(" ");
+  return {
+    ...error,
+    message: `${error.message} (${where})${error.help ? ` See \`${error.help}\`.` : ""}`,
+    commandIndex,
+    commandId,
+    operation: name,
+    path,
+    ...(expected ? { expected } : {}),
+  };
+}
+
 export const documentRecipesCommand: CommandModule = {
   name: "document recipe",
   description:
     "Run a sequential document/sketch JSON recipe in an isolated document",
   async run(argv, _env, io) {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) {
-      io.stdout(
-        `Usage: cadara document recipe <recipe.json>\n${JSON.stringify(example, null, 2)}\n`,
-      );
+      io.stdout(help());
+      return { ok: true };
+    }
+    if (argv[0] === "--schema" && argv.length <= 2) {
+      const output = argv.length === 1 ? recipeCatalog() : recipeOperationCatalog(argv[1]!);
+      if (!output)
+        return refuse(io, recipeError("unknown-operation", "preflight", `Unknown operation ${JSON.stringify(argv[1])}.`, {
+          suggestions: suggestOperations(argv[1]!),
+          help: "cadara document recipe --schema",
+        }).error);
+      io.stdout(JSON.stringify(output) + "\n");
       return { ok: true };
     }
     if (argv.length !== 1)
-      return {
-        ok: false,
-        kind: "usage",
-        message: "Usage: cadara document recipe <recipe.json>",
-      };
-    let operations: RecipeOperation[];
+      return refuse(io, recipeError("usage", "preflight", usage, { help: "cadara document recipe --help" }).error);
+    let input: unknown;
     try {
-      operations = parseRecipe(JSON.parse(await readFile(argv[0]!, "utf8")));
+      input = JSON.parse(await readFile(argv[0]!, "utf8"));
     } catch (error) {
-      return {
-        ok: false,
-        kind: "usage",
-        message: error instanceof Error ? error.message : String(error),
-      };
+      return refuse(io, recipeError("recipe-unreadable", "preflight", error instanceof Error ? error.message : String(error)).error);
+    }
+    let operations: RecipeOperation[];
+    const position = { index: -1 };
+    try {
+      operations = parseRecipe(input, position);
+    } catch (error) {
+      if (!(error instanceof RecipeError)) throw error;
+      const operation = position.index < 0 ? undefined : (input as { operations: unknown[] }).operations[position.index];
+      return refuse(io, locate(error.error, position.index, operation));
     }
     // Capture/help/invalid-input paths never acquire a model or load WASM.
     const { createHeadlessSessionFactory } =
       await import("@/composition/headless");
     const opened = await createHeadlessSessionFactory().open();
     if (opened.kind !== "ready") {
+      const error = recipeError("initialization", "initialization", "Document initialization failed.");
       io.stdout(
-        JSON.stringify({ version: 1, initialization: opened, results: [] }) +
+        JSON.stringify({ version: 1, initialization: opened, results: [], error: error.error }) +
           "\n",
       );
       return {
         ok: false,
         kind: "failure",
-        message: "Document initialization failed.",
+        message: error.message,
       };
     }
     const results: SemanticResult[] = [];
     const snapshots = new Map<string, SemanticDiscovery>();
     let succeeded = true;
+    let stopped: RecipeCliError | undefined;
     try {
-      for (const operation of operations) {
-        const { command, aliases } = scopeSketchOwners({ ...operation.command }, snapshots);
+      // Owner-scoped selectors are rewritten copies; map them back for errors.
+      const origins = new Map<unknown, unknown>();
+      for (const [index, operation] of operations.entries()) try {
+        origins.clear();
+        const { command, aliases } = scopeSketchOwners({ ...operation.command }, snapshots, origins);
         if (isAlias(command.basis)) {
           const state = aliases.get(command.basis.alias)?.state;
           if (!state)
-            throw new Error("Alias has no completed authoritative state.");
+            throw selectionError("Alias has no completed authoritative state.", command.basis, [], [], undefined, []);
           const { documentId, revisionId, repositoryHeads } = state;
           command.basis = { documentId, revisionId, repositoryHeads };
         }
         if ("draft" in command && isAlias(command.draft)) {
           const draft = aliases.get(command.draft.alias)?.state.draft;
-          if (!draft) throw new Error("Alias has no current private draft.");
+          if (!draft) throw selectionError("Alias has no current private draft.", command.draft, [], [], undefined, []);
           command.draft = draft;
         }
         if (command.operation === "sketch.dimension.add") {
           const resolvePoint = (value: typeof command.points[number]) => {
             if (!isAlias(value)) return value;
             const matches = aliases.get(value.alias)?.references.filter(r => r.label === value.label && r.target.kind === "sketchPoint") ?? [];
-            if (matches.length !== 1 || matches[0]!.target.kind !== "sketchPoint") throw new Error("Point target alias is missing or ambiguous.");
+            if (matches.length !== 1 || matches[0]!.target.kind !== "sketchPoint") throw selectionError("Point target alias is missing or ambiguous.", value, ["sketchPoint"], matches, aliases.get(value.alias));
             return matches[0]!.target.pointId;
           };
           command.points = [resolvePoint(command.points[0]), resolvePoint(command.points[1])];
@@ -424,32 +539,44 @@ export const documentRecipesCommand: CommandModule = {
         if (command.operation === "variable.update" && isAlias(command.variableId)) {
           const target = command.variableId;
           const matches = aliases.get(target.alias)?.variables?.filter(variable => variable.name === target.label) ?? [];
-          if (matches.length !== 1) throw new Error("Variable target alias is missing or ambiguous.");
+          if (matches.length !== 1) {
+            const variables = (aliases.get(target.alias)?.variables ?? []).map(variable => ({ label: variable.name, target: variable.variableId }));
+            throw selectionError("Variable target alias is missing or ambiguous.", target, ["variable"], variables.filter(v => v.label === target.label), undefined, variables);
+          }
           command.variableId = matches[0]!.variableId;
         }
         if ((command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && isAlias(command.dimensionId)) {
           const target = command.dimensionId;
           const sketch = aliases.get(target.alias)?.sketch;
           const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
-          if (matches.length !== 1) throw new Error("Dimension target alias is missing or ambiguous.");
+          if (matches.length !== 1) {
+            const dimensions = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].map(d => ({ label: d.label, target: d.dimensionId }));
+            throw selectionError("Dimension target alias is missing or ambiguous.", target, ["dimension"], dimensions.filter(d => d.label === target.label), undefined, dimensions);
+          }
           command.dimensionId = matches[0]!.dimensionId;
         }
         if ((command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair") && isAlias(command.derivationId)) {
           const target = command.derivationId;
           const matches = aliases.get(target.alias)?.sketch?.mirrors.filter(mirror => mirror.label === target.label) ?? [];
-          if (matches.length !== 1) throw new Error("Mirror target alias is missing or ambiguous.");
+          if (matches.length !== 1) {
+            const mirrors = (aliases.get(target.alias)?.sketch?.mirrors ?? []).map(mirror => ({ label: mirror.label, target: mirror.derivationId }));
+            throw selectionError("Mirror target alias is missing or ambiguous.", target, ["mirror"], mirrors.filter(m => m.label === target.label), undefined, mirrors);
+          }
           command.derivationId = matches[0]!.derivationId;
         }
         if (command.operation === "sketch.offset.remove" && isAlias(command.derivationId)) {
           const target = command.derivationId;
           const matches = aliases.get(target.alias)?.sketch?.offsets.filter(offset => offset.label === target.label) ?? [];
-          if (matches.length !== 1) throw new Error("Offset target alias is missing or ambiguous.");
+          if (matches.length !== 1) {
+            const offsets = (aliases.get(target.alias)?.sketch?.offsets ?? []).map(offset => ({ label: offset.label, target: offset.derivationId }));
+            throw selectionError("Offset target alias is missing or ambiguous.", target, ["offset"], offsets.filter(o => o.label === target.label), undefined, offsets);
+          }
           command.derivationId = matches[0]!.derivationId;
         }
         function resolveSketchTarget(target: import("@/contracts/shared/references").DurableRef | import("@/contracts/shared/references").SketchTangentHandleRef | TargetAlias, kinds: readonly string[]) {
           if (!isAlias(target)) return target;
           const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && kinds.includes(r.target.kind)) ?? [];
-          if (matches.length !== 1) throw new Error("Sketch target alias is missing or ambiguous.");
+          if (matches.length !== 1) throw selectionError("Sketch target alias is missing or ambiguous.", target, kinds, matches, aliases.get(target.alias));
           return matches[0]!.target;
         }
         function resolveMirrorAxis(target: import("@/contracts/shared/references").SketchDatumReferenceRef | Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | TargetAlias) {
@@ -457,7 +584,10 @@ export const documentRecipesCommand: CommandModule = {
           const discovery = aliases.get(target.alias);
           const matches = [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => r.label === target.label && (r.target.kind === "sketchEntity" || r.target.kind === "sketchDatumReference"));
           const found = matches.length === 1 ? matches[0]!.target : null;
-          if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference")) throw new Error("Mirror axis alias is missing or ambiguous.");
+          if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference")) {
+            const kinds = ["sketchEntity", "sketchDatumReference"];
+            throw selectionError("Mirror axis alias is missing or ambiguous.", target, kinds, matches, discovery, [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind)));
+          }
           return found;
         }
         if ("featureId" in command && isAlias(command.featureId)) {
@@ -527,7 +657,10 @@ export const documentRecipesCommand: CommandModule = {
           if (!isAlias(value)) return value;
           const discovered = aliases.get(value.alias);
           const matches = [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => r.label === value.label && ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"].includes(r.target.kind));
-          if (matches.length !== 1) throw new Error("Requirement target alias is missing or ambiguous.");
+          if (matches.length !== 1) {
+            const kinds = ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"];
+            throw selectionError("Requirement target alias is missing or ambiguous.", value, kinds, matches, discovered, [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind)));
+          }
           const target = matches[0]!.target;
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "sketchDatumReference" && target.kind !== "projectedReferenceGeometry") throw new Error("Invalid requirement target.");
           return target;
@@ -609,7 +742,7 @@ export const documentRecipesCommand: CommandModule = {
           // Preserve the semantic unsupported-target refusal for an otherwise
           // unambiguous exportable target; feature labels are never exports.
           const matches = supported.length ? supported : exportable;
-          if (matches.length !== 1) throw new Error("Export target alias is missing or ambiguous.");
+          if (matches.length !== 1) throw selectionError("Export target alias is missing or ambiguous.", target, kinds, matches, discovery);
           command.target = matches[0]!.target;
         }
         if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined) {
@@ -618,7 +751,7 @@ export const documentRecipesCommand: CommandModule = {
             if (!isAlias(profile)) return profile;
             const kinds = parameters.resultBodyType === "surface" ? ["region", "face", "sketchEntity"] : ["region", "face"];
             const matches = aliases.get(profile.alias)?.references.filter(r => r.label === profile.label && kinds.includes(r.target.kind)) ?? [];
-            if (matches.length !== 1) throw new Error("Extrude profile target alias is missing or ambiguous.");
+            if (matches.length !== 1) throw selectionError("Extrude profile target alias is missing or ambiguous.", profile, kinds, matches, aliases.get(profile.alias));
             const target = matches[0]!.target;
             if (target.kind !== "region" && target.kind !== "face" && target.kind !== "sketchEntity") throw new Error("Unsupported extrude profile reference.");
             return target;
@@ -763,7 +896,7 @@ export const documentRecipesCommand: CommandModule = {
         if (command.operation === "extrude.create" && "profile" in command && isAlias(command.profile)) {
           const target = command.profile;
           const matches = aliases.get(target.alias)?.references.filter(r => r.label === target.label && r.target.kind === "region") ?? [];
-          if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw new Error("Profile target alias is missing or ambiguous.");
+          if (matches.length !== 1 || matches[0]!.target.kind !== "region") throw selectionError("Profile target alias is missing or ambiguous.", target, ["region"], matches, aliases.get(target.alias));
           command.profile = matches[0]!.target;
         }
         if ((command.operation === "sketch.open" || command.operation === "sketch.support.reassign") && isAlias(command.sketchId)) {
@@ -794,6 +927,13 @@ export const documentRecipesCommand: CommandModule = {
         if (operation.alias && terminal.discovery) {
           snapshots.set(operation.alias, terminal.discovery);
         }
+      } catch (error) {
+        // A selection that cannot resolve stops the recipe before this command
+        // executes; it gets a CLI error, never a fabricated SemanticResult.
+        if (!(error instanceof RecipeError)) throw error;
+        stopped = locate({ ...error.error, selector: origins.get(error.error.selector) ?? error.error.selector }, index, operation.command);
+        succeeded = false;
+        break;
       }
     } finally {
       const cleanup = await opened.session.close();
@@ -806,6 +946,7 @@ export const documentRecipesCommand: CommandModule = {
             .slice(results.length)
             .map((operation) => operation.command.commandId),
           cleanup,
+          ...(stopped ? { error: stopped } : {}),
         }) + "\n",
       );
     }
@@ -814,7 +955,7 @@ export const documentRecipesCommand: CommandModule = {
       : {
           ok: false,
           kind: "failure",
-          message: "Recipe failed; prior completed operations are retained.",
+          message: stopped?.message ?? "Recipe failed; prior completed operations are retained.",
         };
   },
 };

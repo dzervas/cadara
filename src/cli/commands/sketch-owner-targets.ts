@@ -1,4 +1,5 @@
 import type { SemanticDiscovery } from "@/contracts/semantic/schema";
+import { selectionError } from "@/cli/commands/recipe-diagnostics";
 
 /**
  * Owner-qualified target selector `{ alias, label, sketch }`: `sketch` names an
@@ -46,20 +47,25 @@ function scope(discovery: SemanticDiscovery, owner: string): SemanticDiscovery {
 /**
  * Rewrites every owner-qualified selector in `command` to an unqualified one
  * pointing at a per-operation scoped snapshot, returned in `aliases`.
+ * `origins` maps each rewritten object to the recipe's original object.
  */
 export function scopeSketchOwners<T>(
   command: T,
   snapshots: ReadonlyMap<string, SemanticDiscovery>,
+  origins?: Map<unknown, unknown>,
 ): { command: T; aliases: Map<string, SemanticDiscovery> } {
   const aliases = new Map(snapshots);
   const scoped = new Map<string, string>();
   function rewrite(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(rewrite);
     if (!value || typeof value !== "object") return value;
-    if (!("alias" in value && "sketch" in value))
-      return Object.fromEntries(
+    if (!("alias" in value && "sketch" in value)) {
+      const copy = Object.fromEntries(
         Object.entries(value).map(([key, entry]) => [key, rewrite(entry)]),
       );
+      origins?.set(copy, value);
+      return copy;
+    }
     const { alias, sketch, ...selector } = value as {
       alias: string;
       sketch: string;
@@ -67,14 +73,16 @@ export function scopeSketchOwners<T>(
     const key = JSON.stringify([alias, sketch]);
     if (!scoped.has(key)) {
       const owner = ownerOf(snapshots.get(sketch));
-      if (!owner) throw new Error("Sketch owner alias has no sketch identity.");
+      if (!owner) throw selectionError("Sketch owner alias has no sketch identity.", value, ["sketch"], [], undefined, []);
       let name = `${alias}#${scoped.size}`;
       while (aliases.has(name)) name += "#";
       const discovery = snapshots.get(alias);
       if (discovery) aliases.set(name, scope(discovery, owner));
       scoped.set(key, name);
     }
-    return { ...selector, alias: scoped.get(key) };
+    const rewritten = { ...selector, alias: scoped.get(key) };
+    origins?.set(rewritten, value);
+    return rewritten;
   }
   return { command: rewrite(command) as T, aliases };
 }

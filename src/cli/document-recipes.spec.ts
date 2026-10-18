@@ -224,15 +224,24 @@ it("runs an isolated sequential recipe in a real Bun process with clean JSON std
         ],
       }),
     );
-    await expect(
-      exec("bun", [cliEntry(), "document", "recipe", file], {
-        cwd: root,
-        timeout: 60000,
-      }),
-    ).rejects.toMatchObject({
-      code: 2,
-      stdout: "",
-      stderr: "Unknown or ambiguous document alias.\n",
+    const refused = await exec("bun", [cliEntry(), "document", "recipe", file], {
+      cwd: root,
+      timeout: 60000,
+    }).then(
+      () => {
+        throw new Error("Expected a usage refusal");
+      },
+      (error) => error as { code: number; stdout: string; stderr: string },
+    );
+    expect(refused).toMatchObject({ code: 2, stdout: "" });
+    const [json, summary, end] = refused.stderr.split("\n");
+    expect(summary).toBe(
+      'Unknown or ambiguous document alias. (operations[0] "bad" document.inspect at basis)',
+    );
+    expect(end).toBe("");
+    expect(JSON.parse(json!)).toMatchObject({
+      version: 1,
+      error: { code: "invalid-recipe", phase: "preflight", commandIndex: 0, commandId: "bad", path: "basis", selector: { alias: "missing" }, knownAliases: [] },
     });
   } finally {
     await rm(directory, { recursive: true, force: true });
