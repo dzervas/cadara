@@ -6,6 +6,7 @@ import { FeatureSidebar } from "@/components/layout/feature-sidebar";
 import { shouldStartVariableKeyboardEdit } from "@/components/layout/feature-sidebar.a11y";
 import { FeatureTimelineBar } from "@/components/layout/feature-timeline-bar";
 import { FloatingPartsTree } from "@/components/layout/floating-parts-tree";
+import { WorkbenchVariablesPanel } from "@/components/layout/workbench-variables-panel";
 import { getNextHistoryTreeFocusIndex } from "@/components/layout/feature-timeline-bar.a11y";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import {
@@ -31,6 +32,70 @@ import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import type { FeatureId, RegionId, SketchId } from "@/contracts/shared/ids";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+
+test.each(["150", ""])(
+  "variable errors stay below the row control inside the panel (value %j)",
+  async (valueText) => {
+    const { snapshot } = await new MockKernelAdapter().getDocumentSnapshot({
+      contractVersion: "modeling-contract/v1alpha1",
+      documentId: "doc_workspace",
+    });
+    const message = "extrude 12 profile selection is incorrect";
+    const markup = renderToStaticMarkup(
+      <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+        <WorkbenchVariablesPanel
+          snapshot={{
+            ...snapshot,
+            document: {
+              ...snapshot.document,
+              variables: [
+                { variableId: "variable_width", name: "width", valueText },
+                { variableId: "variable_depth", name: "depth", valueText: "20" },
+              ],
+            },
+          }}
+          invalidVariableValueMessages={{ variable_width: message }}
+          onAddVariable={() => undefined}
+          onUpdateVariable={() => undefined}
+          onClose={() => undefined}
+        />
+      </MantineProvider>,
+    );
+    const widthRow = markup.slice(
+      markup.indexOf('<div data-variable-row="variable_width"'),
+      markup.indexOf('<div data-variable-row="variable_depth"'),
+    );
+    const error = widthRow.match(/<p\b[^>]*role="alert"[^>]*>[^<]*<\/p>/)?.[0];
+    expect(
+      error,
+      "the error belongs to its variable row, not a portal",
+    ).toBeDefined();
+    expect(error).toContain(message);
+    expect(error, "long errors wrap within the panel").toContain(
+      "overflow-wrap:anywhere",
+    );
+    expect(error).toContain("var(--workbench-shell-danger-text)");
+    expect(
+      error,
+      "validation stays in normal flow, never over the row",
+    ).not.toMatch(/position:(absolute|fixed)/);
+    expect(
+      widthRow,
+      "the error follows the complete row control as a separate block",
+    ).toMatch(valueText ? /<\/button><p\b/ : /<\/div><p\b/);
+    if (valueText) {
+      expect(widthRow).toContain('aria-label="Edit variable width"');
+      expect(widthRow).toContain(">width</span>");
+      expect(widthRow).toContain(">150</span>");
+    } else {
+      expect(widthRow).toContain('aria-label="Variable name variable_width"');
+      expect(widthRow).toContain('value="width"');
+      expect(widthRow).toContain('aria-label="Variable value variable_width"');
+    }
+    expect(widthRow.match(/role="alert"/g)).toHaveLength(1);
+    expect(markup).not.toContain('role="tooltip"');
+  },
+);
 
 function createTimelinePreferenceStorage() {
   const map = new Map<string, string>();
