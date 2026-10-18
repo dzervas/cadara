@@ -87,3 +87,101 @@ test("src/domain/modeling/occ/tessellation.spec.ts", () => {
     "LOD selection must not rewrite durable selection targets.",
   ).toBeTruthy();
 });
+
+// Match the screen fraction at the viewport's existing 45-degree perspective FOV.
+const referenceHalfFovTangent = Math.tan(Math.PI / 8);
+
+test.each([
+  ["startup", 0.04],
+  ["normal", 0.1],
+  ["fine", 0.25],
+] as const)(
+  "equal screen fractions select %s in both projections",
+  (tier, ratio) => {
+    const bodyRadiusModelUnits = 1;
+    const cameraDistanceModelUnits = 1 / ratio;
+    const perspective = { bodyRadiusModelUnits, cameraDistanceModelUnits };
+    const orthographic = {
+      ...perspective,
+      cameraDistanceModelUnits: tier === "startup" ? 1 : 1000,
+      projection: {
+        kind: "orthographic" as const,
+        halfHeightModelUnits:
+          cameraDistanceModelUnits * referenceHalfFovTangent,
+        zoom: 1,
+      },
+    };
+    expect(selectBodyLodTier(perspective)).toBe(tier);
+    expect(selectBodyLodTier(orthographic)).toBe(tier);
+    const widerPerspective = {
+      ...perspective,
+      cameraDistanceModelUnits:
+        cameraDistanceModelUnits * referenceHalfFovTangent,
+      projection: {
+        kind: "perspective" as const,
+        verticalFovDegrees: 90,
+        zoom: 1,
+      },
+    };
+    expect(selectBodyLodTier(widerPerspective)).toBe(tier);
+  },
+);
+
+test("orthographic zoom refines and coarsens bodies independent of camera distance", () => {
+  const input = {
+    bodyRadiusModelUnits: 1,
+    cameraDistanceModelUnits: 1000,
+    projection: {
+      kind: "orthographic" as const,
+      halfHeightModelUnits: referenceHalfFovTangent * 25,
+      zoom: 1,
+    },
+  };
+  expect(
+    [1, 2.5, 6.25, 2.5, 1].map((zoom) =>
+      selectBodyLodTier({
+        ...input,
+        projection: { ...input.projection, zoom },
+      }),
+    ),
+  ).toEqual(["startup", "normal", "fine", "normal", "startup"]);
+});
+
+test("viewport LOD follows orthographic zoom and frustum height, not body distance", () => {
+  const renderable = {
+    ownerBodyId: "body_1",
+    geometry: {
+      kind: "polyline",
+      points: [
+        [-1, 0, 0],
+        [1, 0, 0],
+      ],
+    },
+  } as RenderableEntityRecord;
+  const input = {
+    cameraPosition: [0, 0, 1000] as const,
+    renderables: [renderable],
+    projection: {
+      kind: "orthographic" as const,
+      halfHeightModelUnits: referenceHalfFovTangent * 25,
+      zoom: 1,
+    },
+  };
+  expect(
+    [1, 2.5, 6.25, 2.5, 1].map((zoom) =>
+      selectViewportLodTierForRenderables({
+        ...input,
+        projection: { ...input.projection, zoom },
+      }),
+    ),
+  ).toEqual(["startup", "normal", "fine", "normal", "startup"]);
+  expect(
+    selectViewportLodTierForRenderables({
+      ...input,
+      projection: {
+        ...input.projection,
+        halfHeightModelUnits: referenceHalfFovTangent * 4,
+      },
+    }),
+  ).toBe("fine");
+});
