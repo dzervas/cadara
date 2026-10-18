@@ -183,6 +183,8 @@ type ScalarConstraintRecord = {
   id: ConstraintId | DimensionId;
   targetKind: "constraint" | "dimension";
   evaluate(values: Float64Array): ScalarConstraintEvaluation;
+  /** Unsquared geometric equations; unlike the loss gradient, these retain rank at satisfaction. */
+  evaluateComponents(values: Float64Array): readonly number[];
   /**
    * The variables of an internal record (no authored constraint or
    * dimension to derive them from structurally). Without it the record is
@@ -1040,6 +1042,37 @@ function localCollinearResidual(
   return Math.sqrt(startDistance * startDistance + endDistance * endDistance);
 }
 
+function localCollinearComponents(
+  values: Float64Array,
+  target: LocalCollinearTargetOperand,
+  reference: { start: SketchPoint2D; end: SketchPoint2D },
+  lines: Map<
+    SketchEntityId,
+    Extract<SketchEntityDefinition, { kind: "lineSegment" }>
+  >,
+  points: Map<SketchPointId, SolverPointRecord>,
+): readonly number[] {
+  if (target.kind === "localPoint") {
+    const point = points.get(target.pointId);
+    return [
+      point
+        ? pointLineSignedDistance(
+            getPoint(values, point),
+            reference.start,
+            reference.end,
+          )
+        : Infinity,
+    ];
+  }
+  const line = resolveLocalLineOperand(values, target, lines, points);
+  return line
+    ? [
+        pointLineSignedDistance(line.start, reference.start, reference.end),
+        pointLineSignedDistance(line.end, reference.start, reference.end),
+      ]
+    : [Infinity, Infinity];
+}
+
 function resolvePointDimensionOperand(
   values: Float64Array,
   operand: Extract<DimensionDefinition, { kind: "linePointDistance" }>["point"],
@@ -1841,6 +1874,10 @@ function createDerivedParameterProjection(input: {
       return {
         ...constraint,
         evaluate: (values) => evaluateScoped(values).result,
+        evaluateComponents: (values) =>
+          constraint.evaluateComponents(
+            project(values, projectionValidationIndices).values,
+          ),
         ...(blockingOffsets.length > 0 || innerBlockers
           ? {
               offsetBlockers: (values: Float64Array) => {
@@ -2074,11 +2111,15 @@ function createNumericalScalarConstraint(input: {
   parameterCount: number;
   affectedVariableIndices?: readonly number[];
   evaluateResidual(values: Float64Array): number;
+  evaluateComponents?(values: Float64Array): readonly number[];
 }): ScalarConstraintRecord {
   const indices = input.affectedVariableIndices;
   return {
     id: input.id,
     targetKind: input.targetKind,
+    evaluateComponents:
+      input.evaluateComponents ??
+      ((values) => [input.evaluateResidual(values)]),
     evaluate(values) {
       const residualValue = input.evaluateResidual(values);
       const gradient = zeroVector(input.parameterCount);
@@ -2352,6 +2393,19 @@ function buildSystem(
     return {
       id: constraint.constraintId,
       targetKind: "constraint",
+      evaluateComponents(values) {
+        const position = getPoint(values, point);
+        const geometry = reconstructCurrentSpline(values, entity);
+        const closest = closestSplineLocation(position, geometry);
+        if (!closest || geometry.validity !== "valid")
+          return [Infinity, Infinity];
+        const evaluated = evaluateSplineSpan(
+          geometry.spans[closest.spanIndex]!,
+          { kind: "local", value: closest.u },
+        );
+        return subtract(position, evaluated.position);
+      },
+
       evaluate(values) {
         const gradient = zeroVector(parameterCount);
         const position = getPoint(values, point);
@@ -2494,6 +2548,24 @@ function buildSystem(
       id: constraint.constraintId,
       targetKind: "constraint",
       evaluate: (values) => scoped(values).result,
+      evaluateComponents(values) {
+        const record = parameterProjection
+          .derivationEvaluation(values)
+          ?.offsetFrames.find(
+            (candidate) => candidate.derivationId === shell.derivationId,
+          );
+        const output = record?.outputs.shells.find(
+          (candidate) => candidate.entityId === shell.entityId,
+        );
+        if (!record || !output) return [Infinity, Infinity];
+        const result = offsetFrameCurveResidual({
+          frame: record.frame,
+          derivatives: offsetRecordDerivatives(record),
+          seedEntityId: output.seed,
+          point: getPoint(values, point),
+        });
+        return "code" in result ? [Infinity, Infinity] : result.value;
+      },
       offsetBlockers: (values) => scoped(values).blockers,
     };
   };
@@ -2569,6 +2641,45 @@ function buildSystem(
     return circleLike
       ? length(subtract(position, circleLike.center)) - circleLike.radius
       : 0;
+  };
+
+  const localCurveComponents = (
+    values: Float64Array,
+    point: SolverPointRecord,
+    entity: SketchEntityDefinition,
+  ): readonly number[] => {
+    const position = getPoint(values, point);
+    const circle = getLocalCircleLike(values, entity);
+    return circle?.arc
+      ? subtract(position, nearestPointOnLocalArcSweep(position, circle.arc))
+      : [pointOnLocalCurveResidual(values, point, entity)];
+  };
+  const projectedCurveComponents = (
+    position: SketchPoint2D,
+    projected: ProjectedSketchReferenceGeometry,
+  ): readonly number[] =>
+    projected.kind === "arc"
+      ? subtract(
+          position,
+          nearestPointOnProjectedArcSweep(
+            position,
+            projectedArcData(projected),
+          ),
+        )
+      : [pointOnProjectedCurveResidual(position, projected)];
+  const symmetryComponents = (
+    first: SketchPoint2D,
+    second: SketchPoint2D,
+    start: SketchPoint2D,
+    end: SketchPoint2D,
+  ) => {
+    const unit = unitVector(start, end);
+    return unit
+      ? [
+          pointLineSignedDistance(midpoint(first, second), start, end),
+          dot2(subtract(second, first), unit),
+        ]
+      : [Infinity, Infinity];
   };
 
   const normalResidual = (
@@ -2710,6 +2821,14 @@ function buildSystem(
       id: `constraint_internal_arc_common_radius_${entity.entityId}` as ConstraintId,
       targetKind: "constraint",
       structuralVariableIndices: pIdx(center, start, end),
+      evaluateComponents(values) {
+        const origin = getPoint(values, center);
+        return [
+          length(subtract(getPoint(values, end), origin)) -
+            length(subtract(getPoint(values, start), origin)),
+        ];
+      },
+
       evaluate(values) {
         const gradient = zeroVector(parameterCount);
         const centerPosition = getPoint(values, center);
@@ -2787,6 +2906,27 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          const pairs = records.map((record) => {
+            const seedStart = getPoint(values, record.seedStart!);
+            const seedEnd = getPoint(values, record.seedEnd!);
+            const offsetStart = getPoint(values, record.offsetStart!);
+            const offsetEnd = getPoint(values, record.offsetEnd!);
+            const seedUnit = unitVector(seedStart, seedEnd);
+            const offsetUnit = unitVector(offsetStart, offsetEnd);
+            if (!seedUnit || !offsetUnit) return [Infinity, Infinity];
+            return [
+              seedUnit[0] * offsetUnit[1] - seedUnit[1] * offsetUnit[0],
+              (record.pair.side === "left" ? 1 : -1) *
+                dot2(
+                  [-seedUnit[1], seedUnit[0]],
+                  subtract(offsetStart, seedStart),
+                ),
+            ];
+          });
+          return [pairs[0]![0]!, pairs[1]![0]!, pairs[0]![1]! - pairs[1]![1]!];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const evaluations = records.map((record) => {
@@ -2989,6 +3129,10 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          return subtract(getPoint(values, left), getPoint(values, right));
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const a = getPoint(values, left);
@@ -3019,6 +3163,14 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          const delta = subtract(
+            getPoint(values, end),
+            getPoint(values, start),
+          );
+          return [delta[constraint.kind === "horizontal" ? 1 : 0]];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const a = getPoint(values, start);
@@ -3048,6 +3200,10 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          return subtract(getPoint(values, point), constraint.position);
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const actual = getPoint(values, point);
@@ -3073,6 +3229,29 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          const a = subtract(
+            getPoint(values, point1),
+            getPoint(values, middle),
+          );
+          const b = subtract(
+            getPoint(values, point2),
+            getPoint(values, middle),
+          );
+          // acos is even at 0 and pi; its central difference there vanishes.
+          // The signed sine has the same local zero set and retains the angular row.
+          if (
+            constraint.valueRadians === 0 ||
+            constraint.valueRadians === Math.PI
+          )
+            return [(a[0] * b[1] - a[1] * b[0]) / (length(a) * length(b))];
+          return [
+            Math.acos(
+              Math.max(-1, Math.min(1, dot2(a, b) / (length(a) * length(b)))),
+            ) - constraint.valueRadians,
+          ];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const p1 = getPoint(values, point1);
@@ -3162,6 +3341,19 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          const da = subtract(getPoint(values, a1), getPoint(values, a0));
+          const db = subtract(getPoint(values, b1), getPoint(values, b0));
+          const na = length(da),
+            nb = length(db);
+          if (constraint.kind === "equalLength") return [na - nb];
+          return [
+            constraint.kind === "parallel"
+              ? (da[0] * db[1] - da[1] * db[0]) / (na * nb)
+              : dot2(da, db) / (na * nb),
+          ];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const pa0 = getPoint(values, a0);
@@ -3285,6 +3477,9 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponents(values) {
+            return subtract(getPoint(values, point), targetPoint);
+          },
           evaluateResidual(values) {
             return length(subtract(getPoint(values, point), targetPoint));
           },
@@ -3319,6 +3514,17 @@ function buildSystem(
         scalarConstraints.push({
           id: constraint.constraintId,
           targetKind: "constraint",
+          evaluateComponents(values) {
+            const position = getPoint(values, point);
+            const closest = closestSplineSpanLocation(position, projectedSpans);
+            if (!closest) return [Infinity, Infinity];
+            const evaluated = evaluateSplineSpan(
+              projectedSpans[closest.spanIndex]!,
+              { kind: "local", value: closest.u },
+            );
+            return subtract(position, evaluated.position);
+          },
+
           evaluate(values) {
             const gradient = zeroVector(parameterCount);
             const position = getPoint(values, point);
@@ -3346,6 +3552,17 @@ function buildSystem(
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: pIdx(point),
+            evaluateComponents(values) {
+              return projected
+                ? projectedCurveComponents(getPoint(values, point), projected)
+                : [
+                    pointLineSignedDistance(
+                      getPoint(values, point),
+                      datumLine!.start,
+                      datumLine!.end,
+                    ),
+                  ];
+            },
             evaluateResidual(values) {
               return projected
                 ? pointOnProjectedCurveResidual(
@@ -3382,6 +3599,12 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point, start, end),
+          evaluateComponents(values) {
+            return subtract(
+              getPoint(values, point),
+              midpoint(getPoint(values, start), getPoint(values, end)),
+            );
+          },
           evaluateResidual(values) {
             const target = midpoint(
               getPoint(values, start),
@@ -3420,6 +3643,9 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponents(values) {
+            return subtract(getPoint(values, point), target);
+          },
           evaluateResidual(values) {
             return length(subtract(getPoint(values, point), target));
           },
@@ -3463,6 +3689,9 @@ function buildSystem(
                 ...pIdx(point),
                 ...entityIdx(curve.entityId),
               ],
+              evaluateComponents(values) {
+                return localCurveComponents(values, point, curve);
+              },
               evaluateResidual(values) {
                 return pointOnLocalCurveResidual(values, point, curve);
               },
@@ -3486,6 +3715,23 @@ function buildSystem(
             ...lineIdx(constraint.line.entityId),
             ...collinearTargetIdx(constraint.target),
           ],
+          evaluateComponents(values) {
+            const line = resolveLocalLineOperand(
+              values,
+              constraint.line,
+              lineEntityMap,
+              pointRecords,
+            );
+            return line
+              ? localCollinearComponents(
+                  values,
+                  constraint.target,
+                  line,
+                  lineEntityMap,
+                  pointRecords,
+                )
+              : [Infinity, Infinity];
+          },
           evaluateResidual(values) {
             const line = resolveLocalLineOperand(
               values,
@@ -3525,6 +3771,15 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: collinearTargetIdx(constraint.target),
+          evaluateComponents(values) {
+            return localCollinearComponents(
+              values,
+              constraint.target,
+              projectedLine,
+              lineEntityMap,
+              pointRecords,
+            );
+          },
           evaluateResidual(values) {
             if (!unitVector(projectedLine.start, projectedLine.end)) {
               return Number.POSITIVE_INFINITY;
@@ -3629,6 +3884,16 @@ function buildSystem(
         );
       };
 
+      const projectedTangentComponents = (
+        residual: number,
+        contact: SketchPoint2D,
+      ) => [
+        residual,
+        ...(projected?.kind === "arc"
+          ? [projectedArcSweepViolation(contact, projected)]
+          : []),
+      ];
+
       if (entity.kind === "lineSegment") {
         const start = pointRecords.get(entity.startPointId);
         const end = pointRecords.get(entity.endPointId);
@@ -3642,6 +3907,29 @@ function buildSystem(
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: pIdx(start, end),
+            evaluateComponents(values) {
+              const startPoint = getPoint(values, start);
+              const endPoint = getPoint(values, end);
+              const unit = unitVector(startPoint, endPoint);
+              if (!unit) {
+                return [0];
+              }
+
+              const signedDistance = pointLineSignedDistance(
+                projectedCircle.center,
+                startPoint,
+                endPoint,
+              );
+              const lineNormal: SketchPoint2D = [unit[1], -unit[0]];
+              const contactPoint: SketchPoint2D = [
+                projectedCircle.center[0] - signedDistance * lineNormal[0],
+                projectedCircle.center[1] - signedDistance * lineNormal[1],
+              ];
+              return projectedTangentComponents(
+                Math.abs(signedDistance) - projectedCircle.radius,
+                contactPoint,
+              );
+            },
             evaluateResidual(values) {
               const startPoint = getPoint(values, start);
               const endPoint = getPoint(values, end);
@@ -3677,6 +3965,44 @@ function buildSystem(
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: entityIdx(entity.entityId),
+            evaluateComponents(values) {
+              const localCircle = getLocalCircleLike(values, entity);
+              if (!localCircle) {
+                return [0];
+              }
+
+              const localCenter = localCircle.center;
+              const centerOffset = subtract(
+                localCenter,
+                projectedCircle.center,
+              );
+              const centerDistance = length(centerOffset);
+              const direction: SketchPoint2D =
+                centerDistance > DEGENERATE_NORM_EPSILON
+                  ? [
+                      centerOffset[0] / centerDistance,
+                      centerOffset[1] / centerDistance,
+                    ]
+                  : [1, 0];
+              const targetDistance =
+                constraint.relation === "external"
+                  ? localCircle.radius + projectedCircle.radius
+                  : Math.abs(localCircle.radius - projectedCircle.radius);
+              const contactDirection =
+                constraint.relation === "external"
+                  ? direction
+                  : ([-direction[0], -direction[1]] as const);
+              const contactPoint: SketchPoint2D = [
+                projectedCircle.center[0] +
+                  contactDirection[0] * projectedCircle.radius,
+                projectedCircle.center[1] +
+                  contactDirection[1] * projectedCircle.radius,
+              ];
+              return projectedTangentComponents(
+                centerDistance - targetDistance,
+                contactPoint,
+              );
+            },
             evaluateResidual(values) {
               const localCircle = getLocalCircleLike(values, entity);
               if (!localCircle) {
@@ -3736,6 +4062,40 @@ function buildSystem(
               ...pIdx(center),
               ...eIdx(entity.entityId),
             ],
+            evaluateComponents(values) {
+              const { radius } = getArcParameters(values, arcState);
+              const localCenter = getPoint(values, center);
+              const centerOffset = subtract(
+                localCenter,
+                projectedCircle.center,
+              );
+              const centerDistance = length(centerOffset);
+              const direction: SketchPoint2D =
+                centerDistance > DEGENERATE_NORM_EPSILON
+                  ? [
+                      centerOffset[0] / centerDistance,
+                      centerOffset[1] / centerDistance,
+                    ]
+                  : [1, 0];
+              const targetDistance =
+                constraint.relation === "external"
+                  ? radius + projectedCircle.radius
+                  : Math.abs(radius - projectedCircle.radius);
+              const contactDirection =
+                constraint.relation === "external"
+                  ? direction
+                  : ([-direction[0], -direction[1]] as const);
+              const contactPoint: SketchPoint2D = [
+                projectedCircle.center[0] +
+                  contactDirection[0] * projectedCircle.radius,
+                projectedCircle.center[1] +
+                  contactDirection[1] * projectedCircle.radius,
+              ];
+              return projectedTangentComponents(
+                centerDistance - targetDistance,
+                contactPoint,
+              );
+            },
             evaluateResidual(values) {
               const { radius } = getArcParameters(values, arcState);
               const localCenter = getPoint(values, center);
@@ -3835,6 +4195,36 @@ function buildSystem(
               ...pIdx(start, end),
               ...entityIdx(curve.entityId),
             ],
+            evaluateComponents(values) {
+              const circleLike = getLocalCircleLike(values, curve);
+              if (!circleLike) {
+                return [0];
+              }
+
+              const startPoint = getPoint(values, start);
+              const endPoint = getPoint(values, end);
+              const unit = unitVector(startPoint, endPoint);
+              if (!unit) {
+                return [0];
+              }
+
+              const signedDistance = pointLineSignedDistance(
+                circleLike.center,
+                startPoint,
+                endPoint,
+              );
+              const lineNormal: SketchPoint2D = [unit[1], -unit[0]];
+              const contactPoint: SketchPoint2D = [
+                circleLike.center[0] - signedDistance * lineNormal[0],
+                circleLike.center[1] - signedDistance * lineNormal[1],
+              ];
+              const tangentResidual =
+                Math.abs(signedDistance) - circleLike.radius;
+              const arcViolation = circleLike.arc
+                ? localArcSweepViolation(contactPoint, circleLike.arc)
+                : 0;
+              return [tangentResidual, arcViolation];
+            },
             evaluateResidual(values) {
               const circleLike = getLocalCircleLike(values, curve);
               if (!circleLike) {
@@ -3885,6 +4275,34 @@ function buildSystem(
               ...entityIdx(first.entityId),
               ...entityIdx(second.entityId),
             ],
+            evaluateComponents(values) {
+              const firstCircle = getLocalCircleLike(values, first);
+              const secondCircle = getLocalCircleLike(values, second);
+              if (!firstCircle || !secondCircle) {
+                return [0];
+              }
+
+              const centerDistance = length(
+                subtract(firstCircle.center, secondCircle.center),
+              );
+              const targetDistance =
+                constraint.relation === "external"
+                  ? firstCircle.radius + secondCircle.radius
+                  : Math.abs(firstCircle.radius - secondCircle.radius);
+              const tangentResidual = centerDistance - targetDistance;
+              const [firstContact, secondContact] = localCircleTangencyContacts(
+                firstCircle,
+                secondCircle,
+                constraint.relation,
+              );
+              const firstArcViolation = firstCircle.arc
+                ? localArcSweepViolation(firstContact, firstCircle.arc)
+                : 0;
+              const secondArcViolation = secondCircle.arc
+                ? localArcSweepViolation(secondContact, secondCircle.arc)
+                : 0;
+              return [tangentResidual, firstArcViolation, secondArcViolation];
+            },
             evaluateResidual(values) {
               const firstCircle = getLocalCircleLike(values, first);
               const secondCircle = getLocalCircleLike(values, second);
@@ -3948,6 +4366,11 @@ function buildSystem(
             ...entityIdx(first.entityId),
             ...entityIdx(second.entityId),
           ],
+          evaluateComponents(values) {
+            const a = getLocalCircleLike(values, first),
+              b = getLocalCircleLike(values, second);
+            return a && b ? subtract(a.center, b.center) : [Infinity, Infinity];
+          },
           evaluateResidual(values) {
             const firstCircle = getLocalCircleLike(values, first);
             const secondCircle = getLocalCircleLike(values, second);
@@ -3985,6 +4408,12 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: entityIdx(entity.entityId),
+          evaluateComponents(values) {
+            const circle = getLocalCircleLike(values, entity);
+            return circle
+              ? subtract(circle.center, projectedCircle.center)
+              : [Infinity, Infinity];
+          },
           evaluateResidual(values) {
             const localCircle = getLocalCircleLike(values, entity);
             return localCircle
@@ -4021,6 +4450,17 @@ function buildSystem(
             ...lineIdx(line.entityId),
             ...entityIdx(curve.entityId),
           ],
+          evaluateComponents(values) {
+            const circle = getLocalCircleLike(values, curve);
+            const contact = getPoint(values, point);
+            return circle
+              ? [
+                  ...localCurveComponents(values, point, curve),
+                  normalResidual(values, line, contact, circle.center),
+                  lineContactResidual(values, line, contact),
+                ]
+              : [Infinity];
+          },
           evaluateResidual(values) {
             const circleLike = getLocalCircleLike(values, curve);
             if (!circleLike) {
@@ -4075,6 +4515,14 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: [...pIdx(point), ...lineIdx(line.entityId)],
+          evaluateComponents(values) {
+            const contact = getPoint(values, point);
+            return [
+              ...projectedCurveComponents(contact, projected),
+              normalResidual(values, line, contact, projectedCircle.center),
+              lineContactResidual(values, line, contact),
+            ];
+          },
           evaluateResidual(values) {
             const contactPoint = getPoint(values, point);
             const curveResidual = pointOnProjectedCurveResidual(
@@ -4119,6 +4567,14 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(first, second, axisStart, axisEnd),
+          evaluateComponents(values) {
+            return symmetryComponents(
+              getPoint(values, first),
+              getPoint(values, second),
+              getPoint(values, axisStart),
+              getPoint(values, axisEnd),
+            );
+          },
           evaluateResidual(values) {
             return symmetricResidual(
               getPoint(values, first),
@@ -4157,6 +4613,14 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(first, second),
+          evaluateComponents(values) {
+            return symmetryComponents(
+              getPoint(values, first),
+              getPoint(values, second),
+              projectedLine.start,
+              projectedLine.end,
+            );
+          },
           evaluateResidual(values) {
             return symmetricResidual(
               getPoint(values, first),
@@ -4188,6 +4652,18 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponents(values) {
+          const delta = subtract(
+            getPoint(values, right),
+            getPoint(values, left),
+          );
+          return [
+            (dimension.axis === "aligned"
+              ? length(delta)
+              : delta[dimension.axis === "horizontal" ? 0 : 1]) - drivingValue,
+          ];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const a = getPoint(values, left);
@@ -4239,6 +4715,17 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponents(values) {
+          const delta = subtract(
+            getPoint(values, right),
+            getPoint(values, left),
+          );
+          return [
+            delta[dimension.kind === "horizontalDistance" ? 0 : 1] -
+              drivingValue,
+          ];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const a = getPoint(values, left);
@@ -4271,6 +4758,15 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponents(values) {
+          const state = entityStates.get(entity.entityId);
+          return [
+            (state?.kind === "circle"
+              ? getCircleRadius(values, state)
+              : entity.radius) - drivingValue,
+          ];
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const circleState = entityStates.get(entity.entityId);
@@ -4325,6 +4821,19 @@ function buildSystem(
           targetKind: "dimension",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponents(values) {
+            const delta = subtract(getPoint(values, point), datumPoint);
+            if (drivingValue === 0)
+              return dimension.axis === "aligned"
+                ? delta
+                : [delta[dimension.axis === "horizontal" ? 0 : 1]];
+            return [
+              (dimension.axis === "aligned"
+                ? length(delta)
+                : Math.abs(delta[dimension.axis === "horizontal" ? 0 : 1])) -
+                drivingValue,
+            ];
+          },
           evaluateResidual(values) {
             const localPoint = getPoint(values, point);
             if (dimension.axis === "horizontal") {
@@ -4407,6 +4916,41 @@ function buildSystem(
               ...lineDimOperandIdx(dimension.lines[0]),
               ...lineDimOperandIdx(dimension.lines[1]),
             ],
+            evaluateComponents(values) {
+              const first = resolveLineDimensionOperand(
+                values,
+                dimension.lines[0],
+                lineEntityMap,
+                pointRecords,
+                options.projectedReferences ?? [],
+              );
+              const second = resolveLineDimensionOperand(
+                values,
+                dimension.lines[1],
+                lineEntityMap,
+                pointRecords,
+                options.projectedReferences ?? [],
+              );
+              if (!first || !second) return [Infinity];
+              if (component === "parallel")
+                return [
+                  lineParallelResidual(
+                    first.start,
+                    first.end,
+                    second.start,
+                    second.end,
+                  ),
+                ];
+              const distance = pointLineSignedDistance(
+                second.start,
+                first.start,
+                first.end,
+              );
+              return [
+                (drivingValue === 0 ? distance : Math.abs(distance)) -
+                  drivingValue,
+              ];
+            },
             evaluateResidual(values) {
               const first = resolveLineDimensionOperand(
                 values,
@@ -4454,6 +4998,31 @@ function buildSystem(
             ...lineDimOperandIdx(dimension.line),
             ...pointDimOperandIdx(dimension.point),
           ],
+          evaluateComponents(values) {
+            const line = resolveLineDimensionOperand(
+              values,
+              dimension.line,
+              lineEntityMap,
+              pointRecords,
+              options.projectedReferences ?? [],
+            );
+            const point = resolvePointDimensionOperand(
+              values,
+              dimension.point,
+              pointRecords,
+              options.projectedReferences ?? [],
+            );
+            if (!line || !point) return [Infinity];
+            const distance = pointLineSignedDistance(
+              point,
+              line.start,
+              line.end,
+            );
+            return [
+              (drivingValue === 0 ? distance : Math.abs(distance)) -
+                drivingValue,
+            ];
+          },
           evaluateResidual(values) {
             const line = resolveLineDimensionOperand(
               values,
@@ -4566,6 +5135,24 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponents(values) {
+          const { radius, startAngle, endAngle } = getArcParameters(
+            values,
+            arcState,
+          );
+          const angle =
+            dimension.kind === "arcStartPointCoincident"
+              ? startAngle
+              : endAngle;
+          return subtract(
+            add(getPoint(values, center), [
+              radius * Math.cos(angle),
+              radius * Math.sin(angle),
+            ]),
+            getPoint(values, point),
+          );
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const centerPos = getPoint(values, center);
@@ -4611,6 +5198,13 @@ function buildSystem(
       scalarConstraints.push({
         id: `constraint_drag_target_${options.dragTarget.pointId}` as ConstraintId,
         targetKind: "constraint",
+        evaluateComponents(values) {
+          return subtract(
+            getPoint(values, point),
+            options.dragTarget!.position,
+          );
+        },
+
         evaluate(values) {
           const gradient = zeroVector(parameterCount);
           const actual = getPoint(values, point);
@@ -7031,6 +7625,8 @@ export interface SketchSolverWorkTrace {
   lossEvaluations: number;
   lineSearches: number;
   lineSearchTrials: number;
+  constrainednessClassifications: number;
+  componentResidualEvaluations: number;
 }
 
 let solverWorkTrace: SketchSolverWorkTrace | null = null;
@@ -7052,6 +7648,8 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     lossEvaluations: 0,
     lineSearches: 0,
     lineSearchTrials: 0,
+    constrainednessClassifications: 0,
+    componentResidualEvaluations: 0,
   };
   gaussNewtonFallbackTrace = trace;
   solverWorkTrace = work;
@@ -8054,6 +8652,112 @@ function offsetArcCommonCircleDiagnostics(
   return diagnostics;
 }
 
+/** Numerical rank of raw geometric equations, not the vanishing squared-loss gradients. */
+function sketchHasFreeParameters(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+  result: SketchCoreSolveResult,
+): boolean {
+  if (solverWorkTrace) solverWorkTrace.constrainednessClassifications += 1;
+  const blockedIds = new Set<string>([
+    ...result.solvedSnapshot.constraintStatuses
+      .filter((entry) => entry.status === "blocked")
+      .map((entry) => entry.constraintId),
+    ...result.solvedSnapshot.dimensionStatuses
+      .filter((entry) => entry.status === "blocked")
+      .map((entry) => entry.dimensionId),
+  ]);
+  for (const component of program.components) {
+    const variables = component.variableIndices;
+    const columns = new Map(variables.map((index, column) => [index, column]));
+    const rows: Float64Array[] = [];
+    for (const equationIndex of component.equationIndices) {
+      const constraint = program.system.scalarConstraints[equationIndex]!;
+      if (blockedIds.has(constraint.id)) continue;
+      const evaluate = (at: Float64Array) => {
+        if (solverWorkTrace) solverWorkTrace.componentResidualEvaluations += 1;
+        return constraint.evaluateComponents(at);
+      };
+      const residuals = evaluate(values);
+      const equationRows = residuals.map(() => zeroVector(variables.length));
+      const support = program.equationMetadata[equationIndex]!.variableIndices;
+      for (const index of support) {
+        const column = columns.get(index);
+        if (column === undefined) continue;
+        const step =
+          Math.cbrt(Number.EPSILON) * Math.max(1, Math.abs(values[index]!));
+        const plus = cloneValues(values),
+          minus = cloneValues(values);
+        plus[index] += step;
+        minus[index] -= step;
+        const next = evaluate(plus),
+          previous = evaluate(minus);
+        for (let row = 0; row < residuals.length; row += 1)
+          equationRows[row]![column] =
+            (next[row]! - previous[row]!) / (2 * step);
+      }
+      // Scale each equation block together: independently normalizing a zero
+      // component's roundoff would invent a constraint (e.g. point on a curve).
+      const scale = Math.max(
+        0,
+        ...equationRows.map((row) => Math.hypot(...row)),
+      );
+      if (!Number.isFinite(scale)) return true;
+      if (scale === 0) continue;
+      for (const row of equationRows) {
+        for (let column = 0; column < row.length; column += 1)
+          row[column] /= scale;
+        rows.push(row);
+      }
+    }
+    if (rows.length < variables.length) return true;
+    // Complete pivoting keeps the rank decision independent of equation/point
+    // order. The threshold is dimensionless after equation-block normalization,
+    // above central-difference roundoff, and does not change solve tolerances.
+    const epsilon = 1e-7;
+    for (let pivot = 0; pivot < variables.length; pivot += 1) {
+      let bestRow = pivot,
+        bestColumn = pivot,
+        largest = 0;
+      for (let row = pivot; row < rows.length; row += 1)
+        for (let column = pivot; column < variables.length; column += 1) {
+          const magnitude = Math.abs(rows[row]![column]!);
+          if (magnitude > largest) {
+            largest = magnitude;
+            bestRow = row;
+            bestColumn = column;
+          }
+        }
+      if (largest <= epsilon) return true;
+      [rows[pivot], rows[bestRow]] = [rows[bestRow]!, rows[pivot]!];
+      for (const row of rows)
+        [row[pivot], row[bestColumn]] = [row[bestColumn]!, row[pivot]!];
+      for (let row = pivot + 1; row < rows.length; row += 1) {
+        const factor = rows[row]![pivot]! / rows[pivot]![pivot]!;
+        for (let column = pivot + 1; column < variables.length; column += 1)
+          rows[row]![column] -= factor * rows[pivot]![column]!;
+        rows[row]![pivot] = 0;
+      }
+    }
+  }
+  return false;
+}
+
+function classifySolvedConstrainedness(
+  program: SketchCompiledSolveProgram,
+  values: Float64Array,
+  result: SketchCoreSolveResult,
+) {
+  if (result.status.solveState !== "solved") return;
+  result.status.constraintState = sketchHasFreeParameters(
+    program,
+    values,
+    result,
+  )
+    ? "underConstrained"
+    : "wellConstrained";
+}
+
 function materializeSolveResult(
   program: SketchCompiledSolveProgram,
   values: Float64Array,
@@ -8263,7 +8967,9 @@ function materializeSolveResult(
     // statuses above; an absolute loss gate would override that policy.
     status = {
       solveState: "solved",
-      constraintState: "wellConstrained",
+      // Final public results replace this provisional status with the component
+      // Jacobian rank. Acceptance checks must not pay for constrainedness.
+      constraintState: "underConstrained",
     };
   } else {
     if (!Number.isFinite(solved.loss) || solved.loss >= SOLVED_LOSS_THRESHOLD) {
@@ -9065,7 +9771,7 @@ export function solveCompiledSketchProgram(
   );
   // [TECH] G16‴/G16⁗: the blocked set is decided on the solve's start
   // state, with one re-solve when a blocked offset builds at the end.
-  return solveWithRebuildRetry({
+  const final = solveWithRebuildRetry({
     program,
     startValues: preconditionedValues,
     solve: () =>
@@ -9075,7 +9781,9 @@ export function solveCompiledSketchProgram(
     reevaluate: (values) => reevaluateProgramValues(program, values),
     isAccepted: (solved) =>
       isAcceptableSolvedSnapshot(solved.result.solvedSnapshot),
-  }).result;
+  });
+  classifySolvedConstrainedness(program, final.solved.values, final.result);
+  return final.result;
 }
 
 function isAcceptableSolvedValues(
@@ -9312,9 +10020,8 @@ export function startCompiledSketchSolveSession(input: {
     isAccepted: (candidate) =>
       isAcceptableSolvedSnapshot(candidate.result.solvedSnapshot),
   });
-  const solvedIsAcceptable = isAcceptableSolvedSnapshot(
-    solved.solvedSnapshot,
-  );
+  classifySolvedConstrainedness(input.program, solvedValues.values, solved);
+  const solvedIsAcceptable = isAcceptableSolvedSnapshot(solved.solvedSnapshot);
   const priorIsAcceptable =
     input.priorSolvedSnapshot !== null &&
     input.priorSolvedSnapshot !== undefined &&
@@ -9399,6 +10106,11 @@ function createDragTargetConstraint(
     {
       id: `constraint_drag_target_${dragTarget.pointId}` as ConstraintId,
       targetKind: "constraint",
+      evaluateComponents(values) {
+        return subtract(getPoint(values, point), dragTarget.position).map(
+          (value) => Math.sqrt(weight) * value,
+        );
+      },
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const actual = getPoint(values, point);
@@ -9432,6 +10144,9 @@ function createDragRadiusConstraint(
     {
       id: `constraint_drag_radius_${entityId}` as ConstraintId,
       targetKind: "constraint",
+      evaluateComponents(values) {
+        return [Math.sqrt(weight) * (values[radiusIndex]! - targetRadius)];
+      },
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const actual = values[radiusIndex]!;
@@ -9465,6 +10180,12 @@ function createDragTangentVectorConstraint(
     {
       id: `constraint_drag_tangent_${entityId}_${occurrenceId}` as ConstraintId,
       targetKind: "constraint",
+      evaluateComponents(values) {
+        return [
+          Math.sqrt(weight) * (values[bx]! - targetVector[0]),
+          Math.sqrt(weight) * (values[by]! - targetVector[1]),
+        ];
+      },
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const dx = values[bx]! - targetVector[0];
@@ -9561,6 +10282,7 @@ function resolveDragTargetFrame(
         const hardZeroX = system.parameterProjection.wrapConstraint(
           {
             id: `constraint_drag_tangent_zero_x_${target.entityId}_${target.occurrenceId}` as ConstraintId,
+            evaluateComponents: (values) => [values[bx]!],
             targetKind: "constraint",
             evaluate(values) {
               const gradient = zeroVector(system.parameterCount);
@@ -9574,6 +10296,7 @@ function resolveDragTargetFrame(
         const hardZeroY = system.parameterProjection.wrapConstraint(
           {
             id: `constraint_drag_tangent_zero_y_${target.entityId}_${target.occurrenceId}` as ConstraintId,
+            evaluateComponents: (values) => [values[by]!],
             targetKind: "constraint",
             evaluate(values) {
               const gradient = zeroVector(system.parameterCount);
@@ -9884,6 +10607,11 @@ function materializeDraggedPointCandidate(
     loss: state.loss,
     perConstraint: state.perConstraint,
   });
+  // Interactive previews keep the prior accepted constrainedness; only final
+  // public solves compute rank, never repeated drag candidate/acceptance checks.
+  if (materialized.status.solveState === "solved")
+    materialized.status.constraintState =
+      session.lastAcceptedSnapshot.status.constraintState;
   return { state, materialized };
 }
 
@@ -9928,6 +10656,13 @@ function createMinimumMotionAnchorConstraint(input: {
     {
       id: input.id,
       targetKind: "constraint",
+      evaluateComponents(values) {
+        return indices.map(
+          (index) =>
+            Math.sqrt(input.weight) *
+            (values[index]! - input.anchorValues[index]!),
+        );
+      },
       evaluate(values) {
         const gradient = zeroVector(input.parameterCount);
         let residual = 0;
@@ -10407,6 +11142,26 @@ export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
   dragTarget: SketchDragTarget,
   targetTolerance: number | null = session.program.tolerances.coincidence,
+): SketchDraggedPointSolveResult {
+  const result = updateCompiledSketchSolveSessionFrame(
+    session,
+    dragTarget,
+    targetTolerance,
+  );
+  if (targetTolerance !== null && result.kind === "solved") {
+    classifySolvedConstrainedness(session.program, session.values, {
+      status: result.solvedSnapshot.status,
+      solvedSnapshot: result.solvedSnapshot,
+      diagnostics: result.diagnostics,
+    });
+  }
+  return result;
+}
+
+function updateCompiledSketchSolveSessionFrame(
+  session: SketchCompiledSolveSession,
+  dragTarget: SketchDragTarget,
+  targetTolerance: number | null,
 ): SketchDraggedPointSolveResult {
   if (session.disposed) {
     return {

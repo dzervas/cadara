@@ -272,8 +272,8 @@ test("src/contracts/solver/solver-contract.spec.ts", async () => {
     );
     expect(
       solved.status.solveState === "solved" &&
-        solved.status.constraintState === "wellConstrained",
-      "Solve should return a machine-readable solved and constrained status.",
+        solved.status.constraintState === "underConstrained",
+      "The rectangle still has free position and unconstrained sides despite its satisfied width.",
     ).toBeTruthy();
     expect(
       solved.solvedSnapshot.solvedEntities.length,

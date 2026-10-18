@@ -153,7 +153,7 @@ describe("T16f 12a/12b: persisted seed + copy driving radii (constructed definit
     const snapshot = next.liveSolve!.solvedSnapshot;
     expect(snapshot.status).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(snapshot.dimensionStatuses.map((entry) => entry.status)).toEqual([
       "driving",

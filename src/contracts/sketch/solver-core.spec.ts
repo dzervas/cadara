@@ -6945,7 +6945,7 @@ test("T08b-g6 review R1 + T08b-g7b (G16′): a projection-only offset failure (t
     expect(snapshot.diagnostics, label).toEqual([]);
     expect(snapshot.status, label).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(
       snapshot.solvedPoints.find(
@@ -7084,7 +7084,7 @@ test("T08b-g7b review B1 ([TECH] G16‴): a requirement on an offset output that
   ] as const) {
     expect(snapshot.status, label).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(
       solvedCircleRadius(snapshot, "sketch_entity_seed")! - 2,
@@ -7160,7 +7160,7 @@ test("T08b-g7b review B1 ([TECH] G16‴): an offset already failed at the solve'
   ] as const) {
     expect(snapshot.status, label).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(statusOf(snapshot, "dimension_output_diameter"), label).toBe(
       "blocked",
@@ -7937,7 +7937,7 @@ test("T08b-g7b re-review A-1 ([TECH] G16⁗): seed collapsed at the start, seed 
   ] as const) {
     expect(snapshot.status, label).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(statusOf(snapshot, "dimension_seed_radius"), label).toBe("driving");
     expect(statusOf(snapshot, "dimension_output_diameter"), label).toBe(
@@ -7975,7 +7975,7 @@ test("T08b-g7b re-review A-1 ([TECH] G16⁗): a batch solve whose other requirem
     ] as const) {
       expect(snapshot.status, label).toEqual({
         solveState: "solved",
-        constraintState: "wellConstrained",
+        constraintState: "underConstrained",
       });
       expect(
         solvedCircleRadius(snapshot, "sketch_entity_seed")! - 2,
