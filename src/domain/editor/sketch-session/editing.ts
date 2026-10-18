@@ -3,6 +3,7 @@ import {
   type AuthoredSketchDerivationSettings,
 } from "@/domain/modeling/sketch-dimension-expressions";
 import type { SketchPoint } from "@/contracts/modeling/schema";
+import { resolveSketchSnap } from "@/domain/sketch-snapping/snap-candidates";
 import type {
   SketchEntityId,
   SketchId,
@@ -3629,6 +3630,7 @@ export function applySketchGeometryDrag(
     point,
     drag.grabOffset,
     options?.exactZero,
+    session.sketchUnitsPerPixel ?? null,
   );
 
   const edit = solveDragEdit(
@@ -3717,6 +3719,7 @@ function buildDragTarget(
   pointer: SketchPoint,
   grabOffset: SketchPoint,
   exactZero?: boolean,
+  sketchUnitsPerPixel: number | null = null,
 ): SketchDragTarget {
   // Cartesian offset for non-radius intents.
   const offsetPoint: SketchPoint = [
@@ -3725,12 +3728,50 @@ function buildDragTarget(
   ];
 
   switch (intent.kind) {
-    case "point":
+    case "point": {
+      // O17: drag targets used raw cursor coordinates, so T17c's exact-drop
+      // rows passed while a human's near drop never reached the neighbour.
+      // Snap the logical fit point (including its grab offset) before the
+      // solve, using the same measured pixel radius as drawing. This is a
+      // position snap only: no Coincident is authored, so dragging apart
+      // remains the recovery from a degenerate span.
+      const neighbours = new Set<SketchPointId>();
+      for (const entity of definition.entities) {
+        if (entity.kind !== "spline") continue;
+        const occurrences = orderedSplineOccurrences(entity);
+        if (!occurrences) continue;
+        occurrences.forEach((occurrence, index) => {
+          if (occurrence.pointId !== intent.pointId) return;
+          for (const adjacent of [index - 1, index + 1]) {
+            const neighbour =
+              entity.closure === "smooth"
+                ? occurrences[
+                    (adjacent + occurrences.length) % occurrences.length
+                  ]
+                : occurrences[adjacent];
+            if (neighbour && neighbour.pointId !== intent.pointId)
+              neighbours.add(neighbour.pointId);
+          }
+        });
+      }
+      const snap = resolveSketchSnap({
+        pointer: offsetPoint,
+        sketchUnitsPerPixel,
+        geometries: definition.points
+          .filter((point) => neighbours.has(point.pointId))
+          .map((point) => ({
+            kind: "point",
+            source: { kind: "localPoint", pointId: point.pointId },
+            point: point.position,
+            label: "Spline fit point",
+          })),
+      });
       return {
         kind: "sketchPoint",
         pointId: intent.pointId,
-        position: offsetPoint,
+        position: snap.snappedPoint,
       };
+    }
     case "translate": {
       // Delta = offsetPoint minus the first defining point's current position.
       const firstPoint = definition.points.find(
