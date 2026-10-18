@@ -7728,18 +7728,62 @@ function preconditionValuesForPointAnchors(
       return point ? [subtract(resolved.target, getPoint(values, point))] : [];
     });
 
-    if (deltas.length === 0) {
-      continue;
-    }
+    const dimensionDeltas = program.definition.dimensions.flatMap(
+      (dimension) => {
+        if (
+          dimension.kind !== "pointDatumDistance" ||
+          isReferenceDimension(dimension) ||
+          dimension.axis === "aligned" ||
+          !component.pointIds.includes(dimension.point.pointId)
+        ) {
+          return [];
+        }
+        const point = program.system.pointRecords.get(dimension.point.pointId);
+        const datum = resolveSketchDatumPoint(dimension.datum.datum);
+        if (!point || !datum) return [];
+        const axis = dimension.axis === "horizontal" ? 0 : 1;
+        const current = getPoint(values, point)[axis] - datum[axis];
+        // Keep the absolute-distance branch and move the whole component before
+        // solving, rather than letting a distant centre target fold its polygon.
+        const target = (current < 0 ? -1 : 1) * getDrivingDimensionValue(dimension);
+        return [{ axis, delta: target - current }];
+      },
+    );
 
-    const first = deltas[0]!;
-    if (
-      deltas.some(
-        (delta) =>
-          length(subtract(delta, first)) > program.tolerances.coincidence,
-      )
-    ) {
-      continue;
+    let first: SketchPoint2D;
+    if (dimensionDeltas.length > 0) {
+      const translation: [number, number] = [0, 0];
+      for (const axis of [0, 1] as const) {
+        const candidates = [
+          ...deltas.map((delta) => delta[axis]),
+          ...dimensionDeltas
+            .filter((delta) => delta.axis === axis)
+            .map((delta) => delta.delta),
+        ];
+        const candidate = candidates[0];
+        if (
+          candidate !== undefined &&
+          candidates.every(
+            (delta) =>
+              Math.abs(delta - candidate) <= program.tolerances.coincidence,
+          )
+        ) {
+          translation[axis] = candidate;
+        }
+      }
+      first = translation;
+    } else {
+      const anchor = deltas[0];
+      if (
+        !anchor ||
+        deltas.some(
+          (delta) =>
+            length(subtract(delta, anchor)) > program.tolerances.coincidence,
+        )
+      ) {
+        continue;
+      }
+      first = anchor;
     }
 
     if (length(first) <= program.tolerances.coincidence) {
