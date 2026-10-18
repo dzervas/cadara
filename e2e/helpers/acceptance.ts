@@ -124,6 +124,13 @@ export async function settledProjections(
   workbench: SketchWorkbenchHarness,
   ids: readonly string[],
 ) {
+  // OrbitControls damps per update, not elapsed time. Drain the real pan/orbit
+  // tail before measuring stillness so GPU contention cannot stretch it past
+  // this wait. This does not bypass target readiness or camera transitions.
+  expect(
+    await workbench.page.evaluate(() => window.__cadFlushCameraDamping?.()),
+    "the controls damping tail settled",
+  ).toBe(true);
   const read = () =>
     workbench.page.evaluate(
       (targets) =>
