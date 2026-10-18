@@ -354,7 +354,7 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
     ).toBeFalsy();
   }
 
-  function testConstructionRenderableFeedbackIsDashedAndPickable() {
+  function testConstructionRenderableFeedbackIsDashDotAndPickable() {
     const definition = createDefinition();
     definition.entities[0] = {
       ...definition.entities[0]!,
@@ -376,8 +376,8 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
 
     expect(
       constructionRenderable?.linePattern,
-      "Construction sketch edges should use dashed edit feedback.",
-    ).toBe("dashed");
+      "O1: construction sketch edges should use dash-dot edit feedback.",
+    ).toBe("dash-dot");
     expect(
       constructionRenderable.target?.kind,
       "Construction sketch edges should remain bound for picking.",
@@ -396,5 +396,5 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
   testConstructionToggleMutatesOnlySelectedEntity();
   testConstructionVertexToggleIncludesPointEntity();
   testConstructionModifierAuthorsNewGeometry();
-  testConstructionRenderableFeedbackIsDashedAndPickable();
+  testConstructionRenderableFeedbackIsDashDotAndPickable();
 });

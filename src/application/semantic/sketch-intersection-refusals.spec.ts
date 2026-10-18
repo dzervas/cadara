@@ -67,7 +67,7 @@ it("uses an explicit crossing pick rather than traversal order when a boundary h
   }
 }, 60000);
 
-it("refuses stale, foreign, unsupported and no-crossing edits without authoring an action", async () => {
+it("refuses stale, foreign, unsupported and no-crossing Split/Extend edits; no-crossing Trim authors one undoable deletion", async () => {
   const f = await createSketchWorkflow();
   try {
     const line = await f.execute({
@@ -100,13 +100,13 @@ it("refuses stale, foreign, unsupported and no-crossing edits without authoring 
     for (const edit of [
       { kind: "split", target, boundary: cutter, pick: [4, 0] },
       { kind: "extend", target, boundary: cutter },
-      { kind: "trim", target },
       {
         kind: "split",
         target,
         boundary: { ...cutter, sketchId: "sketch_foreign" },
         pick: [4, 0],
       },
+      { kind: "trim", target },
     ]) {
       const refused = await f.run({
         operation: "sketch.geometry.update",
@@ -114,19 +114,48 @@ it("refuses stale, foreign, unsupported and no-crossing edits without authoring 
         edit,
         intent: "fulfill",
       });
-      expect(refused.outcome.kind).toBe("rejected");
-      expect(refused.completion.live.kind).toBe("unchanged");
-      const inspected = await f.execute({
-        operation: "sketch.inspect",
-        draft: refused.completion.live.state!.draft,
-      });
-      expect(inspected.discovery!.sketch!.entities).toEqual(
-        boundary.discovery!.sketch!.entities,
-      );
-      expect(inspected.discovery!.sketch!.points).toEqual(
-        boundary.discovery!.sketch!.points,
-      );
-      expect(inspected.discovery!.history).toEqual(boundary.discovery!.history);
+      if (edit.kind === "trim") {
+        // O14: an isolated curve has no retained piece, so Trim deletes it.
+        expect(refused.outcome.kind).toBe("completed");
+        expect(refused.completion.live.kind).toBe("applied");
+        const inspected = await f.execute({
+          operation: "sketch.inspect",
+          draft: refused.completion.live.state!.draft,
+        });
+        expect(inspected.discovery!.sketch!.entities).toEqual(
+          boundary.discovery!.sketch!.entities.filter(
+            (entity) => entity.entityId !== boundary.discovery!.sketch!.entities[0]!.entityId,
+          ),
+        );
+        expect(inspected.discovery!.sketch!.points).toEqual(boundary.discovery!.sketch!.points);
+        expect(inspected.discovery!.history!.undoEntries).toHaveLength(
+          boundary.discovery!.history!.undoEntries!.length + 1,
+        );
+        expect(inspected.discovery!.history!.undoEntries!.slice(0, -1)).toEqual(
+          boundary.discovery!.history!.undoEntries,
+        );
+        const undone = await f.execute({
+          operation: "history.undo",
+          draft: inspected.discovery!.state.draft,
+        });
+        expect(undone.discovery!.sketch!.entities).toEqual(boundary.discovery!.sketch!.entities);
+        expect(undone.discovery!.sketch!.points).toEqual(boundary.discovery!.sketch!.points);
+        expect(undone.discovery!.history!.undoEntries).toEqual(boundary.discovery!.history!.undoEntries);
+      } else {
+        expect(refused.outcome.kind).toBe("rejected");
+        expect(refused.completion.live.kind).toBe("unchanged");
+        const inspected = await f.execute({
+          operation: "sketch.inspect",
+          draft: refused.completion.live.state!.draft,
+        });
+        expect(inspected.discovery!.sketch!.entities).toEqual(
+          boundary.discovery!.sketch!.entities,
+        );
+        expect(inspected.discovery!.sketch!.points).toEqual(
+          boundary.discovery!.sketch!.points,
+        );
+        expect(inspected.discovery!.history).toEqual(boundary.discovery!.history);
+      }
     }
     const circle = await f.execute({
       operation: "sketch.author",

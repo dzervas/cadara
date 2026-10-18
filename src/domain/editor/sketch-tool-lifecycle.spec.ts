@@ -116,7 +116,13 @@ test("the Escape step order is chain end, finalize, cancel, exit (T11-D10)", () 
 describe("Escape and Enter on every armed drawing tool", () => {
   for (const toolId of Object.keys(expectedLifecycles) as SketchToolId[]) {
     test(toolId, () => {
-      const session = armed(toolId);
+      // O25: Tangent Arc needs a real source endpoint before it can draw.
+      const session = toolId === "tangentArc"
+        ? beginSketchTool(
+            acceptSketchDraw(startSketchDraw(armed("line"), [-3, 1]), [1, 1]),
+            toolId,
+          )
+        : armed(toolId);
       expect(
         escapeSketchDrawing(session),
         "An armed tool with no draft leaves for Select.",
