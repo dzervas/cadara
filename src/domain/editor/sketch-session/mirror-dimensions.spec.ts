@@ -438,34 +438,35 @@ describe("T16f: no commit authors a second driver of a mirrored quantity", () =>
     return { session: next, copy };
   }
 
-  test("Make driving of the copy's reference is refused in the domain commit path; the driver's edit opens", () => {
+  test("O6: Make driving of a mirrored reference refuses and offers explicit driver replacement", () => {
     const { session } = copyReference();
     const editing = beginSketchAnnotationEdit(
       session,
       dimensionRef(session, "dimension_copy_reference"),
     );
-    expect(editing.toolPresentation!.floatingInput!.hideSubmit).toBe(true);
-    // The domain commit itself, not only the popup intent.
     const refused = commitSketchAnnotationEditValue(editing, {
       ...editing.activeAnnotationEdit!,
       pendingValue: { source: "literal", value: 2 },
     });
     expect(refused.definition).toBe(session.definition);
     expect(refused.activeAnnotationEdit?.target).toEqual(
-      dimensionRef(session, "dimension_seed"),
+      dimensionRef(session, "dimension_copy_reference"),
     );
-    expect(refused.validationMessage).toBe(REFUSAL);
-    expect(refused.toolPresentation!.validation).toEqual([
-      expect.objectContaining({ message: REFUSAL, severity: "error" }),
-    ]);
-    // The popup intent goes through the same path.
-    const viaPopup = patch(editing, { intent: "commitAnnotationValue" });
-    expect(viaPopup.definition).toBe(session.definition);
-    expect(viaPopup.validationMessage).toBe(REFUSAL);
-    // Review A-2: typing clears the refusal in the popup and the session.
-    const typed = patch(viaPopup, { value: "2.5" });
-    expect(typed.validationMessage).toBe(null);
-    expect(typed.toolPresentation!.validation).toEqual([]);
+    expect(refused.validationMessage).toContain("Radius 2");
+    const offer = refused.toolPresentation!.floatingInput!.secondaryAction!;
+    expect(offer.label).toBe("Make those references");
+    const replaced = patch(refused, offer.action.patch);
+    expect(
+      replaced.definition.dimensions.find(
+        (d) => d.dimensionId === "dimension_seed",
+      ),
+    ).toHaveProperty("reference", true);
+    expect(
+      replaced.definition.dimensions.find(
+        (d) => d.dimensionId === "dimension_copy_reference",
+      ),
+    ).not.toHaveProperty("reference");
+    expect(replaced.liveSolve?.accepted).toBe(true);
   });
 
   test("Fix on the copy circle (it authors a diameter) is refused and opens the driver's edit; the tool stays armed after", () => {

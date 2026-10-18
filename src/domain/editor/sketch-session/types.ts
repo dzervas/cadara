@@ -105,6 +105,8 @@ export interface SketchConstraintAuthoringState {
 export interface SketchAnnotationEditState {
   /** Staged conversion; the authored reference stays untouched until Save. */
   driving?: true;
+  /** O6: explicit confirmation is required before replacing these drivers. */
+  drivingConflicts?: readonly DimensionId[];
   target: SketchConstraintRef | SketchDimensionRef;
   pendingValue: AuthoredValue<number> | null;
   /**
