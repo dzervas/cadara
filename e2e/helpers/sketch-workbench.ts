@@ -34,17 +34,17 @@ export class SketchWorkbenchHarness {
 
   async openWithOperationHistory(
     payload: ModelingOperationHistoryPayload,
-    path = "/",
+    path = "/app",
   ) {
     await this.seedOperationHistory(payload);
     await this.open(path);
   }
 
-  async open(path = "/") {
+  async open(path = "/app") {
     await this.openPreservingStorage(withDisabledRepository(path));
   }
 
-  async openWithRepository(path = "/") {
+  async openWithRepository(path = "/app") {
     await this.openPreservingStorage(withTestMode(path));
   }
 
@@ -120,7 +120,7 @@ export class SketchWorkbenchHarness {
     );
   }
 
-  async openPreservingStorage(path = "/") {
+  async openPreservingStorage(path = "/app") {
     await this.page.goto(path);
     await this.waitForCadStateReady();
     await expect

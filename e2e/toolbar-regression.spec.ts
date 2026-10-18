@@ -44,7 +44,7 @@ test("pattern dropdown stays responsive without restarting shortcut profile load
     };
   }, shortcutProfileStorageKey);
 
-  await page.goto("/");
+  await page.goto("/app");
 
   const patternButton = page.locator('button[data-tool-id="pattern"]');
   await expect(patternButton).toBeVisible();

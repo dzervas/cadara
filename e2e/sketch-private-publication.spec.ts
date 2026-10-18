@@ -576,7 +576,7 @@ test("document Undo/Redo preserves the original identity and later sketch histor
   const databaseName = `cad-e2e-sketch-identity-${testInfo.workerIndex}-${Date.now()}`;
   const workbench = new SketchWorkbenchHarness(page);
   await workbench.openPreservingStorage(
-    `/?${new URLSearchParams({ cadRepositoryDbName: databaseName, cadTestMode: "1" })}`,
+    `/app?${new URLSearchParams({ cadRepositoryDbName: databaseName, cadTestMode: "1" })}`,
   );
 
   const createPublishedLine = async (offset: number) => {

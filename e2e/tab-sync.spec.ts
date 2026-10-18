@@ -61,7 +61,7 @@ function createSyncedWorkbenchUrl(channelName: string, databaseName: string) {
     cadTestMode: "1",
   });
 
-  return `/?${params}`;
+  return `/app?${params}`;
 }
 
 async function openSyncedWorkbench(page: Page, url: string) {

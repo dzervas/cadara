@@ -7,7 +7,7 @@ test.setTimeout(60_000);
 test("toolbar file menu downloads and opens a cadara document copy", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/app");
 
   const fileButton = page.getByRole("button", { name: "File" });
   await expect(fileButton).toBeVisible();

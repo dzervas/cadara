@@ -20,8 +20,13 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"],
-    },
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["vite.config.ts", "vite.single.config.ts", "vite.offline-test.config.ts"],
+  "include": [
+    "vite.config.ts",
+    "vite.single.config.ts",
+    "vite.offline-test.config.ts",
+    "playwright.cloudflare.config.ts"
+  ]
 }

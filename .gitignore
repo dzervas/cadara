@@ -38,6 +38,10 @@ tmp-*
 *.3mf
 *.cadara
 !public/**/*.cadara
+!landing/examples/**/*.cadara
+!landing/examples/**/*.stl
+.wrangler/
+!landing/examples/*/*.cadara
 .fallow/
 /coverage
 *-capture.json

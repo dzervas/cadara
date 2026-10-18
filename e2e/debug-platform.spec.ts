@@ -20,7 +20,7 @@ async function evaluateAfterNavigation<T>(
 test("dev debug namespace exposes structured state, trace, and session export", async ({
   page,
 }) => {
-  await page.goto("/?cadTestMode=true");
+  await page.goto("/app?cadTestMode=true");
 
   await expect
     .poll(

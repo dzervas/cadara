@@ -1,0 +1,56 @@
+{
+  "name": "Six-spoke control wheel",
+  "dimensions": "Ø80 × 20 mm · Ø12 bore · 8 mm web",
+  "parts": [
+    {
+      "file": "wheel.stl",
+      "label": "Wheel",
+      "finish": "silver",
+      "explode": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "wheel-hub.stl",
+      "label": "Hub",
+      "finish": "orange",
+      "explode": [
+        0,
+        0,
+        25
+      ]
+    },
+    {
+      "file": "wheel-screw-1.stl",
+      "label": "Screw 1",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    },
+    {
+      "file": "wheel-screw-2.stl",
+      "label": "Screw 2",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    },
+    {
+      "file": "wheel-screw-3.stl",
+      "label": "Screw 3",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    }
+  ]
+}

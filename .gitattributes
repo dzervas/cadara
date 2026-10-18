@@ -1,1 +1,2 @@
 test/fixtures/onshape-captures/*.onshape-capture.json -diff
+landing/examples/**/*.cadara -diff

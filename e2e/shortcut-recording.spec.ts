@@ -5,7 +5,7 @@ test.use({ viewport: { width: 1440, height: 960 } });
 test("records a custom shortcut and applies it from the settings modal", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/app");
 
   await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
   const modal = page.getByRole("dialog", { name: "Keyboard shortcuts" });

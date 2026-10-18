@@ -455,7 +455,7 @@ function peerSyncPath(channel: string, databaseName: string) {
     cadRepositoryDbName: databaseName,
     cadTestMode: "1",
   });
-  return `/?${params}`;
+  return `/app?${params}`;
 }
 
 /**

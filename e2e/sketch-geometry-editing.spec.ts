@@ -157,7 +157,7 @@ test("repository-backed sketch commit waits for publication acknowledgement and 
 }, testInfo) => {
   const workbench = new SketchWorkbenchHarness(page);
   const repositoryName = `sketch-refresh-${testInfo.workerIndex}-${Date.now()}`;
-  const repositoryPath = `/?cadRepositoryDbName=${repositoryName}`;
+  const repositoryPath = `/app?cadRepositoryDbName=${repositoryName}`;
 
   await installRepositoryDelayAndNoFileSystemAccess(page);
   await workbench.openWithRepository(repositoryPath);

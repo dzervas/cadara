@@ -1,0 +1,66 @@
+{
+  "name": "VENT / 100",
+  "dimensions": "100 × 70 × 32 mm",
+  "parts": [
+    {
+      "file": "enclosure-shell.stl",
+      "label": "Graphite enclosure shell",
+      "finish": "graphite",
+      "explode": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "file": "enclosure-lid.stl",
+      "label": "Amber orange lid",
+      "finish": "orange",
+      "explode": [
+        0,
+        0,
+        25
+      ]
+    },
+    {
+      "file": "enclosure-screw-1.stl",
+      "label": "Black socket-head screw 1",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    },
+    {
+      "file": "enclosure-screw-2.stl",
+      "label": "Black socket-head screw 2",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    },
+    {
+      "file": "enclosure-screw-3.stl",
+      "label": "Black socket-head screw 3",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    },
+    {
+      "file": "enclosure-screw-4.stl",
+      "label": "Black socket-head screw 4",
+      "finish": "black",
+      "explode": [
+        0,
+        0,
+        40
+      ]
+    }
+  ]
+}

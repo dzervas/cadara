@@ -9,7 +9,7 @@ test.use({ viewport: { width: 1440, height: 960 } });
 test("state debugger owns workbench debug readouts and collapses locally", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/app");
   await expect(page.getByText("State Debugger")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Expand state debugger" }),
