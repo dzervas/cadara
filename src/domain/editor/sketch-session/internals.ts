@@ -544,6 +544,29 @@ export function getSketchSessionSnapIntersections(
 }
 
 /**
+ * Empty/image-only sketches intentionally persist as notEvaluated. They owe
+ * no region derivation, but must replace a previous sketch's/undo's fills
+ * with a current empty set rather than an unsolved-constraint warning.
+ * Do not extend this exemption to unresolved geometry or requirements.
+ */
+function isUnevaluatedEmptySketch(
+  definition: DerivableSketchDefinition,
+  snapshot: SolvedSketchSnapshot,
+) {
+  return (
+    snapshot.status.solveState === "notEvaluated" &&
+    definition.entities.length === 0 &&
+    definition.points.length === 0 &&
+    definition.constraints.length === 0 &&
+    definition.dimensions.length === 0 &&
+    definition.references.length === 0 &&
+    (definition.derivedRelationships?.length ?? 0) === 0 &&
+    sketchProfileGateFailures(snapshot).length === 0 &&
+    !snapshot.diagnostics.some((diagnostic) => diagnostic.severity === "error")
+  );
+}
+
+/**
  * Establishes a new live solve basis: solves synchronously and kernel-free
  * (reusing the cached solve), bumps the live region generation and marks the
  * regions pending (accepted solve) or unavailable. Regions are derived
@@ -621,25 +644,36 @@ export function withLiveSolveBasis(
       solvedSnapshot: usableSolvedSnapshot,
       accepted,
     },
-    liveRegions: regionsAvailable
+    liveRegions: isUnevaluatedEmptySketch(
+      evaluatedDefinition,
+      usableSolvedSnapshot,
+    )
       ? {
-          ...session.liveRegions,
           generation,
-          status: "pending",
-          // Synthetic unavailable/failed diagnostics describe the prior status only.
-          diagnostics: session.liveRegions.diagnostics.filter(
-            (diagnostic) =>
-              diagnostic.code !== LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC.code &&
-              diagnostic.code !== LIVE_REGIONS_DERIVATION_FAILED_CODE,
-          ),
+          status: "current",
+          regions: [],
+          boundaryBasis: null,
+          diagnostics: [],
         }
-      : {
-          generation,
-          status: "unavailable",
-          regions: session.liveRegions.regions,
-          boundaryBasis: session.liveRegions.boundaryBasis,
-          diagnostics: [LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC],
-        },
+      : regionsAvailable
+        ? {
+            ...session.liveRegions,
+            generation,
+            status: "pending",
+            // Synthetic unavailable/failed diagnostics describe the prior status only.
+            diagnostics: session.liveRegions.diagnostics.filter(
+              (diagnostic) =>
+                diagnostic.code !== LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC.code &&
+                diagnostic.code !== LIVE_REGIONS_DERIVATION_FAILED_CODE,
+            ),
+          }
+        : {
+            generation,
+            status: "unavailable",
+            regions: session.liveRegions.regions,
+            boundaryBasis: session.liveRegions.boundaryBasis,
+            diagnostics: [LIVE_REGIONS_UNAVAILABLE_DIAGNOSTIC],
+          },
   };
 }
 
@@ -959,6 +993,18 @@ export function getSketchSessionDerivedValidity(
   );
   if (!liveSolve) return { state: "stale", diagnostics: regionDiagnostics };
   if (liveRegions.status === "current") {
+    if (
+      isUnevaluatedEmptySketch(liveSolve.definition, liveSolve.solvedSnapshot) &&
+      !regionDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+    ) {
+      return {
+        state: "current",
+        diagnostics: mergeSketchSolveDiagnostics(
+          liveSolve.solvedSnapshot.diagnostics,
+          regionDiagnostics,
+        ),
+      };
+    }
     return withRelationshipScopedDiagnostics(
       deriveSketchValidity({
         solvedSnapshot: liveSolve.solvedSnapshot,
