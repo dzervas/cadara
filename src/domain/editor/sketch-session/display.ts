@@ -58,6 +58,7 @@ import type {
   SketchSessionState,
 } from "./types";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { getSketchEditOperatorResult } from "./editing";
 import {
   REFERENCE_IMAGE_ANCHOR_MARKER_COLOR,
   REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS,
@@ -168,7 +169,17 @@ export function getStableSketchSessionDisplayRenderables(
     },
   );
   const pointOwners = getSketchPointOwnerEntityIds(displayDefinition);
-  const pointRenderables = displayDefinition.points.map((point) => {
+  // A corner preview trims the lines but leaves the authored graph intact for
+  // cancel/undo. Hide only markers that its mutation will actually remove.
+  const cornerTool = session.activeEditTool;
+  const previewPointIds =
+    cornerTool &&
+    (cornerTool.toolId === "sketchFillet" || cornerTool.toolId === "sketchChamfer")
+      ? getSketchEditOperatorResult(session, cornerTool).definition?.pointIds
+      : undefined;
+  const pointRenderables = displayDefinition.points.filter(
+    (point) => !previewPointIds || previewPointIds.includes(point.pointId),
+  ).map((point) => {
     const style = pointStyleLookup.get(point.pointId);
     const ownerEntityIds = pointOwners.get(point.pointId) ?? [];
     const isVisibleReferenceImageAnchor =

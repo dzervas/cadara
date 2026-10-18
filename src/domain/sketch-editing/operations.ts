@@ -76,6 +76,11 @@ import {
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
 import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
+import {
+  constraintReferencesSketchGeometry,
+  dimensionReferencesSketchGeometry,
+  getEntityPointIds,
+} from "@/domain/sketch-editing/definition-references";
 
 export type OffsetSide = "left" | "right";
 
@@ -1694,6 +1699,165 @@ function primitiveArcRelationships(input: {
   };
 }
 
+/**
+ * A trimmed corner is either discarded or retained as a constrained virtual
+ * sharp. Inspect the graph AFTER re-pointing the lines; a standalone point
+ * entity is just a wrapper, not a reason to retain an otherwise unused corner.
+ * Both endpoint IDs matter: adjacent lines may meet geometrically without
+ * sharing a point record. Never mutate the pre-edit graph (undo owns it).
+ */
+function reconcileTrimmedCorner(
+  definition: SketchDefinition,
+  pointIds: readonly SketchPointId[],
+  lines: readonly SketchEntityId[],
+  label: string,
+  factories: SketchEditOperationFactories,
+): SketchDefinition {
+  let result = definition;
+  for (const pointId of new Set(pointIds)) {
+    const wrappers = result.entities.filter(
+      (entity) => entity.kind === "point" && entity.pointId === pointId,
+    );
+    const points = new Set([pointId]);
+    const entities = new Set(wrappers.map((entity) => entity.entityId));
+    const referencesEntity = (id: SketchEntityId) => entities.has(id);
+    const referencesPoint = (id: SketchPointId) => points.has(id);
+    const referenced =
+      result.entities.some(
+        (entity) =>
+          entity.kind !== "point" &&
+          getEntityPointIds(entity).includes(pointId),
+      ) ||
+      result.constraints.some((constraint) =>
+        constraintReferencesSketchGeometry(constraint, points, entities),
+      ) ||
+      result.dimensions.some((dimension) =>
+        dimensionReferencesSketchGeometry(dimension, points, entities),
+      ) ||
+      result.derivedRelationships?.some(
+        (relationship) =>
+          relationship.seedEntityIds.some(referencesEntity) ||
+          (relationship.kind === "mirror" &&
+            relationship.mirrorReference.kind === "lineEntity" &&
+            referencesEntity(relationship.mirrorReference.entityId)) ||
+          relationship.outputs.some(
+            (output) =>
+              referencesEntity(output.seedEntityId) ||
+              referencesEntity(output.outputEntityId) ||
+              output.seedPointIds.some(referencesPoint) ||
+              output.outputPointIds.some(referencesPoint),
+          ) ||
+          (relationship.kind === "offset" &&
+            (relationship.jointOutputs.some(
+              (output) =>
+                referencesEntity(output.firstSeedEntityId) ||
+                referencesEntity(output.secondSeedEntityId) ||
+                referencesEntity(output.outputEntityId) ||
+                [
+                  output.centerPointId,
+                  output.startPointId,
+                  output.endPointId,
+                ].some(referencesPoint),
+            ) ||
+              relationship.piecewiseCubicOutputs.some(
+                (output) =>
+                  referencesEntity(output.seedEntityId) ||
+                  referencesEntity(output.outputEntityId) ||
+                  [output.startPointId, output.endPointId].some(
+                    referencesPoint,
+                  ),
+              ))),
+      ) ||
+      result.referenceImages?.some(
+        (image) =>
+          image.ownedPointIds.includes(pointId) ||
+          image.ownedEntityIds.some(referencesEntity) ||
+          image.ownedState.calibration?.anchors.some(
+            (anchor) => anchor.pointId === pointId,
+          ),
+      ) ||
+      result.styles?.some(
+        (style) =>
+          style.target.kind === "entity" &&
+          referencesEntity(style.target.entityId),
+      ) ||
+      result.references.some(
+        (reference) =>
+          reference.kind === "sketchReference" &&
+          reference.source.sketchId ===
+            result.points.find((point) => point.pointId === pointId)?.target
+              .sketchId &&
+          ((reference.source.kind === "sketchPoint" &&
+            reference.source.pointId === pointId) ||
+            (reference.source.kind === "sketchEntity" &&
+              referencesEntity(reference.source.entityId))),
+      );
+    if (!referenced) {
+      result = {
+        ...result,
+        pointIds: result.pointIds.filter((id) => id !== pointId),
+        points: result.points.filter((point) => point.pointId !== pointId),
+        entityIds: result.entityIds.filter((id) => !entities.has(id)),
+        entities: result.entities.filter(
+          (entity) => !entities.has(entity.entityId),
+        ),
+      };
+      continue;
+    }
+    const virtualLabel = `${label} virtual sharp`;
+    const virtualEntities = wrappers.length
+      ? wrappers
+      : [
+          factories.createPointEntity(
+            virtualLabel,
+            factories.createEntityId(`virtual-sharp-${pointId}`),
+            pointId,
+          ),
+        ];
+    // solver-core's localCollinearResidual is point-to-INFINITE-line distance,
+    // not segment membership: the sharp lies beyond both trimmed endpoints.
+    const constraints: ConstraintDefinition[] = lines.map(
+      (entityId, index) => ({
+        kind: "collinear",
+        constraintId: factories.createConstraintId(
+          `virtual-sharp-${pointId}-collinear-${index}`,
+        ),
+        label: virtualLabel,
+        target: { kind: "localPoint", pointId },
+        line: { kind: "localEntity", entityId },
+      }),
+    );
+    result = {
+      ...result,
+      points: result.points.map((point) =>
+        point.pointId === pointId
+          ? { ...point, label: virtualLabel, isConstruction: true }
+          : point,
+      ),
+      entityIds: [
+        ...result.entityIds,
+        ...virtualEntities
+          .filter((entity) => !entities.has(entity.entityId))
+          .map((entity) => entity.entityId),
+      ],
+      entities: [
+        ...result.entities.filter((entity) => !entities.has(entity.entityId)),
+        ...virtualEntities.map((entity) => ({
+          ...entity,
+          label: virtualLabel,
+          isConstruction: true,
+        })),
+      ],
+      constraintIds: [
+        ...result.constraintIds,
+        ...constraints.map((constraint) => constraint.constraintId),
+      ],
+      constraints: [...result.constraints, ...constraints],
+    };
+  }
+  return result;
+}
+
 export function createSketchFilletMutation(input: {
   definition: SketchDefinition;
   entityIds: readonly SketchEntityId[];
@@ -1858,7 +2022,14 @@ export function createSketchFilletMutation(input: {
     dimensions: [...geometry.dimensions, ...dimensions],
   };
 
-  return createMutationOperationResult(definition, [
+  const reconciled = reconcileTrimmedCorner(
+    definition,
+    [corner.pointId, corner.secondPointId],
+    input.entityIds,
+    `Fillet ${input.sequence}`,
+    input.factories,
+  );
+  return createMutationOperationResult(reconciled, [
     makePreviewLine(
       "preview-fillet-trim-a",
       "Fillet preview",
@@ -2007,7 +2178,14 @@ export function createSketchChamferMutation(input: {
     [chamferEntity],
   );
 
-  return createMutationOperationResult(definition, [
+  const reconciled = reconcileTrimmedCorner(
+    definition,
+    [corner.pointId, corner.secondPointId],
+    input.entityIds,
+    `Chamfer ${input.sequence}`,
+    input.factories,
+  );
+  return createMutationOperationResult(reconciled, [
     makePreviewLine(
       "preview-chamfer-trim-a",
       "Chamfer preview",
