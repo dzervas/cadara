@@ -1094,6 +1094,45 @@ describe("T17c6 D-3: a release in a constrained sketch reaches the cursor exactl
     expect(getSketchSessionInvalidFeedback(f.session)).toBe(MIXED_TEXT);
   });
 
+  test.each([0.005, 0.02])(
+    "O17: a near drop snaps to the neighbouring fit point and explains the degenerate span at %s units/px",
+    async (scale) => {
+      const { f, f2, f3, before } = await mixedOutline();
+      // A 4 px miss at a measured viewport scale must snap, not require the
+      // mathematically exact cursor coordinates used by the T17c6 row above.
+      f.dispatch({
+        type: "sketch.pointerMoved",
+        point: F2,
+        sketchUnitsPerPixel: scale,
+      });
+      expect(f.session.sketchUnitsPerPixel).toBe(scale);
+      await glideTo(f, f3, [F2[0] + 4 * scale, F2[1] + 2 * scale]);
+      expect({
+        dropped: positionOf(f.session.definition, f3),
+        neighbour: positionOf(f.session.definition, f2),
+        message: f.session.validationMessage,
+        regions: f.session.liveRegions.status,
+      }).toEqual({
+        dropped: positionOf(before, f2),
+        neighbour: positionOf(before, f2),
+        message: MIXED_TEXT,
+        regions: "unavailable",
+      });
+      expect(f.undoLabels()).toEqual(["Move Sketch Geometry"]);
+      expect(f.session.definition.constraints).toEqual(before.constraints);
+      f.dispatch({ type: "history.undoRequested" });
+      await f.settle();
+      expect(f.session.definition.points).toEqual(before.points);
+      expect(f.session.validationMessage).toBeNull();
+      f.dispatch({ type: "history.redoRequested" });
+      await f.settle();
+      expect(positionOf(f.session.definition, f3)).toEqual(
+        positionOf(before, f2),
+      );
+      expect(f.session.validationMessage).toBe(MIXED_TEXT);
+    },
+  );
+
   test("a reachable drop elsewhere lands exactly at the cursor; the region stays", async () => {
     const { f, f3 } = await mixedOutline();
     const to: P = [3.0137, 3.9071];
