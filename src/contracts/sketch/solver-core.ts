@@ -7023,8 +7023,9 @@ let gaussNewtonFallbackTrace: SketchGaussNewtonFallbackTrace[] | null = null;
  * `evaluateLoss`; `lineSearches` every Wolfe line search and
  * `lineSearchTrials` the candidate evaluations inside them. A line search
  * evaluates only its trial points (the start is the caller's current
- * state), so `lossEvaluations − lineSearchTrials` is the number of solver
- * starts, never a per-iteration cost.
+ * state), so `lossEvaluations − lineSearchTrials` counts the evaluations
+ * outside Wolfe searches (solver starts, candidate judging, Gauss–Newton
+ * candidates), never one per BFGS iteration.
  */
 export interface SketchSolverWorkTrace {
   lossEvaluations: number;
