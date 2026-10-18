@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -20,9 +20,15 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+import {
+  createDwellHint,
+  SKETCH_HINT_DWELL_MS,
+  SKETCH_HINT_LINGER_MS,
+} from "@/hooks/dwell-hint";
 import { SketchPickHint } from "@/components/cad/sketch-pick-hint";
 import {
   createSketchNearGapHint,
+  getSketchNearGapHintPointIds,
   createSketchPickHint,
   getSketchNearGapHintText,
   getSketchPickHintText,
@@ -352,4 +358,54 @@ test("T13k: the near-gap chip renders its text and a Merge… button, beside or 
   expect(render(<SketchPickHint hint={null} nearGap={null} />)).not.toContain(
     'role="status"',
   );
+});
+
+test("D26: a selected gap end keeps Merge over empty space; deselecting starts linger", () => {
+  vi.useFakeTimers();
+  const { definition, gaps } = nearGapFixture();
+  const endpoint = definition.points.find(
+    (point) => point.pointId === fp("c"),
+  )!.target;
+  let visible: ReturnType<typeof createSketchNearGapHint> = null;
+  const timing = createDwellHint<
+    NonNullable<ReturnType<typeof createSketchNearGapHint>>
+  >((value) => {
+    visible = value;
+  });
+  const update = (
+    hover: PrimitiveRef | null,
+    selection: readonly PrimitiveRef[],
+  ) => {
+    const hint = createSketchNearGapHint({
+      definition,
+      gaps,
+      pointIds: getSketchNearGapHintPointIds(
+        hover,
+        selection,
+        endpoint.sketchId,
+      ),
+    });
+    if (hint)
+      timing.hover(`${hint.sourcePointId}|${hint.destinationPointId}`, hint);
+    else timing.leave();
+  };
+  try {
+    update(endpoint, [endpoint]);
+    vi.advanceTimersByTime(SKETCH_HINT_DWELL_MS);
+    expect(visible).toMatchObject({ sourcePointId: fp("c") });
+    update(null, [endpoint]);
+    vi.advanceTimersByTime(SKETCH_HINT_LINGER_MS + 1);
+    expect(
+      visible,
+      "selection is deliberate, not a departed hover",
+    ).toMatchObject({ sourcePointId: fp("c") });
+    update(null, []);
+    vi.advanceTimersByTime(SKETCH_HINT_LINGER_MS - 1);
+    expect(visible).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(visible).toBeNull();
+  } finally {
+    timing.dispose();
+    vi.useRealTimers();
+  }
 });
