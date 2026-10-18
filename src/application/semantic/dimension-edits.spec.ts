@@ -1,9 +1,5 @@
 import { expect, it } from "vitest";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
-import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 
 type Workflow = Awaited<ReturnType<typeof createSketchWorkflow>>;
@@ -16,14 +12,10 @@ async function addThenEdit(
   initial: number,
   edited: number,
 ) {
-  const target = f
-    .current()
-    .discovery!.references.find(
-      (r) => r.target.kind === "sketchEntity" && r.target.entityId === entityId,
-    )!.target;
+  const target = f.ref(entityId);
   const added = await f.execute({
     operation: "sketch.requirement.add",
-    draft: f.current().discovery!.state.draft,
+    draft: f.draft(),
     tool,
     targets: [target],
     mode: "driving",
@@ -48,22 +40,13 @@ async function addThenEdit(
 async function publishAndSave(f: Workflow) {
   const published = await f.execute({
     operation: "sketch.publish",
-    draft: f.current().discovery!.state.draft,
+    draft: f.draft(),
     requireProfiles: true,
   });
-  const directory = await mkdtemp(resolve(tmpdir(), "cadara-dimension-edits-"));
-  try {
-    const path = resolve(directory, "edited.cadara");
-    await f.execute({ operation: "document.save", path });
-    const document: AuthoredModelDocument = JSON.parse(
-      await readFile(path, "utf8"),
-    );
-    return document.sketches.find(
-      (s) => s.sketchId === published.discovery!.sketch!.sketchId,
-    )!.definition;
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  const document = await f.saveAndRead();
+  return document.sketches.find(
+    (s) => s.sketchId === published.discovery!.sketch!.sketchId,
+  )!.definition;
 }
 
 function sideLength(result: SemanticResult, entityId: string) {
@@ -78,12 +61,10 @@ function sideLength(result: SemanticResult, entityId: string) {
 
 /** Rectangle 20 x 10; picks the side whose endpoints share the given coordinate. */
 async function rectangleSide(f: Workflow, axis: 0 | 1, at: number) {
-  const created = await f.execute({
-    operation: "sketch.author",
-    draft: f.current().discovery!.state.draft,
-    primitive: { kind: "rectangle", start: [0, 0], end: [20, 10] },
-    construction: false,
-    intent: "fulfill",
+  const created = await f.author({
+    kind: "rectangle",
+    start: [0, 0],
+    end: [20, 10],
   });
   const sketch = created.discovery!.sketch!;
   expect(
@@ -152,12 +133,10 @@ for (const row of [
   it(`edited circle ${row.kind} (${row.tool}) solves, finishes the sketch and saves the edited value and radius`, async () => {
     const f = await createSketchWorkflow();
     try {
-      const created = await f.execute({
-        operation: "sketch.author",
-        draft: f.current().discovery!.state.draft,
-        primitive: { kind: "circle", center: [0, 0], radius: 5 },
-        construction: false,
-        intent: "fulfill",
+      const created = await f.author({
+        kind: "circle",
+        center: [0, 0],
+        radius: 5,
       });
       expect(
         created.discovery!.sketch!.requirements,

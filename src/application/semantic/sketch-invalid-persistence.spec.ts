@@ -2,18 +2,9 @@ import { expect, it } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
-
-type NativeDocument = {
-  sketches: {
-    definition: {
-      pointIds: string[];
-      constraintIds: string[];
-      constraints: Record<string, unknown>[];
-    };
-  }[];
-};
 
 const CONFLICTING_REQUIREMENTS = [
   {
@@ -73,12 +64,10 @@ it("nonconverged authored sketch finishes, saves, reopens and re-enters with dia
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-invalid-"));
   const f = await createSketchWorkflow();
   try {
-    const authored = await f.execute({
-      operation: "sketch.author",
-      draft: f.current().discovery!.state.draft,
-      primitive: { kind: "rectangle", start: [0, 0], end: [20, 10] },
-      construction: false,
-      intent: "fulfill",
+    const authored = await f.author({
+      kind: "rectangle",
+      start: [0, 0],
+      end: [20, 10],
     });
     const valid = await f.execute({
       operation: "sketch.publish",
@@ -87,19 +76,15 @@ it("nonconverged authored sketch finishes, saves, reopens and re-enters with dia
     });
     const sketchId = valid.discovery!.sketch!.sketchId!;
     expect(valid.discovery!.sketch!.profiles).toHaveLength(1);
-    const validPath = resolve(directory, "valid.cadara");
-    await f.execute({ operation: "document.save", path: validPath });
 
     // Author the conflict straight into the current native format, as the
     // browser row did, so the sketch is invalid only through file contents.
-    const native = JSON.parse(
-      await readFile(validPath, "utf8"),
-    ) as NativeDocument;
+    const native = await f.saveAndRead();
     const definition = native.sketches[0]!.definition;
     const pointId = definition.pointIds[0]!;
     const conflicting = CONFLICTING_REQUIREMENTS.map((requirement) => ({
       ...requirement,
-      position: [...requirement.position],
+      position: [...requirement.position] as [number, number],
       pointId,
     }));
     definition.constraintIds.push(...conflicting.map((c) => c.constraintId));
@@ -157,9 +142,9 @@ it("nonconverged authored sketch finishes, saves, reopens and re-enters with dia
       path: reopenedPath,
     });
     expect(saved.completion.file.kind).toBe("written");
-    const savedInvalid = JSON.parse(
+    const savedInvalid: AuthoredModelDocument = JSON.parse(
       await readFile(reopenedPath, "utf8"),
-    ) as NativeDocument;
+    );
     expect(savedInvalid.sketches[0]!.definition.constraintIds).toEqual(
       expect.arrayContaining(conflicting.map((c) => c.constraintId)),
     );

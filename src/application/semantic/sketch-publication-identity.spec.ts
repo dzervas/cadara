@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
+import {
+  createSketchWorkflow,
+  labels,
+} from "../../../test/helpers/semantic-sketch-workflow";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 
 // Lane: logic (docs/testing.md). Seam: the in-process semantic session.
@@ -12,25 +15,15 @@ const sketchIds = (result: SemanticResult) =>
   result.discovery!.model!.timeline!.flatMap((item) =>
     item.target.kind === "sketch" ? [item.target.sketchId] : [],
   );
-const labels = (result: SemanticResult) => ({
-  undo: result.discovery!.history!.undoEntries!.map((e) => e.label),
-  redo: result.discovery!.history!.redoEntries!.map((e) => e.label),
-});
 
 test("document Undo/Redo preserves the original sketch identity and later sketch history stays independent", async () => {
   const w = await createSketchWorkflow();
   try {
     const publishLine = async (start: number[], end: number[]) => {
-      await w.execute({
-        operation: "sketch.author",
-        draft: w.current().discovery!.state.draft,
-        primitive: { kind: "line", start, end },
-        construction: false,
-        intent: "fulfill",
-      });
+      await w.author({ kind: "line", start, end });
       const published = await w.execute({
         operation: "sketch.publish",
-        draft: w.current().discovery!.state.draft,
+        draft: w.draft(),
         requireProfiles: false,
       });
       return published.discovery!.sketch!.sketchId!;

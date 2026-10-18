@@ -15,17 +15,6 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
     resolve(tmpdir(), "cadara-deletion-invalid-"),
   );
   const f = await createSketchWorkflow();
-  const draft = () => f.current().discovery!.state.draft;
-  const ref = (kind: "sketchPoint" | "sketchEntity", id: string) =>
-    f
-      .current()
-      .discovery!.references.find(
-        ({ target }) =>
-          target.kind === kind &&
-          (kind === "sketchPoint"
-            ? "pointId" in target && target.pointId === id
-            : "entityId" in target && target.entityId === id),
-      )!.target;
   /** The authored relationships as discovery reports them. */
   const relationships = () => {
     const sketch = f.current().discovery!.sketch!;
@@ -77,49 +66,34 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
         [12, 14],
       ],
     ])
-      await f.execute({
-        operation: "sketch.author",
-        draft: draft(),
-        primitive: { kind: "line", start, end },
-        construction: false,
-        intent: "fulfill",
-      });
+      await f.author({ kind: "line", start, end });
     const [seed, corner] = f.current().discovery!.sketch!.entities;
     await f.execute({
       operation: "sketch.geometry.update",
-      draft: draft(),
+      draft: f.draft(),
       edit: {
         kind: "mergePoints",
-        target: ref("sketchPoint", corner!.pointIds[0]!),
-        destination: ref("sketchPoint", seed!.pointIds[1]!),
+        target: f.ref(corner!.pointIds[0]!),
+        destination: f.ref(seed!.pointIds[1]!),
       },
       intent: "fulfill",
     });
     await f.execute({
       operation: "sketch.offset.create",
-      draft: draft(),
-      targets: [
-        ref("sketchEntity", corner!.entityId),
-        ref("sketchEntity", seed!.entityId),
-      ],
+      draft: f.draft(),
+      targets: [f.ref(corner!.entityId), f.ref(seed!.entityId)],
       distance: 0.5,
       side: "right",
       intent: "fulfill",
     });
     // A circle left of the sketch Y axis, mirrored about it.
-    await f.execute({
-      operation: "sketch.author",
-      draft: draft(),
-      primitive: { kind: "circle", center: [-20, 10], radius: 2 },
-      construction: false,
-      intent: "fulfill",
-    });
+    await f.author({ kind: "circle", center: [-20, 10], radius: 2 });
     const original = f.current().discovery!.sketch!.entities.at(-1)!;
     expect(original.kind).toBe("circle");
     const mirrored = await f.execute({
       operation: "sketch.mirror.create",
-      draft: draft(),
-      targets: [ref("sketchEntity", original.entityId)],
+      draft: f.draft(),
+      targets: [f.ref(original.entityId)],
       axis: f
         .current()
         .discovery!.sketch!.operands.find((r) => r.label === "Sketch Y axis")!
@@ -150,8 +124,8 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
     // action each; both relationships stay, broken.
     const seedDeleted = await f.run({
       operation: "sketch.geometry.delete",
-      draft: draft(),
-      targets: [ref("sketchEntity", seed!.entityId)],
+      draft: f.draft(),
+      targets: [f.ref(seed!.entityId)],
       intent: "author-invalid",
     });
     expect(seedDeleted.outcome.kind).toBe("completed");
@@ -161,8 +135,8 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
     ).toHaveLength(2);
     const deleted = await f.run({
       operation: "sketch.geometry.delete",
-      draft: draft(),
-      targets: [ref("sketchEntity", original.entityId)],
+      draft: f.draft(),
+      targets: [f.ref(original.entityId)],
       intent: "author-invalid",
     });
     expect(deleted.outcome).toEqual({ kind: "accepted-invalid" });
@@ -208,7 +182,7 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
     // diagnostics and validity each time; the file keeps both relationships.
     const finished = await f.run({
       operation: "sketch.publish",
-      draft: draft(),
+      draft: f.draft(),
       requireProfiles: false,
     });
     expect(finished.outcome).toEqual({
@@ -223,7 +197,7 @@ it("an offset's seed and a mirror's original deleted (one action each) leave bot
     await f.run({ operation: "sketch.open", sketchId });
     expect(relationships()).toEqual(built);
     expect(diagnostics(), "re-entry").toEqual(broken);
-    await f.execute({ operation: "sketch.discard", draft: draft() });
+    await f.execute({ operation: "sketch.discard", draft: f.draft() });
     const path = resolve(directory, "deletion-invalid.cadara");
     await f.execute({ operation: "document.save", path });
     const file: AuthoredModelDocument = JSON.parse(

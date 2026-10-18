@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
+import {
+  createSketchWorkflow,
+  labels,
+} from "../../../test/helpers/semantic-sketch-workflow";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 
 type Workflow = Awaited<ReturnType<typeof createSketchWorkflow>>;
@@ -16,13 +19,7 @@ async function twoLines(f: Workflow, x: number) {
       [x, 15],
     ],
   ])
-    await f.execute({
-      operation: "sketch.author",
-      draft: f.current().discovery!.state.draft,
-      primitive: { kind: "line", start, end },
-      construction: false,
-      intent: "fulfill",
-    });
+    await f.author({ kind: "line", start, end });
   const [target, boundary] = f
     .current()
     .discovery!.references.filter((r) => r.target.kind === "sketchEntity")
@@ -39,11 +36,6 @@ function lines(result: SemanticResult) {
     ),
   );
 }
-
-const labels = (result: SemanticResult) => ({
-  undo: result.discovery!.history!.undoEntries!.map((e) => e.label),
-  redo: result.discovery!.history!.redoEntries!.map((e) => e.label),
-});
 
 it("Extend a line by a line: one 'Extend' action reaches the boundary; Undo and Redo replay it", async () => {
   const f = await createSketchWorkflow();
