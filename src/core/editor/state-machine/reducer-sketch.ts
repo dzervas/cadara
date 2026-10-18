@@ -104,6 +104,9 @@ function finishSketchSession(state: SketchEditorState): EditorTransitionResult {
   // why; Discard and leave is the way out). Review R-1: nothing is stored,
   // so nothing goes stale when the sketch comes back.
   if (getPeerDeletedSketchNotice(state) !== null) return { state, effects: [] };
+  // O30 (cadara-b3k.2): a Finish while the commit is in flight changes
+  // nothing; the pending commit's result decides (see emitSketchCommit).
+  if (state.pendingCommitRequestId !== null) return { state, effects: [] };
   const session = finalizeSketchDraw(state.session);
   // T14c: Finish drops the annotation context (a reopened sketch starts
   // without one).
