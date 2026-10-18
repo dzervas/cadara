@@ -54,7 +54,7 @@ async function outcomeDocument(outcome: SemanticOutcome, appliedState?: Semantic
           geometry: { kind: invalid ? "invalid-editable" : "current", state, sketchBasis: null, solve: null, derivation: null, rebuildRevisionId: state.revisionId },
           persistence: invalid ? { kind: "committed", commandId: command.commandId, transactionId: "tx", state } : { kind: "not-required" },
           file: { kind: "not-required" },
-        }, diagnostics: [], discovery: appliedState ? null : { state, references: [], history: null },
+        }, diagnostics: [{ code: "sdk-test", severity: "info", message: "Full outcome evidence", target: null, detail: null }], discovery: appliedState ? null : { state, references: [], history: null },
       };
     },
     drain: async () => {}, release: async () => {},
@@ -82,7 +82,12 @@ for (const outcome of [
       const attempted = await doc.tryOp("variable.update", fields);
       expect(attempted.ok).toBe(returns);
       if (attempted.ok) expect(attempted.handle.result.outcome).toEqual(outcome);
-      else expect(attempted.error).toBeInstanceOf(SemanticOperationError);
+      else {
+        expect(attempted.error).toBeInstanceOf(SemanticOperationError);
+        expect((attempted.error as SemanticOperationError).result).toEqual(doc.results().at(-1));
+        expect((attempted.error as SemanticOperationError).result.diagnostics).toEqual([{ code: "sdk-test", severity: "info", message: "Full outcome evidence", target: null, detail: null }]);
+      }
+      expect(doc.commands()).toHaveLength(outcome.kind === "completed" || outcome.kind === "accepted-invalid" ? 2 : 0);
     } finally { await doc.close(); }
   });
 }
@@ -130,7 +135,30 @@ test("SDK live selection keeps candidates, scopes queries, and converts the disc
   } finally { await doc.close(); }
 });
 
-test("SDK trace replays typed targets and a failed step; probes edit only a disposable document", async () => {
+test("SDK capability polling refuses export formats absent from discovery", async () => {
+  const workflow = await createSemanticSessionWorkflow("sdk-export-capabilities");
+  const doc = new SemanticDocument({
+    execute: async (command, options) => {
+      const result = await workflow.session.execute(command, options);
+      return { ...result, discovery: result.discovery ? {
+        ...result.discovery,
+        exportProviders: result.discovery.exportProviders?.filter((provider) => provider.format === "step"),
+      } : null };
+    },
+    close: () => workflow.close(),
+  });
+  try {
+    await doc.ops.document.create({ label: "STEP only" });
+    expect(doc.canRun("export.step")).toBe(true);
+    expect(doc.canRun("export.stl")).toBe(false);
+    expect(doc.canRun("export.svg")).toBe(false);
+    expect(doc.canRun("sketch.begin")).toBe(true);
+    await doc.close();
+    expect(doc.canRun("export.step")).toBe(false);
+  } finally { await doc.close(); }
+});
+
+test("SDK trace omits caught failures and replays the final model; probes edit only a disposable document", async () => {
   const makeDocument = async (): Promise<SemanticDocument> => {
     const workflow = await createSemanticSessionWorkflow("sdk-probe");
     return new SemanticDocument(workflow.session, undefined, makeDocument);
@@ -145,6 +173,17 @@ test("SDK trace replays typed targets and a failed step; probes edit only a disp
     await doc.ops.sketch.publish({ requireProfiles: true });
     const region = doc.references({ kind: "region" })[0]!.target as Extract<import("@/contracts/shared/references").DurableRef, { kind: "region" }>;
     await doc.ops.extrude.create({ profile: region, depth: "depth" });
+    try {
+      await doc.ops.sketch.open({ sketchId: "sketch_missing" });
+      throw new Error("Expected missing sketch rejection");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SemanticOperationError);
+      const result = (error as SemanticOperationError).result;
+      expect(result).toEqual(doc.results().at(-1));
+      expect(result.outcome.kind).toBe("rejected");
+      expect(result.diagnostics).toEqual(doc.results().at(-1)!.diagnostics);
+    }
+    await doc.ops.document.rename({ label: "Repaired plate" });
     const source = JSON.stringify(doc.current!.result);
     const sourceCommands = JSON.stringify(doc.commands());
     const probe = await doc.probe([{ operation: "variable.update", fields: { variableId: doc.inspect(["variables"]).variables[0]!.variableId, name: "depth", valueText: "5" } }]);
@@ -154,15 +193,14 @@ test("SDK trace replays typed targets and a failed step; probes edit only a disp
     expect(JSON.stringify(doc.current!.result)).toBe(source);
     expect(JSON.stringify(doc.commands())).toBe(sourceCommands);
     const features = doc.inspect(["features"]).features.map((f) => [f.kind, f.label]);
-    await doc.tryOp("sketch.open", { sketchId: "sketch_missing" });
     const trace = doc.trace();
     expect(trace.version).toBe(1);
-    expect(trace.operations.at(-1)!.operation).toBe("sketch.open");
+    expect(trace.operations.some((operation) => operation.operation === "sketch.open")).toBe(false);
+    expect(trace.operations.at(-1)!.operation).toBe("document.rename");
     const results = await replay.replay(trace);
-    expect(results.at(-1)!.outcome.kind).toBe("rejected");
-    // The final refusal has no discovery; the preceding successful model is equivalent.
-    const discovery = results.at(-2)!.discovery!;
-    expect(discovery.document?.label).toBe("Trace plate");
+    expect(results.every((result) => result.outcome.kind === "completed")).toBe(true);
+    const discovery = results.at(-1)!.discovery!;
+    expect(discovery.document?.label).toBe("Repaired plate");
     expect(discovery.model?.bodies.map((b) => b.bounds)).toEqual([{ min: [0, 0, 0], max: [4, 2, 2] }]);
     expect(discovery.model?.features.map((f) => [f.kind, f.label])).toEqual(features);
   } finally { await doc.close(); await replay.close(); }
@@ -234,31 +272,51 @@ test("a failed applied command advances authority without reusing uncertified di
     }
     expect(doc.current!.discovery).toBeNull();
     expect(doc.references()).toEqual([]);
+    expect(doc.commands()).toHaveLength(2);
+    const copy = await outcomeDocument({ kind: "failed", failures: ["execution"] }, state);
+    try {
+      const replay = await copy.replay({ version: 1, operations: doc.commands() });
+      expect(replay).toHaveLength(1);
+      expect(replay[0]!.outcome.kind).toBe("failed");
+      expect(replay[0]!.completion.live).toEqual({ kind: "applied", state });
+      expect(copy.commands()).toHaveLength(1);
+    } finally { await copy.close(); }
   } finally { await doc.close(); }
 });
 
-test("dimension probes reconstruct a private draft and remap its typed dimension identity", async () => {
+test.each(["typed", "handle-ref"] as const)("dimension probes remap a %s selector after an omitted save shifts handle numbering", async (selector) => {
+  let writes = 0;
   const makeDocument = async (): Promise<SemanticDocument> => {
-    const workflow = await createSemanticSessionWorkflow("sdk-dimension-probe");
+    const workflow = await createSemanticSessionWorkflow("sdk-dimension-probe", {
+      nativeFileIO: {
+        read: async () => { throw new Error("Unexpected read"); },
+        write: async (_path, text) => { writes++; return { kind: "written", bytesWritten: new TextEncoder().encode(text).length, diagnostics: [] }; },
+      },
+    });
     return new SemanticDocument(workflow.session, undefined, makeDocument);
   };
   const doc = await makeDocument();
   try {
     await doc.ops.document.create({ label: "Draft probe" });
+    await doc.ops.document.save({ path: "delivered.cadara" });
     await doc.ops.sketch.begin({ plane: "xy" });
     await doc.ops.sketch.author({ primitive: { kind: "rectangle", start: [0, 0], end: [4, 2] }, construction: false });
     const points = doc.current!.discovery!.sketch!.points;
-    await doc.ops.sketch.dimension.add({ axis: "horizontal", points: [points[0]!.pointId, points[1]!.pointId], mode: "driving", value: 4 });
+    const dimensionHandle = await doc.ops.sketch.dimension.add({ axis: "horizontal", points: [points[0]!.pointId, points[1]!.pointId], mode: "driving", value: 4 });
+    const dimension = dimensionHandle.discovery!.sketch!.requirements[0]!;
     const source = JSON.stringify(doc.current!.result);
-    const probe = await doc.probe([{ operation: "sketch.dimension.update", fields: { dimensionId: doc.current!.discovery!.sketch!.requirements[0]!.dimensionId, value: 6 } }]);
+    const trace = doc.trace();
+    const probe = await doc.probe([{ operation: "sketch.dimension.update", fields: { dimensionId: selector === "typed" ? dimension.dimensionId : dimensionHandle.ref(dimension.label), value: 6 } }]);
     expect(probe.results[0]!.outcome.kind).toBe("completed");
     const xs = probe.results[0]!.discovery!.sketch!.points.map((p) => p.position[0]);
     expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(6);
     expect(JSON.stringify(doc.current!.result)).toBe(source);
+    expect(doc.trace()).toEqual(trace);
+    expect(writes).toBe(1);
   } finally { await doc.close(); }
 });
 
-test("disposable replay omits file writes without rebinding historical save aliases", async () => {
+test("disposable replay omits file writes and caught stale-handle conflicts", async () => {
   let writes = 0;
   const makeDocument = async () => {
     const workflow = await createSemanticSessionWorkflow("sdk-no-probe-writes", {
@@ -277,7 +335,9 @@ test("disposable replay omits file writes without rebinding historical save alia
     await doc.ops.variable.add({ name: "width", valueText: "4" });
     await expect(saved.ops.document.rename({ label: "stale" })).rejects.toMatchObject({ result: { outcome: { kind: "conflicted" } } });
     const replay = await copy.replay(doc.trace(), { omitFileWrites: true });
-    expect(replay.at(-1)!.outcome.kind).toBe("conflicted");
+    expect(replay.every((result) => result.outcome.kind === "completed")).toBe(true);
+    expect(copy.inspect(["variables"]).variables).toMatchObject([{ name: "width", valueText: "4" }]);
+    expect(doc.trace().operations.some((operation) => operation.operation === "document.rename")).toBe(false);
     expect(writes).toBe(1);
   } finally { await doc.close(); await copy.close(); }
 });
@@ -298,7 +358,7 @@ test("a disposable probe preserves even falsy programming exceptions and still c
 });
 
 
-test("trace export refuses an undiscovered typed reference rather than exporting an invalid nested selector", async () => {
+test("trace omits a failed command with an undiscovered typed reference", async () => {
   const workflow = await createSemanticSessionWorkflow("sdk-stale-trace");
   const doc = new SemanticDocument(workflow.session);
   try {
@@ -310,10 +370,10 @@ test("trace export refuses an undiscovered typed reference rather than exporting
     const target = { kind: "face", bodyId: doc.references({ kind: "body" })[0]!.target.bodyId, faceId: "face_missing" } as const;
     const failure = await doc.tryOp("export.step", { target, path: "/tmp/kkl15-nonexistent-face.step", options: { schema: "AP242", unit: "millimeter" } });
     expect(failure.ok).toBe(false);
-    expect(doc.commands().at(-1)?.operation).toBe("export.step");
-    try { doc.trace(); throw new Error("Expected trace export refusal"); } catch (error) {
-      expect(error).toBeInstanceOf(SemanticTraceError);
-      expect(error).toMatchObject({ operation: "export.step", reference: target });
-    }
+    if (failure.ok) throw new Error("Expected invalid export target failure");
+    expect(failure.error).toBeInstanceOf(SemanticOperationError);
+    expect((failure.error as SemanticOperationError).result).toEqual(doc.results().at(-1));
+    expect(doc.commands().at(-1)?.operation).toBe("extrude.create");
+    expect(doc.trace().operations.some((operation) => operation.operation === "export.step")).toBe(false);
   } finally { await doc.close(); }
 });
