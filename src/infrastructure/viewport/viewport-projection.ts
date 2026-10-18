@@ -29,7 +29,8 @@ const DEFAULT_CAMERA_TARGET = new THREE.Vector3(0, 0, 4);
 const DEFAULT_CAMERA_UP = new THREE.Vector3(0, 0, 1);
 const DEFAULT_PERSPECTIVE_CAMERA_FOV = 45;
 const ORTHOGRAPHIC_FRUSTUM_HEIGHT = 32;
-const FIT_PADDING_FACTOR = 1.18;
+/** Fit margin: the model fills 1/factor of the tighter axis (user: 1.18 was too tight). */
+export const FIT_PADDING_FACTOR = 1.4;
 const MIN_FIT_HALF_EXTENT = 1;
 const MIN_FIT_CAMERA_DISTANCE = 8;
 const MIN_CAMERA_DISTANCE = 0.0001;
