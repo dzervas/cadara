@@ -13,14 +13,20 @@ export interface OccTessellationTier {
   angularDeflectionDegreeEquivalent: number;
 }
 
+export type BodyLodProjection =
+  | { kind: "orthographic"; halfHeightModelUnits: number; zoom: number }
+  | { kind: "perspective"; verticalFovDegrees: number; zoom: number };
+
 export interface BodyLodSelectionInput {
   cameraDistanceModelUnits: number;
   bodyRadiusModelUnits: number;
+  projection?: BodyLodProjection;
 }
 
 export interface ViewportLodSelectionInput {
   cameraPosition: RenderPoint3D;
   renderables: readonly RenderableEntityRecord[];
+  projection?: BodyLodProjection;
 }
 
 const EXISTING_OCC_ANGULAR_DEFLECTION_RADIANS = 0.5;
@@ -69,12 +75,28 @@ export function getOccTessellationTier(
 export function selectBodyLodTier(
   input: BodyLodSelectionInput,
 ): OccTessellationTierId {
-  if (input.bodyRadiusModelUnits <= 0 || input.cameraDistanceModelUnits <= 0) {
+  const projection = input.projection;
+  // O34: radius / visible half-height is the screen-space radius. Scale it
+  // by tan(45deg / 2) to retain the existing radius/distance thresholds at
+  // the viewport's default perspective FOV. Equal screen fractions therefore
+  // select equal tiers, including orthographic zoom (which never moves the camera).
+  const referenceHalfFovTangent = Math.tan(Math.PI / 8);
+  const effectiveDistance =
+    projection?.kind === "orthographic"
+      ? projection.halfHeightModelUnits /
+        projection.zoom /
+        referenceHalfFovTangent
+      : input.cameraDistanceModelUnits *
+        (projection
+          ? Math.tan((projection.verticalFovDegrees * Math.PI) / 360) /
+            projection.zoom /
+            referenceHalfFovTangent
+          : 1);
+  if (input.bodyRadiusModelUnits <= 0 || effectiveDistance <= 0) {
     return "startup";
   }
 
-  const projectedSize =
-    input.bodyRadiusModelUnits / input.cameraDistanceModelUnits;
+  const projectedSize = input.bodyRadiusModelUnits / effectiveDistance;
 
   if (projectedSize >= 0.18) {
     return "fine";
@@ -113,6 +135,7 @@ export function selectViewportLodTierForRenderables(
     const tier = selectBodyLodTier({
       bodyRadiusModelUnits: bounds.radius,
       cameraDistanceModelUnits: distance(input.cameraPosition, bounds.center),
+      projection: input.projection,
     });
     selectedTier = maxTier(selectedTier, tier);
   }

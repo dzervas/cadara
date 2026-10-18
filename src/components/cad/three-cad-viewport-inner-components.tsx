@@ -418,16 +418,22 @@ export function BodyLodWatcher({
     lastCameraTokenRef.current = null;
   }, [renderables]);
 
-  useFrame(({ camera }) => {
+  useFrame(({ camera, size }) => {
     if (!enabled) {
       lastCameraTokenRef.current = null;
       return;
     }
+    if (
+      !(camera instanceof THREE.OrthographicCamera) &&
+      !(camera instanceof THREE.PerspectiveCamera)
+    ) {
+      return;
+    }
 
-    const token = camera.position
-      .toArray()
-      .map((value) => value.toFixed(3))
-      .join(",");
+    // O34: orthographic wheel zoom leaves position unchanged. Compare the
+    // projection and viewport too; only a changed token scans body geometry,
+    // and only a changed tier notifies React.
+    const token = `${camera.type}:${camera.position.toArray().join(",")}:${camera.zoom}:${camera.projectionMatrix.elements.join(",")}:${size.width},${size.height}`;
     if (lastCameraTokenRef.current === token) {
       return;
     }
@@ -435,6 +441,18 @@ export function BodyLodWatcher({
     lastCameraTokenRef.current = token;
     const tierId = selectViewportLodTierForRenderables({
       cameraPosition: [camera.position.x, camera.position.y, camera.position.z],
+      projection:
+        camera instanceof THREE.OrthographicCamera
+          ? {
+              kind: "orthographic",
+              halfHeightModelUnits: (camera.top - camera.bottom) / 2,
+              zoom: camera.zoom,
+            }
+          : {
+              kind: "perspective",
+              verticalFovDegrees: camera.fov,
+              zoom: camera.zoom,
+            },
       renderables: renderablesRef.current.map((entry) => entry.renderable),
     });
 
