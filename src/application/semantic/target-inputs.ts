@@ -22,7 +22,13 @@ type SelectablePrimitive<
   : T;
 type SelectableBooleanScope<T> = T extends { bodyId: infer B }
   ? Omit<T, "bodyId"> & { bodyId: B | TargetSelector }
-  : T;
+  : T extends { bodyIds: infer B extends readonly unknown[] }
+    ? Omit<T, "bodyIds"> & { bodyIds: readonly (B[number] | TargetSelector)[] }
+    : T;
+type SelectableBound<T> = T extends { target: infer R } ? Omit<T, "target"> & { target: R | TargetSelector } : T;
+type SelectableExtent<T> = T extends { firstEnd: infer A; secondEnd: infer B }
+  ? Omit<T, "firstEnd" | "secondEnd"> & { firstEnd: SelectableBound<A>; secondEnd: SelectableBound<B> }
+  : T extends { end: infer E } ? Omit<T, "end"> & { end: SelectableBound<E> } : T;
 type SelectableReplayTransform<T> = T extends { direction: infer R }
   ? Omit<T, "direction"> & { direction: R | TargetSelector }
   : T extends { plane: infer R }
@@ -37,12 +43,13 @@ type SelectableFeatureParameters<T> = T extends {
       transform: SelectableReplayTransform<R>;
     }
   : T extends { profiles: infer P extends readonly unknown[] }
-    ? Omit<T, "profiles" | "axis" | "booleanScope"> & {
+    ? Omit<T, "profiles" | "axis" | "booleanScope" | "startExtent" | "extent"> & {
         profiles: readonly [
           P[number] | TargetSelector,
           ...(P[number] | TargetSelector)[],
         ];
-      } & (T extends { axis: infer A }
+      } & (T extends { startExtent: infer S } ? { startExtent: SelectableBound<S> } : unknown) &
+        (T extends { extent: infer E } ? { extent: SelectableExtent<E> } : unknown) & (T extends { axis: infer A }
           ? { axis: A | TargetSelector }
           : unknown) &
         (T extends { booleanScope: infer B }
@@ -82,6 +89,7 @@ export type SelectableCommand<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<
       T,
       | "parameters"
+      | "owner"
       | "basis"
       | "draft"
       | "points"
@@ -104,6 +112,7 @@ export type SelectableCommand<T = SemanticCommand> = T extends SemanticCommand
       | "primitive"
       | "support"
     > &
+      (T extends { owner?: infer O } ? { owner?: O | TargetSelector } : unknown) &
       (T extends { parameters: infer P }
         ? { parameters: SelectableFeatureParameters<P> }
         : unknown) &

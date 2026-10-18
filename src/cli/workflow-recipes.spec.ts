@@ -110,14 +110,17 @@ describe.each(["source", "extracted package"])(
         extracted,
       ]);
       await rm(staging, { recursive: true });
-      expect((await readdir(extracted)).sort()).toEqual([
+      expect((await readdir(extracted)).filter((name) => !/^chunk-.*\.js$/.test(name)).sort()).toEqual([
         "COVERAGE.md",
         "LICENSE.md",
         "README.md",
+        "SDK.md",
         "examples",
         "main.js",
         "occ",
         "package.json",
+        "sdk.js",
+        "types",
       ]);
       expect((await readdir(join(extracted, "occ"))).sort()).toEqual([
         "cadara-occ.js",

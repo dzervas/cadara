@@ -33,8 +33,8 @@ it("semantic lifecycle commands use the shared production lifecycle and persiste
 
 it("recipe lifecycle aliases do not own modeling, topology or author-history algorithms", () => {
   const source = read("src/cli/commands/document-recipes.ts");
-  expect(source).toContain("validateSemanticCommand(command)");
-  expect(source).toContain("opened.session.execute(validated.data)");
+  expect(read("src/application/semantic/sdk.ts")).toContain("validateSemanticCommand(command)");
+  expect(source).toContain("sdk.execute(operation.command,");
   expect(source).not.toMatch(
     /setFeatureSuppression\(|reorderDocumentHistory\(|setFeatureCursor\(|repository\.(?:mutate|initialize)|applyCollaborativeWrites|topologyLineage|restoreAuthoredModelDocument/,
   );

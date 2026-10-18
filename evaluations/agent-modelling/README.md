@@ -16,7 +16,7 @@ Modelling tasks that an LLM agent completes through a CADara interface. An indep
 
   Every prompt is wrapped by `harness/prompt-template.md`.
 
-- `harness/arms.json`: per-interface instructions. `cli` is the shipped `cadara document recipe` with `.agents/skills/cadara-cli-modelling/SKILL.md`. `sdk`, `rt` and `rtlook` used throwaway prototypes that are not in the repository; their agent-facing docs are kept beside `arms.json`.
+- `harness/arms.json`: per-interface instructions. `cli` is the shipped recipe CLI. `sdk-shipped` is the shipped `cadara-cli/sdk` plus `cadara script`; materialize its canonical docs using [harness/SDK-SHIPPED.md](harness/SDK-SHIPPED.md). The historical `sdk`, `rt` and `rtlook` arms used throwaway prototypes; their docs/results remain explicitly historical.
 - `checker.py`: the expected outputs. It reopens the saved file through the built CLI and checks:
   - body count and kind
   - bounds
@@ -46,3 +46,18 @@ Context is total processed input (uncached + cache read/write) summed over turns
 - **The SDK arms helped gpt-6.1-sol on t1–t4,** with about 25% less context and 15–20% less time than the CLI. Sonnet was flat across arms.
 - **Agents overclaim.** In the hard tier, 5 of 16 runs reported success while a parametric probe failed.
 - Full write-up: `docs/research/agent-modelling-interface.md` §11a.
+
+## Shipped SDK qualification (cadara-kkl.15)
+
+The shipped SDK has its own `sdk-shipped` arm; this does not relabel prototype runs as production evidence. The script command, namespaced operation typing, handles, outcome/error policy, scoped selection/queries, disposable probes, native save/reopen/STEP export, CLI trace replay and consumer declarations are qualified by `src/application/semantic/sdk.spec.ts`, `test/static/sdk-operation-types.spec.ts` and `src/cli/sdk-scripts.spec.ts`.
+
+Reference-model rerun against the built package (`CADARA_CLI=/tmp/cli-kkl-15/main.js`, 2026-10-18):
+
+| Entry seam | t1 plate | t2 bushing | t3 enclosure | t4 face-supported edit | t5 parametric enclosure |
+| --- | --- | --- | --- | --- | --- |
+| unchanged `verify-references.sh` | pass, 4/4 probes | pass | pass | pass | pass, 5/5 probes |
+| shipped `verify-sdk-references.sh` | pass, 4/4 probes | pass | pass | pass | pass, 5/5 probes |
+
+The SDK harness runs unchanged reference recipe data through the shipped SDK's `replay` method inside `cadara script`, then the unchanged independent checker reopens the delivered files and probes them. It tests package/seam parity, not fresh agent performance, generated-ops ergonomics or a new two-model comparison. Run it with `CADARA_CLI=<built main.js> ./verify-sdk-references.sh`.
+
+V1 trace export deliberately refuses references that cannot be uniquely label-selected (duplicate labels within one owner and session-scoped tangent handles), naming the exact step/reference in `SemanticTraceError` while retaining the complete executed command log. Full reference provenance is tracked in `cadara-kkl.17`. Recipes stop at a failed step even when a script catches that error and continues; no full repaired-tail replay claim is made.

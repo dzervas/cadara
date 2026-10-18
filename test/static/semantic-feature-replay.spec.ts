@@ -17,7 +17,7 @@ test("semantic replay reuses canonical production normalization and exact mutati
     /executeFeatureReplayFeature|buildExtrudeFeatureShape|applyBooleanPolicy|gp_Trsf/,
   );
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /replaySource|localTransforms|authoredFeatures|normalizeFeatureDefinition|buildExtrudeFeatureShape|gp_Trsf/,
   );

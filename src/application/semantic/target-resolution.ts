@@ -219,6 +219,11 @@ export function resolveSemanticCommand(
       );
     return matches[0]!.target;
   }
+  if (command.operation === "document.inspect" && command.owner) {
+    const owner = resolveSketchTarget(command.owner, ["sketch", "feature", "body"]);
+    if (owner.kind !== "sketch" && owner.kind !== "feature" && owner.kind !== "body") throw new Error("Invalid reference owner.");
+    command.owner = owner;
+  }
   function resolveMirrorAxis(
     target:
       | import("@/contracts/shared/references").SketchDatumReferenceRef
@@ -674,6 +679,33 @@ export function resolveSemanticCommand(
               ...parameters.profiles.slice(1).map(resolveProfile),
             ],
           };
+  }
+  if ((command.operation === "extrude.create" || command.operation === "extrude.update" || command.operation === "revolve.create" || command.operation === "revolve.update") && "parameters" in command && command.parameters !== undefined) {
+    const revolve = command.operation.startsWith("revolve.");
+    function resolveBound(bound: { kind: string; target?: import("@/contracts/shared/references").DurableRef | TargetSelector }) {
+      if (!isTargetSelector(bound.target)) return;
+      const kinds = bound.kind === "sketchPointOffset" ? ["sketchPoint"]
+        : bound.kind === "entityOffset" ? ["edge", "face"]
+        : bound.kind === "upToFace" ? ["face"]
+        : bound.kind === "upToPart" ? ["body"]
+        : bound.kind === "upToVertex" ? revolve ? ["vertex"] : ["vertex", "sketchPoint"] : [];
+      const target = resolveSketchTarget(bound.target, kinds);
+      if (target.kind === "sketchTangentHandle") throw new Error("Invalid extent target.");
+      bound.target = target;
+    }
+    const parameters = command.parameters;
+    if ("startExtent" in parameters) resolveBound(parameters.startExtent);
+    const extent = parameters.extent;
+    if (extent.mode === "twoSide") { resolveBound(extent.firstEnd); resolveBound(extent.secondEnd); }
+    else resolveBound(extent.end);
+    if (parameters.resultBodyType === "solid" && parameters.booleanScope.kind === "targetBodies") {
+      parameters.booleanScope = { kind: "targetBodies", bodyIds: parameters.booleanScope.bodyIds.map((value) => {
+        if (!isTargetSelector(value)) return value;
+        const target = resolveSketchTarget(value, ["body"]);
+        if (target.kind !== "body") throw new Error("Invalid exact boolean scope body.");
+        return target.bodyId;
+      }) };
+    }
   }
   if (
     (command.operation === "extrude.create" ||

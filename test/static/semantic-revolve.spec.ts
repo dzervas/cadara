@@ -22,7 +22,7 @@ test("revolve consumes canonical browser preparation and the existing production
     /repository\.(?:mutate|initialize)|BRepPrimAPI|executeOccFeature|dispatch\(/,
   );
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /prepareRevolveFeatureDefinition|createFeature\(|updateFeature\(|BRepPrimAPI/,
   );

@@ -22,7 +22,7 @@ test("lofts reuse canonical options, browser hydration/build and exact productio
     /executeLoftFeature|BRepOffsetAPI|transformLoftSectionWire|repository\.mutate/,
   );
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /prepareLoftFeatureDefinition|executeLoftFeature|BRepOffsetAPI|addPathDrivenLoftSections/,
   );

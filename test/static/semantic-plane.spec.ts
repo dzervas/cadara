@@ -25,7 +25,7 @@ test("planes share browser frame preparation, invariant ownership and exact prod
     /repository\.(?:mutate|initialize)|executePlaneFeature|cross\(|Math\.hypot/,
   );
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /preparePlaneFeatureDefinition|createFeature\(|updateFeature\(|validateSketchPlaneFrameInvariants/,
   );

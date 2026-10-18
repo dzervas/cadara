@@ -7,12 +7,13 @@
  * failure, 2 usage error). New subcommands are added by registration, never by
  * restructuring this file.
  */
+import { scriptCommand } from "@/cli/commands/script";
 import { onshapeCaptureCommand } from "@/cli/commands/onshape-capture";
 import { documentRecipesCommand } from "@/cli/commands/document-recipes";
 import type { CliEnv, CliIO, CommandModule } from "@/cli/types";
 
 /** Registered subcommands. Add new commands here. */
-export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand, documentRecipesCommand];
+export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand, documentRecipesCommand, scriptCommand];
 
 function commandTokens(name: string): string[] {
   return name.split(" ").filter(Boolean);

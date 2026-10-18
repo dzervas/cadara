@@ -19,7 +19,7 @@ test("holes reuse shared canonical/browser preparation and native mutation witho
     /executeHoleFeature|makeCountersinkTool|makeCylinder|BRepPrimAPI|repository\.mutate/,
   );
   const cli = read("src/cli/commands/document-recipes.ts");
-  expect(cli).toContain("opened.session.execute(validated.data)");
+  expect(cli).toContain("sdk.execute(operation.command,");
   expect(cli).not.toMatch(
     /prepareHoleFeatureDefinition|executeHoleFeature|createFeature\(|updateFeature\(|makeCountersinkTool/,
   );

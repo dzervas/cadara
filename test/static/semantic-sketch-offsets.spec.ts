@@ -76,8 +76,9 @@ test("relationship label aliases delegate to the application resolver, not termi
   expect(client).toContain(
     'validateTarget(command.derivationId, "derivation_validation")',
   );
-  expect(client).toContain('from "@/application/semantic/target-resolution"');
-  expect(client).toContain("resolveSemanticCommand(operation.command,");
+  expect(client).toContain('from "@/application/semantic/sdk"');
+  expect(read("src/application/semantic/sdk.ts")).toContain("resolveSemanticCommand(input,");
+  expect(client).toContain("sdk.execute(operation.command,");
   for (const path of [
     "src/cli/commands/document-recipes.ts",
     "src/domain/editor/sketch-session/editing.ts",
