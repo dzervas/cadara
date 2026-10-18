@@ -1,0 +1,297 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "basis": null,
+      "label": "Enclosure",
+      "as": "r0"
+    },
+    {
+      "version": 1,
+      "commandId": "var-width",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "r0"
+      },
+      "name": "width",
+      "valueText": "60",
+      "intent": "fulfill",
+      "as": "vwidth"
+    },
+    {
+      "version": 1,
+      "commandId": "var-depth",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "vwidth"
+      },
+      "name": "depth",
+      "valueText": "40",
+      "intent": "fulfill",
+      "as": "vdepth"
+    },
+    {
+      "version": 1,
+      "commandId": "var-height",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "vdepth"
+      },
+      "name": "height",
+      "valueText": "25",
+      "intent": "fulfill",
+      "as": "vheight"
+    },
+    {
+      "version": 1,
+      "commandId": "var-wall",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "vheight"
+      },
+      "name": "wall",
+      "valueText": "2",
+      "intent": "fulfill",
+      "as": "vwall"
+    },
+    {
+      "version": 1,
+      "commandId": "var-bossInset",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "vwall"
+      },
+      "name": "bossInset",
+      "valueText": "6",
+      "intent": "fulfill",
+      "as": "vbossInset"
+    },
+    {
+      "version": 1,
+      "commandId": "begin",
+      "operation": "sketch.begin",
+      "basis": {
+        "alias": "vbossInset"
+      },
+      "plane": "xy",
+      "as": "d0"
+    },
+    {
+      "version": 1,
+      "commandId": "rect",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "d0"
+      },
+      "draft": {
+        "alias": "d0"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [60, 40]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "d1"
+    },
+    {
+      "version": 1,
+      "commandId": "anchor",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "d1"
+      },
+      "draft": {
+        "alias": "d1"
+      },
+      "targets": [
+        {
+          "alias": "d1",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "d1",
+          "label": "Sketch origin"
+        }
+      ],
+      "tool": "constraintCoincident",
+      "mode": "driving",
+      "value": null,
+      "intent": "fulfill",
+      "as": "d2"
+    },
+    {
+      "version": 1,
+      "commandId": "wdim",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "d2"
+      },
+      "draft": {
+        "alias": "d2"
+      },
+      "targets": [
+        {
+          "alias": "d1",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "d1",
+          "label": "Rectangle 1 bottom right"
+        }
+      ],
+      "tool": "dimensionHorizontal",
+      "mode": "driving",
+      "value": 60,
+      "intent": "fulfill",
+      "as": "d3"
+    },
+    {
+      "version": 1,
+      "commandId": "ddim",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "d3"
+      },
+      "draft": {
+        "alias": "d3"
+      },
+      "targets": [
+        {
+          "alias": "d1",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "d1",
+          "label": "Rectangle 1 top left"
+        }
+      ],
+      "tool": "dimensionVertical",
+      "mode": "driving",
+      "value": 40,
+      "intent": "fulfill",
+      "as": "d4"
+    },
+    {
+      "version": 1,
+      "commandId": "upw",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "d4"
+      },
+      "draft": {
+        "alias": "d4"
+      },
+      "dimensionId": {
+        "alias": "d4",
+        "label": "Horizontal distance 3"
+      },
+      "value": "width",
+      "intent": "fulfill",
+      "as": "d5"
+    },
+    {
+      "version": 1,
+      "commandId": "upd",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "d5"
+      },
+      "draft": {
+        "alias": "d5"
+      },
+      "dimensionId": {
+        "alias": "d5",
+        "label": "Vertical distance 4"
+      },
+      "value": "depth",
+      "intent": "fulfill",
+      "as": "d6"
+    },
+    {
+      "version": 1,
+      "commandId": "lbl",
+      "operation": "sketch.label.set",
+      "basis": {
+        "alias": "d6"
+      },
+      "draft": {
+        "alias": "d6"
+      },
+      "target": {
+        "alias": "d6",
+        "label": "Sketch Draft"
+      },
+      "label": "Enclosure footprint",
+      "intent": "fulfill",
+      "as": "d7"
+    },
+    {
+      "version": 1,
+      "commandId": "pub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "d7"
+      },
+      "draft": {
+        "alias": "d7"
+      },
+      "requireProfiles": true,
+      "as": "s1"
+    },
+    {
+      "version": 1,
+      "commandId": "ext",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "s1"
+      },
+      "intent": "fulfill",
+      "as": "e1",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "s1",
+            "label": "Outer region",
+            "sketch": "s1"
+          }
+        ],
+        "startExtent": {
+          "kind": "profilePlane"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": {
+              "source": "expression",
+              "valueText": "height"
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "newBody"
+        },
+        "booleanScope": {
+          "kind": "standalone"
+        }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "e1"
+      },
+      "path": "stage1.cadara"
+    }
+  ]
+}

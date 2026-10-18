@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "open",
+      "operation": "document.open",
+      "path": "plate.cadara",
+      "basis": null,
+      "as": "plate"
+    },
+    {
+      "version": 1,
+      "commandId": "thickness",
+      "operation": "variable.update",
+      "variableId": { "alias": "plate", "label": "thickness" },
+      "name": "thickness",
+      "valueText": "10",
+      "intent": "fulfill",
+      "basis": { "alias": "plate" },
+      "as": "thick"
+    },
+    {
+      "version": 1,
+      "commandId": "boss-diameter",
+      "operation": "variable.add",
+      "name": "bossDiameter",
+      "valueText": "20",
+      "intent": "fulfill",
+      "basis": { "alias": "thick" },
+      "as": "diameter"
+    },
+    {
+      "version": 1,
+      "commandId": "boss-height",
+      "operation": "variable.add",
+      "name": "bossHeight",
+      "valueText": "5",
+      "intent": "fulfill",
+      "basis": { "alias": "diameter" },
+      "as": "height"
+    },
+    {
+      "version": 1,
+      "commandId": "begin-boss",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": { "alias": "height" },
+      "as": "draft"
+    },
+    {
+      "version": 1,
+      "commandId": "circle",
+      "operation": "sketch.author",
+      "primitive": { "kind": "circle", "center": [40, 25], "radius": 10 },
+      "construction": false,
+      "intent": "fulfill",
+      "basis": { "alias": "draft" },
+      "draft": { "alias": "draft" },
+      "as": "circle"
+    },
+    {
+      "version": 1,
+      "commandId": "name-boss-sketch",
+      "operation": "sketch.label.set",
+      "target": {
+        "alias": "circle",
+        "label": "Sketch Draft",
+        "sketch": "circle"
+      },
+      "label": "Boss profile",
+      "intent": "fulfill",
+      "basis": { "alias": "circle" },
+      "draft": { "alias": "circle" },
+      "as": "named"
+    },
+    {
+      "version": 1,
+      "commandId": "size-boss",
+      "operation": "sketch.requirement.add",
+      "tool": "dimensionDistance",
+      "targets": [{ "alias": "named", "label": "Circle 1", "sketch": "named" }],
+      "mode": "driving",
+      "value": 20,
+      "intent": "fulfill",
+      "basis": { "alias": "named" },
+      "draft": { "alias": "named" },
+      "as": "sized"
+    },
+    {
+      "version": 1,
+      "commandId": "locate-x",
+      "operation": "sketch.requirement.add",
+      "tool": "dimensionHorizontal",
+      "targets": [
+        { "alias": "sized", "label": "Circle 1 center", "sketch": "sized" },
+        { "alias": "sized", "label": "Sketch origin", "sketch": "sized" }
+      ],
+      "mode": "driving",
+      "value": 40,
+      "intent": "fulfill",
+      "basis": { "alias": "sized" },
+      "draft": { "alias": "sized" },
+      "as": "x"
+    },
+    {
+      "version": 1,
+      "commandId": "locate-y",
+      "operation": "sketch.requirement.add",
+      "tool": "dimensionVertical",
+      "targets": [
+        { "alias": "x", "label": "Circle 1 center", "sketch": "x" },
+        { "alias": "x", "label": "Sketch origin", "sketch": "x" }
+      ],
+      "mode": "driving",
+      "value": 25,
+      "intent": "fulfill",
+      "basis": { "alias": "x" },
+      "draft": { "alias": "x" },
+      "as": "y"
+    },
+    {
+      "version": 1,
+      "commandId": "drive-diameter",
+      "operation": "sketch.dimension.update",
+      "dimensionId": { "alias": "y", "label": "Diameter 2", "sketch": "y" },
+      "value": "bossDiameter",
+      "intent": "fulfill",
+      "basis": { "alias": "y" },
+      "draft": { "alias": "y" },
+      "as": "param-d"
+    },
+    {
+      "version": 1,
+      "commandId": "drive-center-x",
+      "operation": "sketch.dimension.update",
+      "dimensionId": {
+        "alias": "param-d",
+        "label": "Horizontal distance 3",
+        "sketch": "param-d"
+      },
+      "value": "width / 2",
+      "intent": "fulfill",
+      "basis": { "alias": "param-d" },
+      "draft": { "alias": "param-d" },
+      "as": "param-x"
+    },
+    {
+      "version": 1,
+      "commandId": "drive-center-y",
+      "operation": "sketch.dimension.update",
+      "dimensionId": {
+        "alias": "param-x",
+        "label": "Vertical distance 4",
+        "sketch": "param-x"
+      },
+      "value": "depth / 2",
+      "intent": "fulfill",
+      "basis": { "alias": "param-x" },
+      "draft": { "alias": "param-x" },
+      "as": "param-y"
+    },
+    {
+      "version": 1,
+      "commandId": "publish-boss",
+      "operation": "sketch.publish",
+      "requireProfiles": true,
+      "basis": { "alias": "param-y" },
+      "draft": { "alias": "param-y" },
+      "as": "published"
+    },
+    {
+      "version": 1,
+      "commandId": "join-boss",
+      "operation": "extrude.create",
+      "intent": "fulfill",
+      "basis": { "alias": "published" },
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "published",
+            "label": "Outer region",
+            "sketch": "published"
+          }
+        ],
+        "startExtent": {
+          "kind": "blindOffset",
+          "distance": { "source": "expression", "valueText": "thickness" },
+          "direction": "positive"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": { "source": "expression", "valueText": "bossHeight" }
+          }
+        },
+        "operation": { "source": "literal", "value": "join" },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": { "alias": "published", "label": "Mounting plate" }
+        }
+      },
+      "as": "boss"
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "path": "plate-boss.cadara",
+      "basis": { "alias": "boss" },
+      "as": "saved"
+    },
+    {
+      "version": 1,
+      "commandId": "reopen",
+      "operation": "document.open",
+      "path": "plate-boss.cadara",
+      "basis": null,
+      "as": "reopened"
+    },
+    {
+      "version": 1,
+      "commandId": "verify",
+      "operation": "document.inspect",
+      "basis": { "alias": "reopened" },
+      "as": "verified"
+    }
+  ]
+}

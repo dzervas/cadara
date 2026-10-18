@@ -1,0 +1,28 @@
+{
+  "t1": {
+    "title": "Parametric mounting plate",
+    "inputs": [],
+    "text": "Model a rectangular mounting plate 80 mm (X) × 50 mm (Y) × 6 mm (Z) thick. One corner sits at the origin and the plate extends in +X, +Y and +Z. It has four Ø6 mm through-holes, each centred 8 mm from its two nearest outer edges.\n\nThe model must be parametric. Create document variables named exactly `width` = 80, `depth` = 50, `thickness` = 6, `holeDiameter` = 6 and `holeInset` = 8, and make them actually drive the geometry: changing any variable must update the outline, the thickness, the hole size and the hole positions (holes stay `holeInset` from the edges).\n\nSave it as `plate.cadara` and export `plate.step` (STEP) in this directory."
+  },
+  "t2": {
+    "title": "Flanged bushing (revolve)",
+    "inputs": [],
+    "text": "Model a flanged bushing as a single solid. Its axis is the world Z axis and it spans z = 0 to z = 20. It has a Ø10 mm through bore, a Ø16 mm outer cylinder along the full 20 mm height, and a Ø28 mm flange, 3 mm thick, at the bottom (z = 0 to 3).\n\nSave it as `bushing.cadara` and export `bushing.stl` (binary STL) in this directory."
+  },
+  "t3": {
+    "title": "Open-top enclosure with vent slots",
+    "inputs": [],
+    "text": "Model an open-top rectangular enclosure as a single solid. Outer size is 60 mm (X) × 40 mm (Y) × 25 mm (Z), with one corner at the origin, extending in +X, +Y and +Z. Walls and floor are 2 mm thick and the top (z = 25) is open.\n\nThe front wall (the wall at y = 0) has two rectangular vent slots cut through it. Each slot is 20 mm wide along X and 4 mm tall along Z, centred at x = 30. One slot is centred at z = 12, the other at z = 18.\n\nSave it as `enclosure.cadara` in this directory."
+  },
+  "t4": {
+    "title": "Edit an existing parametric plate",
+    "inputs": ["reference/plate.cadara"],
+    "text": "`plate.cadara` in this directory is an existing parametric mounting plate (80 × 50 mm, corner at the origin, extending in +X/+Y/+Z) whose document variables include `thickness`.\n\nEdit it: set the `thickness` variable to 10, then add a cylindrical boss Ø20 mm and 5 mm tall, centred on the plate's top face at (x = 40, y = 25) and joined to the plate so the result is a single solid.\n\nSave the result as `plate-boss.cadara` and leave `plate.cadara` unchanged."
+  },
+  "t5": {
+    "title": "Parametric electronics enclosure (hard)",
+    "inputs": [],
+    "text": "Model an open-top electronics enclosure as a single solid. Outer size is 60 mm (X) × 40 mm (Y) × 25 mm (Z), with one corner at the origin, extending in +X, +Y and +Z. The four vertical outer edges are rounded with a 3 mm radius. Walls and floor are 2 mm thick, the top (z = 25) is open, and the cavity follows the outer shape (inner vertical corners have a 1 mm radius).\n\nInside, four cylindrical screw bosses Ø6 mm stand on the floor, rising 8 mm above the floor's top surface (z = 2 to 10). Their axes sit 6 mm in from the outer edges, at (6, 6), (54, 6), (54, 34) and (6, 34). Each boss has a Ø2.5 mm hole along its axis, through the boss and the floor.\n\nThe model must be parametric. Create document variables named exactly `width` = 60, `depth` = 40, `height` = 25, `wall` = 2 and `bossInset` = 6, and make them drive the geometry: the outline, the height, the wall/floor thickness (the boss bases stay on the floor's top surface) and the boss positions (bosses stay `bossInset` from the outer edges when width or depth change).\n\nSave it as `enclosure.cadara` in this directory.",
+    "note": "Run twice per arm/model (the 2026-10-18 results report the second repetition as t6)."
+  }
+}

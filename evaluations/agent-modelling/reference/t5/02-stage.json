@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "o",
+      "operation": "document.open",
+      "basis": null,
+      "path": "stage1.cadara",
+      "as": "o"
+    },
+    {
+      "version": 1,
+      "commandId": "fil",
+      "operation": "fillet.create",
+      "basis": { "alias": "o" },
+      "intent": "fulfill",
+      "as": "f",
+      "parameters": {
+        "edgeTargets": [
+          {
+            "kind": "edge",
+            "bodyId": "body_feature_extrude-1",
+            "edgeId": "edge_body_feature_extrude-1_g80df91ae719ecbab"
+          },
+          {
+            "kind": "edge",
+            "bodyId": "body_feature_extrude-1",
+            "edgeId": "edge_body_feature_extrude-1_g1acdad24ce2e65cf"
+          },
+          {
+            "kind": "edge",
+            "bodyId": "body_feature_extrude-1",
+            "edgeId": "edge_body_feature_extrude-1_gad76f776598e4d29"
+          },
+          {
+            "kind": "edge",
+            "bodyId": "body_feature_extrude-1",
+            "edgeId": "edge_body_feature_extrude-1_g222dacbf73292609"
+          }
+        ],
+        "radius": { "source": "literal", "value": 3 }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": { "alias": "f" },
+      "path": "stage2.cadara"
+    }
+  ]
+}

@@ -1,0 +1,901 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "basis": null,
+      "as": "create",
+      "label": "Parametric mounting plate"
+    },
+    {
+      "version": 1,
+      "commandId": "width",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "create"
+      },
+      "as": "width",
+      "name": "width",
+      "valueText": "80",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "depth",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "width"
+      },
+      "as": "depth",
+      "name": "depth",
+      "valueText": "50",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "thickness",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "depth"
+      },
+      "as": "thickness",
+      "name": "thickness",
+      "valueText": "6",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "holeDiameter",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "thickness"
+      },
+      "as": "holeDiameter",
+      "name": "holeDiameter",
+      "valueText": "6",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "holeInset",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "holeDiameter"
+      },
+      "as": "holeInset",
+      "name": "holeInset",
+      "valueText": "8",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "begin",
+      "operation": "sketch.begin",
+      "basis": {
+        "alias": "holeInset"
+      },
+      "as": "begin",
+      "plane": "xy"
+    },
+    {
+      "version": 1,
+      "commandId": "nameSketch",
+      "operation": "sketch.label.set",
+      "basis": {
+        "alias": "begin"
+      },
+      "as": "nameSketch",
+      "draft": {
+        "alias": "begin"
+      },
+      "intent": "fulfill",
+      "target": {
+        "alias": "begin",
+        "label": "Sketch Draft"
+      },
+      "label": "Plate outline and mounting holes"
+    },
+    {
+      "version": 1,
+      "commandId": "rect",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "nameSketch"
+      },
+      "as": "rect",
+      "draft": {
+        "alias": "nameSketch"
+      },
+      "intent": "fulfill",
+      "construction": false,
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [80, 50]
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "anchor",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "rect"
+      },
+      "as": "anchor",
+      "draft": {
+        "alias": "rect"
+      },
+      "intent": "fulfill",
+      "tool": "constraintCoincident",
+      "targets": [
+        {
+          "alias": "rect",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "rect",
+          "label": "Sketch origin"
+        }
+      ],
+      "mode": "driving",
+      "value": null
+    },
+    {
+      "version": 1,
+      "commandId": "widthDim",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "anchor"
+      },
+      "as": "widthDim",
+      "draft": {
+        "alias": "anchor"
+      },
+      "intent": "fulfill",
+      "axis": "horizontal",
+      "points": [
+        {
+          "alias": "anchor",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "anchor",
+          "label": "Rectangle 1 bottom right"
+        }
+      ],
+      "mode": "driving",
+      "value": 80
+    },
+    {
+      "version": 1,
+      "commandId": "depthDim",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "widthDim"
+      },
+      "as": "depthDim",
+      "draft": {
+        "alias": "widthDim"
+      },
+      "intent": "fulfill",
+      "axis": "vertical",
+      "points": [
+        {
+          "alias": "widthDim",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "widthDim",
+          "label": "Rectangle 1 top left"
+        }
+      ],
+      "mode": "driving",
+      "value": 50
+    },
+    {
+      "version": 1,
+      "commandId": "c1",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "depthDim"
+      },
+      "as": "c1",
+      "draft": {
+        "alias": "depthDim"
+      },
+      "intent": "fulfill",
+      "construction": false,
+      "primitive": {
+        "kind": "circle",
+        "center": [8, 8],
+        "radius": 3
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "c2",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "c1"
+      },
+      "as": "c2",
+      "draft": {
+        "alias": "c1"
+      },
+      "intent": "fulfill",
+      "construction": false,
+      "primitive": {
+        "kind": "circle",
+        "center": [72, 8],
+        "radius": 3
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "c3",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "c2"
+      },
+      "as": "c3",
+      "draft": {
+        "alias": "c2"
+      },
+      "intent": "fulfill",
+      "construction": false,
+      "primitive": {
+        "kind": "circle",
+        "center": [72, 42],
+        "radius": 3
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "c4",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "c3"
+      },
+      "as": "c4",
+      "draft": {
+        "alias": "c3"
+      },
+      "intent": "fulfill",
+      "construction": false,
+      "primitive": {
+        "kind": "circle",
+        "center": [8, 42],
+        "radius": 3
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "x5",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "c4"
+      },
+      "as": "x5",
+      "draft": {
+        "alias": "c4"
+      },
+      "intent": "fulfill",
+      "axis": "horizontal",
+      "points": [
+        {
+          "alias": "c4",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "c4",
+          "label": "Circle 5 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 8
+    },
+    {
+      "version": 1,
+      "commandId": "y5",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "x5"
+      },
+      "as": "y5",
+      "draft": {
+        "alias": "x5"
+      },
+      "intent": "fulfill",
+      "axis": "vertical",
+      "points": [
+        {
+          "alias": "x5",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "x5",
+          "label": "Circle 5 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 8
+    },
+    {
+      "version": 1,
+      "commandId": "diam5",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "y5"
+      },
+      "as": "diam5",
+      "draft": {
+        "alias": "y5"
+      },
+      "intent": "fulfill",
+      "tool": "dimensionDistance",
+      "targets": [
+        {
+          "alias": "y5",
+          "label": "Circle 5"
+        }
+      ],
+      "mode": "driving",
+      "value": 6
+    },
+    {
+      "version": 1,
+      "commandId": "x6",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "diam5"
+      },
+      "as": "x6",
+      "draft": {
+        "alias": "diam5"
+      },
+      "intent": "fulfill",
+      "axis": "horizontal",
+      "points": [
+        {
+          "alias": "diam5",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "diam5",
+          "label": "Circle 6 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 72
+    },
+    {
+      "version": 1,
+      "commandId": "y6",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "x6"
+      },
+      "as": "y6",
+      "draft": {
+        "alias": "x6"
+      },
+      "intent": "fulfill",
+      "axis": "vertical",
+      "points": [
+        {
+          "alias": "x6",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "x6",
+          "label": "Circle 6 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 8
+    },
+    {
+      "version": 1,
+      "commandId": "diam6",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "y6"
+      },
+      "as": "diam6",
+      "draft": {
+        "alias": "y6"
+      },
+      "intent": "fulfill",
+      "tool": "dimensionDistance",
+      "targets": [
+        {
+          "alias": "y6",
+          "label": "Circle 6"
+        }
+      ],
+      "mode": "driving",
+      "value": 6
+    },
+    {
+      "version": 1,
+      "commandId": "x7",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "diam6"
+      },
+      "as": "x7",
+      "draft": {
+        "alias": "diam6"
+      },
+      "intent": "fulfill",
+      "axis": "horizontal",
+      "points": [
+        {
+          "alias": "diam6",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "diam6",
+          "label": "Circle 7 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 72
+    },
+    {
+      "version": 1,
+      "commandId": "y7",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "x7"
+      },
+      "as": "y7",
+      "draft": {
+        "alias": "x7"
+      },
+      "intent": "fulfill",
+      "axis": "vertical",
+      "points": [
+        {
+          "alias": "x7",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "x7",
+          "label": "Circle 7 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 42
+    },
+    {
+      "version": 1,
+      "commandId": "diam7",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "y7"
+      },
+      "as": "diam7",
+      "draft": {
+        "alias": "y7"
+      },
+      "intent": "fulfill",
+      "tool": "dimensionDistance",
+      "targets": [
+        {
+          "alias": "y7",
+          "label": "Circle 7"
+        }
+      ],
+      "mode": "driving",
+      "value": 6
+    },
+    {
+      "version": 1,
+      "commandId": "x8",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "diam7"
+      },
+      "as": "x8",
+      "draft": {
+        "alias": "diam7"
+      },
+      "intent": "fulfill",
+      "axis": "horizontal",
+      "points": [
+        {
+          "alias": "diam7",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "diam7",
+          "label": "Circle 8 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 8
+    },
+    {
+      "version": 1,
+      "commandId": "y8",
+      "operation": "sketch.dimension.add",
+      "basis": {
+        "alias": "x8"
+      },
+      "as": "y8",
+      "draft": {
+        "alias": "x8"
+      },
+      "intent": "fulfill",
+      "axis": "vertical",
+      "points": [
+        {
+          "alias": "x8",
+          "label": "Rectangle 1 bottom left"
+        },
+        {
+          "alias": "x8",
+          "label": "Circle 8 center"
+        }
+      ],
+      "mode": "driving",
+      "value": 42
+    },
+    {
+      "version": 1,
+      "commandId": "diam8",
+      "operation": "sketch.requirement.add",
+      "basis": {
+        "alias": "y8"
+      },
+      "as": "diam8",
+      "draft": {
+        "alias": "y8"
+      },
+      "intent": "fulfill",
+      "tool": "dimensionDistance",
+      "targets": [
+        {
+          "alias": "y8",
+          "label": "Circle 8"
+        }
+      ],
+      "mode": "driving",
+      "value": 6
+    },
+    {
+      "version": 1,
+      "commandId": "exprHorizontaldistance3",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "diam8"
+      },
+      "as": "exprHorizontaldistance3",
+      "draft": {
+        "alias": "diam8"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "diam8",
+        "label": "Horizontal distance 3"
+      },
+      "value": "width"
+    },
+    {
+      "version": 1,
+      "commandId": "exprVerticaldistance4",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprHorizontaldistance3"
+      },
+      "as": "exprVerticaldistance4",
+      "draft": {
+        "alias": "exprHorizontaldistance3"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprHorizontaldistance3",
+        "label": "Vertical distance 4"
+      },
+      "value": "depth"
+    },
+    {
+      "version": 1,
+      "commandId": "exprHorizontaldistance9",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprVerticaldistance4"
+      },
+      "as": "exprHorizontaldistance9",
+      "draft": {
+        "alias": "exprVerticaldistance4"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprVerticaldistance4",
+        "label": "Horizontal distance 9"
+      },
+      "value": "holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprVerticaldistance10",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprHorizontaldistance9"
+      },
+      "as": "exprVerticaldistance10",
+      "draft": {
+        "alias": "exprHorizontaldistance9"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprHorizontaldistance9",
+        "label": "Vertical distance 10"
+      },
+      "value": "holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprDiameter11",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprVerticaldistance10"
+      },
+      "as": "exprDiameter11",
+      "draft": {
+        "alias": "exprVerticaldistance10"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprVerticaldistance10",
+        "label": "Diameter 11"
+      },
+      "value": "holeDiameter"
+    },
+    {
+      "version": 1,
+      "commandId": "exprHorizontaldistance12",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprDiameter11"
+      },
+      "as": "exprHorizontaldistance12",
+      "draft": {
+        "alias": "exprDiameter11"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprDiameter11",
+        "label": "Horizontal distance 12"
+      },
+      "value": "width - holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprVerticaldistance13",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprHorizontaldistance12"
+      },
+      "as": "exprVerticaldistance13",
+      "draft": {
+        "alias": "exprHorizontaldistance12"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprHorizontaldistance12",
+        "label": "Vertical distance 13"
+      },
+      "value": "holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprDiameter14",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprVerticaldistance13"
+      },
+      "as": "exprDiameter14",
+      "draft": {
+        "alias": "exprVerticaldistance13"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprVerticaldistance13",
+        "label": "Diameter 14"
+      },
+      "value": "holeDiameter"
+    },
+    {
+      "version": 1,
+      "commandId": "exprHorizontaldistance15",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprDiameter14"
+      },
+      "as": "exprHorizontaldistance15",
+      "draft": {
+        "alias": "exprDiameter14"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprDiameter14",
+        "label": "Horizontal distance 15"
+      },
+      "value": "width - holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprVerticaldistance16",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprHorizontaldistance15"
+      },
+      "as": "exprVerticaldistance16",
+      "draft": {
+        "alias": "exprHorizontaldistance15"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprHorizontaldistance15",
+        "label": "Vertical distance 16"
+      },
+      "value": "depth - holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprDiameter17",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprVerticaldistance16"
+      },
+      "as": "exprDiameter17",
+      "draft": {
+        "alias": "exprVerticaldistance16"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprVerticaldistance16",
+        "label": "Diameter 17"
+      },
+      "value": "holeDiameter"
+    },
+    {
+      "version": 1,
+      "commandId": "exprHorizontaldistance18",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprDiameter17"
+      },
+      "as": "exprHorizontaldistance18",
+      "draft": {
+        "alias": "exprDiameter17"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprDiameter17",
+        "label": "Horizontal distance 18"
+      },
+      "value": "holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprVerticaldistance19",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprHorizontaldistance18"
+      },
+      "as": "exprVerticaldistance19",
+      "draft": {
+        "alias": "exprHorizontaldistance18"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprHorizontaldistance18",
+        "label": "Vertical distance 19"
+      },
+      "value": "depth - holeInset"
+    },
+    {
+      "version": 1,
+      "commandId": "exprDiameter20",
+      "operation": "sketch.dimension.update",
+      "basis": {
+        "alias": "exprVerticaldistance19"
+      },
+      "as": "exprDiameter20",
+      "draft": {
+        "alias": "exprVerticaldistance19"
+      },
+      "intent": "fulfill",
+      "dimensionId": {
+        "alias": "exprVerticaldistance19",
+        "label": "Diameter 20"
+      },
+      "value": "holeDiameter"
+    },
+    {
+      "version": 1,
+      "commandId": "publish",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "exprDiameter20"
+      },
+      "as": "publish",
+      "draft": {
+        "alias": "exprDiameter20"
+      },
+      "requireProfiles": true
+    },
+    {
+      "version": 1,
+      "commandId": "extrude",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "publish"
+      },
+      "as": "extrude",
+      "profile": {
+        "alias": "publish",
+        "label": "Outer region"
+      },
+      "depth": "thickness",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "rename",
+      "operation": "body.rename",
+      "basis": {
+        "alias": "extrude"
+      },
+      "as": "rename",
+      "bodyId": {
+        "alias": "extrude",
+        "label": "Extrude 1"
+      },
+      "label": "Mounting plate",
+      "intent": "fulfill"
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "rename"
+      },
+      "as": "save",
+      "path": "plate.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "reopen",
+      "operation": "document.open",
+      "basis": null,
+      "as": "reopen",
+      "path": "plate.cadara"
+    },
+    {
+      "version": 1,
+      "commandId": "export",
+      "operation": "export.step",
+      "basis": {
+        "alias": "reopen"
+      },
+      "as": "export",
+      "target": {
+        "alias": "reopen",
+        "label": "Mounting plate"
+      },
+      "path": "plate.step",
+      "options": {
+        "schema": "AP242",
+        "unit": "millimeter"
+      }
+    }
+  ]
+}

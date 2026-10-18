@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "o",
+      "operation": "document.open",
+      "basis": null,
+      "path": "stage2.cadara",
+      "as": "o"
+    },
+    {
+      "version": 1,
+      "commandId": "sh",
+      "operation": "shell.create",
+      "basis": { "alias": "o" },
+      "intent": "fulfill",
+      "as": "s",
+      "parameters": {
+        "mode": "openFaces",
+        "faceTargets": [
+          {
+            "kind": "face",
+            "bodyId": "body_feature_extrude-1",
+            "faceId": "face_body_feature_extrude-1_ga2904f1afa4bdf0"
+          }
+        ],
+        "bodyTarget": { "kind": "body", "bodyId": "body_feature_extrude-1" },
+        "thickness": { "source": "expression", "valueText": "wall" },
+        "direction": "inside",
+        "operation": { "source": "literal", "value": "newBody" },
+        "booleanScope": { "kind": "standalone" }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": { "alias": "s" },
+      "path": "stage3.cadara"
+    }
+  ]
+}

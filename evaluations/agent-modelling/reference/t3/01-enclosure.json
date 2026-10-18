@@ -1,0 +1,334 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "version": 1,
+      "commandId": "create",
+      "operation": "document.create",
+      "label": "Enclosure",
+      "basis": null,
+      "as": "p0"
+    },
+    {
+      "version": 1,
+      "commandId": "var-height",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "p0"
+      },
+      "name": "height",
+      "valueText": "25",
+      "intent": "fulfill",
+      "as": "v0"
+    },
+    {
+      "version": 1,
+      "commandId": "var-wall",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "v0"
+      },
+      "name": "wall",
+      "valueText": "2",
+      "intent": "fulfill",
+      "as": "v1"
+    },
+    {
+      "version": 1,
+      "commandId": "var-ventDepth",
+      "operation": "variable.add",
+      "basis": {
+        "alias": "v1"
+      },
+      "name": "ventDepth",
+      "valueText": "wall + 1",
+      "intent": "fulfill",
+      "as": "v2"
+    },
+    {
+      "version": 1,
+      "commandId": "base-begin",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": {
+        "alias": "v2"
+      },
+      "as": "baseD0"
+    },
+    {
+      "version": 1,
+      "commandId": "base-r0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "baseD0"
+      },
+      "draft": {
+        "alias": "baseD0"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [0, 0],
+        "end": [60, 40]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "baseR0"
+    },
+    {
+      "version": 1,
+      "commandId": "base-pub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "baseR0"
+      },
+      "draft": {
+        "alias": "baseR0"
+      },
+      "requireProfiles": true,
+      "as": "base"
+    },
+    {
+      "version": 1,
+      "commandId": "base-ext",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "base"
+      },
+      "profile": {
+        "alias": "base",
+        "label": "Outer region",
+        "sketch": "base"
+      },
+      "depth": 25,
+      "intent": "fulfill",
+      "as": "box"
+    },
+    {
+      "version": 1,
+      "commandId": "base-depth",
+      "operation": "extrude.update",
+      "basis": {
+        "alias": "box"
+      },
+      "featureId": {
+        "alias": "box",
+        "label": "Extrude 1"
+      },
+      "depth": "height",
+      "intent": "fulfill",
+      "as": "box2"
+    },
+    {
+      "version": 1,
+      "commandId": "cav-begin",
+      "operation": "sketch.begin",
+      "plane": "xy",
+      "basis": {
+        "alias": "box2"
+      },
+      "as": "cavD0"
+    },
+    {
+      "version": 1,
+      "commandId": "cav-r0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "cavD0"
+      },
+      "draft": {
+        "alias": "cavD0"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [2, 2],
+        "end": [58, 38]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "cavR0"
+    },
+    {
+      "version": 1,
+      "commandId": "cav-pub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "cavR0"
+      },
+      "draft": {
+        "alias": "cavR0"
+      },
+      "requireProfiles": true,
+      "as": "cav"
+    },
+    {
+      "version": 1,
+      "commandId": "cav-ext",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "cav"
+      },
+      "intent": "fulfill",
+      "as": "cavity",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "cav",
+            "label": "Outer region",
+            "sketch": "cav"
+          }
+        ],
+        "startExtent": {
+          "kind": "blindOffset",
+          "distance": {
+            "source": "expression",
+            "valueText": "wall"
+          },
+          "direction": "positive"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "positive",
+            "distance": {
+              "source": "expression",
+              "valueText": "height - wall"
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "cut"
+        },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": {
+            "alias": "cav",
+            "label": "Extrude 1"
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "vent-begin",
+      "operation": "sketch.begin",
+      "plane": "xz",
+      "basis": {
+        "alias": "cavity"
+      },
+      "as": "ventD0"
+    },
+    {
+      "version": 1,
+      "commandId": "vent-r0",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "ventD0"
+      },
+      "draft": {
+        "alias": "ventD0"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [20, 10],
+        "end": [40, 14]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "ventR0"
+    },
+    {
+      "version": 1,
+      "commandId": "vent-r1",
+      "operation": "sketch.author",
+      "basis": {
+        "alias": "ventR0"
+      },
+      "draft": {
+        "alias": "ventR0"
+      },
+      "primitive": {
+        "kind": "rectangle",
+        "start": [20, 16],
+        "end": [40, 20]
+      },
+      "construction": false,
+      "intent": "fulfill",
+      "as": "ventR1"
+    },
+    {
+      "version": 1,
+      "commandId": "vent-pub",
+      "operation": "sketch.publish",
+      "basis": {
+        "alias": "ventR1"
+      },
+      "draft": {
+        "alias": "ventR1"
+      },
+      "requireProfiles": true,
+      "as": "vent"
+    },
+    {
+      "version": 1,
+      "commandId": "vent-ext",
+      "operation": "extrude.create",
+      "basis": {
+        "alias": "vent"
+      },
+      "intent": "fulfill",
+      "as": "vents",
+      "parameters": {
+        "resultBodyType": "solid",
+        "profiles": [
+          {
+            "alias": "vent",
+            "label": "Outer region",
+            "sketch": "vent"
+          },
+          {
+            "alias": "vent",
+            "label": "Loop region 2",
+            "sketch": "vent"
+          }
+        ],
+        "startExtent": {
+          "kind": "profilePlane"
+        },
+        "extent": {
+          "mode": "oneSide",
+          "end": {
+            "kind": "blind",
+            "direction": "negative",
+            "distance": {
+              "source": "expression",
+              "valueText": "ventDepth"
+            }
+          }
+        },
+        "operation": {
+          "source": "literal",
+          "value": "cut"
+        },
+        "booleanScope": {
+          "kind": "targetBody",
+          "bodyId": {
+            "alias": "vent",
+            "label": "Extrude 1"
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "commandId": "save",
+      "operation": "document.save",
+      "basis": {
+        "alias": "vents"
+      },
+      "path": "enclosure.cadara"
+    }
+  ]
+}
