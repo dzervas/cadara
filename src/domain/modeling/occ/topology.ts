@@ -26,6 +26,7 @@ import {
   releaseDiscardedOccAuthoringStateObjects,
 } from "@/domain/modeling/occ/memory";
 import {
+  assertNativeMeshFaceBindings,
   parseNativeShimPayloadJson,
   type OccNativeShimPayload,
   type OpenCascadeNativeTopologyKernelHost,
@@ -853,6 +854,12 @@ export function rewriteNativeTopologyPayloadIds(
     vertexIdsByNativeId?: ReadonlyMap<VertexId, VertexId>;
   },
 ): OccNativeShimPayload {
+  assertNativeMeshFaceBindings(
+    nativePayload.mesh,
+    nativePayload.topology
+      .filter((record) => record.kind === "face")
+      .map((record) => record.id),
+  );
   const rewriteId = (kind: "face" | "edge" | "vertex", id: string) => {
     if (kind === "face") {
       return aliases.faceIdsByNativeId?.get(id as FaceId) ?? id;

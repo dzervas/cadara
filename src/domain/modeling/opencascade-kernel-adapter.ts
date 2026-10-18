@@ -228,6 +228,7 @@ interface OccKernelRuntimeState {
 }
 
 interface CachedNativeTopologyBodyPayload {
+  body: OccTrackedBody;
   bodyId: BodyId;
   topologyToken: string;
   lodTierId: OccTessellationTierId;
@@ -2884,12 +2885,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private pruneNativeTopologyBodyPayloadCache(state: OccAuthoringState) {
-    const liveBodyKeys = new Set(
-      state.bodies.map((body) => `${body.bodyId}:${body.topologyToken}`),
+    const liveBodies = new Map(
+      state.bodies.map((body) => [`${body.bodyId}:${body.topologyToken}`, body]),
     );
 
     for (const [key, cached] of this.nativeTopologyBodyPayloadCache) {
-      if (!liveBodyKeys.has(`${cached.bodyId}:${cached.topologyToken}`)) {
+      const body = liveBodies.get(`${cached.bodyId}:${cached.topologyToken}`);
+      // Rebuilds/invalid feature edits can reuse a token for a different shape
+      // or naming owner. Never retain that previous body's display triangles.
+      if (
+        body?.shape !== cached.body.shape ||
+        body?.topology !== cached.body.topology
+      ) {
         this.nativeTopologyBodyPayloadCache.delete(key);
       }
     }
@@ -3464,7 +3471,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         });
         const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey);
 
-        if (cached) {
+        if (
+          cached &&
+          cached.body.shape === body.shape &&
+          cached.body.topology === body.topology
+        ) {
           return {
             bodyId: body.bodyId,
             nativePayload: cached.nativePayload,
@@ -3499,6 +3510,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         );
 
         this.nativeTopologyBodyPayloadCache.set(cacheKey, {
+          body,
           bodyId: body.bodyId,
           topologyToken: body.topologyToken,
           lodTierId: tier.id,

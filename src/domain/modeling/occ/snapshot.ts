@@ -119,6 +119,9 @@ const PROFILE_TEXT_WIDTH_FACTOR = 0.6;
 
 interface OccSnapshotBuildOptions {
   lodTierId?: OccTessellationTierId;
+  // Adapter-normalized payload: topology and mesh bindings use tracked durable
+  // IDs, not raw shim IDs. Native -> durable translation belongs to the adapter
+  // (also used by native snapshot/history consumers), never this render read.
   nativeTopologyPayload?: OccNativeTopologyPayload;
 }
 
@@ -1244,46 +1247,46 @@ function getNativeTopologyBodyPayload(
   );
 }
 
-function createNativeFaceIdAliasMap(
-  body: OccTrackedBody,
-  nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
-) {
-  if (body.nativeTopologyIdAliases?.faceIdsByNativeId) {
-    return body.nativeTopologyIdAliases.faceIdsByNativeId;
-  }
-
-  const aliases = new Map<string, FaceId>(
-    body.topology.faceIds.map((faceId) => [faceId, faceId]),
-  );
-  const nativeFaceIds =
-    nativeBodyPayload?.topology
-      .filter((record) => record.kind === "face")
-      .map((record) => record.id) ?? [];
-
-  for (let index = 0; index < nativeFaceIds.length; index += 1) {
-    const durableFaceId = body.topology.faceIds[index];
-    const nativeFaceId = nativeFaceIds[index];
-
-    if (durableFaceId && nativeFaceId) {
-      aliases.set(nativeFaceId, durableFaceId);
-    }
-  }
-
-  return aliases;
-}
-
 function buildNativeFaceMeshGeometries(
   mesh: OccNativeShimMeshSummary,
-  durableFaceIdByNativeFaceId: ReadonlyMap<string, FaceId>,
+  body: OccTrackedBody,
+  nativeBodyPayload: OccNativeTopologyBodyPayload,
 ) {
   const positions = mesh.positions;
   const triangleIndices = mesh.triangleIndices;
   const triangleFaceBindings = mesh.triangleFaceBindings;
 
-  if (!positions || !triangleIndices || !triangleFaceBindings) {
+  if (
+    !positions ||
+    !triangleIndices ||
+    triangleIndices.length !== mesh.triangleCount
+  ) {
+    if (
+      mesh.triangleCount > 0 ||
+      triangleIndices?.length ||
+      triangleFaceBindings?.length
+    ) {
+      throw new Error(
+        `Native render mesh on body ${body.bodyId} is missing triangle geometry.`,
+      );
+    }
     return new Map<FaceId, RenderMeshGeometry>();
   }
+  if (
+    !triangleFaceBindings ||
+    triangleFaceBindings.length !== triangleIndices.length
+  ) {
+    throw new Error(
+      `Native render mesh on body ${body.bodyId} requires one durable face binding per triangle.`,
+    );
+  }
 
+  const durableFaceIds = new Set<string>(body.topology.faceIds);
+  const payloadFaceIds = new Set(
+    nativeBodyPayload.topology
+      .filter((record) => record.kind === "face")
+      .map((record) => record.id),
+  );
   const geometryByFaceId = new Map<
     FaceId,
     {
@@ -1294,13 +1297,14 @@ function buildNativeFaceMeshGeometries(
   >();
 
   for (let index = 0; index < triangleIndices.length; index += 1) {
-    const nativeFaceId = triangleFaceBindings[index];
-    const faceId = nativeFaceId
-      ? durableFaceIdByNativeFaceId.get(nativeFaceId)
-      : undefined;
-    const triangle = triangleIndices[index];
-    if (!faceId || !triangle) {
-      continue;
+    const faceId = triangleFaceBindings[index] as FaceId | undefined;
+    const triangle = triangleIndices[index]!;
+    // Native and durable namespaces can overlap with different meanings. Do not
+    // alias or guess here: a malformed payload must fail, not lose/misbind faces.
+    if (!faceId || !durableFaceIds.has(faceId) || !payloadFaceIds.has(faceId)) {
+      throw new Error(
+        `Native render mesh triangle ${index} on body ${body.bodyId} references unmatched durable face ID ${String(faceId)}.`,
+      );
     }
 
     const geometry =
@@ -1358,16 +1362,13 @@ function buildNativeFaceRenderRecords(
   body: OccTrackedBody,
   faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
   mesh: OccNativeShimMeshSummary,
-  nativeBodyPayload: OccNativeTopologyBodyPayload | undefined,
+  nativeBodyPayload: OccNativeTopologyBodyPayload,
 ) {
   const records: RenderableEntityRecord[] = [];
-  const durableFaceIdByNativeFaceId = createNativeFaceIdAliasMap(
-    body,
-    nativeBodyPayload,
-  );
   const geometryByFaceId = buildNativeFaceMeshGeometries(
     mesh,
-    durableFaceIdByNativeFaceId,
+    body,
+    nativeBodyPayload,
   );
 
   for (const faceId of body.topology.faceIds) {
@@ -1824,7 +1825,7 @@ function buildBodyRenderRecords(
     return [buildBodyOnlyMeshRenderRecord(body)];
   }
 
-  if (nativeRenderMesh) {
+  if (nativeBodyPayload && nativeRenderMesh) {
     records.push(
       ...buildNativeFaceRenderRecords(
         state,

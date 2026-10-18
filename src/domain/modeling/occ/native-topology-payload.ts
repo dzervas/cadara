@@ -648,6 +648,23 @@ function createBufferRef(
   };
 }
 
+// Check in the payload's current namespace, before aliasing as well as before
+// packing. An unknown native ID can equal a different face's durable ID; it
+// must never be accepted by a later durable-membership check or fallback index.
+export function assertNativeMeshFaceBindings(
+  mesh: OccNativeShimMeshSummary | null | undefined,
+  faceIds: readonly string[],
+) {
+  const knownFaceIds = new Set(faceIds);
+  for (const faceId of mesh?.triangleFaceBindings ?? []) {
+    if (!knownFaceIds.has(faceId)) {
+      throw new Error(
+        `Native mesh binding references unmatched topology face ID ${faceId}.`,
+      );
+    }
+  }
+}
+
 function packMeshSummaryBuffers(
   mesh: OccNativeShimMeshSummary | null | undefined,
   suffix: string,
@@ -663,6 +680,7 @@ function packMeshSummaryBuffers(
     };
   }
 
+  assertNativeMeshFaceBindings(mesh, faceIds);
   const buffers: OccNativeTransferableBuffer[] = [];
   const positions = new Float32Array((mesh.positions?.length ?? 0) * 3);
   mesh.positions?.forEach((point, index) => {
@@ -683,21 +701,13 @@ function packMeshSummaryBuffers(
   const faceIndexById = new Map(
     faceIds.map((faceId, index) => [faceId, index]),
   );
-  const fallbackFaceIndexById = new Map<string, number>();
   const triangleFaceBindings = new Uint32Array(
     mesh.triangleFaceBindings?.length ?? 0,
   );
   mesh.triangleFaceBindings?.forEach((faceId, index) => {
     const explicitIndex = faceIndexById.get(faceId);
-    if (explicitIndex !== undefined) {
-      triangleFaceBindings[index] = explicitIndex;
-      return;
-    }
-
-    const fallbackIndex =
-      fallbackFaceIndexById.get(faceId) ?? fallbackFaceIndexById.size;
-    fallbackFaceIndexById.set(faceId, fallbackIndex);
-    triangleFaceBindings[index] = fallbackIndex;
+    // Membership was checked above; never invent indices for unmatched IDs.
+    triangleFaceBindings[index] = explicitIndex!;
   });
 
   const packedPositions = createBufferRef(
@@ -1483,9 +1493,10 @@ export function createOccNativeMeshExportPayloadFromShimPayload(input: {
     input.target.kind === "body"
       ? `${input.target.bodyId}_mesh_export`
       : "unresolved_mesh_export",
-    input.nativePayload.topology
-      .filter((record) => record.kind === "face")
-      .map((record) => record.id),
+    // Mesh-only export has no topology table or durable picking contract. Its
+    // body_export face IDs define an export-local inventory, unlike display
+    // topology payloads, whose bindings must name their explicit face records.
+    [...new Set(input.nativePayload.mesh?.triangleFaceBindings ?? [])],
   );
 
   return {

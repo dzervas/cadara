@@ -26,7 +26,7 @@ const request = {
 
 // Measure the sagitta of actual base-cap boundary chords, not the nominal
 // deflection. Ignore interior diagonals and side triangles of the cylinder.
-function rimChordError(
+function rimMetrics(
   positions: readonly RenderPoint3D[],
   triangles: readonly (readonly [number, number, number])[],
 ) {
@@ -46,17 +46,21 @@ function rimChordError(
       else edges.set(key, { a: positions[a]!, b: positions[b]!, count: 1 });
     }
   }
-  return Math.max(
-    0,
-    ...[...edges.values()]
-      .filter(
-        ({ a, b, count }) =>
-          count === 1 &&
-          Math.abs(Math.hypot(a[0], a[1]) - 10) < 1e-5 &&
-          Math.abs(Math.hypot(b[0], b[1]) - 10) < 1e-5,
-      )
-      .map(({ a, b }) => 10 - Math.hypot((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)),
+  const rim = [...edges.values()].filter(
+    ({ a, b, count }) =>
+      count === 1 &&
+      Math.abs(Math.hypot(a[0], a[1]) - 10) < 1e-5 &&
+      Math.abs(Math.hypot(b[0], b[1]) - 10) < 1e-5,
   );
+  return {
+    rimSegments: rim.length,
+    chordError: Math.max(
+      0,
+      ...rim.map(
+        ({ a, b }) => 10 - Math.hypot((a[0] + b[0]) / 2, (a[1] + b[1]) / 2),
+      ),
+    ),
+  };
 }
 
 for (const profile of ["circle", "split diameter"] as const) {
@@ -178,7 +182,7 @@ for (const profile of ["circle", "split diameter"] as const) {
             );
             return {
               triangles: mesh.triangleIndices!,
-              chordError: rimChordError(mesh.positions!, mesh.triangleIndices!),
+              ...rimMetrics(mesh.positions!, mesh.triangleIndices!),
               topology: body.topology,
               identity: body.identity,
               adjacency: body.adjacency,
@@ -189,22 +193,22 @@ for (const profile of ["circle", "split diameter"] as const) {
           const records = snapshot.render.records.filter(
             (record) => record.ownerBodyId && record.geometry.kind === "mesh",
           );
+          const rims = records.map((record) =>
+            record.geometry.kind === "mesh"
+              ? rimMetrics(
+                  record.geometry.vertexPositions,
+                  record.geometry.triangleIndices,
+                )
+              : { chordError: 0, rimSegments: 0 },
+          );
           return {
             triangles: records.flatMap((record) =>
               record.geometry.kind === "mesh"
                 ? record.geometry.triangleIndices
                 : [],
             ),
-            chordError: Math.max(
-              ...records.map((record) =>
-                record.geometry.kind === "mesh"
-                  ? rimChordError(
-                      record.geometry.vertexPositions,
-                      record.geometry.triangleIndices,
-                    )
-                  : 0,
-              ),
-            ),
+            chordError: Math.max(...rims.map((rim) => rim.chordError)),
+            rimSegments: rims.reduce((sum, rim) => sum + rim.rimSegments, 0),
             topology: snapshot.bodies,
             identity: records.map((record) => record.binding),
             adjacency: null,
@@ -213,6 +217,13 @@ for (const profile of ["circle", "split diameter"] as const) {
         const startup = await read("startup");
         const normal = await read("normal");
         const fine = await read("fine");
+        if (profile === "circle") {
+          expect([
+            startup.rimSegments,
+            normal.rimSegments,
+            fine.rimSegments,
+          ]).toEqual([26, 90, 360]);
+        }
         expect(startup.triangles.length).toBeGreaterThan(0);
         expect(normal.triangles.length).toBeGreaterThan(
           startup.triangles.length,
