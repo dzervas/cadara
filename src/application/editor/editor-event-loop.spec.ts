@@ -1310,6 +1310,69 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   loop.stop();
 });
 
+test("O30 (cadara-b3k.2): a second Finish while the first commit is in flight does not emit a second commit", async () => {
+  // Logic lane, EditorEventLoop seam: the sketch.commit effect runs on the
+  // serial queue, so a second sketch.commit emitted while the first is pending
+  // reaches the repository AFTER the first has published and carries the same
+  // entry-time publication base; the repository then refuses it as 'changed
+  // by another session' with one tab. Finish must be idempotent while a
+  // commit is pending.
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketch = snapshot.document.sketches[0]!;
+  snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+  const { runtime, derivations } = createControlledRegionRuntime(snapshot);
+  const commits: { resolve: () => void }[] = [];
+  runtime.commitSketch = () =>
+    new Promise((resolve) => {
+      commits.push({ resolve: () => resolve(null) });
+    });
+  const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+  const currentSketch = await openSeedSketch(loop, sketch.sketchId);
+  await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
+
+  const point = currentSketch().session.definition.points[0]!;
+  loop.dispatch({
+    type: "sketch.geometryDragStarted",
+    target: point.target,
+    point: point.position,
+  });
+  const to: [number, number] = [point.position[0] + 0.25, point.position[1]];
+  loop.dispatch({ type: "sketch.geometryDragMoved", point: to });
+  loop.dispatch({ type: "sketch.geometryDragEnded", point: to });
+  await waitForCondition(() => derivations.length === 3);
+  derivations[2]!.resolve({ regions: sketch.sketch.regions, diagnostics: [] });
+  await waitForState(
+    loop,
+    (state) =>
+      state.kind === "editingSketch" &&
+      state.session.liveRegions.status === "current",
+  );
+
+  loop.dispatch({ type: "sketch.publishRequested" });
+  await waitForCondition(() => commits.length === 1);
+  const firstCommitRequestId = currentSketch().pendingCommitRequestId;
+  expect(firstCommitRequestId).not.toBeNull();
+  // The user presses Finish again while the first commit is still running.
+  loop.dispatch({ type: "sketch.publishRequested" });
+  loop.dispatch({ type: "tool.activated", toolId: "finishSketch" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(
+    commits,
+    "Finish while a commit is pending must not emit a second sketch.commit.",
+  ).toHaveLength(1);
+
+  expect(
+    currentSketch().pendingCommitRequestId,
+    "The first commit stays the pending one, so its result is honoured.",
+  ).toBe(firstCommitRequestId);
+  commits[0]!.resolve();
+  await waitForState(loop, (state) => state.kind !== "editingSketch");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(commits, "One publication for one edit.").toHaveLength(1);
+  loop.stop();
+});
+
 test("EditorEventLoop keeps drag regions stale until the drag completes, then derives once", async () => {
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;

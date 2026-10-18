@@ -439,6 +439,13 @@ export function emitFeatureHydration(
 export function emitSketchCommit(
   state: SketchEditorState,
 ): EditorTransitionResult {
+  // O30 (cadara-b3k.2): Finish is idempotent while a commit is in flight. A
+  // second sketch.commit would overwrite pendingCommitRequestId, so the
+  // first commit's result is ignored (the author never leaves the sketch),
+  // and it would reach the serial queue after the first has published,
+  // carrying the same entry-time publication base, so the repository refuses
+  // it as changed by another session with one tab.
+  if (state.pendingCommitRequestId !== null) return { state, effects: [] };
   const mutationBasis = getSnapshotMutationBasis(state);
   if (!state.session.commitRequest || mutationBasis === null) {
     if (state.editSessionCursorContext?.phase === "active") {
