@@ -359,11 +359,15 @@ test("fixed seed (Q2, constrained lag): dragging the copy moves nothing, keeps t
   expect(next.activeDrag?.feedback?.kind, "constrained cue at the copy").toBe(
     "constrained",
   );
+  expect(next.activeDrag?.feedback?.text).toBe(CONSTRAINED_DRAG_BLOCKED_MESSAGE);
+  expect(next.validationMessage).toBeNull();
   const done = finishSketchGeometryDrag(next, move.to);
   expect(done.definition, "nothing authored: the pre-drag definition").toBe(
     setup.session.definition,
   );
-  expect(done.validationMessage).toBe(CONSTRAINED_DRAG_BLOCKED_MESSAGE);
+  // O26: the local cue already explained the refusal; do not repeat on release.
+  expect(done.validationMessage).toBeNull();
+  expect(done.activeDrag).toBeNull();
 });
 
 describe("T15d T-12: tangent intents on a copy act on the seed occurrence", () => {
