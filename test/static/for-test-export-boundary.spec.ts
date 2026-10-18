@@ -11,7 +11,7 @@ import ts from "typescript";
  * production code must never reach one.
  *
  * Production modules are those reachable from the shipped entry points (the
- * app's `index.html` script and the CLI), following static and dynamic
+ * landing/editor HTML scripts and the CLI), following static and dynamic
  * imports, re-exports and `new Worker(new URL(…, import.meta.url))` worker
  * entries. Specs, fixtures and test builders are therefore excluded unless
  * production code actually imports them (asserted below).
@@ -27,7 +27,7 @@ import ts from "typescript";
 
 const ROOT = process.cwd();
 const SRC = join(ROOT, "src");
-const ENTRY_POINTS = ["src/main.tsx", "src/cli/main.ts"];
+const ENTRY_POINTS = ["landing/main.tsx", "src/main.tsx", "src/cli/main.ts"];
 const SOURCE_EXTENSIONS = [".ts", ".tsx"];
 // T17o (I3): the plural `…ForTests` spelling is a test seam too.
 const TEST_EXPORT = /ForTests?$/;
@@ -180,6 +180,9 @@ test("test/static/for-test-export-boundary.spec.ts production modules never reac
   // The graph must reach the offset owners and the worker entries, and no
   // spec, fixture or test builder.
   for (const required of [
+    "landing/main.tsx",
+    "landing/Landing.tsx",
+    "landing/ModelScene.tsx",
     "src/contracts/sketch/offset-derivation-frame.ts",
     "src/contracts/sketch/offset-chain-topology.ts",
     "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.ts",

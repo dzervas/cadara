@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -125,7 +126,7 @@ test("actual Bun style/image recipes use discovered aliases, retain raster bytes
         code: 0,
         ...(await promisify(execFile)(
           "bun",
-          ["src/cli/main.ts", "document", "recipe", recipe],
+          [cliEntry(), "document", "recipe", recipe],
           { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
         )),
       };

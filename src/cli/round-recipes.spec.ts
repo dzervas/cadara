@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -74,7 +75,7 @@ it("runs circle and tangent-source authoring by discovered labels with clean cor
     await writeFile(path, JSON.stringify({ version: 1, operations }));
     const output = await promisify(execFile)(
       "bun",
-      ["src/cli/main.ts", "document", "recipe", path],
+      [cliEntry(), "document", "recipe", path],
       { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
     ).catch((error: unknown) => {
       const failed = error as { stdout?: string; stderr?: string };
@@ -149,7 +150,7 @@ it("refuses unknown and missing tangent-source aliases without inventing a sourc
       await writeFile(path, JSON.stringify(recipe));
       return promisify(execFile)(
         "bun",
-        ["src/cli/main.ts", "document", "recipe", path],
+        [cliEntry(), "document", "recipe", path],
         { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
       ).then(
         () => {

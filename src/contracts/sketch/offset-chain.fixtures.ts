@@ -1,5 +1,5 @@
 /**
- * Spec support for `offset-chain-topology.spec.ts`: the native offset-chain
+ * Spec support for `offset-chain-topology.heavy.spec.ts`: the native offset-chain
  * harness (native line/spline tool commit + endpoint-snap inference → solve →
  * N2 connectivity → fresh adapter → resolver) and the §1.5 native corner-matrix
  * rows. Every chain is built only by native tools. Contracts may not import

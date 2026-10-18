@@ -32,7 +32,7 @@ Commands below run from the review workspace. Logs are local diagnostics; this d
 
 ```sh
 bunx vitest run src/domain/modeling/occ/runtime.spec.ts \
-  src/domain/modeling/occ/sketch-derivation.worker.spec.ts \
+  src/domain/modeling/occ/sketch-derivation.worker.isolated.spec.ts \
   src/domain/modeling/occ/production-asset-conformance.spec.ts \
   src/domain/modeling/occ/topology.spec.ts \
   src/domain/modeling/occ/baked-body.spec.ts \
@@ -93,7 +93,7 @@ The following are **prior verified ticket 01 findings**, not repaired in this re
 4. d3cd9 split-interface sheet-tool successor alias resolves zero output faces where exactly one is expected. Prior aggregate finding; retain the entire real-OCC assertion:
 
    ```sh
-   bunx vitest run src/domain/import/onshape/apply-pipeline.spec.ts \
+   bunx vitest run src/domain/import/onshape/apply-pipeline.heavy.spec.ts \
      -t 'd3cd9 applies the complete prepared action sequence through real OCC with zero diagnostics'
    ```
 
@@ -101,7 +101,7 @@ The following are **prior verified ticket 01 findings**, not repaired in this re
 6. Prior broad offset suite bounded attempt timed out after 120s/21 passing rows, including a 61s certification row. Three affected real-OCC rows independently passed:
 
    ```sh
-   bunx vitest run src/domain/editor/sketch-offset-live-cutover.spec.ts \
+   bunx vitest run src/domain/editor/sketch-offset-live-cutover.heavy.spec.ts \
      -t 'g5b-7|REQUIRED-1 \(OCC\)|G19c \(OCC\)' --reporter verbose
    ```
 

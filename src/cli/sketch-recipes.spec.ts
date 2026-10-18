@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -13,7 +14,7 @@ it("runs both documented command families and opens a native file over a private
   try {
     const help = await exec(
       "bun",
-      ["src/cli/main.ts", "document", "recipe", "--help"],
+      [cliEntry(), "document", "recipe", "--help"],
       { cwd: root },
     );
     const recipe = JSON.parse(help.stdout.slice(help.stdout.indexOf("{")));
@@ -47,11 +48,10 @@ it("runs both documented command families and opens a native file over a private
     );
     const file = resolve(directory, "recipe.json");
     await writeFile(file, JSON.stringify(recipe));
-    const output = await exec(
-      "bun",
-      ["src/cli/main.ts", "document", "recipe", file],
-      { cwd: root, timeout: 90000 },
-    );
+    const output = await exec("bun", [cliEntry(), "document", "recipe", file], {
+      cwd: root,
+      timeout: 90000,
+    });
     const result: {
       results: SemanticResult[];
       unexecuted: string[];
@@ -155,11 +155,10 @@ it("runs private rectangle authoring and publication with client-only basis and 
         ],
       }),
     );
-    const output = await exec(
-      "bun",
-      ["src/cli/main.ts", "document", "recipe", file],
-      { cwd: root, timeout: 90000 },
-    );
+    const output = await exec("bun", [cliEntry(), "document", "recipe", file], {
+      cwd: root,
+      timeout: 90000,
+    });
     expect(output.stderr).toBe("");
     const result = JSON.parse(output.stdout);
     expect(

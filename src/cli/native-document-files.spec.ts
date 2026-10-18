@@ -1,5 +1,6 @@
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { createHeadlessSessionFactory } from "@/composition/headless";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -747,7 +748,7 @@ it("renames, saves and reopens a native document in a fresh production editing c
     );
     const first = JSON.parse(
       (
-        await exec("bun", ["src/cli/main.ts", "document", "recipe", recipe], {
+        await exec("bun", [cliEntry(), "document", "recipe", recipe], {
           cwd: root,
           timeout: 60000,
         })
@@ -785,7 +786,7 @@ it("renames, saves and reopens a native document in a fresh production editing c
     );
     const second = JSON.parse(
       (
-        await exec("bun", ["src/cli/main.ts", "document", "recipe", recipe], {
+        await exec("bun", [cliEntry(), "document", "recipe", recipe], {
           cwd: root,
           timeout: 60000,
         })

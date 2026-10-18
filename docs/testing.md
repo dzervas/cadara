@@ -11,18 +11,29 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 
 ## Commands
 
-- `bun run test:logic` runs the non-UI behavioral lane.
+- `bun run test` is the everyday loop: every non-Playwright spec except the heavy tier, in about a minute (the `fast` and `isolated` Vitest projects, run as two parallel processes so their Typia warm-ups overlap).
+- `bun run test:logic` runs the non-UI behavioral lane (fast tier only).
 - `bun run test:logic:coverage` emits the non-UI coverage report from the logic lane only.
 - `bun run test:ui` runs UI-local and browser-adjacent Bun specs.
 - `bun run test:static` runs repository policy guards under `test/static/`.
-- `bun run test` runs the umbrella non-Playwright suite: logic, UI, and static.
+- `bun run test:heavy` runs the heavy tier: `*.heavy.spec.ts` and the CLI subprocess specs under `src/cli/`, against a CLI bundle built once per run. Minutes, not seconds; final pass only.
 - `bun run test:e2e` runs the fast Playwright browser lane with four workers; real-capture acceptance specs are excluded.
 - `bun run test:e2e:offline` builds the app with the debug platform on (`vite.offline-test.config.ts`, into `.tmp-offline-dist/`) and runs `e2e/offline/` against `vite preview` of that build, cutting the network after load; it is outside `test:all`.
 - `bun run test:e2e:diagnostic` reruns the fast lane serially with retained failure traces and video.
 - `bun run test:e2e:real-captures` explicitly runs the complete Onshape/OCC acceptance lane against the tracked fixtures in `test/fixtures/onshape-captures` with one worker.
 - `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
 - `bun run test:e2e:all` runs the fast and real-capture Playwright lanes sequentially.
-- `bun run test:all:acceptance` runs every validation lane, including real captures; `bun run test:all` keeps the normal feedback loop on the fast E2E lane.
+- `bun run test:all:acceptance` runs every validation lane, including real captures; `bun run test:all` is the final pass: lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
+
+## Tiers
+
+Lanes say what a spec proves; tiers say when it runs. Tiers are Vitest projects in `vite.config.ts`, selected by file name:
+
+- `fast` (`*.spec.ts` by default): the budget is one minute for the whole tier, so a single file should stay under about five seconds. It shares one module registry per worker (`isolate: false`), which is what makes it fast.
+- `isolated` (`*.isolated.spec.ts`): specs whose `vi.mock` factories need a fresh module instance. Under a shared registry a mock is silently skipped when an earlier file already evaluated the module (`test/static/vitest-tier-boundary.spec.ts` guards this). Prefer injecting a fake through the seam over mocking a module; only mock when the seam has no port.
+- `heavy` (`*.heavy.spec.ts`, plus everything under `src/cli/`): real-OCC pipelines, certification meters, and the CLI subprocess specs. Anything that needs more than roughly twenty seconds alone belongs here; name it so rather than slowing the fast tier. Everyday coverage of the same seams stays in the fast tier through the in-process semantic session (`src/application/semantic/`), which is what the CLI drives.
+
+The CLI specs spawn the bundle that `test/helpers/cli-bundle-global-setup.ts` builds once per run and inject through `cliEntry()`. Spawning `bun src/cli/main.ts` costs about thirty seconds and six gigabytes per process because Bun transforms Typia at startup; only `workflow-recipes.spec.ts` exercises that source entry and the extracted release on purpose.
 
 ## Test Lanes
 

@@ -493,7 +493,7 @@ the durability behavior that cannot be proved by pure planning assertions.
 
 ### Apply-pipeline coverage
 
-Extend `src/domain/import/onshape/apply-pipeline.spec.ts` at the provider ->
+Extend `src/domain/import/onshape/apply-pipeline.heavy.spec.ts` at the provider ->
 prepare -> `applyImportPreparedActions` seam:
 
 - a compact v2 fixture should commit an extrude followed by a matched fillet or

@@ -2,6 +2,19 @@ import { execFile, type ExecFileOptions } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { inject } from "vitest";
+
+declare module "vitest" {
+  interface ProvidedContext {
+    /** Absolute `main.js` of the CLI bundle built by the heavy project's global setup. */
+    cliEntry: string;
+  }
+}
+
+/** The CLI entry the recipe specs spawn; see `cli-bundle-global-setup.ts`. */
+export function cliEntry() {
+  return inject("cliEntry");
+}
 
 /** Keep process failures observable; each family owns its recipe and assertions. */
 export async function invokeCliRecipe(
@@ -16,7 +29,7 @@ export async function invokeCliRecipe(
       code: 0,
       ...(await promisify(execFile)(
         "bun",
-        ["src/cli/main.ts", "document", "recipe", path],
+        [cliEntry(), "document", "recipe", path],
         { ...options, encoding: "utf8" },
       )),
     };

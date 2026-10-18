@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -63,7 +64,7 @@ it("a real Bun recipe resolves the solid target and keeps native STEP progress o
       recipe,
       JSON.stringify({ version: 1, operations: commands }),
     );
-    const invocation = ["src/cli/main.ts", "document", "recipe", recipe];
+    const invocation = [cliEntry(), "document", "recipe", recipe];
     const options = {
       cwd: resolve(import.meta.dirname, "../.."),
       timeout: 90000,
