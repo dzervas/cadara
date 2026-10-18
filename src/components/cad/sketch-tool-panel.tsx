@@ -143,6 +143,10 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
                   <SketchToolControlField
                     key={control.id}
                     control={control}
+                    invalid={
+                      control.kind === "numeric" &&
+                      validation.some((message) => message.severity === "error")
+                    }
                     onPatch={onPatch}
                   />
                 ))}
@@ -181,12 +185,16 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
 
 function SketchToolControlField({
   control,
+  invalid,
   onPatch,
 }: {
   control: SketchToolControl;
+  invalid: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
-  const rowStyle = fieldSurfaceStyle({});
+  const rowStyle = fieldSurfaceStyle({
+    error: invalid ? { message: "Invalid value" } : null,
+  });
 
   return (
     <div
@@ -218,6 +226,7 @@ function SketchToolControlField({
         ) : control.kind === "numeric" ? (
           <NumberInput
             id={control.id}
+            error={invalid}
             disabled={control.disabled}
             value={control.value ?? ""}
             size="xs"

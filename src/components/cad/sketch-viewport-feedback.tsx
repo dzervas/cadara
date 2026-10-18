@@ -149,6 +149,10 @@ export function SketchViewportFeedbackLayer({
         <div className="pointer-events-none absolute inset-0 z-40">
           <ViewportFloatingInput
             descriptor={schema.floatingInput}
+            invalid={Boolean(
+              schema.floatingInput.numericOnly &&
+                schema.validation?.some((message) => message.severity === "error"),
+            )}
             projection={projectionById.get(
               getFloatingInputProjectionId(schema.floatingInput.id),
             )}
@@ -606,11 +610,13 @@ function createCenteredArcPath(input: {
 
 function ViewportFloatingInput({
   descriptor,
+  invalid,
   projection,
   onPatch,
   documentVariableNames,
 }: {
   descriptor: SketchToolFloatingInputDescriptor;
+  invalid: boolean;
   projection: SketchViewportFeedbackProjection | undefined;
   onPatch: (patch: Record<string, unknown>) => void;
   documentVariableNames: readonly string[];
@@ -668,6 +674,18 @@ function ViewportFloatingInput({
         <input
           ref={inputRef}
           className="mt-2 h-9 w-full rounded-md border border-[var(--cad-border)] bg-[var(--cad-surface)] px-2 font-mono text-[13px] text-[var(--cad-foreground)] outline-none focus-visible:border-[var(--cad-accent)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--cad-accent)]"
+          aria-invalid={invalid || undefined}
+          // O29: preserve the focused input's text while session validation
+          // marks an intermediate number invalid; valid edits clear this.
+          style={
+            invalid
+              ? {
+                  borderColor: "var(--workbench-shell-danger-border)",
+                  background: "var(--workbench-shell-danger-surface)",
+                  color: "var(--workbench-shell-danger-text)",
+                }
+              : undefined
+          }
           list={variableNames.length > 0 ? suggestionsId : undefined}
           defaultValue={descriptor.value ?? ""}
           readOnly={descriptor.readOnly}
