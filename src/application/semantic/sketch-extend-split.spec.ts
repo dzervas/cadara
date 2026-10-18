@@ -97,3 +97,69 @@ it("Extend a line by a line: one 'Extend' action reaches the boundary; Undo and 
     await f.close();
   }
 }, 60000);
+
+it("Split a line by a line: one 'Split' action leaves two pieces; Undo and Redo replay it", async () => {
+  const f = await createSketchWorkflow();
+  try {
+    const { before, target, boundary } = await twoLines(f, 15);
+    const split = await f.execute({
+      operation: "sketch.geometry.update",
+      draft: before.discovery!.state.draft,
+      edit: { kind: "split", target, boundary, pick: [15, 0] },
+      intent: "fulfill",
+    });
+    const pieces = lines(split);
+    expect(pieces, "two line pieces and the boundary").toHaveLength(3);
+    expect(pieces).toEqual(
+      expect.arrayContaining([
+        [
+          [0, 0],
+          [15, 0],
+        ],
+        [
+          [15, 0],
+          [30, 0],
+        ],
+        [
+          [15, -15],
+          [15, 15],
+        ],
+      ]),
+    );
+    expect(
+      split.discovery!.sketch!.entities.map((e) => e.entityId),
+      "the split line keeps its identity on one piece",
+    ).toContain(target.kind === "sketchEntity" ? target.entityId : null);
+    expect(labels(split)).toEqual({
+      undo: [...labels(before).undo, "Split"],
+      redo: [],
+    });
+
+    const undone = await f.execute({
+      operation: "history.undo",
+      draft: split.discovery!.state.draft,
+    });
+    expect(undone.discovery!.sketch!.entities).toEqual(
+      before.discovery!.sketch!.entities,
+    );
+    expect(lines(undone), "Undo restores the single line").toEqual(
+      lines(before),
+    );
+    expect(labels(undone)).toEqual({
+      undo: labels(before).undo,
+      redo: ["Split"],
+    });
+
+    const redone = await f.execute({
+      operation: "history.redo",
+      draft: undone.discovery!.state.draft,
+    });
+    expect(redone.discovery!.sketch!.entities).toEqual(
+      split.discovery!.sketch!.entities,
+    );
+    expect(lines(redone), "Redo replays the split").toEqual(pieces);
+    expect(labels(redone)).toEqual(labels(split));
+  } finally {
+    await f.close();
+  }
+}, 60000);
