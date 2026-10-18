@@ -1,7 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import {
-  glideDoubleClick,
   glideDrag,
   waitForCommittedAction,
   waitForRedoneAction,
@@ -18,11 +17,11 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // about a construction line, or about the X datum axis picked in the
 // viewport), gliding-pointer drags on either side through the pick stack and
 // the coupled solve, explicit axis drags, Escape mid-drag, one authored
-// action per drag (Undo/Redo), Finish → re-entry, and the Trim refusal on a
-// mirrored copy. Only the browser composes pointer → pick stack → session →
-// history → publication. The underlying rules are pinned by the T15a–d logic
-// rows; these rows pin their browser wiring (discrimination per row: see
-// T15e.md).
+// action per drag (Undo/Redo), and the Trim refusal on a mirrored copy. Only
+// the browser composes pointer → pick stack → session → history. The
+// underlying rules are pinned by the T15a–d logic rows; these rows pin their
+// browser wiring (discrimination per row: see T15e.md). Finish → re-entry is
+// semantic-only: src/application/semantic/sketch-mirror-reentry.spec.ts.
 
 // Viewport 1440×960, top plane: sketch origin at (720, 480), Y up. Every
 // placement uses Shift (no inferred constraint); the 3-point arc authors its
@@ -612,34 +611,6 @@ test("T15e: Escape mid-drag of a mirror copy restores the sketch and records no 
     page.keyboard.press("Control+z"),
   );
   await expectStaged(workbench, 5);
-});
-
-test("T15e: Finish → re-enter keeps the mirrored sketch identical", async ({
-  page,
-}) => {
-  const workbench = new SketchWorkbenchHarness(page);
-  await mirrorFourSeeds(workbench);
-  // One copy drag first, so the state is not just the creation result.
-  const created = await snapshot(page);
-  const dragged = await settledAfterDrag(workbench, created, null, () =>
-    glideDrag(workbench, mirrorOnScreen(LINE[0]), { x: 220, y: 590 }),
-  );
-
-  await workbench.activateTool("Exit the active sketch.");
-  await workbench.expectMachine("idle", 60_000);
-  await glideDoubleClick(
-    page,
-    page
-      .getByRole("button", { name: /Select .*Double-click to reopen\./ })
-      .first(),
-  );
-  await workbench.expectSketchSessionActive();
-  await expectStaged(workbench, 9);
-  const reentered = await snapshot(page);
-  expect(geometryOf(reentered), "re-entry shows the finished sketch").toEqual(
-    geometryOf(dragged),
-  );
-  expectMirrorImage(reentered, "after re-entry");
 });
 
 test("T15e: Trim on a mirrored copy is refused with the named message and changes nothing", async ({
