@@ -139,7 +139,7 @@ it("runs an isolated sequential recipe in a real Bun process with clean JSON std
     const probe = `
       function check() { for (const name of ['window', 'document', 'indexedDB']) if (name in globalThis) throw new Error('Unexpected browser global: ' + name); }
       check();
-      const { dispatch } = await import('./src/cli/main.ts');
+      const { dispatch } = await import(${JSON.stringify(cliEntry())});
       process.exitCode = await dispatch(['document', 'recipe', ${JSON.stringify(file)}], () => undefined, { stdout: text => process.stdout.write(text), stderr: text => process.stderr.write(text) });
       check();
     `;

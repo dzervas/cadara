@@ -26,3 +26,18 @@ test("module mocks only appear in isolated specs", async () => {
     "Rename these to *.isolated.spec.ts (or stop mocking modules).",
   ).toEqual([]);
 });
+
+// Only the release workflow deliberately pays Bun's source Typia startup cost.
+// Other process probes must use the heavy project's injected CLI bundle too.
+test("CLI source-entry subprocess coverage stays in the release workflow", async () => {
+  const offenders: string[] = [];
+  for await (const file of glob("src/cli/**/*.spec.ts")) {
+    if (file === "src/cli/workflow-recipes.spec.ts") continue;
+    if (/src\/cli\/main\.ts/.test(readFileSync(file, "utf8")))
+      offenders.push(file);
+  }
+  expect(
+    offenders,
+    "Use cliEntry() for CLI subprocesses; source/release smoke lives in workflow-recipes.spec.ts.",
+  ).toEqual([]);
+});
