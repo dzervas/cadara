@@ -20,6 +20,16 @@ export function getStableSketchSessionDisplayKey(
     session.sketchId ?? "draft",
     objectIdentity(session.plane),
     objectIdentity(session.definition),
+    // Corner previews can remove a marker without changing the authored graph.
+    session.activeEditTool &&
+    (session.activeEditTool.toolId === "sketchFillet" ||
+      session.activeEditTool.toolId === "sketchChamfer")
+      ? [
+          session.activeEditTool.toolId,
+          objectIdentity(session.activeEditTool.selectedTargets),
+          session.activeEditTool.toolValue,
+        ].join(":")
+      : "no-corner-preview",
     objectIdentity(session.projectedReferences),
     objectIdentity(session.projectionDiagnostics),
     objectIdentity(session.liveRegions),

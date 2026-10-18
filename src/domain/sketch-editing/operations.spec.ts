@@ -1,4 +1,10 @@
 import { describe, test, expect } from "vitest";
+import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
+import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
+import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
+import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 import type {
   NumericSketchDefinition,
@@ -4104,4 +4110,347 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(accepted(after)).toBe(true);
     expect(displacement(after)).toBeLessThan(1e-9);
   });
+});
+
+describe("O27 corner replacement", () => {
+  const cornerId = "sketch_point_a" as SketchPointId;
+  const lineIds = ["sketch_entity_ab", "sketch_entity_ac"] as SketchEntityId[];
+  function corner() {
+    const fixture = makeSketchFixture();
+    fixture.point("a", 0, 0);
+    fixture.point("b", 4, 0);
+    fixture.point("c", 0, 4);
+    fixture.line("ab", "a", "b");
+    fixture.line("ac", "a", "c");
+    return fixture;
+  }
+  function wrapper(definition: SketchDefinition) {
+    const factories = createSessionCommitFactories(
+      1,
+      FIXTURE_SKETCH_ID as SketchId,
+    );
+    const entity = factories.createPointEntity(
+      "Corner",
+      factories.createEntityId("corner"),
+      cornerId,
+    );
+    definition.entityIds.push(entity.entityId);
+    definition.entities.push(entity);
+    return entity;
+  }
+  for (const kind of ["fillet", "chamfer"] as const) {
+    function mutate(definition: SketchDefinition) {
+      const common = {
+        definition,
+        entityIds: lineIds,
+        sequence: 2,
+        factories: createSessionCommitFactories(
+          2,
+          FIXTURE_SKETCH_ID as SketchId,
+        ),
+      };
+      const result =
+        kind === "fillet"
+          ? createSketchFilletMutation({ ...common, radius: 1 })
+          : createSketchChamferMutation({ ...common, distance: 1 });
+      expect(result.valid).toBe(true);
+      return result;
+    }
+    test(`${kind} preview hides the discarded marker; cancel and undo restore it`, async () => {
+      const fixture = corner();
+      const session = updateSketchReferenceProjection(
+        createSketchSessionFromSnapshot(
+          sketchSnapshotRecordForTest(
+            fixture.build(),
+            [],
+            createStandardPlaneDefinition("xy"),
+          ),
+          OCC_KERNEL_SETTINGS,
+        ),
+        [],
+        [],
+      );
+      const owner = await createSketchActionOwnerFixture(session);
+      const original = structuredClone(owner.session.definition);
+      const marker = () =>
+        getSketchSessionDisplayRenderables(owner.session).some(
+          (r) =>
+            r.target?.kind === "sketchPoint" && r.target.pointId === cornerId,
+        );
+      expect(marker()).toBe(true); // Warm the stable-display cache before staging.
+      owner.dispatch({
+        type: "tool.activated",
+        toolId: kind === "fillet" ? "sketchFillet" : "sketchChamfer",
+      });
+      const stage = () => {
+        for (const entityId of lineIds)
+          owner.dispatch({
+            type: "viewport.selectionRequested",
+            target: {
+              kind: "sketchEntity",
+              sketchId: owner.session.sketchId as SketchId,
+              entityId,
+            },
+          });
+        owner.dispatch({ type: "sketch.toolPatched", patch: { value: "1" } });
+      };
+      stage();
+      expect(owner.session.toolStagedEntities.length).toBeGreaterThan(0);
+      expect(marker()).toBe(false);
+      expect(owner.session.definition).toEqual(original);
+      owner.dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "cancelSketchEditOperator" },
+      });
+      expect(marker()).toBe(true);
+      stage();
+      owner.dispatch({
+        type: "sketch.toolPatched",
+        patch: { intent: "commitSketchEditOperator" },
+      });
+      expect(owner.session.definition.pointIds).not.toContain(cornerId);
+      expect(marker()).toBe(false);
+      expect(owner.undoLabels()).toHaveLength(1);
+      owner.dispatch({ type: "history.undoRequested" });
+      expect(owner.session.definition).toEqual(original);
+      expect(marker()).toBe(true);
+      owner.dispatch({ type: "history.redoRequested" });
+      expect(owner.session.definition.pointIds).not.toContain(cornerId);
+      expect(marker()).toBe(false);
+    });
+    test(`${kind} reconciles both coincident endpoint records with unique virtual-sharp identities`, () => {
+      const fixture = makeSketchFixture();
+      fixture.point("a", 0, 0);
+      const secondId = fixture.point("a2", 0, 0);
+      fixture.point("b", 4, 0);
+      fixture.point("c", 0, 4);
+      fixture.line("ab", "a", "b");
+      fixture.line("ac", "a2", "c");
+      fixture.coincident("a", "a2");
+      const after = mutate(fixture.definition()).definition!;
+      for (const pointId of [cornerId, secondId]) {
+        expect(
+          after.points.find((p) => p.pointId === pointId)?.isConstruction,
+        ).toBe(true);
+        expect(
+          after.entities.filter(
+            (e) => e.kind === "point" && e.pointId === pointId,
+          ),
+        ).toHaveLength(1);
+        expect(
+          after.constraints.filter(
+            (c) =>
+              c.kind === "collinear" &&
+              c.target.kind === "localPoint" &&
+              c.target.pointId === pointId,
+          ),
+        ).toHaveLength(2);
+      }
+      expect(new Set(after.entityIds).size).toBe(after.entityIds.length);
+      expect(new Set(after.constraintIds).size).toBe(
+        after.constraintIds.length,
+      );
+    });
+    for (const wrapped of [false, true]) {
+      test(`${kind} removes an unreferenced corner${wrapped ? " and its point entity" : ""}`, () => {
+        const before = corner().definition();
+        const entity = wrapped ? wrapper(before) : null;
+        const original = structuredClone(before);
+        const result = mutate(before);
+        expect(result.definition!.pointIds).not.toContain(cornerId);
+        expect(
+          result.definition!.points.some((p) => p.pointId === cornerId),
+        ).toBe(false);
+        if (entity)
+          expect(result.definition!.entityIds).not.toContain(entity.entityId);
+        expect(before).toEqual(original); // History must retain the entire pre-edit corner graph.
+        for (const preview of result.previewEntities) {
+          if (preview.kind === "line") {
+            expect(preview.start).not.toEqual([0, 0]);
+            expect(preview.end).not.toEqual([0, 0]);
+          }
+        }
+      });
+    }
+    for (const reference of [
+      "dimension",
+      "third line",
+      "constraint",
+      "derived point",
+      "derived wrapper",
+      "styled wrapper",
+    ] as const) {
+      test(`${kind} retains a virtual sharp referenced by a ${reference}`, () => {
+        const fixture = corner();
+        if (reference === "third line") {
+          fixture.point("d", -3, -3);
+          fixture.line("ad", "a", "d");
+        }
+        const before = fixture.definition();
+        const pointEntity =
+          reference === "derived wrapper" || reference === "styled wrapper"
+            ? wrapper(before)
+            : null;
+        if (reference === "styled wrapper") {
+          before.styles = [
+            {
+              styleId: "corner-style" as NonNullable<
+                SketchDefinition["styles"]
+              >[number]["styleId"],
+              label: "Corner style",
+              target: { kind: "entity", entityId: pointEntity!.entityId },
+              fill: { kind: "none" },
+              stroke: {
+                color: "#ffffff",
+                opacity: 1,
+                width: 1,
+                lineCap: "round",
+                lineJoin: "round",
+                miterLimit: 4,
+              },
+            },
+          ];
+          before.styleIds = before.styles.map((s) => s.styleId);
+        }
+        if (reference === "dimension") {
+          before.dimensions.push({
+            kind: "distance",
+            dimensionId: "dimension_corner" as DimensionId,
+            label: "Corner to B",
+            axis: "horizontal",
+            pointIds: [cornerId, "sketch_point_b" as SketchPointId],
+            value: createLiteralAuthoredValue(4),
+          });
+          before.dimensionIds.push(before.dimensions[0]!.dimensionId);
+        }
+        if (reference === "constraint") {
+          const constraint = {
+            kind: "fixPoint" as const,
+            constraintId: createSessionCommitFactories(
+              1,
+              FIXTURE_SKETCH_ID as SketchId,
+            ).createConstraintId("corner"),
+            label: "Fixed corner",
+            pointId: cornerId,
+            position: [0, 0] as const,
+          };
+          before.constraints.push(constraint);
+          before.constraintIds.push(constraint.constraintId);
+        }
+        if (reference === "derived point" || reference === "derived wrapper") {
+          before.derivedRelationships = [
+            {
+              kind: "transform",
+              derivationId: "corner-owner",
+              label: "Corner owner",
+              origin: [0, 0],
+              translation: [1, 1],
+              rotationRadians: 0,
+              scale: 1,
+              seedEntityIds: pointEntity ? [pointEntity.entityId] : [],
+              outputs: pointEntity
+                ? []
+                : [
+                    {
+                      seedEntityId: lineIds[0]!,
+                      outputEntityId: "derived_line" as SketchEntityId,
+                      instanceIndex: 1,
+                      seedPointIds: [cornerId],
+                      outputPointIds: [],
+                    },
+                  ],
+            },
+          ];
+        }
+        const after = mutate(before).definition!;
+        expect(after.pointIds).toContain(cornerId);
+        expect(
+          after.points.find((p) => p.pointId === cornerId)?.isConstruction,
+        ).toBe(true);
+        const virtual = after.entities.filter(
+          (e) => e.kind === "point" && e.pointId === cornerId,
+        );
+        expect(virtual).toHaveLength(1);
+        expect(virtual[0]).toMatchObject({
+          isConstruction: true,
+          label: `${kind === "fillet" ? "Fillet" : "Chamfer"} 2 virtual sharp`,
+        });
+        if (pointEntity)
+          expect(virtual[0]!.entityId).toBe(pointEntity.entityId);
+        const ties = after.constraints.filter(
+          (c) =>
+            c.kind === "collinear" &&
+            c.target.kind === "localPoint" &&
+            c.target.pointId === cornerId,
+        );
+        expect(ties).toHaveLength(2);
+        expect(
+          ties.map((c) => c.kind === "collinear" && c.line.entityId),
+        ).toEqual(lineIds);
+        expect(after.dimensions).toEqual(
+          expect.arrayContaining(before.dimensions),
+        );
+        expect(after.constraints).toEqual(
+          expect.arrayContaining(before.constraints),
+        );
+        if (
+          reference === "derived point" ||
+          reference === "derived wrapper" ||
+          reference === "styled wrapper"
+        )
+          return;
+        // Start the sharp off its intersection: merely keeping a disconnected point must not pass.
+        const displaced = {
+          ...after,
+          points: after.points.map((p) =>
+            p.pointId === cornerId
+              ? { ...p, position: [-0.2, -0.3] as const }
+              : p,
+          ),
+        };
+        const solved = solveSketchDefinitionCore({
+          definition: literalResolvedDefinition(displaced),
+          tolerances: {
+            coincidence: 1e-6,
+            angleRadians: 1e-6,
+            minimumSegmentLength: 1e-6,
+          },
+          modelingTolerance: 1e-3,
+          partialSolvePolicy: "bestEffort",
+        }).solvedSnapshot;
+        expect(solved.status.solveState).toBe("solved");
+        expect(
+          solved.constraintStatuses.every((s) =>
+            isAcceptedConstraintStatus(s.status),
+          ),
+        ).toBe(true);
+        expect(
+          solved.dimensionStatuses.every((s) => s.status === "driving"),
+        ).toBe(true);
+        if (reference === "dimension") {
+          expect(
+            solved.dimensionStatuses.find(
+              (s) => s.dimensionId === "dimension_corner",
+            )?.solvedValue,
+          ).toBeCloseTo(4, 5);
+        }
+        const sharp = solved.solvedPoints.find(
+          (p) => p.pointId === cornerId,
+        )!.solvedPosition;
+        for (const id of lineIds) {
+          const line = after.entities.find((e) => e.entityId === id)!;
+          if (line.kind !== "lineSegment")
+            throw new Error("Expected trimmed line");
+          const at = (id: SketchPointId) =>
+            solved.solvedPoints.find((p) => p.pointId === id)!.solvedPosition;
+          const start = at(line.startPointId),
+            end = at(line.endPointId);
+          const residual =
+            (sharp[0] - start[0]) * (end[1] - start[1]) -
+            (sharp[1] - start[1]) * (end[0] - start[0]);
+          expect(Math.abs(residual)).toBeLessThan(1e-5);
+        }
+      });
+    }
+  }
 });
