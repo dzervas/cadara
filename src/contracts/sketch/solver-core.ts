@@ -4815,6 +4815,12 @@ function buildSystem(
         continue;
       }
 
+      // Axis distances are displayed as magnitudes, but a rebuild must retain
+      // the point's side of the datum. An absolute residual lets optimizer
+      // trials cross the datum and converge on the opposite, equally valid root.
+      const initialPoint = getPoint(initialValues, point);
+      const horizontalSide = initialPoint[0] < datumPoint[0] ? -1 : 1;
+      const verticalSide = initialPoint[1] < datumPoint[1] ? -1 : 1;
       scalarConstraints.push(
         createNumericalScalarConstraint({
           id: dimension.dimensionId,
@@ -4837,11 +4843,15 @@ function buildSystem(
           evaluateResidual(values) {
             const localPoint = getPoint(values, point);
             if (dimension.axis === "horizontal") {
-              return Math.abs(localPoint[0] - datumPoint[0]) - drivingValue;
+              return (
+                horizontalSide * (localPoint[0] - datumPoint[0]) - drivingValue
+              );
             }
 
             if (dimension.axis === "vertical") {
-              return Math.abs(localPoint[1] - datumPoint[1]) - drivingValue;
+              return (
+                verticalSide * (localPoint[1] - datumPoint[1]) - drivingValue
+              );
             }
 
             return length(subtract(localPoint, datumPoint)) - drivingValue;
