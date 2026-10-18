@@ -6,9 +6,11 @@ import { createBaseExtrudeOperationHistory } from "./helpers/modeling-fixtures";
 test.setTimeout(90_000);
 test.use({ viewport: { width: 1440, height: 960 } });
 
-const FACE_POINT = { x: 230, y: 130 };
-const EDGE_POINT = { x: 199, y: 110 };
-const VERTEX_POINT = { x: 109, y: 207 };
+// Fixed pixels in the initial body-fit frame (1440 × 960 viewport).
+// Keep the face point near its perimeter so the crop includes hover outlines.
+const FACE_POINT = { x: 390, y: 265 };
+const EDGE_POINT = { x: 382, y: 244 };
+const VERTEX_POINT = { x: 257, y: 351 };
 const BLANK_POINT = { x: 1000, y: 200 };
 
 const FACE_TARGET =

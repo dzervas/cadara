@@ -6,7 +6,8 @@ import { createBaseExtrudeOperationHistory } from "./helpers/modeling-fixtures";
 test.setTimeout(90_000);
 test.use({ viewport: { width: 1440, height: 960 } });
 
-const FACE_POINT = { x: 230, y: 178 };
+// Top face in the initial body-fit frame (1440 × 960 viewport).
+const FACE_POINT = { x: 540, y: 348 };
 
 test("section handle drags forward and back along the active section normal", async ({
   page,
