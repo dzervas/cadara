@@ -5,6 +5,7 @@ import * as THREE from "three";
 import {
   createScreenSpacePointMarkerGeometry,
   updateScreenSpacePointMarker,
+  type SketchDisplayPolylineMaterialConfig,
 } from "@/components/cad/sketch-display-style";
 
 /** Flat, camera-facing marker whose geometry is measured in CSS pixels. */
@@ -12,6 +13,7 @@ export function ScreenSpacePointMarker({
   position,
   radiusPixels,
   ring = false,
+  strokeConfig,
   radiusScale = 1,
   material,
   visible = true,
@@ -20,6 +22,7 @@ export function ScreenSpacePointMarker({
   position: readonly [number, number, number];
   radiusPixels: number;
   ring?: boolean;
+  strokeConfig?: SketchDisplayPolylineMaterialConfig;
   radiusScale?: number;
   material: THREE.MeshBasicMaterial;
   visible?: boolean;
@@ -28,8 +31,8 @@ export function ScreenSpacePointMarker({
   const { camera, size } = useThree();
   const meshRef = useRef<THREE.Mesh>(null);
   const geometry = useMemo(
-    () => createScreenSpacePointMarkerGeometry(radiusPixels, ring),
-    [radiusPixels, ring],
+    () => createScreenSpacePointMarkerGeometry(radiusPixels, ring, strokeConfig),
+    [radiusPixels, ring, strokeConfig],
   );
   useEffect(() => () => geometry.dispose(), [geometry]);
   useFrame(() => {

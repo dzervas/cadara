@@ -535,6 +535,13 @@ export function SketchDisplayMarkerNode({
     markerContext,
   );
 
+  const strokeConfig = useMemo(
+    () =>
+      renderable.markerShape === "ring"
+        ? getSketchDisplayPolylineMaterialConfig(renderable, applyStyles, palette)
+        : undefined,
+    [applyStyles, palette, renderable],
+  );
   const materialConfig = useMemo(
     () =>
       getSketchDisplayMarkerMaterialConfig(renderable, applyStyles, palette),
@@ -615,6 +622,7 @@ export function SketchDisplayMarkerNode({
         radiusPixels={radii.visiblePixelRadius}
         radiusScale={radiusScale}
         ring={renderable.markerShape === "ring"}
+        strokeConfig={strokeConfig}
         renderOrder={getSketchDisplayMarkerRenderOrder(renderable)}
       />
       <primitive object={pickProxy} />

@@ -357,15 +357,29 @@ export function getSketchDisplayPolylineHandleVisibility(
 export function createScreenSpacePointMarkerGeometry(
   radiusPixels: number,
   ring: boolean,
+  strokeConfig?: SketchDisplayPolylineMaterialConfig,
 ) {
-  const stroke = ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS.stroke.default.min;
-  return ring
-    ? new THREE.RingGeometry(
-        radiusPixels + stroke,
-        radiusPixels + stroke * 2,
-        32,
-      )
-    : new THREE.CircleGeometry(radiusPixels, 32);
+  if (!ring) return new THREE.CircleGeometry(radiusPixels, 32);
+
+  // Leave a full dot-radius gap; the point's 1.5x hover still fits inside.
+  const innerRadius = radiusPixels * 2;
+  if (strokeConfig && strokeConfig.linePattern !== "solid") {
+    const centerRadius = innerRadius + 0.5;
+    return buildSketchPolylineStrokeGeometry({
+      points: Array.from({ length: 65 }, (_, index) => {
+        const angle = (index / 64) * Math.PI * 2;
+        return [
+          Math.cos(angle) * centerRadius,
+          Math.sin(angle) * centerRadius,
+          0,
+        ] as const;
+      }),
+      isClosed: true,
+      materialConfig: { ...strokeConfig, lineWidth: 1 },
+      worldUnitsPerPixel: 1,
+    });
+  }
+  return new THREE.RingGeometry(innerRadius, innerRadius + 1, 32);
 }
 
 export function updateScreenSpacePointMarker(
@@ -938,6 +952,18 @@ export function getSketchDisplayMarkerMaterialConfig(
   applyStyles: boolean,
   palette: SketchRenderingPalette,
 ): SketchDisplayMarkerMaterialConfig {
+  if (renderable.markerShape === "ring") {
+    const stroke = getSketchDisplayPolylineMaterialConfig(
+      renderable,
+      applyStyles,
+      palette,
+    );
+    return {
+      color: stroke.color,
+      opacity: stroke.opacity,
+      transparent: stroke.opacity < 1,
+    };
+  }
   const defaultColor =
     renderable.role === "reference"
       ? SURFACE_COLORS.sketchReference

@@ -33,6 +33,8 @@ import {
 } from "@/components/cad/three-cad-viewport-pick-candidates";
 import {
   getSketchDisplayMarkerPresentation,
+  getSketchDisplayMarkerMaterialConfig,
+  getSketchDisplayPolylineMaterialConfig,
   getActiveSketchMarkerWorldRadii,
   ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS,
   createScreenSpacePointMarkerGeometry,
@@ -265,7 +267,7 @@ test("T11f: a hovered point's marker is drawn larger than its curve's other poin
   ).toEqual({ visible: true, radiusScale: 1 });
 });
 
-test("standalone Point surrounds an endpoint-sized fill with a separate screen-space ring", () => {
+function standalonePointRenderables(isConstruction = false) {
   const session = markerSession();
   const target = entityRef("standalone");
   if (target.kind !== "sketchEntity") throw new Error("Expected entity ref.");
@@ -279,19 +281,23 @@ test("standalone Point surrounds an endpoint-sized fill with a separate screen-s
         target,
         label: "Standalone point",
         pointId: pointId("free"),
-        isConstruction: false,
+        isConstruction,
       },
     ],
   };
-  const renderables = getSketchSessionDisplayRenderables({
-    ...session,
-    definition,
-  });
-  const ring = renderables.find(
-    (entry) =>
-      entry.target?.kind === "sketchEntity" &&
-      entry.target.entityId === target.entityId,
-  )!;
+  return getSketchSessionDisplayRenderables({ ...session, definition });
+}
+
+const markerPalette = {
+  constrained: 0xffffff,
+  underconstrained: 0x228be6,
+  overconstrained: 0xff0000,
+  regionFill: 0x444444,
+};
+
+test("standalone Point surrounds an endpoint-sized fill with a separate screen-space ring", () => {
+  const renderables = standalonePointRenderables();
+  const ring = renderables.find((entry) => entry.markerShape === "ring")!;
   expect(ring.markerShape).toBe("ring");
   expect(ring.geometry.kind).toBe("marker");
   const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
@@ -309,18 +315,110 @@ test("standalone Point surrounds an endpoint-sized fill with a separate screen-s
       1000,
     );
     const outline = getActiveSketchMarkerWorldRadii(ring, camera, 1000);
+    expect(fill.visiblePixelRadius).toBeCloseTo(4.48);
     expect(fill.visiblePixelRadius).toBe(endpoint.visiblePixelRadius);
     expect(outline.visiblePixelRadius).toBe(fill.visiblePixelRadius);
+    for (const name of ["free", "la"]) {
+      const point = marker(renderables, name);
+      expect(point.markerLayer).not.toBe("overlay");
+      for (const hovered of [false, true]) {
+        const presentation = getSketchDisplayMarkerPresentation(
+          point,
+          context(renderables, {
+            hoverTarget: hovered ? point.target : entityRef("line"),
+            selection: [point.target!],
+          }),
+        );
+        expect(presentation.visible).toBe(true);
+        const dot = createScreenSpacePointMarkerGeometry(
+          fill.visiblePixelRadius,
+          false,
+        );
+        expect(
+          (dot as THREE.CircleGeometry).parameters.radius *
+            presentation.radiusScale,
+        ).toBeCloseTo(hovered ? 6.72 : 4.48);
+        dot.dispose();
+      }
+    }
     const geometry = createScreenSpacePointMarkerGeometry(
       outline.visiblePixelRadius,
       true,
     );
     expect(geometry).toBeInstanceOf(THREE.RingGeometry);
-    expect(
-      (geometry as THREE.RingGeometry).parameters.innerRadius,
-    ).toBeGreaterThan(fill.visiblePixelRadius);
+    const { innerRadius, outerRadius } = (geometry as THREE.RingGeometry)
+      .parameters;
+    expect(innerRadius).toBeCloseTo(8.96);
+    expect(outerRadius - innerRadius).toBe(1);
+    expect(innerRadius - fill.visiblePixelRadius).toBeCloseTo(4.48);
     geometry.dispose();
   }
+});
+
+test("construction Point ring uses the construction circle's dash-dot stroke, not a solid marker fill", () => {
+  const renderables = standalonePointRenderables(true);
+  const ring = renderables.find((entry) => entry.markerShape === "ring")!;
+  const construction = renderables.find(
+    (entry) =>
+      entry.target?.kind === "sketchEntity" &&
+      entry.target.entityId === "sketch_entity_construction",
+  )!;
+  const stroke = getSketchDisplayPolylineMaterialConfig(
+    ring,
+    true,
+    markerPalette,
+  );
+  const constructionStroke = getSketchDisplayPolylineMaterialConfig(
+    construction,
+    true,
+    markerPalette,
+  );
+  expect(stroke).toEqual(constructionStroke);
+  expect([
+    stroke.linePattern,
+    stroke.dashSize,
+    stroke.gapSize,
+    stroke.dotSize,
+  ]).toEqual(["dash-dot", 12, 5, 1]);
+  expect(
+    getSketchDisplayMarkerMaterialConfig(ring, true, markerPalette),
+  ).toEqual({
+    color: stroke.color,
+    opacity: stroke.opacity,
+    transparent: true,
+  });
+
+  const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+  const radius = getActiveSketchMarkerWorldRadii(
+    ring,
+    camera,
+    1000,
+  ).visiblePixelRadius;
+  const geometry = createScreenSpacePointMarkerGeometry(radius, true, stroke);
+  const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster();
+  const hits = Array.from({ length: 360 }, (_, degrees) => {
+    const angle = THREE.MathUtils.degToRad(degrees);
+    const centerRadius = radius * 2 + 0.5;
+    ray.set(
+      new THREE.Vector3(
+        centerRadius * Math.cos(angle),
+        centerRadius * Math.sin(angle),
+        1,
+      ),
+      new THREE.Vector3(0, 0, -1),
+    );
+    return ray.intersectObject(mesh).length > 0;
+  });
+  expect(hits.filter(Boolean).length).toBeGreaterThan(120);
+  expect(
+    hits.filter((hit) => !hit).length,
+    "Construction has visible gaps in the rendered ring.",
+  ).toBeGreaterThan(30);
+  geometry.dispose();
+  material.dispose();
 });
 
 test("origin markers are flat and retain compact pixel radii through zoom and oblique views", () => {
