@@ -5,7 +5,6 @@ import {
   glideDoubleClick,
   glideDrag,
   readHistoryStrip,
-  selectRegionInViewport,
   waitForCommittedAction,
   waitForRedoneAction,
   waitForUndoneAction,
@@ -31,8 +30,10 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // label move, delete) committed by pointer and keyboard, each undone and
 // redone by the keyboard against the session's authored definition; a
 // cancelled draft; Finish, re-entry and the retained private history; the
-// document-level Undo/Redo of the publication; and (rows 2–3) invalid
-// sketches through Finish and the File menu's Save As / Open. Every pointer
+// document-level Undo/Redo of the publication; and (row 2) invalid
+// sketches through Finish and the File menu's Save As / Open. The
+// invalid-by-merge row moved to the semantic session
+// (src/application/semantic/sketch-invalid-merge.spec.ts). Every pointer
 // path glides (several `mouse.move` steps); waits are on committed history
 // entries (sequence-based, T17-17), machine state and revisions, never a
 // frame count. Debug reads (the session's authored definition, live
@@ -438,46 +439,10 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
   expect(await published.getAttribute("data-history-sketch-id")).toBe(sketchId);
 });
 
-/** Canvas point of a live sketch point (re-entry frames the sketch anew). */
-async function pointOnCanvas(
-  workbench: FeatureWorkbenchHarness,
-  pointId: string,
-) {
-  const page = workbench.page;
-  const sketch = await definition(page);
-  const sketchId = sketch.points[0]!.target.sketchId;
-  const surface = (await workbench.viewportSurface().boundingBox())!;
-  const canvas = (await workbench.viewport().boundingBox())!;
-  const at = await page.evaluate(
-    (id) => window.__cadProjectToScreen?.(id) ?? null,
-    `${sketchId}.${pointId}`,
-  );
-  if (!at) throw new Error(`${pointId} has no projected screen point.`);
-  return { x: at.x + surface.x - canvas.x, y: at.y + surface.y - canvas.y };
-}
-
 const liveRegions = (page: Page) =>
   page.evaluate(
     () => window.__cadaraDebug?.getSketchSnapshot()?.liveRegions ?? null,
   );
-const documentDiagnostics = (page: Page) =>
-  page.evaluate(
-    () => window.__cadaraDebug?.getState()?.snapshotDiagnosticsCount ?? -1,
-  );
-const bodyCount = (page: Page) =>
-  page.evaluate(
-    () => window.__cadaraDebug?.getState()?.topologyDebug.bodyCount ?? -1,
-  );
-const regionTargets = (page: Page) =>
-  page.evaluate(
-    () =>
-      window.__cadaraDebug
-        ?.getState()
-        ?.selectableTargets.filter((target) =>
-          /^sketch_.+\.region_[0-9a-f]{32}$/.test(target),
-        ) ?? [],
-  );
-
 /** No internal id in the page's text or accessible labels (T17e). */
 async function expectNoInternalIds(page: Page, when: string) {
   const text = await page.evaluate(() => {
@@ -506,224 +471,6 @@ async function finish(workbench: FeatureWorkbenchHarness) {
   await workbench.activateTool(FINISH_TOOL);
   await workbench.expectMachine("idle", 60_000);
 }
-
-const RECTANGLE_TOOL = "Create rectangle geometry.";
-const MERGE_TOOL =
-  "Merge two sketch points: the first into the second (the destination).";
-const FIX_TOOL = "Fix Geometry";
-const RECTANGLE = [
-  { x: 420, y: 300 },
-  { x: 700, y: 520 },
-] as const;
-/** Two Shift-placed lines whose ends are 6 px apart: a real near gap. */
-const GAP_LINES = [
-  [
-    { x: 1100, y: 300 },
-    { x: 900, y: 360 },
-  ],
-  [
-    { x: 894, y: 354 },
-    { x: 1050, y: 600 },
-  ],
-] as const;
-const CONFLICT =
-  "Fix 4, Fix 5 conflict. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.";
-const EXTRUDE_WAITING =
-  "Repair Extrude 1. Correct Sketch Draft; the profile will resolve again.";
-
-test("§5 E2E-5 invalid by merge: an endpoint merge retaining two disagreeing Fix requirements (D25) blocks the profiles; Finish → the downstream extrude waits; re-entry and Save As → Open show the same diagnostics and validity; deleting one Fix makes the extrude current again", async ({
-  page,
-}) => {
-  test.setTimeout(420_000);
-  const workbench = new FeatureWorkbenchHarness(page);
-  await workbench.openWithRepository();
-  await openTopSketch(workbench);
-  await workbench.activateTool(RECTANGLE_TOOL);
-  await glidePress(
-    page,
-    page.locator('[role="menuitem"][data-tool-id="rectangle"]'),
-  );
-  await glideClick(workbench, RECTANGLE[0]);
-  await waitForCommittedAction(page, "Create Sketch Geometry", () =>
-    glideClick(workbench, RECTANGLE[1]),
-  );
-  await toSelect(page);
-  for (const [start, end] of GAP_LINES) {
-    await workbench.activateTool(LINE_TOOL);
-    await shiftClick(workbench, start);
-    await waitForCommittedAction(page, "Create Sketch Geometry", () =>
-      shiftClick(workbench, end),
-    );
-    await toSelect(page);
-  }
-  const drawn = await definition(page);
-  const [, , , , gapA, gapB] = drawn.entities;
-  const destination = (gapA as { endPointId: string }).endPointId;
-  const source = (gapB as { startPointId: string }).startPointId;
-  // Each gap end Fixed where it is.
-  for (const at of [GAP_LINES[0][1], GAP_LINES[1][0]]) {
-    await glidePress(
-      page,
-      page.getByRole("button", { name: FIX_TOOL, exact: true }),
-    );
-    await waitForCommittedAction(page, FIX_TOOL, () =>
-      glideClick(workbench, at),
-    );
-    await toSelect(page);
-  }
-  await expect
-    .poll(() => liveRegions(page), { timeout: 30_000 })
-    .toEqual({ status: "current", count: 1 });
-
-  // The rectangle extruded, its region picked in the viewport.
-  await finish(workbench);
-  await workbench.activateFeature("extrude");
-  await expect
-    .poll(() => regionTargets(page), { timeout: 30_000 })
-    .toHaveLength(1);
-  await selectRegionInViewport(workbench, (await regionTargets(page))[0]!);
-  await workbench.expectFeaturePreviewReady("extrude");
-  await workbench.commitFeature();
-  await expect.poll(() => bodyCount(page), { timeout: 30_000 }).toBe(1);
-  const builtExtrude = page.getByRole("button", {
-    name: "Select Extrude 1. Double-click to reopen.",
-  });
-  await expect(builtExtrude).toHaveCount(1);
-  expect(await documentDiagnostics(page)).toBe(0);
-
-  // Re-enter; Merge Points (the source, then the destination): both Fix
-  // requirements are retained (D25) and now disagree.
-  await reenter(workbench);
-  await workbench.activateTool(MERGE_TOOL);
-  await glideClick(workbench, await pointOnCanvas(workbench, source));
-  await glideClick(workbench, await pointOnCanvas(workbench, destination));
-  await expect(
-    page
-      .locator('[data-sketch-viewport-floating-input="merge-points-confirm"]')
-      .getByRole("button", { name: "Merge" }),
-  ).toBeVisible({ timeout: 15_000 });
-  await waitForCommittedAction(page, "Merge Points", () =>
-    page.keyboard.press("Enter"),
-  );
-  await expect(
-    page.getByRole("status").filter({ hasText: "Fix 5 conflicts with Fix 4" }),
-    "the merge says what it retained",
-  ).toHaveText(
-    "Merging Line 3 start into Line 2 end: Fix 5 conflicts with Fix 4. The sketch is invalid; profiles from it are blocked. Change or delete one of them, or Undo.",
-    { timeout: 15_000 },
-  );
-  await toSelect(page);
-  // T17k2 (T17k F-1): leaving the tool keeps the invalid sketch's
-  // explanation on the status line (base: Escape cleared it), the text
-  // Undo/Redo and re-entry show.
-  await expect(
-    page.getByRole("status").filter({ hasText: CONFLICT }),
-    "the explanation outlives the tool",
-  ).toHaveText(CONFLICT, { timeout: 15_000 });
-  const problemRows = page.locator(
-    "[data-sketch-constraint-row][data-sketch-constraint-problem]",
-  );
-  const diagnostics = async () => ({
-    problems: await problemRows
-      .locator("[data-sketch-constraint-problem-text]")
-      .allTextContents(),
-    count: await page.evaluate(
-      () =>
-        document
-          .querySelector("[data-sketch-constraint-problem-count]")
-          ?.getAttribute("data-sketch-constraint-problem-count") ?? null,
-    ),
-    regions: await liveRegions(page),
-  });
-  const conflictDiagnostics = {
-    problems: [`Conflict: ${CONFLICT}`, `Conflict: ${CONFLICT}`],
-    count: "2",
-    regions: { status: "unavailable", count: 0 },
-  };
-  await expect
-    .poll(diagnostics, { message: "the merged sketch", timeout: 30_000 })
-    .toEqual(conflictDiagnostics);
-  const merged = await definition(page);
-  expect(
-    merged.constraints.filter((constraint) => constraint.kind === "fixPoint"),
-    "both Fix requirements are retained, on the destination",
-  ).toEqual([
-    expect.objectContaining({ pointId: destination }),
-    expect.objectContaining({ pointId: destination }),
-  ]);
-
-  // Finish: the extrude waits for its sketch (no body, a repair entry).
-  await finish(workbench);
-  const waitingExtrude = page.getByRole("button", { name: EXTRUDE_WAITING });
-  const partDiagnostics = async () => ({
-    waiting: await waitingExtrude.count(),
-    built: await builtExtrude.count(),
-    bodies: await bodyCount(page),
-    documentDiagnostics: await documentDiagnostics(page),
-  });
-  const waiting = { waiting: 1, built: 0, bodies: 0, documentDiagnostics: 1 };
-  await expect
-    .poll(partDiagnostics, {
-      message: "the extrude waits for its invalid sketch",
-      timeout: 30_000,
-    })
-    .toEqual(waiting);
-  await expectNoInternalIds(page, "finished");
-  // Re-entered: the same diagnostics (Finish ≡ re-entry, B5).
-  await reenter(workbench);
-  await expect(
-    page.getByRole("status").filter({ hasText: CONFLICT }),
-  ).toHaveText(CONFLICT, { timeout: 15_000 });
-  await expect
-    .poll(diagnostics, { timeout: 30_000 })
-    .toEqual(conflictDiagnostics);
-  await finish(workbench);
-
-  // Save As → Open a copy: a new history, the same diagnostics and
-  // validity in part mode and after re-entry.
-  const saved = await saveDocumentCopy<{
-    sketches: { definition: SketchDefinition }[];
-  }>(page);
-  expect(
-    saved.sketches[0]!.definition.constraints.filter(
-      (constraint) => constraint.kind === "fixPoint",
-    ),
-    "the file keeps both requirements",
-  ).toHaveLength(2);
-  await openDocumentCopy(page, saved, "merge-invalid.cadara");
-  await expect
-    .poll(() => readHistoryStrip(page), { timeout: 15_000 })
-    .toEqual({ undo: [], redo: [] });
-  await expect.poll(partDiagnostics, { timeout: 30_000 }).toEqual(waiting);
-  await reenter(workbench);
-  await expect(
-    page.getByRole("status").filter({ hasText: CONFLICT }),
-  ).toHaveText(CONFLICT, { timeout: 15_000 });
-  await expect
-    .poll(diagnostics, { timeout: 30_000 })
-    .toEqual(conflictDiagnostics);
-  await expectNoInternalIds(page, "reopened and re-entered");
-
-  // Correct the requirement: delete Fix 4 from the Constraints list (one
-  // action); the profiles come back; Finish → the extrude is built again.
-  await waitForCommittedAction(page, "Delete Sketch Item", () =>
-    glidePress(page, page.getByRole("button", { name: "Delete Fix 4" })),
-  );
-  await expect
-    .poll(diagnostics, { message: "the conflict is gone", timeout: 30_000 })
-    .toEqual({
-      problems: [],
-      count: null,
-      regions: { status: "current", count: 1 },
-    });
-  await finish(workbench);
-  await expect
-    .poll(partDiagnostics, {
-      message: "the extrude is current again",
-      timeout: 60_000,
-    })
-    .toEqual({ waiting: 0, built: 1, bodies: 1, documentDiagnostics: 0 });
-});
 
 const OFFSET_TOOL =
   "Offset a connected chain with a durable offset relationship.";
@@ -872,7 +619,7 @@ test("§5 E2E-5 invalid by deletion: an offset's seed and a mirror's original de
   // Finish; re-entry; Save As → Open (fresh history); re-entry: the same
   // diagnostics and validity each time; the file keeps both relationships.
   // (No downstream feature here: part mode has no read of a sketch's
-  // validity besides its consumers, row 2, and its tint,
+  // validity besides its consumers, sketch-invalid-merge.spec.ts, and its tint,
   // `sketch-invalid-part-mode-display.spec.ts`.)
   await finish(workbench);
   await reenter(workbench);
