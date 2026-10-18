@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import * as THREE from "three";
+import { flushSync } from "react-dom";
 
 import { getMeasurementWitnessStyleConfig } from "@/components/cad/measurement-witness-style";
 import type { MeasurementWitness } from "@/domain/measure/measurement";
@@ -389,7 +390,11 @@ export function SketchProjectionFrameWatcher({
     }
 
     lastCameraTokenRef.current = token;
-    onCameraChanged();
+    // O33: this callback already recomputes React projection/collision layout on
+    // each changed camera frame. Commit its DOM overlays before R3F draws that
+    // camera, rather than letting a deferred React commit trail the canvas.
+    // Keep the full layout pass (including the final settled camera position).
+    flushSync(onCameraChanged);
   });
 
   return null;
