@@ -31,7 +31,10 @@ async function addThenEdit(
     intent: "fulfill",
   });
   const [dimension] = added.discovery!.sketch!.requirements;
-  expect(dimension!.value, "premise: the dimension authors its initial value").toBe(initial);
+  expect(
+    dimension!.value,
+    "premise: the dimension authors its initial value",
+  ).toBe(initial);
   return f.execute({
     operation: "sketch.dimension.update",
     draft: added.discovery!.state.draft,
@@ -67,7 +70,9 @@ function sideLength(result: SemanticResult, entityId: string) {
   const sketch = result.discovery!.sketch!;
   const [a, b] = sketch.entities
     .find((e) => e.entityId === entityId)!
-    .pointIds.map((id) => sketch.points.find((p) => p.pointId === id)!.position);
+    .pointIds.map(
+      (id) => sketch.points.find((p) => p.pointId === id)!.position,
+    );
   return Math.hypot(b![0] - a![0], b![1] - a![1]);
 }
 
@@ -81,10 +86,14 @@ async function rectangleSide(f: Workflow, axis: 0 | 1, at: number) {
     intent: "fulfill",
   });
   const sketch = created.discovery!.sketch!;
-  expect(sketch.requirements, "the Rectangle tool authors no width/height").toEqual([]);
+  expect(
+    sketch.requirements,
+    "the Rectangle tool authors no width/height",
+  ).toEqual([]);
   return sketch.entities.find((e) =>
     e.pointIds.every(
-      (id) => sketch.points.find((p) => p.pointId === id)!.position[axis] === at,
+      (id) =>
+        sketch.points.find((p) => p.pointId === id)!.position[axis] === at,
     ),
   )!.entityId;
 }
@@ -122,7 +131,8 @@ for (const row of [
         ]),
       ).toEqual([["lineLength", side, row.edited]]);
       const line = definition.entities.find((e) => e.entityId === side)!;
-      if (line.kind !== "lineSegment") throw new Error("Expected the rectangle side line");
+      if (line.kind !== "lineSegment")
+        throw new Error("Expected the rectangle side line");
       const [start, end] = [line.startPointId, line.endPointId].map(
         (id) => definition.points.find((p) => p.pointId === id)!.position,
       );
@@ -130,6 +140,54 @@ for (const row of [
         Math.hypot(end![0] - start![0], end![1] - start![1]),
         "the saved points carry the solved length",
       ).toBeCloseTo(row.edited, 6);
+    } finally {
+      await f.close();
+    }
+  }, 60000);
+
+for (const row of [
+  { tool: "dimensionRadius", kind: "circleRadius", initial: 1.7, radius: 18 },
+  { tool: "dimensionDistance", kind: "diameter", initial: 3.4, radius: 9 },
+] as const)
+  it(`edited circle ${row.kind} (${row.tool}) solves, finishes the sketch and saves the edited value and radius`, async () => {
+    const f = await createSketchWorkflow();
+    try {
+      const created = await f.execute({
+        operation: "sketch.author",
+        draft: f.current().discovery!.state.draft,
+        primitive: { kind: "circle", center: [0, 0], radius: 5 },
+        construction: false,
+        intent: "fulfill",
+      });
+      expect(
+        created.discovery!.sketch!.requirements,
+        "the Circle tool authors no size",
+      ).toEqual([]);
+      const circle = created.discovery!.sketch!.entities[0]!.entityId;
+      const edited = await addThenEdit(f, row.tool, circle, row.initial, 18);
+      expect(edited.discovery!.sketch!.requirements).toMatchObject([
+        { kind: row.kind, value: 18 },
+      ]);
+      expect(
+        edited.discovery!.sketch!.entities[0]!.radius,
+        "solved radius",
+      ).toBeCloseTo(row.radius, 6);
+      expect(edited.discovery!.sketch!.profiles).toHaveLength(1);
+
+      const definition = await publishAndSave(f);
+      expect(
+        definition.dimensions.map((d) => [
+          d.kind,
+          "entityId" in d ? d.entityId : null,
+          "value" in d && d.value?.source === "literal" ? d.value.value : null,
+        ]),
+      ).toEqual([[row.kind, circle, 18]]);
+      const saved = definition.entities.find((e) => e.entityId === circle)!;
+      if (saved.kind !== "circle") throw new Error("Expected the circle");
+      expect(
+        saved.radius,
+        "the saved circle carries the solved radius",
+      ).toBeCloseTo(row.radius, 6);
     } finally {
       await f.close();
     }
