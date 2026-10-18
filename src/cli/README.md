@@ -117,6 +117,9 @@ never match a qualified selector.
 xy and a yz single-rectangle sketch in one invocation, then extrudes each sketch's
 `Outer region` by owner into two distinct boxes, without saving, reopening,
 extra curves or generated IDs.
+[`examples/multi-sketch-part.json`](./examples/multi-sketch-part.json) joins an
+xy plate and a yz wall into one L-bracket body, thickens the wall, renames the
+body, saves, reopens and exports STEP/STL, writing into the working directory.
 
 ### Discovering operations and units
 
@@ -801,9 +804,10 @@ persisted but invalid feature: `fulfill` reports geometry failure;
 when the production owner actually accepts that state. A production rejection
 remains a rejection for either intent.
 
-Recipe `parameters.profiles` also accepts exact unique label aliases; nested
-start/end targets and boolean body IDs currently require typed discovered
-references. Up-to-next must prove complete termination of the swept profile,
+Recipe `parameters.profiles` also accepts exact unique label aliases, as does a
+singular `booleanScope: { kind: "targetBody", bodyId }` (an exact body label);
+nested start/end targets and plural `targetBodies` currently require typed
+discovered references. Up-to-next must prove complete termination of the swept profile,
 not choose an arbitrary first contact or partially covering target.
 
 Discovery includes feature/produced-body identities and `model.bodies[].bounds`
