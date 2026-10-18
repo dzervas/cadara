@@ -6,10 +6,12 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
+import type { RecipeCliError } from "@/cli/commands/recipe-diagnostics";
 import { cliEntry, invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
+import { expectBounds, labelled } from "../../test/helpers/semantic-result-assertions";
 
 type Operation = Record<string, unknown>;
-type Envelope = { results: SemanticResult[]; unexecuted: string[]; cleanup: { kind: string; resourcesReleased: boolean } };
+type Envelope = { results: SemanticResult[]; unexecuted: string[]; cleanup: { kind: string; resourcesReleased: boolean }; error?: RecipeCliError };
 
 const root = resolve(import.meta.dirname, "../..");
 const options = { cwd: root, timeout: 90000, env: { ...process.env, NODE_ENV: "production", TEST: "false" } };
@@ -43,15 +45,6 @@ async function run(operations: readonly Operation[], exitCode: number) {
 }
 function bodies(result: SemanticResult) {
   return result.discovery!.model!.bodies;
-}
-function expectBounds(bounds: { min: readonly number[]; max: readonly number[] } | null, min: number[], max: number[]) {
-  for (const axis of [0, 1, 2]) {
-    expect(bounds!.min[axis]).toBeCloseTo(min[axis]!, 5);
-    expect(bounds!.max[axis]).toBeCloseTo(max[axis]!, 5);
-  }
-}
-function labelled(result: SemanticResult, label: string, kind: string) {
-  return result.discovery!.references.filter((r) => r.label === label && r.target.kind === kind).map((r) => r.target);
 }
 /** Replace one example operation (by command ID) and keep the rest of the recipe. */
 function withOperation(commandId: string, patch: Operation, operations = example) {
@@ -135,6 +128,21 @@ test("a private draft alias qualifies in-draft selections, and multiple matches 
   const postSketch = results[7]!.discovery!.sketch!.sketchId;
   const owned = results[7]!.discovery!.references.filter((r) => r.label === "Outer region" && "sketchId" in r.target && r.target.sketchId === postSketch);
   expect(owned.map((r) => r.target.kind).sort()).toEqual(["region", "sketchEntity"]);
+  // The base sketch's same-labelled region exists in the snapshot but is outside the owner.
+  expect(labelled(results[7]!, "Outer region", "region")).toContainEqual(expect.objectContaining({ sketchId: baseSketch }));
+  const error = envelope!.error!;
+  expect(error).toMatchObject({
+    code: "selection-ambiguous",
+    phase: "resolution",
+    commandIndex: 8,
+    commandId: "delete",
+    path: "target",
+    selector: { alias: "post", label: "Outer region", sketch: "post" },
+  });
+  expect(error.candidates!.map((c) => (c.target as { kind: string }).kind).sort(), "Only the owner's candidates are listed.").toEqual(["region", "sketchEntity"]);
+  for (const candidate of error.candidates!)
+    expect(candidate).toMatchObject({ label: "Outer region", target: { sketchId: postSketch }, owner: { kind: "sketch", sketchId: postSketch } });
+  expect(envelope!.unexecuted).toEqual(["delete", "rename"]);
 });
 
 test("missing owners are usage errors before runtime startup", async () => {

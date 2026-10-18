@@ -118,8 +118,9 @@ xy and a yz single-rectangle sketch in one invocation, then extrudes each sketch
 `Outer region` by owner into two distinct boxes, without saving, reopening,
 extra curves or generated IDs.
 [`examples/multi-sketch-part.json`](./examples/multi-sketch-part.json) joins an
-xy plate and a yz wall into one L-bracket body, thickens the wall, renames the
-body, saves, reopens and exports STEP/STL, writing into the working directory.
+xy plate and a yz wall into one L-bracket body, changes the wall extrusion's
+depth from 4 to 6 with `extrude.update`, renames the body, saves, reopens and
+exports STEP/STL, writing into the working directory.
 
 ### Discovering operations and units
 
@@ -146,7 +147,10 @@ from, so it cannot drift from what is accepted. Each `operations[]` entry has:
   (`millimeter`). Angle units differ per operation and must not be guessed:
   revolve, draft, sweep-twist and sketch-pattern angles are radians; chamfer,
   hole countersink, body transform rotation and circular-pattern angles are
-  degrees.
+  degrees. A `value` whose unit depends on the dimension or derivation kind
+  (`sketch.requirement.add`, `sketch.dimension.update`,
+  `sketch.derivation.create`) has no `x-unit`; its schema `description` states
+  its units (for example degrees for an angle dimension).
 
 The catalog's `capabilityModel` separates four levels: a valid **shape** (refused
 before the kernel starts when violated), **execution** capability, **preview**

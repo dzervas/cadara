@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
 import ts from "typescript";
-import { cliEntry } from "../../test/helpers/cli-recipe-process";
+import { cliEntry, invokeCliDocumentRecipe, invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 
 const root = resolve(import.meta.dirname, "../..");
+const options = { cwd: root, timeout: 90000, maxBuffer: 64 * 1024 * 1024 };
 
 type Schema = { [key: string]: unknown };
 interface CatalogOperation {
@@ -21,6 +20,7 @@ interface CatalogOperation {
 interface Catalog {
   version: 1;
   lengthUnit: string;
+  unitPolicy: string;
   capabilityModel: Record<string, string>;
   recipe: Schema;
   components: Record<string, Schema>;
@@ -33,20 +33,6 @@ function refusal(run: { code: number; stdout: string; stderr: string }) {
   expect(run.stdout).toBe("");
   const [json, ...summary] = run.stderr.trimEnd().split("\n");
   return { ...(JSON.parse(json!) as { version: 1; error: Record<string, unknown> }), summary: summary.join("\n") };
-}
-
-async function runCli(args: readonly string[], options: { cwd?: string; entry?: string } = {}) {
-  try {
-    const output = await promisify(execFile)("bun", [options.entry ?? cliEntry(), "document", "recipe", ...args], {
-      cwd: options.cwd ?? root,
-      timeout: 90000,
-      encoding: "utf8",
-      maxBuffer: 64 * 1024 * 1024,
-    });
-    return { code: 0, ...output };
-  } catch (error) {
-    return error as { code: number; stdout: string; stderr: string };
-  }
 }
 
 /** Independent source of truth: the closed literal union in the contract source. */
@@ -81,7 +67,7 @@ function propertiesNamed(node: unknown, pattern: RegExp, found: { key: string; s
 
 describe("recipe operation discovery", () => {
   it("publishes every closed operation with its exact contract shape, capability tier and per-field angle units", async () => {
-    const run = await runCli(["--schema"]);
+    const run = await invokeCliDocumentRecipe(["--schema"], options);
     expect(run.code, run.stderr).toBe(0);
     expect(run.stderr).toBe("");
     const catalog = JSON.parse(run.stdout) as Catalog;
@@ -115,6 +101,18 @@ describe("recipe operation discovery", () => {
       .filter(({ schema }) => !("x-unit" in schema) && !("const" in schema) && !("$ref" in schema && /Direction|Kind|Form/.test(String(schema.$ref))))
       .map(({ key }) => key);
     expect(unitless, "Every angle-valued contract field states its unit.").toEqual([]);
+    // A `value` whose unit depends on the dimension or derivation kind states its units in its description.
+    const mixedUnitValues = {
+      "sketch.requirement.add": ["degrees", "document length units"],
+      "sketch.dimension.update": ["degrees", "document length units", "radians"],
+      "sketch.derivation.create": ["document length units", "radians"],
+    };
+    for (const [operation, valueUnits] of Object.entries(mixedUnitValues)) {
+      expect(catalog.unitPolicy).toContain(operation);
+      const { description } = (byName.get(operation)!.schema.properties as Record<string, Schema>).value!;
+      expect(typeof description, `${operation} value describes its units`).toBe("string");
+      for (const unit of valueUnits) expect(description, `${operation} value names ${unit}`).toContain(unit);
+    }
 
     // Closed objects: the generated shape refuses unknown fields like the validator.
     const author = byName.get("sketch.author")!.schema as Schema;
@@ -123,7 +121,7 @@ describe("recipe operation discovery", () => {
   }, 120000);
 
   it("narrows discovery to one operation with every referenced component", async () => {
-    const run = await runCli(["--schema", "revolve.create"]);
+    const run = await invokeCliDocumentRecipe(["--schema", "revolve.create"], options);
     expect(run.code, run.stderr).toBe(0);
     const entry = JSON.parse(run.stdout) as CatalogOperation;
     expect(entry.operation).toBe("revolve.create");
@@ -142,7 +140,7 @@ describe("recipe operation discovery", () => {
   }, 120000);
 
   it("refuses an unknown operation name with close suggestions and the usage exit code", async () => {
-    const refused = refusal(await runCli(["--schema", "revolv.create"]));
+    const refused = refusal(await invokeCliDocumentRecipe(["--schema", "revolv.create"], options));
     expect(refused.summary).toContain("Unknown operation \"revolv.create\"");
     expect(refused).toMatchObject({
       version: 1,
@@ -170,10 +168,8 @@ describe("recipe preflight diagnostics", () => {
     try {
       const entry = resolve(directory, "main.js");
       await copyFile(cliEntry(), entry);
-      const run = async (operations: readonly Record<string, unknown>[]) => {
-        await writeFile(resolve(directory, "recipe.json"), JSON.stringify({ version: 1, operations }));
-        return runCli(["recipe.json"], { cwd: directory, entry });
-      };
+      const run = (operations: readonly Record<string, unknown>[]) =>
+        invokeCliRecipe(directory, operations, { ...options, cwd: directory, entry });
 
       const plane = refusal(await run(plate({ 1: { plane: "xw" } })));
       expect(plane).not.toHaveProperty("initialization");
@@ -234,10 +230,8 @@ describe("recipe selection diagnostics and correction", () => {
   it("lists ambiguous typed candidates with owners without executing the command, then accepts the corrected recipe", async () => {
     const directory = await mkdtemp(resolve(tmpdir(), "cadara-correction-"));
     try {
-      const run = async (operations: readonly Record<string, unknown>[]) => {
-        await writeFile(resolve(directory, "recipe.json"), JSON.stringify({ version: 1, operations: operations.map((operation) => ({ version: 1, ...operation })) }));
-        return runCli(["recipe.json"], { cwd: directory });
-      };
+      const run = (operations: readonly Record<string, unknown>[]) =>
+        invokeCliRecipe(directory, operations.map((operation) => ({ version: 1, ...operation })), { ...options, cwd: directory });
       const execute = async (operations: readonly Record<string, unknown>[]) => {
         const output = await run(operations);
         return { ...output, envelope: JSON.parse(output.stdout) };
@@ -319,7 +313,7 @@ describe("recipe selection diagnostics and correction", () => {
       const references = corrected.envelope.results.at(-1).discovery.references as { label: string; target: { kind: string; constructionId?: string } }[];
       const bodyLabel = references.find((r) => r.target.kind === "body")!.label;
       const axisLabel = references.find((r) => r.target.constructionId === "construction_plane-xy")!.label;
-      const schema = JSON.parse((await runCli(["--schema", "circularPattern.create"])).stdout) as CatalogOperation;
+      const schema = JSON.parse((await invokeCliDocumentRecipe(["--schema", "circularPattern.create"], options)).stdout) as CatalogOperation;
       const pattern = (options: Record<string, unknown>) => ({
         commandId: "copy", operation: "circularPattern.create", basis: basis("solid"), intent: "fulfill", as: "copied",
         parameters: { participants: [{ role: "body", targets: [{ alias: "solid", label: bodyLabel }] }, { role: "axis", targets: [{ alias: "solid", label: axisLabel }] }], options: { instanceCount: 2, equalSpace: false, oppositeDirection: false, ...options } },

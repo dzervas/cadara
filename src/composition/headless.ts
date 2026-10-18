@@ -11,7 +11,7 @@ import type {
 } from "@/application/semantic/document-port";
 import type { DocumentId } from "@/contracts/shared/ids";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { headlessDocumentSettings } from "@/composition/headless-capabilities";
 import { createStoreGeometryAssetResolver } from "@/infrastructure/modeling/geometry-asset-resolver";
 import {
   createMemoryGeometryAssetStore,
@@ -74,7 +74,7 @@ export function createHeadlessSessionFactory(
       let solver: SketchConstraintSolverAdapter;
       const adapter = new OpenCascadeKernelAdapter({
         documentId,
-        tolerances: createDocumentSolverTolerances(OCC_KERNEL_SETTINGS),
+        tolerances: createDocumentSolverTolerances(headlessDocumentSettings),
         initialSnapshotRequiresRuntime: true,
         getOpenCascadeInstance: () => loader.getInstance(),
         assetResolver: {

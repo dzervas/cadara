@@ -62,7 +62,9 @@ for (const variant of expand(components.SemanticCommand!))
 
 export const recipeOperationNames: readonly string[] = [...variantsByOperation.keys()];
 export const recipeLengthUnit = headlessDocumentSettings.linearUnit;
-const featureKinds = new Set(constants(contractJsonSchemas.schemas[1] as JsonSchema));
+// `schemas` follows the generated tuple [SemanticCommand, ModelingFeatureKind].
+const [, featureKindSchema] = contractJsonSchemas.schemas;
+const featureKinds = new Set(constants(featureKindSchema as JsonSchema));
 
 function capability(operation: string) {
   const prefix = operation.split(".")[0]!;
@@ -149,7 +151,7 @@ export function recipeCatalog() {
     kind: "cadara.document-recipe.catalog",
     schemaDialect: "OpenAPI 3.1 JSON Schema (Typia), $ref into `components`",
     lengthUnit: recipeLengthUnit,
-    unitPolicy: "Lengths and coordinates use `lengthUnit`. Every angle-valued field states its unit with `x-unit` (radian or degree); see each operation's `units`. A field whose unit depends on a sibling variant (for example sketch.derivation.create `value`) explains it in its `description`.",
+    unitPolicy: "Lengths and coordinates use `lengthUnit`. Every angle-valued field states its unit with `x-unit` (radian or degree); see each operation's `units`. A `value` whose unit depends on the dimension or derivation kind (sketch.requirement.add, sketch.dimension.update, sketch.derivation.create) states its units in its `description`.",
     capabilityModel,
     recipe,
     operations: recipeOperationNames.map(operationEntry),

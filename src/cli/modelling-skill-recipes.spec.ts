@@ -7,13 +7,13 @@ import { promisify } from "node:util";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
 import { cliEntry, invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
+import { expectBounds, labelled } from "../../test/helpers/semantic-result-assertions";
 
 // Qualifies the executable example and the success/failure signals taught by
 // the repository agent skill `.agents/skills/cadara-cli-modelling/SKILL.md`
 // against the built browserless package (cadara-3sq.5).
 type Operation = Record<string, unknown>;
 type Envelope = { results: SemanticResult[]; unexecuted: string[]; cleanup: { kind: string; resourcesReleased: boolean } };
-type Bounds = { min: readonly number[]; max: readonly number[] } | null;
 
 const options = { timeout: 120000, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, NODE_ENV: "production", TEST: "false" } };
 let directory: string;
@@ -45,12 +45,6 @@ async function runFailing(operations: readonly Operation[]) {
 }
 const byId = (envelope: Envelope) => Object.fromEntries(envelope.results.map((r) => [r.correlation.commandId, r]));
 const bodies = (result: SemanticResult) => result.discovery!.model!.bodies;
-function expectBounds(bounds: Bounds, min: number[], max: number[]) {
-  for (const axis of [0, 1, 2]) {
-    expect(bounds!.min[axis]).toBeCloseTo(min[axis]!, 5);
-    expect(bounds!.max[axis]).toBeCloseTo(max[axis]!, 5);
-  }
-}
 const faces = (result: SemanticResult) => bodies(result)[0]!.topology!.filter((t) => t.entityClass === "face");
 /** Planar faces at constant x, as [x, zLow, zHigh]: the wall's inner face moves with its thickness. */
 const constantXFaces = (result: SemanticResult) =>
@@ -63,8 +57,6 @@ const geometry = (result: SemanticResult) =>
     ...body,
     faces: topology!.filter((t) => t.entityClass === "face").map(({ reference: _, ...rest }) => JSON.stringify(rest)).sort(),
   }));
-const labelled = (result: SemanticResult, label: string, kind: string) =>
-  result.discovery!.references.filter((r) => r.label === label && r.target.kind === kind).map((r) => r.target);
 function stlBounds(bytes: Buffer) {
   const count = bytes.readUInt32LE(80);
   expect(bytes.length).toBe(84 + count * 50);
@@ -116,7 +108,7 @@ test("the shipped multi-sketch example authors, edits, saves, reopens and export
   ]);
   expect(constantXFaces(r["wall-extrude"]!)).toEqual([[0, 0, 30], [4, 4, 30], [40, 0, 4]]);
 
-  // The edit thickens the wall; bounds alone cannot show it, the inner face does.
+  // The depth edit moves the wall's inner face; bounds alone cannot show it, the face does.
   expect(constantXFaces(r["thicken-wall"]!)).toEqual([[0, 0, 30], [6, 4, 30], [40, 0, 4]]);
   expect(faces(r["thicken-wall"]!)).toHaveLength(8);
   expect(labelled(r["name-body"]!, "L bracket", "body")).toEqual([{ kind: "body", bodyId }]);
