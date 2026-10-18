@@ -278,6 +278,7 @@ export function WorkbenchVariablesPanel({
             message: "Variable expression result is unavailable.",
           };
           const isValueInvalid = variableResult.kind === "error";
+          const valueErrorId = `variable-value-error-${variable.variableId}`;
           const isEditingVariable =
             editingVariableId === variable.variableId ||
             variable.valueText === "";
@@ -356,6 +357,8 @@ export function WorkbenchVariablesPanel({
                   />
                   <input
                     aria-label={`Variable value ${variable.variableId}`}
+                    aria-invalid={isValueInvalid || undefined}
+                    aria-describedby={isValueInvalid ? valueErrorId : undefined}
                     className="h-7 min-w-0 rounded border bg-[var(--workbench-shell-control-surface)] px-2 font-mono text-xs text-[var(--workbench-shell-text-muted)] outline-none focus:border-[var(--workbench-shell-accent)]"
                     style={{
                       borderColor: isValueInvalid
@@ -415,7 +418,7 @@ export function WorkbenchVariablesPanel({
                   c="var(--workbench-shell-danger-text)"
                   mx="xs"
                   mt={4}
-                  role="alert"
+                  id={valueErrorId}
                   style={{ overflowWrap: "anywhere" }}
                 >
                   {variableResult.message}

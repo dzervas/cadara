@@ -65,7 +65,10 @@ test.each(["150", ""])(
       markup.indexOf('<div data-variable-row="variable_width"'),
       markup.indexOf('<div data-variable-row="variable_depth"'),
     );
-    const error = widthRow.match(/<p\b[^>]*role="alert"[^>]*>[^<]*<\/p>/)?.[0];
+    const errorId = "variable-value-error-variable_width";
+    const error = widthRow.match(
+      new RegExp(`<p\\b[^>]*id="${errorId}"[^>]*>[^<]*</p>`),
+    )?.[0];
     expect(
       error,
       "the error belongs to its variable row, not a portal",
@@ -90,9 +93,16 @@ test.each(["150", ""])(
     } else {
       expect(widthRow).toContain('aria-label="Variable name variable_width"');
       expect(widthRow).toContain('value="width"');
-      expect(widthRow).toContain('aria-label="Variable value variable_width"');
+      const valueInput = widthRow.match(
+        /<input\b[^>]*aria-label="Variable value variable_width"[^>]*>/,
+      )?.[0];
+      expect(valueInput).toContain('aria-invalid="true"');
+      expect(valueInput).toContain(`aria-describedby="${errorId}"`);
     }
-    expect(widthRow.match(/role="alert"/g)).toHaveLength(1);
+    expect(
+      markup,
+      "field validation must not duplicate the shell alert",
+    ).not.toContain('role="alert"');
     expect(markup).not.toContain('role="tooltip"');
   },
 );
