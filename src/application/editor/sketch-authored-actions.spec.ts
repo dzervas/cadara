@@ -19,7 +19,11 @@ import {
   type SketchEditorState,
 } from "@/core/editor/state-machine";
 import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
-import { runEditorEffect } from "./effect-registry";
+import {
+  runEditorEffect,
+  createModelingServiceEditorEffectRuntime,
+} from "./effect-registry";
+import { createSketchPublicationFailureFixture } from "@/domain/modeling/modeling-service/sketch-publication.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
 import {
   acceptSketchDraw,
@@ -866,6 +870,72 @@ test("Finish carries the original private base and reconciles retained history t
       remapTestSketchIds(original, "sketch_published"),
     );
     expect(undone.state.session.sketchLabel).toBe("sketch_draft");
+  }
+});
+
+test("a post-write restore failure finishes the authored owner once; Finish again is harmless and direct re-entry keeps the published identity", async () => {
+  const { service, receipts } = createSketchPublicationFailureFixture();
+  try {
+    const f = await fixture();
+    const runtime = createModelingServiceEditorEffectRuntime(service);
+    const before = await service.getCurrentDocumentSnapshot();
+    const finish = f.dispatch({ type: "sketch.publishRequested" });
+    const commit = finish.effects.find(
+      (effect) => effect.type === "sketch.commit",
+    );
+    if (!commit) throw new Error("Expected Finish to publish the draft.");
+    const event = await runEditorEffect(commit, runtime);
+    expect(event, JSON.stringify(event)).toMatchObject({
+      type: "effect.sketchCommitted",
+      accepted: true,
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ code: "sketch-publication-restore-failed" }),
+      ]),
+    });
+    const completed = f.owner.transition(finish.state, event, (state) =>
+      transitionEditorState(state, event),
+    );
+    expect(completed.state.kind).toBe("idle");
+    let state: EditorState = completed.state;
+    for (const effect of completed.effects) {
+      const refreshed = await runEditorEffect(effect, runtime);
+      state = f.owner.transition(state, refreshed, (current) =>
+        transitionEditorState(current, refreshed),
+      ).state;
+    }
+    const retryEvent: EditorEvent = { type: "sketch.publishRequested" };
+    const retry = f.owner.transition(state, retryEvent, (current) =>
+      transitionEditorState(current, retryEvent),
+    );
+    expect(retry.state.kind).toBe("idle");
+    expect(retry.effects).toEqual([]);
+    expect(receipts).toHaveLength(1);
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    expect(snapshot.document.sketches).toHaveLength(
+      before.document.sketches.length + 1,
+    );
+    expect(snapshot.document.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "sketch-publication-restore-failed" }),
+    );
+    if (event.type !== "effect.sketchCommitted" || !event.publishedSketchId)
+      throw new Error("Missing committed identity");
+    const reopen: EditorEvent = {
+      type: "authoring.reopenRequested",
+      toolId: "sketch",
+      target: { kind: "sketch", sketchId: event.publishedSketchId },
+    };
+    const reopened = f.owner.transition(retry.state, reopen, (current) =>
+      transitionEditorState(current, reopen),
+    );
+    expect(reopened.state.kind).toBe("editingSketch");
+    if (reopened.state.kind !== "editingSketch")
+      throw new Error("Expected direct reopen");
+    expect(reopened.state.session.commitRequest?.sketchId).toBe(
+      event.publishedSketchId,
+    );
+    expect(receipts).toHaveLength(1);
+  } finally {
+    service.dispose();
   }
 });
 

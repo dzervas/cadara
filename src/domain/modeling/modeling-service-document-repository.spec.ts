@@ -2167,6 +2167,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       },
     });
     expect(conflict.isErr()).toBe(true);
+    expect(conflict.isErr() && conflict.error.message).toBe(
+      `Can't apply Publish Sketch: ‘${originalSketch.label}’ was changed by another session.`,
+    );
     // The failed publication restores the repository's state, which this
     // session did not author: it gets a revision the session never held
     // (base: the stored id, the publication's own revision).
