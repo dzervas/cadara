@@ -20,7 +20,7 @@ import {
   RECTANGLE,
   constraintRows,
   drawRectangle,
-  expectSelect,
+  leaveArmedDimension,
   extent,
   finishAndExtrudeOneRegion,
   floatingInput,
@@ -109,7 +109,7 @@ test("§1 E2E-1 second fixture: Rectangle stays armed and adds no size; its widt
   await waitForCommittedAction(page, "Commit Constraint Value", () =>
     page.keyboard.press("Enter"),
   );
-  await expectSelect(page, workbench, DIMENSION_TOOL);
+  await leaveArmedDimension(page, workbench);
   const sized = await sketchSnapshot(page);
   expect(sized.dimensions, "one dimension: the width").toHaveLength(1);
   expect(extent(sized, 0)).toBeCloseTo(WIDTH, 5);

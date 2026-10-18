@@ -58,7 +58,9 @@ test("T13d: Make reference frees the rim and its measured label follows; Make dr
   await workbench.clickViewportAt({ x: 520, y: 250 });
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible();
-  const diameter = Number(await floatingInput.locator("input").inputValue());
+  const diameter = Number(
+    await floatingInput.getByRole("textbox").inputValue(),
+  );
   expect(diameter, "premise: measured prefill").toBeCloseTo(140 * scale, 2);
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
@@ -93,7 +95,10 @@ test("T13d: Make reference frees the rim and its measured label follows; Make dr
   // Make reference: one action from the edit popup.
   await glyph.dblclick();
   await expect(floatingInput).toBeVisible();
-  await floatingInput.getByRole("button", { name: "Make reference" }).click();
+  await expect(
+    floatingInput.getByRole("switch", { name: "Make driving" }),
+  ).toBeChecked();
+  await floatingInput.getByRole("switch", { name: "Make driving" }).click();
   await expect(floatingInput).toBeHidden();
   await expect(glyph).toHaveAttribute("aria-label", /reference diameter$/);
   await expect(glyph).toContainText(`(${diameter.toFixed(2)})`);
@@ -122,7 +127,23 @@ test("T13d: Make reference frees the rim and its measured label follows; Make dr
   await expect(
     floatingInput.locator("[data-floating-input-readout]"),
   ).toHaveText(`Measured ${grown.toFixed(2)} mm`);
-  await floatingInput.getByRole("button", { name: "Make driving" }).click();
+  await expect(
+    floatingInput.getByRole("switch", { name: "Make driving" }),
+  ).not.toBeChecked();
+  await expect(
+    floatingInput.getByRole("button", { name: "Save", exact: true }),
+  ).toBeHidden();
+  await floatingInput.getByRole("switch", { name: "Make driving" }).check();
+  await expect(floatingInput).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Constraints" }).getByRole("button", {
+      name: /^Diameter.*reference diameter$/,
+    }),
+    "conversion is staged until Save",
+  ).toBeVisible();
+  await floatingInput
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
   await expect(floatingInput).toBeHidden();
   await expect(glyph).not.toContainText("(");
   expect(await labelValue()).toBeCloseTo(grown, 2);

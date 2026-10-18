@@ -152,7 +152,9 @@ test("T14e T-17: a conflicting dimension stays visible with Show all off and not
   await workbench.clickViewportAt({ x: 470, y: 320 });
   await workbench.clickViewportAt({ x: 520, y: 250 });
   await expect(floatingInput).toBeVisible();
-  const diameter = Number(await floatingInput.locator("input").inputValue());
+  const diameter = Number(
+    await floatingInput.getByRole("textbox").inputValue(),
+  );
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
   await leaveTool(workbench);
@@ -174,7 +176,7 @@ test("T14e T-17: a conflicting dimension stays visible with Show all off and not
   );
   await diameterChip.dblclick();
   await expect(floatingInput).toBeVisible();
-  await floatingInput.locator("input").fill((diameter * 1.5).toFixed(3));
+  await floatingInput.getByRole("textbox").fill((diameter * 1.5).toFixed(3));
   await floatingInput.getByRole("button", { name: "Save" }).click();
   await expect(floatingInput).toBeHidden();
 

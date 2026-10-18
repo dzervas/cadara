@@ -135,7 +135,7 @@ async function addCircleWithDiameterChip(workbench: SketchWorkbenchHarness) {
   await workbench.clickViewportAt({ x: 1000, y: 380 });
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible();
-  await floatingInput.locator("input").fill("5");
+  await floatingInput.getByRole("textbox").fill("5");
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
   await leaveTool(workbench);
@@ -402,7 +402,7 @@ test("T14b review R-1: a dimension chip's edit opens focused, Escape closes it, 
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible();
   await expect(
-    floatingInput.locator("input"),
+    floatingInput.getByRole("textbox"),
     "The edit input takes focus when it opens.",
   ).toBeFocused();
   await expect(chipLocator, "premise: passive while editing").toHaveAttribute(

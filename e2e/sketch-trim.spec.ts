@@ -110,7 +110,10 @@ test("T17f: after moving a dimension label, Trim applies at once (one 'Trim' act
     /sketch_entity_/,
   );
   const entities = async () => (await sketchSnapshot(page)).entities.length;
-  const before = await entities();
+  const before = await sketchSnapshot(page);
+  const horizontal = before.entities[0]!;
+  const point = (snapshot: typeof before, id: string) =>
+    snapshot.points.find((entry) => entry.id === id)!.position;
   await waitForCommittedAction(page, "Trim", () =>
     glideClick(workbench, target),
   );
@@ -118,8 +121,20 @@ test("T17f: after moving a dimension label, Trim applies at once (one 'Trim' act
     page.getByText(/Trim needs a solved sketch/),
     "no 'needs a solved sketch' refusal",
   ).toHaveCount(0);
+  expect(await entities(), "an end trim keeps one shortened line").toBe(
+    before.entities.length,
+  );
+  const after = await sketchSnapshot(page);
+  const kept = after.entities.find((entity) => entity.id === horizontal.id)!;
+  const cutter = after.entities[1]!;
   expect(
-    await entities(),
-    "the horizontal line is cut into its two kept pieces",
-  ).toBe(before + 1);
+    point(after, kept.pointIds![0]!)[0],
+    "the new end is tied to the first crossing, including the dimension solve",
+  ).toBeCloseTo(point(after, cutter.pointIds![0]!)[0], 6);
+  expect(kept.pointIds![0]!, "the clicked end is replaced").not.toBe(
+    horizontal.pointIds![0],
+  );
+  expect(kept.pointIds![1]!, "the opposite endpoint is retained").toBe(
+    horizontal.pointIds![1],
+  );
 });
