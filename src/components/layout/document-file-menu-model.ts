@@ -6,11 +6,16 @@ export interface DocumentFileMenuItem {
   icon: WorkbenchIconName;
 }
 
-export type DocumentFileMenuItemId = "new" | "openDocument" | "saveDocumentAs";
+export type DocumentFileMenuItemId =
+  | "new"
+  | "openDocument"
+  | "saveDocumentAs"
+  | "about";
 export type DocumentFileMenuCommand =
   | "newDocument"
   | "openDocument"
-  | "saveDocumentAs";
+  | "saveDocumentAs"
+  | "about";
 
 export const DOCUMENT_FILE_MENU_ITEMS: readonly DocumentFileMenuItem[] = [
   {
@@ -28,6 +33,11 @@ export const DOCUMENT_FILE_MENU_ITEMS: readonly DocumentFileMenuItem[] = [
     label: "Save As",
     icon: "download",
   },
+  {
+    id: "about",
+    label: "About",
+    icon: "info",
+  },
 ];
 
 export function getDocumentFileMenuCommand(
@@ -40,5 +50,7 @@ export function getDocumentFileMenuCommand(
       return "openDocument";
     case "saveDocumentAs":
       return "saveDocumentAs";
+    case "about":
+      return "about";
   }
 }

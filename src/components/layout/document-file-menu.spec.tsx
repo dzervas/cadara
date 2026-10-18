@@ -21,15 +21,15 @@ import { workbenchTheme } from "@/theme/workbench-theme";
 test("src/components/layout/document-file-menu.spec.tsx", () => {
   expect(
     DOCUMENT_FILE_MENU_ITEMS.map((item) => item.label).join(","),
-    "Document file menu model should expose exactly New, Open..., and Save As in order.",
-  ).toBe("New,Open...,Save As");
+    "Document file menu model should expose New, Open..., Save As, and About in order.",
+  ).toBe("New,Open...,Save As,About");
 
   expect(
     DOCUMENT_FILE_MENU_ITEMS.map((item) =>
       getDocumentFileMenuCommand(item.id),
     ).join(","),
     "Document file menu model should route each item to the expected handler command.",
-  ).toBe("newDocument,openDocument,saveDocumentAs");
+  ).toBe("newDocument,openDocument,saveDocumentAs,about");
 
   const markup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
