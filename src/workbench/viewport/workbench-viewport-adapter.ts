@@ -1,3 +1,4 @@
+import type { DocumentId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
@@ -24,6 +25,7 @@ import type {
 } from "@/workbench/viewport/viewport-boundary";
 
 interface WorkbenchViewportModelInput {
+  documentId: DocumentId | null;
   activeSectionView: SectionViewSession | null;
   hoverTarget: PrimitiveRef | null;
   measurementWitnesses: readonly MeasurementWitness[];
@@ -46,6 +48,7 @@ interface WorkbenchViewportModelInput {
 }
 
 export function createWorkbenchViewportModel({
+  documentId,
   activeSectionView,
   hoverTarget,
   measurementWitnesses,
@@ -67,6 +70,7 @@ export function createWorkbenchViewportModel({
   acceptsSpecialModeTarget,
 }: WorkbenchViewportModelInput): ViewportModel {
   return {
+    documentId,
     activeSectionView,
     hoverTarget,
     measurementWitnesses,

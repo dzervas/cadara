@@ -11,6 +11,7 @@ import { getLatestViewportFitViewRequestId } from "@/workbench/viewport/viewport
 test("workbench viewport adapter exposes typed model and command ports", () => {
   const target: PrimitiveRef = { kind: "body", bodyId: "body_1" };
   const model = createWorkbenchViewportModel({
+    documentId: "doc_opened",
     activeSectionView: null,
     hoverTarget: target,
     measurementWitnesses: [],
@@ -32,6 +33,7 @@ test("workbench viewport adapter exposes typed model and command ports", () => {
     documentVariableNames: [],
   });
 
+  expect(model.documentId).toBe("doc_opened");
   expect(model.hoverTarget).toBe(target);
   expect(model.interaction.mode).toBe("part");
   expect(model.interaction.isEditorRenderIdle).toBe(true);

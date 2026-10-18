@@ -317,8 +317,8 @@ export function computeViewportRenderableFitFrame(input: {
   }
 
   const target = bounds.getCenter(new THREE.Vector3());
-  const radius = Math.max(
-    ...points.map((point) => point.distanceTo(target)),
+  const radius = points.reduce(
+    (extent, point) => Math.max(extent, point.distanceTo(target)),
     MIN_FIT_HALF_EXTENT,
   );
   let direction = input.camera.position.clone().sub(input.controls.target);
@@ -331,22 +331,20 @@ export function computeViewportRenderableFitFrame(input: {
   const rightAxis = new THREE.Vector3(1, 0, 0)
     .applyQuaternion(input.camera.quaternion)
     .normalize();
-  const upAxis = input.camera.up.clone().normalize();
-  const projected = points.map((point) => {
+  // camera.up is the world-space orbit constraint, not screen up at an
+  // oblique view. Measure both extents in the actual camera basis.
+  const upAxis = new THREE.Vector3(0, 1, 0)
+    .applyQuaternion(input.camera.quaternion)
+    .normalize();
+  let halfWidth = MIN_FIT_HALF_EXTENT;
+  let halfHeight = MIN_FIT_HALF_EXTENT;
+  for (const point of points) {
     const delta = point.clone().sub(target);
-    return {
-      x: delta.dot(rightAxis),
-      y: delta.dot(upAxis),
-    };
-  });
-  const minX = Math.min(...projected.map((point) => point.x));
-  const maxX = Math.max(...projected.map((point) => point.x));
-  const minY = Math.min(...projected.map((point) => point.y));
-  const maxY = Math.max(...projected.map((point) => point.y));
-  const halfWidth =
-    Math.max((maxX - minX) / 2, MIN_FIT_HALF_EXTENT) * FIT_PADDING_FACTOR;
-  const halfHeight =
-    Math.max((maxY - minY) / 2, MIN_FIT_HALF_EXTENT) * FIT_PADDING_FACTOR;
+    halfWidth = Math.max(halfWidth, Math.abs(delta.dot(rightAxis)));
+    halfHeight = Math.max(halfHeight, Math.abs(delta.dot(upAxis)));
+  }
+  halfWidth *= FIT_PADDING_FACTOR;
+  halfHeight *= FIT_PADDING_FACTOR;
 
   if (input.camera instanceof THREE.OrthographicCamera) {
     const halfFrustumWidth = Math.max(
@@ -387,8 +385,8 @@ export function computeViewportRenderableFitFrame(input: {
   const fitHeightDistance = halfHeight / Math.tan(fovRadians / 2);
   const fitWidthDistance = halfWidth / (Math.tan(fovRadians / 2) * safeAspect);
   const distance = Math.max(
-    fitHeightDistance,
-    fitWidthDistance,
+    fitHeightDistance + radius,
+    fitWidthDistance + radius,
     radius * 2,
     MIN_FIT_CAMERA_DISTANCE,
   );
@@ -460,10 +458,14 @@ function collectBodyRenderablePoints(
 
     switch (renderable.geometry.kind) {
       case "mesh":
-        points.push(...renderable.geometry.vertexPositions.map(toVector3));
+        for (const point of renderable.geometry.vertexPositions) {
+          points.push(toVector3(point));
+        }
         break;
       case "polyline":
-        points.push(...renderable.geometry.points.map(toVector3));
+        for (const point of renderable.geometry.points) {
+          points.push(toVector3(point));
+        }
         break;
       case "marker":
         points.push(toVector3(renderable.geometry.position));

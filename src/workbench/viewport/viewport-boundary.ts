@@ -1,3 +1,4 @@
+import type { DocumentId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
@@ -23,6 +24,7 @@ export interface ViewportSpecialModeTargetInput {
 }
 
 export interface ViewportModel {
+  documentId: DocumentId | null;
   activeSectionView: SectionViewSession | null;
   hoverTarget: PrimitiveRef | null;
   measurementWitnesses: readonly MeasurementWitness[];
