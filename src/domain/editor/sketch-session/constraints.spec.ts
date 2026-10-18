@@ -191,6 +191,42 @@ function expectConflictExplanation(
   ).toEqual(unsatisfied);
 }
 
+// O2: pinning opens the value box; hover must no longer retarget its preview.
+test.each(["pin", "placement patch"])(
+  "O2: %s freezes the dimension preview until cancellation",
+  (placement) => {
+    const session = rectangleAndCircle();
+    const circle = circleTarget(session);
+    const side = entity(session, "Rectangle 1 bottom").target;
+    let next = selectSketchConstraintTarget(
+      beginSketchTool(session, "dimensionDistance"),
+      circle,
+    );
+    next = placement === "pin"
+      ? pinSketchConstraintPreview(next, [15, 3])
+      : patchSketchConstraintValue(next, {
+          intent: "setConstraintAnnotationPlacement", point: [15, 3],
+        });
+    expect(next.toolPresentation?.floatingInput?.label).toBe("Diameter");
+    const opened = next;
+    for (const target of [side, null, circle]) {
+      next = updateSketchConstraintHover(next, target);
+      next = updateSketchPointer(next, [4, 6]);
+      next = selectSketchConstraintTarget(next, side);
+      expect(next.constraintAuthoring).toEqual(opened.constraintAuthoring);
+      expect(next.toolPresentation).toEqual(opened.toolPresentation);
+    }
+    const cancelled = patchSketchConstraintValue(next, {
+      intent: "cancelConstraintValue",
+    });
+    expect(cancelled.toolPresentation?.floatingInput).toBeNull();
+    const picked = selectSketchConstraintTarget(cancelled, side);
+    expect(picked.constraintAuthoring?.selectedTargets.map((entry) => entry.target))
+      .toEqual([side]);
+    expect(picked.toolPresentation?.overlays).not.toEqual(opened.toolPresentation?.overlays);
+  },
+);
+
 // --- D5: measured prefill -------------------------------------------------
 
 test("T13c D5: Dimension on a rectangle side, a circle and the Radius variant opens prefilled with the measured value", () => {

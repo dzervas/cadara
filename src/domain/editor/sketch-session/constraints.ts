@@ -396,6 +396,11 @@ export function updateSketchConstraintHover(
     return session;
   }
 
+  // O2: the value box owns the pinned targets and preview until it closes.
+  if (authoring.isPreviewPinned) {
+    return session;
+  }
+
   const hoverTarget =
     target === null
       ? null
