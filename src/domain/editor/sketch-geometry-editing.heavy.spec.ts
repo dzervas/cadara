@@ -6920,7 +6920,7 @@ test.each([
 // the target). Review R-2: the browser never sends a null pointer (after the
 // pointer leaves the canvas the last on-canvas one is kept), so the
 // cleared case drives `updateSketchPointer(…, null)` synthetically.
-test("T13m: Split's boundary click (the last sketch pointer) picks the crossing; with no pointer, or a synthetically cleared one, the first crossing is cut; other tools record nothing", async () => {
+test("T13m: Split's boundary click (the last sketch pointer) picks the crossing; with no pointer, or a synthetically cleared one, the first crossing is cut; Trim also records its pick, other tools record nothing", async () => {
   let session = enterSketchSession(
     createNewSketchSession(
       createStandardPlaneDefinition("xy"),
@@ -6980,9 +6980,26 @@ test("T13m: Split's boundary click (the last sketch pointer) picks the crossing;
     });
     expect(first.at[0], `${pointer}`).toBeCloseTo(1, 9);
   }
-  // Trim records no pointer.
-  const trim = beginSketchTool(session, "trim");
-  expect(updateSketchPointer(trim, [1, 1]).activeEditTool).toBe(
-    trim.activeEditTool,
-  );
+  // O14: Trim, like Split, records the click pick and clears it off-sketch.
+  for (const toolId of ["trim", "sketchSplit"] as const) {
+    const armed = beginSketchTool(session, toolId);
+    const pointed = updateSketchPointer(armed, [1, 1]);
+    expect(pointed.activeEditTool!.pointer, toolId).toEqual([1, 1]);
+    expect(pointed.definition, `${toolId}: pointer authors nothing`).toBe(
+      armed.definition,
+    );
+    const cleared = updateSketchPointer(pointed, null);
+    expect(cleared.activeEditTool!.pointer, toolId).toBeUndefined();
+    expect(cleared.definition, toolId).toBe(armed.definition);
+    expect(updateSketchPointer(cleared, null).activeEditTool, toolId).toBe(
+      cleared.activeEditTool,
+    );
+  }
+  // The identity/no-op guarantee still holds for edit tools without a pick.
+  for (const toolId of ["sketchExtend", "offset", "sketchFillet"] as const) {
+    const armed = beginSketchTool(session, toolId);
+    expect(updateSketchPointer(armed, [1, 1]).activeEditTool, toolId).toBe(
+      armed.activeEditTool,
+    );
+  }
 });
