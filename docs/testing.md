@@ -132,7 +132,7 @@ Test render-local behavior, visual state contracts, and event wiring.
 - Do not add static policy checks to inflate non-UI coverage.
 - Do not test private helpers if a public seam exists.
 - Do not create a new one-off harness when a seam-specific shared fixture would make future tests cheaper.
-- Do not default to end-to-end coverage for behavior that can be proven in the logic lane.
+- Do not default to end-to-end coverage for behavior that can be proven in the logic lane. Authored/model semantics (geometry, requirements, features, history, persistence, exports) go through the in-process semantic session (`src/application/semantic/`, fixtures in `test/helpers/semantic-*.ts`); an E2E row must prove something only the browser has (pointer inference, picking, overlays, workers, peers, downloads). When a flow lacks a semantic seam, expose the seam (epic `cadara-d17` lists the known gaps) rather than reaching for Playwright.
 
 ## Placement Rules
 
