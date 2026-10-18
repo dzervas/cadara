@@ -12,6 +12,7 @@ import {
   beginSketchGeometryDrag,
   beginSketchTool,
   createNewSketchSession,
+  clearActiveSketchTool,
   finishSketchGeometryDrag,
   getSketchAnnotationDescriptors,
   patchSketchConstraintValue,
@@ -227,6 +228,45 @@ test.each(["pin", "placement patch"])(
   },
 );
 
+// O3/D2: committing a dimension starts another pick cycle, not Select.
+test.each(["dimensionDistance", "dimensionRadius"] as const)(
+  "O3/D2: %s stays armed and authors the next dimension without reactivation",
+  (toolId) => {
+    const session = draw(rectangleAndCircle(), "circle", [[22, 1], [24, 1]]);
+    const circles = session.definition.entities.filter((entry) => entry.kind === "circle");
+    let next = openDimensionInput(session, toolId, [circles[0]!.target], [15, 3]);
+    next = patchSketchConstraintValue(next, { value: "6" });
+    next = commitValue(next);
+    expect(next.definition.dimensions).toHaveLength(1);
+    const firstDimension = next.definition.dimensions[0];
+    expect(next.activeTool).toBe(toolId);
+    expect(next.status).toBe("collectingTargets");
+    expect(next.constraintAuthoring?.selectedTargets).toEqual([]);
+    expect(next.constraintAuthoring?.isPreviewPinned).toBe(false);
+    expect(next.toolPresentation?.floatingInput).toBeNull();
+    next = selectSketchConstraintTarget(next, circles[1]!.target);
+    next = pinSketchConstraintPreview(next, [25, 3]);
+    expect(next.toolPresentation?.floatingInput?.label)
+      .toBe(toolId === "dimensionRadius" ? "Radius" : "Diameter");
+    next = patchSketchConstraintValue(next, { value: "8" });
+    next = commitValue(next);
+    expect(next.definition.dimensions).toHaveLength(2);
+    expect(next.definition.dimensions[0]).toEqual(firstDimension);
+    expect(next.definition.dimensions[1]).toMatchObject({
+      kind: toolId === "dimensionRadius" ? "circleRadius" : "diameter",
+      entityId: circles[1]!.entityId,
+      value: createLiteralAuthoredValue(8),
+    });
+    expect(next.liveSolve?.accepted).toBe(true);
+    expect(next.activeTool).toBe(toolId);
+    expect(next.constraintAuthoring?.selectedTargets).toEqual([]);
+    // Escape from the fresh pick cycle returns to Select as before.
+    const cleared = clearActiveSketchTool(next);
+    expect(cleared.activeTool).toBeNull();
+    expect(cleared.constraintAuthoring).toBeNull();
+  },
+);
+
 // --- D5: measured prefill -------------------------------------------------
 
 test("T13c D5: Dimension on a rectangle side, a circle and the Radius variant opens prefilled with the measured value", () => {
@@ -403,6 +443,8 @@ test("T13c: a width-only rectangle dimension leaves the height free (a height dr
       [3, 0],
     ),
   );
+  // O3/D2: leave the re-armed Dimension tool before testing a Select drag.
+  session = clearActiveSketchTool(session);
   const corner = session.definition.points.find(
     (point) => point.position[0] === 5 && point.position[1] === 4,
   )!;
