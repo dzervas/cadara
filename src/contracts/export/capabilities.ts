@@ -11,6 +11,7 @@ export interface MeshTriangle {
 
 export interface MeshExportAccuracy {
   chordTolerance: number;
+  /** @x-unit radian */
   angleToleranceRadians: number;
 }
 

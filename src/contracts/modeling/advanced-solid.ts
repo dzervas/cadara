@@ -176,7 +176,11 @@ export interface TransformFeatureParameters {
   options:
     | { transformType?: "translation"; vector: readonly [number, number, number] }
     | { transformType?: "translation"; distance: MaybeAuthoredValue<number>; direction?: "positive" | "negative" }
-    | { transformType: "rotation"; angle: number | { source: "literal"; value: number } };
+    | {
+        transformType: "rotation";
+        /** Rotation angle in degrees. @x-unit degree */
+        angle: number | { source: "literal"; value: number };
+      };
 }
 
 export interface LinearPatternFeatureParameters {
@@ -192,6 +196,7 @@ export interface CircularPatternFeatureParameters {
   participants: readonly (BodyOperationParticipant | { role: "axis"; targets: readonly BodyOperationAxis[] })[];
   options: {
     instanceCount: MaybeAuthoredValue<number>;
+    /** @x-unit degree */
     angleDegrees: MaybeAuthoredValue<number>;
     equalSpace: MaybeAuthoredValue<boolean>;
     oppositeDirection: MaybeAuthoredValue<boolean>;
@@ -293,7 +298,10 @@ export type ChamferWidthOptions =
   | {
       widthForm: MaybeAuthoredValue<"offsetAngle">;
       distance: MaybeAuthoredValue<number>;
-      /** Degrees; executor converts to OCC radians. Valid executable range is (0, 90). */
+      /**
+       * Degrees; executor converts to OCC radians. Valid executable range is (0, 90).
+       * @x-unit degree
+       */
       angle: MaybeAuthoredValue<number>;
     };
 
@@ -322,7 +330,10 @@ export interface ChamferAdvancedOptions extends Record<string, unknown> {
   distance?: MaybeAuthoredValue<number>;
   distance1?: MaybeAuthoredValue<number>;
   distance2?: MaybeAuthoredValue<number>;
-  /** Degrees; executor converts to OCC radians. Valid executable range is (0, 90). */
+  /**
+   * Degrees; executor converts to OCC radians. Valid executable range is (0, 90).
+   * @x-unit degree
+   */
   angle?: MaybeAuthoredValue<number>;
 }
 
@@ -360,6 +371,7 @@ export type HoleAdvancedOptions =
       direction?: MaybeAuthoredValue<HoleDirection>;
       mainDiameter: MaybeAuthoredValue<number>;
       countersinkDiameter: MaybeAuthoredValue<number>;
+      /** Included countersink angle in degrees. @x-unit degree */
       countersinkAngleDegrees: MaybeAuthoredValue<number>;
       termination: MaybeAuthoredValue<HoleTermination>;
       depth?: MaybeAuthoredValue<number>;
@@ -408,6 +420,7 @@ export interface CircularPatternAdvancedOptions extends Record<string, unknown> 
    * divides by count to avoid duplicating the seed endpoint, while partial spans
    * divide by count - 1 so the last copied instance lands on the span endpoint.
    * When equalSpace is false, this is the per-instance step.
+   * @x-unit degree
    */
   angleDegrees: MaybeAuthoredValue<number>;
   equalSpace: MaybeAuthoredValue<boolean>;
@@ -792,7 +805,11 @@ export type SweepProfileControl =
 export type SweepTwistOption =
   | { type: "none" }
   | { type: "turns"; turns: MaybeAuthoredValue<number> }
-  | { type: "angle"; angle: MaybeAuthoredValue<number> }
+  | {
+      type: "angle";
+      /** Twist angle in radians. @x-unit radian */
+      angle: MaybeAuthoredValue<number>;
+    }
   | { type: "pitch"; pitch: MaybeAuthoredValue<number> };
 
 export interface SweepAdvancedOptions extends Record<string, unknown> {

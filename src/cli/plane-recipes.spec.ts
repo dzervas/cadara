@@ -125,7 +125,11 @@ test("real Bun plane recipes discover frames, resolve construction/feature alias
         ]);
         expect(malformed.code, malformed.stderr + malformed.stdout).toBe(2);
         expect(malformed.stdout).toBe("");
-        expect(malformed.stderr).toBe("Invalid semantic operation.\n");
+        const [json, summary] = malformed.stderr.split("\n");
+        expect(summary).toContain("Invalid semantic operation: unknown field parameters.reference.offset");
+        expect(JSON.parse(json!)).toMatchObject({
+          error: { code: "invalid-recipe", commandIndex: 2, commandId: "unknown-reference-field", path: "parameters.reference.offset" },
+        });
       }
     }
     const missing = await invoke(

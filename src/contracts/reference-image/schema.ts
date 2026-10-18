@@ -12,6 +12,7 @@ export interface ReferenceImagePlacement {
   center: SketchPoint2D;
   width: number;
   height: number;
+  /** @x-unit radian */
   rotationRadians: number;
 }
 

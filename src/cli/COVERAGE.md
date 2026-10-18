@@ -8,6 +8,8 @@ Every operation below has existing public application and/or actual Bun recipe
 coverage. Family qualification is retained from tickets 11–36; ticket 38 reruns
 the foundation and representative cross-family/failure/isolation seams, not the
 entire historical test union.
+Operation discovery (`--help`, `--schema`) and structured preflight/selection
+errors are qualified by `src/cli/recipe-discovery.spec.ts`.
 
 | Surface | Exact operations | Qualification seams (repository paths) / boundaries |
 | --- | --- | --- |
@@ -26,7 +28,7 @@ entire historical test union.
 | Authored history | `history.inspect`, `history.undo`, `history.redo` | `src/cli/history-recipes.spec.ts`, `src/cli/workflow-recipes.spec.ts`; active editing owner only; compensating edits, not restoration of old revision IDs |
 | Feature lifecycle | `feature.suppression.set`, `feature.reorder`, `feature.delete`, `body.rename`, `target.delete`, `timeline.cursor.set`, `timeline.reorder` | `src/cli/lifecycle-recipes.spec.ts`; production dependency/rollback gates; target deletion is not raw document patching |
 | Extrusion | `extrude.create`, `extrude.update` | `src/cli/extrusion-recipes.spec.ts`, `src/cli/extrusion-variant-recipes.spec.ts`; solid/sheet, bounded end/start/direction/boolean scope variants described in README |
-| Revolution | `revolve.create`, `revolve.update` | `src/cli/revolve-recipes.spec.ts`; supported solid/sheet profiles and explicit eligible axis, degrees and production booleans |
+| Revolution | `revolve.create`, `revolve.update` | `src/cli/revolve-recipes.spec.ts`; supported solid/sheet profiles and explicit eligible axis, angles in radians and production booleans |
 | Construction | `plane.create`, `plane.update` | `src/cli/plane-recipes.spec.ts`; supported canonical plane kinds/reference cardinalities only |
 | Edge treatment | `fillet.create`, `fillet.update`, `chamfer.create`, `chamfer.update` | `src/cli/edge-treatment-recipes.spec.ts`; eligible native solid edges, bounded production options, invalid geometry is not fulfillment |
 | Shell / thicken | `shell.create`, `shell.update`, `thicken.create`, `thicken.update` | `src/cli/shell-thicken-recipes.spec.ts`; native supported faces/sheets/directions and booleans; no arbitrary repair |

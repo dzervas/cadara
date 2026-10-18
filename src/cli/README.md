@@ -67,8 +67,9 @@ Command IDs and aliases are unique within the recipe. Inspection also accepts
 an explicit `{ documentId, revisionId, repositoryHeads }` basis; stale bases are
 refused. Basis aliases resolve only from authoritative result states, never
 labels or list order. Stdout is one JSON envelope containing correlated semantic
-results, unexecuted command IDs and awaited cleanup. Errors use stderr and the
-shell's existing 0/1/2 policy. Execution stops at the first failed operation;
+results, unexecuted command IDs and awaited cleanup (see
+[Errors and exit codes](#errors-and-exit-codes)); stderr carries a human summary
+under the shell's 0/1/2 policy. Execution stops at the first failed operation;
 prior changes are not rolled back. Each invocation owns a separate document.
 Repository commitment is not a disk save. `document.rename` takes `label` and
 a current `basis`; it may define a new alias with `as`. `document.save` takes
@@ -115,6 +116,85 @@ never match a qualified selector.
 xy and a yz single-rectangle sketch in one invocation, then extrudes each sketch's
 `Outer region` by owner into two distinct boxes, without saving, reopening,
 extra curves or generated IDs.
+
+### Discovering operations and units
+
+```bash
+bun main.js document recipe --help                     # concise human help and operation list
+bun main.js document recipe --schema                   # full machine-readable catalog
+bun main.js document recipe --schema revolve.create    # one operation
+```
+
+`--schema` prints JSON generated at build time by Typia from the closed
+`SemanticCommand` contract, the same types the recipe validator is generated
+from, so it cannot drift from what is accepted. Each `operations[]` entry has:
+
+- `schema`: the exact input shape (OpenAPI 3.1 JSON Schema; `$ref`s point into
+  `components`; objects are closed, `oneOf` lists the bounded variants);
+- `capability`: `featureKind`, `execution` and `preview`, taken from the
+  production kernel capability matrix (`supportedFeatureKinds` /
+  `previewableFeatureKinds`, also reported at runtime in
+  `discovery.model.capabilities`). Non-feature operations report
+  `preview: "not-applicable"`. For example, body mirrors/transforms and
+  extrusion-operation replay execute but are not previewable;
+- `units`: every field whose contract declares a unit (`x-unit`, `radian` or
+  `degree`). Lengths and coordinates use the catalog's `lengthUnit`
+  (`millimeter`). Angle units differ per operation and must not be guessed:
+  revolve, draft, sweep-twist and sketch-pattern angles are radians; chamfer,
+  hole countersink, body transform rotation and circular-pattern angles are
+  degrees.
+
+The catalog's `capabilityModel` separates four levels: a valid **shape** (refused
+before the kernel starts when violated), **execution** capability, **preview**
+capability, and **target-dependent refusal**: a valid command may still be
+refused for the current targets/options at runtime. That command executes and
+returns a `SemanticResult` with a `rejected`, `unavailable` or `failed` outcome
+and diagnostics; it is not a CLI error. `recipe` documents the CLI-only
+encoding (`as`, `{ alias }` basis/draft selectors and `{ alias, label }` target
+selectors). `--help` and `--schema` never start the modelling kernel.
+
+### Errors and exit codes
+
+A run that starts the kernel prints exactly one JSON envelope on stdout,
+`{ version: 1, results, ... }`, plus a human summary on stderr when it fails.
+A refused invocation or recipe (exit 2) keeps stdout empty, like every usage
+error; its first stderr line is the JSON `{ version: 1, error }` and the human
+summary follows:
+
+| Exit | JSON (channel) | Meaning |
+| --- | --- | --- |
+| 0 | `results`, `unexecuted: []`, `cleanup` (stdout) | Every operation completed (or was accepted-invalid) and cleanup closed. |
+| 1 | `results`, `unexecuted`, `cleanup` (stdout) | A semantic result failed; it is the last entry of `results`. Unchanged contract. |
+| 1 | `results`, `unexecuted`, `cleanup`, `error` (stdout) | A target/basis/draft selector could not resolve after an executed prefix. The affected command did **not** execute and has no `SemanticResult`; it is the first `unexecuted` ID. `error.code` is `selection-ambiguous` or `selection-unresolved`. |
+| 1 | `initialization`, `results: []`, `error` (stdout) | The modelling kernel failed to start (`error.code: "initialization"`). |
+| 2 | `error` (first stderr line; stdout empty) | Invalid invocation or recipe: nothing executed and the kernel never started. `error.code` is `usage`, `recipe-unreadable`, `invalid-recipe` or `unknown-operation`. |
+
+Executed-recipe and initialization envelopes are unchanged apart from the
+additive `error`. `error` fields:
+
+- `code`, `phase` (`preflight`, `initialization` or `resolution`), `message`
+  (also the stderr line), `help` (a `--schema`/`--help` command when useful);
+- `commandIndex`, `commandId`, `operation`: the affected recipe operation, or
+  `null` for recipe-level errors;
+- `path`: Typia notation (`parameters.profiles[0]`) relative to that operation
+  (relative to the recipe document when `commandIndex` is `null`);
+- `issues` (`invalid-recipe` contract violations): each `path`, Typia
+  `expected`, the offending `value`, the generated `schema` expected there
+  (including its `x-unit`), or `allowed` property names for an unknown field;
+- `suggestions` (`unknown-operation`), `knownAliases` and `selector` (alias
+  errors), `expected` (generated schema of the selector's field);
+- selection errors: `eligibleKinds`, `candidates` (every eligible reference
+  carrying the label: `{ label, target, owner }`, where `target` is the
+  canonical typed value and `owner` the owning `sketch` or `body` with its
+  label), and when nothing matched `available` (up to 50 eligible values) and
+  `availableCount`.
+
+Correct an ambiguous selector by narrowing it to the intended candidate's
+`owner`: add `"sketch"` naming the earlier alias whose discovery identifies that
+sketch (the publish result whose `discovery.sketch.sketchId` equals
+`owner.sketchId`). Alternatively use a candidate's `target` directly in the same
+document (for example after `document.open` of a saved file, where identities
+are stable).
 
 ### Feature lifecycle and rollback timeline
 
