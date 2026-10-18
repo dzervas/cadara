@@ -21,6 +21,8 @@ export async function invokeCliRecipe(
   directory: string,
   operations: readonly Record<string, unknown>[],
   options: Pick<ExecFileOptions, "cwd" | "timeout" | "env" | "maxBuffer">,
+  /** Extra `document recipe` options placed before the recipe path. */
+  args: readonly string[] = [],
 ) {
   const path = resolve(directory, "recipe.json");
   await writeFile(path, JSON.stringify({ version: 1, operations }));
@@ -29,7 +31,7 @@ export async function invokeCliRecipe(
       code: 0,
       ...(await promisify(execFile)(
         "bun",
-        [cliEntry(), "document", "recipe", path],
+        [cliEntry(), "document", "recipe", ...args, path],
         { ...options, encoding: "utf8" },
       )),
     };
