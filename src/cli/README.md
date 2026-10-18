@@ -82,6 +82,40 @@ For example, append `{ "version": 1, "commandId": "save", "operation":
 "document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
 Help, capture and invalid recipes do not start the modeling runtime.
 
+### Sketch-owner-qualified target selectors
+
+Generated labels are local to a sketch: two sketches each have an `Outer region`,
+`Rectangle 1 left` and so on, so `{ "alias": "post", "label": "Outer region" }`
+is ambiguous once both are in the named discovery. Any `{ alias, label }` target
+selector may add `"sketch": "<earlier alias>"` to select only references owned
+by that alias's sketch:
+
+```json
+{ "alias": "post", "label": "Outer region", "sketch": "base" }
+```
+
+The owner alias names the sketch its discovery identifies: a `sketch.publish`
+result's published sketch, or the sketch a private-draft result (`sketch.begin`,
+`sketch.open`, `sketch.author`, …) is editing. Use the publish alias after
+publication: a new sketch receives its durable ID when published, so its draft
+alias no longer matches published references. Selection is otherwise unchanged:
+the exact label must match exactly one operation-eligible reference owned by that
+sketch in the `alias` discovery. Missing, foreign or stale-draft owners, wrong
+kinds and several matches inside the owner fail before the operation (completed
+prefix and cleanup are reported, the rest is unexecuted); unknown or later owner
+aliases and any other selector key are usage errors before runtime startup. The
+owner only narrows label lookup: the resolved typed reference still goes through
+basis, draft-generation and target currentness checks, and explicit typed
+references (`{ "kind": "region", "sketchId", "regionId" }`) work as before.
+Selectors without `sketch` keep their existing meaning. Non-reference lookups
+(variable names, private dimension/derivation labels outside the owner's draft)
+never match a qualified selector.
+
+[`examples/scoped-profiles.json`](./examples/scoped-profiles.json) publishes an
+xy and a yz single-rectangle sketch in one invocation, then extrudes each sketch's
+`Outer region` by owner into two distinct boxes, without saving, reopening,
+extra curves or generated IDs.
+
 ### Feature lifecycle and rollback timeline
 
 The following operations require a current `basis` and explicit `intent`

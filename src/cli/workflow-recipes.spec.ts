@@ -428,7 +428,7 @@ describe.each(["source", "extracted package"])(
         const invocation = [runtime.entry, "document", "recipe"];
         const options = { cwd: runtime.cwd, timeout: 90000 };
         const plateDocuments: string[] = [];
-        for (const name of ["plate", "plate", "sketch"]) {
+        for (const name of ["plate", "plate", "sketch", "scoped-profiles"]) {
           const output = await exec(
             "bun",
             [...invocation, join(extracted, "examples", `${name}.json`)],
