@@ -71,11 +71,11 @@ import {
   SketchPickChooser,
   type SketchPickChooserModel,
 } from "@/components/cad/sketch-pick-chooser";
+import { useDwellHint } from "@/hooks/dwell-hint";
 import {
   createSketchNearGapHint,
   createSketchPickChooserItems,
   createSketchPickHint,
-  getSketchPickHintText,
   handleSketchPickChooserKeyDown,
   SKETCH_PICK_HINT_LEFT_PX,
   type SketchPickChooserItem,
@@ -642,10 +642,9 @@ export function ThreeCadViewport({
       sketch: SketchStackPick | null;
     };
   } | null>(null);
-  // The overlap the hint shows (sticky until another stack is hovered, a
-  // click, or a definition/tool change; T11e) and the open chooser's pick
-  // context (T11-D6).
-  const pickOverlapRef = useRef<SketchStackPickAt | null>(null);
+  // The open chooser's pick context (T11-D6). The displayed hint owns its
+  // overlap context, including during linger, so Choose never uses a stack
+  // that is still waiting for dwell (T11e).
   const chooserRef = useRef<{
     x: number;
     y: number;
@@ -725,12 +724,12 @@ export function ThreeCadViewport({
   ]);
   // The hint with the definition and tool it was computed for; it shows
   // only while both are current (review A-3).
-  const [pickHint, setPickHint] = useState<{
-    hint: SketchPickHintModel | null;
+  const { value: pickHint, timing: pickHintTiming } = useDwellHint<{
+    hint: SketchPickHintModel;
     definition: unknown;
     activeTool: unknown;
-  }>({ hint: null, definition: null, activeTool: null });
-  const pickHintTextRef = useRef<string | null>(null);
+    overlap: SketchStackPickAt;
+  }>();
   const lastFitViewRequestIdRef = useRef(fitViewRequestId);
   const pendingFitViewRequestIdRef = useRef<number | null>(null);
   const selectRef = useRef(onSelect);
@@ -1192,35 +1191,19 @@ export function ThreeCadViewport({
       ),
     [sketchDisplayRenderables, sketchHoverScope],
   );
-  // The near-gap hint's hovered end is sticky like the overlap hint (T11e):
-  // it stays while nothing is hovered (empty space, the chip itself) and is
-  // replaced by the next hovered target. Adjusted while rendering.
-  const [nearGapHover, setNearGapHover] = useState<{
-    scope: string | null;
-    target: PrimitiveRef | null;
-  }>({ scope: null, target: null });
-  if (
-    hoverTarget !== null &&
-    (nearGapHover.scope !== sketchHoverScope ||
-      !nearGapHover.target ||
-      !primitiveRefEquals(nearGapHover.target, hoverTarget))
-  ) {
-    setNearGapHover({ scope: sketchHoverScope, target: hoverTarget });
-  }
   // Hovering or selecting an end of a near gap shows the hint with Merge…
   // (T13k, D26); only while no tool is active.
   // Memoised: the hint runs the merge refusal check for its pair.
-  const nearGapHint = useMemo(
+  const nearGapCandidate = useMemo(
     () =>
       sketchDefinition && sketchActiveTool === null
         ? createSketchNearGapHint({
             gaps: sketchNearGaps,
-            pointIds: [
-              ...(nearGapHover.scope === sketchHoverScope
-                ? [nearGapHover.target]
-                : []),
-              ...[...selection].reverse(),
-            ].flatMap((target) =>
+            // Empty space starts linger even if an endpoint is selected.
+            pointIds: (hoverTarget
+              ? [hoverTarget, ...[...selection].reverse()]
+              : []
+            ).flatMap((target) =>
               target?.kind === "sketchPoint" &&
               target.sketchId === sketchHoverScope
                 ? [target.pointId]
@@ -1230,7 +1213,7 @@ export function ThreeCadViewport({
           })
         : null,
     [
-      nearGapHover,
+      hoverTarget,
       selection,
       sketchActiveTool,
       sketchDefinition,
@@ -1238,14 +1221,34 @@ export function ThreeCadViewport({
       sketchNearGaps,
     ],
   );
+  const { value: nearGapDisplay, timing: nearGapTiming } = useDwellHint<{
+    hint: NonNullable<typeof nearGapCandidate>;
+    definition: unknown;
+  }>();
+  const nearGapHint =
+    nearGapDisplay?.definition === sketchDefinition && sketchActiveTool === null
+      ? nearGapDisplay?.hint ?? null
+      : null;
+  useEffect(() => {
+    if (nearGapCandidate) {
+      nearGapTiming.hover(
+        `${nearGapCandidate.sourcePointId}|${nearGapCandidate.destinationPointId}`,
+        { hint: nearGapCandidate, definition: sketchDefinition },
+      );
+    } else {
+      nearGapTiming.leave();
+    }
+  }, [nearGapCandidate, nearGapTiming, sketchDefinition]);
   useEffect(() => {
     pickCycleRef.current = null;
-    pickHintTextRef.current = null;
-    pickOverlapRef.current = null;
+    pickHintTiming.clear();
+    nearGapTiming.clear();
     if (detachSketchPickChooser()) focusCanvas();
   }, [
     detachSketchPickChooser,
     focusCanvas,
+    pickHintTiming,
+    nearGapTiming,
     sketchDefinition,
     sketchActiveTool,
   ]);
@@ -1275,12 +1278,18 @@ export function ThreeCadViewport({
 
   /** Clears the overlap hint and its stored overlap (T11e: a click). */
   const clearSketchPickHint = useCallback(() => {
-    pickOverlapRef.current = null;
-    if (pickHintTextRef.current !== null) {
-      pickHintTextRef.current = null;
-      setPickHint({ hint: null, definition: null, activeTool: null });
-    }
-  }, []);
+    pickHintTiming.clear();
+    nearGapTiming.clear();
+  }, [pickHintTiming, nearGapTiming]);
+
+  useEffect(() => {
+    // Escape also dismisses passive hints when no active tool changes scope.
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearSketchPickHint();
+    };
+    window.addEventListener("keydown", dismiss, true);
+    return () => window.removeEventListener("keydown", dismiss, true);
+  }, [clearSketchPickHint]);
 
   const setViewportHover = useCallback((target: PrimitiveRef | null) => {
     hoverTargetRef.current = target;
@@ -2213,12 +2222,13 @@ export function ThreeCadViewport({
     /**
      * The hint for the sketch stack hovered or clicked at (x, y) (T11d): it
      * replaces the shown one, and is kept as the overlap "Choose…" opens
-     * (T11e). Empty space never calls this, so the last overlap stays.
+     * (T11e). Hover dwells; click-generated hints remain immediate.
      */
     const updateSketchPickHint = (
       at: SketchStackPickAt,
       previewTarget: PrimitiveRef | null,
       wiring: SketchPickCycleWiring | null,
+      immediate = false,
     ) => {
       const session = sketchSessionRef.current;
       const targets =
@@ -2232,16 +2242,19 @@ export function ThreeCadViewport({
               definition: at.sketch.displayDefinition,
             })
           : null;
-      pickOverlapRef.current = hint ? at : null;
-      const text = hint ? getSketchPickHintText(hint) : null;
-
-      if (text !== pickHintTextRef.current) {
-        pickHintTextRef.current = text;
-        setPickHint({
-          hint,
-          definition: session?.definition ?? null,
-          activeTool: session?.activeTool ?? null,
-        });
+      if (hint && targets) {
+        pickHintTiming.hover(
+          targets.map(getPrimitiveRefKey).sort().join("|"),
+          {
+            hint,
+            definition: session?.definition ?? null,
+            activeTool: session?.activeTool ?? null,
+            overlap: at,
+          },
+          immediate,
+        );
+      } else {
+        pickHintTiming.leave();
       }
     };
 
@@ -2420,8 +2433,10 @@ export function ThreeCadViewport({
         canvasElement.getBoundingClientRect(),
       );
 
-    // The overlap hint stays (sticky last overlap, T11e).
+    // Keep the last actionable overlap during the bounded linger (T11e).
     const clearHover = () => {
+      pickHintTiming.leave();
+      nearGapTiming.leave();
       lastPickedTargetRef.current = null;
       if (hoverTargetRef.current !== null) {
         hoverTargetRef.current = null;
@@ -2662,13 +2677,15 @@ export function ThreeCadViewport({
           )
         : (pick.top?.target ?? null);
 
-      // Any stack replaces the hint (T11e); empty space keeps it.
+      // A new stack dwells before replacing the last actionable hint.
       if (pick.sketch && pick.sketch.stack.length > 0) {
         updateSketchPickHint(
           { x: event.clientX, y: event.clientY, sketch: pick.sketch },
           target,
           wiring,
         );
+      } else {
+        pickHintTiming.leave();
       }
 
       if (target && acceptsViewportTarget(target)) {
@@ -3016,6 +3033,8 @@ export function ThreeCadViewport({
     };
 
     const handlePointerLeave = (event: PointerEvent) => {
+      pickHintTiming.leave();
+      nearGapTiming.leave();
       if (sectionDragRef.current === null && !sketchGeometryDragRef.current) {
         cancelSketchGeometryDragMove();
         primaryPointerDownRef.current = null;
@@ -3192,6 +3211,7 @@ export function ThreeCadViewport({
               wiring,
             ),
             wiring,
+            true,
           );
           return;
         }
@@ -3216,7 +3236,7 @@ export function ThreeCadViewport({
       );
 
       if (at) {
-        updateSketchPickHint(at, clicked.preview, wiring);
+        updateSketchPickHint(at, clicked.preview, wiring, true);
       }
 
       // The hover now previews what the next click would pick (the
@@ -3385,6 +3405,8 @@ export function ThreeCadViewport({
   }, [
     cancelSketchGeometryDragMove,
     canvasReadyVersion,
+    pickHintTiming,
+    nearGapTiming,
     clearSketchPickHint,
     closeSketchPickChooser,
     openSketchPickChooser,
@@ -3704,13 +3726,13 @@ export function ThreeCadViewport({
         <SketchPickHint
           hint={
             sketchSession &&
-            pickHint.definition === sketchDefinition &&
+            pickHint?.definition === sketchDefinition &&
             pickHint.activeTool === sketchActiveTool
               ? pickHint.hint
               : null
           }
           onChoose={() => {
-            const overlap = pickOverlapRef.current;
+            const overlap = pickHint?.overlap;
             // Nothing to choose any more (the selection or its filter
             // changed): the hint goes (T11e review A-2).
             if (!overlap || !openSketchPickChooser(overlap)) {
