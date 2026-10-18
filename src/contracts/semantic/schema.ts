@@ -55,6 +55,7 @@ export interface SemanticRequirementInput {
     | "constraintPierce" | "constraintSymmetric" | "constraintFix";
   targets: readonly SemanticRequirementTarget[];
   mode: "driving" | "reference";
+  /** Driving dimensions: a positive number, degrees for an angle (dimensionDistance between nonparallel lines), document length units otherwise. null for constraints and reference dimensions. */
   value: number | null;
 }
 
@@ -118,11 +119,26 @@ export type SemanticSketchCommand = CommandIdentity & {
     | ({ operation: "sketch.requirement.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticRequirementInput)
     | ({ operation: "sketch.dimension.add"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticDimensionInput)
     | { operation: "sketch.dimension.reference"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; intent: "fulfill" | "author-invalid" }
-    | { operation: "sketch.dimension.update"; draft: SemanticDraftBasis; dimensionId: import("@/contracts/shared/ids").DimensionId; /** Numbers: degrees for angle dimensions, document length units otherwise. Strings are expressions (angles in radians). */ value: number | string; intent: "fulfill" | "author-invalid" }
+    | {
+        operation: "sketch.dimension.update";
+        draft: SemanticDraftBasis;
+        dimensionId: import("@/contracts/shared/ids").DimensionId;
+        /** Numbers: degrees for angle dimensions, document length units otherwise. Strings are expressions (angles in radians). */
+        value: number | string;
+        intent: "fulfill" | "author-invalid";
+      }
     | { operation: "sketch.construction.set"; draft: SemanticDraftBasis; target: Extract<DurableRef, { kind: "sketchPoint" | "sketchEntity" }>; construction: boolean; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.update"; draft: SemanticDraftBasis; edit: SemanticSketchGeometryEdit; intent: "fulfill" | "author-invalid" }
     | ({ operation: "sketch.geometry.build"; draft: SemanticDraftBasis; intent: "fulfill" | "author-invalid" } & SemanticSketchConstruction)
-    | { operation: "sketch.derivation.create"; draft: SemanticDraftBasis; kind: "linearPattern" | "circularPattern" | "transform"; targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[]; /** linearPattern/transform: x offset in document length units; circularPattern: rotation in radians. */ value: number; intent: "fulfill" | "author-invalid" }
+    | {
+        operation: "sketch.derivation.create";
+        draft: SemanticDraftBasis;
+        kind: "linearPattern" | "circularPattern" | "transform";
+        targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[];
+        /** linearPattern/transform: x offset in document length units; circularPattern: rotation in radians. */
+        value: number;
+        intent: "fulfill" | "author-invalid";
+      }
     | { operation: "sketch.mirror.remove"; draft: SemanticDraftBasis; derivationId: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.mirror.repair"; draft: SemanticDraftBasis; derivationId: string; repair: { kind: "axis"; target: Extract<DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef } | { kind: "original"; output: Extract<DurableRef, { kind: "sketchEntity" }>; target: Extract<DurableRef, { kind: "sketchEntity" }> }; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.mirror.create"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[]; axis: Extract<DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef; intent: "fulfill" | "author-invalid" }

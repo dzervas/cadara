@@ -11,7 +11,7 @@ import {
 } from "@/contracts/semantic/runtime-schema";
 
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
-import { isValidSketchOwner, scopeSketchOwners } from "./sketch-owner-targets";
+import { scopeSketchOwners } from "./sketch-owner-targets";
 import {
   contractSchemaAt,
   recipeCatalog,
@@ -77,6 +77,12 @@ interface RecipeOperation {
 }
 function isAlias(value: unknown): value is Alias {
   return !!value && typeof value === "object" && "alias" in value;
+}
+/** Resolve a selector's unique label among labelled non-reference records (variables, dimensions, derivations). */
+function resolveLabelled<T>(message: string, target: TargetAlias, kind: string, records: readonly { label: string; target: T }[]) {
+  const matches = records.filter(record => record.label === target.label);
+  if (matches.length !== 1) throw selectionError(message, target, [kind], matches, undefined, records);
+  return matches[0]!.target;
 }
 const example = {
   version: 1,
@@ -218,7 +224,7 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
     }
     function validateTarget(value: unknown, placeholder: string) {
       if (!isAlias(value)) return value;
-      if (Object.keys(value).length !== ("sketch" in value ? 3 : 2) || !isValidSketchOwner(value, aliases) || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
+      if (Object.keys(value).length !== ("sketch" in value ? 3 : 2) || ("sketch" in value && (typeof value.sketch !== "string" || !aliases.has(value.sketch))) || typeof value.alias !== "string" || !aliases.has(value.alias) || !("label" in value) || typeof value.label !== "string" || !value.label)
         throw invalidRecipe("Unknown or ambiguous target alias.", { selector: value, knownAliases: [...aliases] });
       return placeholder;
     }
@@ -421,7 +427,8 @@ function help() {
     "Recipe extras: `as` names an operation's discovery; `basis`/`draft` accept an object with `alias`; typed",
     "targets accept `alias` + `label` (the unique eligible discovered label), optionally `sketch` (an earlier alias",
     "naming the owning sketch). Lengths are " + `${recipeLengthUnit}s; every`,
-    "angle field states its unit (radian or degree) in the schema `x-unit` and the operation's `units`.",
+    "angle field states its unit (radian or degree) in the schema `x-unit` and the operation's `units`; a `value`",
+    "whose unit depends on the dimension or derivation kind states its units in its schema `description`.",
     "",
     `Operations (${recipeOperationNames.length}):`,
     ...[...families].map(([family, names]) => `  ${family}: ${names.join(", ")}`),
@@ -534,6 +541,7 @@ export const documentRecipesCommand: CommandModule = {
     const snapshots = new Map<string, SemanticDiscovery>();
     let succeeded = true;
     let stopped: RecipeCliError | undefined;
+    let failure: { error: unknown } | undefined;
     try {
       // Owner-scoped selectors are rewritten copies; map them back for errors.
       const origins = new Map<unknown, unknown>();
@@ -563,40 +571,24 @@ export const documentRecipesCommand: CommandModule = {
         }
         if (command.operation === "variable.update" && isAlias(command.variableId)) {
           const target = command.variableId;
-          const matches = aliases.get(target.alias)?.variables?.filter(variable => variable.name === target.label) ?? [];
-          if (matches.length !== 1) {
-            const variables = (aliases.get(target.alias)?.variables ?? []).map(variable => ({ label: variable.name, target: variable.variableId }));
-            throw selectionError("Variable target alias is missing or ambiguous.", target, ["variable"], variables.filter(v => v.label === target.label), undefined, variables);
-          }
-          command.variableId = matches[0]!.variableId;
+          const variables = (aliases.get(target.alias)?.variables ?? []).map(variable => ({ label: variable.name, target: variable.variableId }));
+          command.variableId = resolveLabelled("Variable target alias is missing or ambiguous.", target, "variable", variables);
         }
         if ((command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && isAlias(command.dimensionId)) {
           const target = command.dimensionId;
           const sketch = aliases.get(target.alias)?.sketch;
-          const matches = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].filter(d => d.label === target.label);
-          if (matches.length !== 1) {
-            const dimensions = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].map(d => ({ label: d.label, target: d.dimensionId }));
-            throw selectionError("Dimension target alias is missing or ambiguous.", target, ["dimension"], dimensions.filter(d => d.label === target.label), undefined, dimensions);
-          }
-          command.dimensionId = matches[0]!.dimensionId;
+          const dimensions = [...(sketch?.requirements ?? []), ...(sketch?.measurements ?? [])].map(d => ({ label: d.label, target: d.dimensionId }));
+          command.dimensionId = resolveLabelled("Dimension target alias is missing or ambiguous.", target, "dimension", dimensions);
         }
         if ((command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair") && isAlias(command.derivationId)) {
           const target = command.derivationId;
-          const matches = aliases.get(target.alias)?.sketch?.mirrors.filter(mirror => mirror.label === target.label) ?? [];
-          if (matches.length !== 1) {
-            const mirrors = (aliases.get(target.alias)?.sketch?.mirrors ?? []).map(mirror => ({ label: mirror.label, target: mirror.derivationId }));
-            throw selectionError("Mirror target alias is missing or ambiguous.", target, ["mirror"], mirrors.filter(m => m.label === target.label), undefined, mirrors);
-          }
-          command.derivationId = matches[0]!.derivationId;
+          const mirrors = (aliases.get(target.alias)?.sketch?.mirrors ?? []).map(mirror => ({ label: mirror.label, target: mirror.derivationId }));
+          command.derivationId = resolveLabelled("Mirror target alias is missing or ambiguous.", target, "mirror", mirrors);
         }
         if (command.operation === "sketch.offset.remove" && isAlias(command.derivationId)) {
           const target = command.derivationId;
-          const matches = aliases.get(target.alias)?.sketch?.offsets.filter(offset => offset.label === target.label) ?? [];
-          if (matches.length !== 1) {
-            const offsets = (aliases.get(target.alias)?.sketch?.offsets ?? []).map(offset => ({ label: offset.label, target: offset.derivationId }));
-            throw selectionError("Offset target alias is missing or ambiguous.", target, ["offset"], offsets.filter(o => o.label === target.label), undefined, offsets);
-          }
-          command.derivationId = matches[0]!.derivationId;
+          const offsets = (aliases.get(target.alias)?.sketch?.offsets ?? []).map(offset => ({ label: offset.label, target: offset.derivationId }));
+          command.derivationId = resolveLabelled("Offset target alias is missing or ambiguous.", target, "offset", offsets);
         }
         function resolveSketchTarget(target: import("@/contracts/shared/references").DurableRef | import("@/contracts/shared/references").SketchTangentHandleRef | TargetAlias, kinds: readonly string[]) {
           if (!isAlias(target)) return target;
@@ -607,12 +599,12 @@ export const documentRecipesCommand: CommandModule = {
         function resolveMirrorAxis(target: import("@/contracts/shared/references").SketchDatumReferenceRef | Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | TargetAlias) {
           if (!isAlias(target)) return target;
           const discovery = aliases.get(target.alias);
-          const matches = [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => r.label === target.label && (r.target.kind === "sketchEntity" || r.target.kind === "sketchDatumReference"));
+          const kinds = ["sketchEntity", "sketchDatumReference"];
+          const eligible = [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind));
+          const matches = eligible.filter(r => r.label === target.label);
           const found = matches.length === 1 ? matches[0]!.target : null;
-          if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference")) {
-            const kinds = ["sketchEntity", "sketchDatumReference"];
-            throw selectionError("Mirror axis alias is missing or ambiguous.", target, kinds, matches, discovery, [...(discovery?.references ?? []), ...(discovery?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind)));
-          }
+          if (!found || (found.kind !== "sketchEntity" && found.kind !== "sketchDatumReference"))
+            throw selectionError("Mirror axis alias is missing or ambiguous.", target, kinds, matches, discovery, eligible);
           return found;
         }
         if ("featureId" in command && isAlias(command.featureId)) {
@@ -681,11 +673,11 @@ export const documentRecipesCommand: CommandModule = {
         if (command.operation === "sketch.requirement.add") command.targets = command.targets.map(value => {
           if (!isAlias(value)) return value;
           const discovered = aliases.get(value.alias);
-          const matches = [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => r.label === value.label && ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"].includes(r.target.kind));
-          if (matches.length !== 1) {
-            const kinds = ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"];
-            throw selectionError("Requirement target alias is missing or ambiguous.", value, kinds, matches, discovered, [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind)));
-          }
+          const kinds = ["sketchPoint", "sketchEntity", "sketchDatumReference", "projectedReferenceGeometry"];
+          const eligible = [...(discovered?.references ?? []), ...(discovered?.sketch?.operands ?? [])].filter(r => kinds.includes(r.target.kind));
+          const matches = eligible.filter(r => r.label === value.label);
+          if (matches.length !== 1)
+            throw selectionError("Requirement target alias is missing or ambiguous.", value, kinds, matches, discovered, eligible);
           const target = matches[0]!.target;
           if (target.kind !== "sketchPoint" && target.kind !== "sketchEntity" && target.kind !== "sketchDatumReference" && target.kind !== "projectedReferenceGeometry") throw new Error("Invalid requirement target.");
           return target;
@@ -960,17 +952,28 @@ export const documentRecipesCommand: CommandModule = {
         succeeded = false;
         break;
       }
-    } finally {
-      const cleanup = await opened.session.close();
-      succeeded &&= cleanup.kind === "closed";
-      const unexecuted = operations
-        .slice(results.length)
-        .map((operation) => operation.command.commandId);
-      print(
-        { version: 1, results, unexecuted, cleanup, ...(stopped ? { error: stopped } : {}) },
-        () => compactRecipeOutput(results, unexecuted, cleanup, stopped),
-      );
+    } catch (error) {
+      failure = { error };
     }
+    const cleanup = await opened.session.close();
+    succeeded &&= cleanup.kind === "closed";
+    const unexecuted = operations
+      .slice(results.length)
+      .map((operation) => operation.command.commandId);
+    const printEnvelope = () => print(
+      { version: 1, results, unexecuted, cleanup, ...(stopped ? { error: stopped } : {}) },
+      () => compactRecipeOutput(results, unexecuted, cleanup, stopped),
+    );
+    if (failure) {
+      // The unexpected failure stays authoritative over an output error, which is reported beside it.
+      try {
+        printEnvelope();
+      } catch (printError) {
+        io.stderr(`Recipe output could not be printed: ${printError instanceof Error ? printError.message : String(printError)}\n`);
+      }
+      throw failure.error;
+    }
+    printEnvelope();
     return succeeded
       ? { ok: true }
       : {

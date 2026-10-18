@@ -1,7 +1,7 @@
 import type { SemanticDiscovery } from "@/contracts/semantic/schema";
 import { selectionError } from "@/cli/commands/recipe-diagnostics";
 
-/**
+/*
  * Owner-qualified target selector `{ alias, label, sketch }`: `sketch` names an
  * earlier recipe alias whose discovery identifies one sketch (the sketch a
  * `sketch.publish` result published, or the sketch a private draft edits).
@@ -9,15 +9,6 @@ import { selectionError } from "@/cli/commands/recipe-diagnostics";
  * references in the `alias` snapshot, so eligible kinds, uniqueness and
  * currentness checks are unchanged. Unqualified selectors keep their meaning.
  */
-export function isValidSketchOwner(
-  value: Record<string, unknown>,
-  aliases: ReadonlySet<string>,
-) {
-  return (
-    !("sketch" in value) ||
-    (typeof value.sketch === "string" && aliases.has(value.sketch))
-  );
-}
 
 /** The canonical identity used by the alias snapshot's own sketch references. */
 function ownerOf(discovery: SemanticDiscovery | undefined) {
@@ -52,7 +43,7 @@ function scope(discovery: SemanticDiscovery, owner: string): SemanticDiscovery {
 export function scopeSketchOwners<T>(
   command: T,
   snapshots: ReadonlyMap<string, SemanticDiscovery>,
-  origins?: Map<unknown, unknown>,
+  origins: Map<unknown, unknown>,
 ): { command: T; aliases: Map<string, SemanticDiscovery> } {
   const aliases = new Map(snapshots);
   const scoped = new Map<string, string>();
@@ -63,7 +54,7 @@ export function scopeSketchOwners<T>(
       const copy = Object.fromEntries(
         Object.entries(value).map(([key, entry]) => [key, rewrite(entry)]),
       );
-      origins?.set(copy, value);
+      origins.set(copy, value);
       return copy;
     }
     const { alias, sketch, ...selector } = value as {
@@ -81,7 +72,7 @@ export function scopeSketchOwners<T>(
       scoped.set(key, name);
     }
     const rewritten = { ...selector, alias: scoped.get(key) };
-    origins?.set(rewritten, value);
+    origins.set(rewritten, value);
     return rewritten;
   }
   return { command: rewrite(command) as T, aliases };

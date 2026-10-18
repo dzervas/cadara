@@ -75,10 +75,13 @@ test("relationship label aliases resolve only in the terminal client, not shared
     'validateTarget(command.derivationId, "derivation_validation")',
   );
   expect(client).toContain(
-    "offsets.filter(offset => offset.label === target.label)",
+    "offset => ({ label: offset.label, target: offset.derivationId })",
   );
   expect(client).toContain(
-    'throw selectionError("Offset target alias is missing or ambiguous."',
+    'resolveLabelled("Offset target alias is missing or ambiguous.", target, "offset", offsets)',
+  );
+  expect(client).toContain(
+    "const matches = records.filter(record => record.label === target.label);\n  if (matches.length !== 1) throw selectionError(message, target, [kind], matches, undefined, records);",
   );
   for (const path of [
     "src/domain/editor/sketch-session/editing.ts",

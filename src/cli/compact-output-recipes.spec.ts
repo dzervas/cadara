@@ -410,18 +410,23 @@ it("reports initialization failure as a compact envelope when native assets are 
   });
 }, 60000);
 
-it("projects failed cleanup without hiding its failures or settled results", () => {
-  const state: SemanticState = {
-    documentId: "doc_a",
-    revisionId: "rev_1",
-    repositoryHeads: ["memory:a:1"],
-    editingContext: { kind: "document" },
-    draft: null,
-  };
-  const settled: SemanticResult = {
+const documentState: SemanticState = {
+  documentId: "doc_a",
+  revisionId: "rev_1",
+  repositoryHeads: ["memory:a:1"],
+  editingContext: { kind: "document" },
+  draft: null,
+};
+/** A document inspection result with an unchanged live state. */
+function makeInspectResult(
+  commandId: string,
+  outcome: SemanticResult["outcome"],
+  discovery: SemanticResult["discovery"],
+): SemanticResult {
+  return {
     version: 1,
     correlation: {
-      commandId: "queued",
+      commandId,
       family: "document",
       intent: "inspect",
       basis: {
@@ -430,17 +435,25 @@ it("projects failed cleanup without hiding its failures or settled results", () 
         repositoryHeads: ["memory:a:1"],
       },
     },
-    outcome: { kind: "canceled", phase: "not-started" },
+    outcome,
     completion: {
-      live: { kind: "unchanged", state },
+      live: { kind: "unchanged", state: documentState },
       handoff: { kind: "not-required" },
       geometry: { kind: "not-required" },
       persistence: { kind: "not-required" },
       file: { kind: "not-required" },
     },
     diagnostics: [],
-    discovery: null,
+    discovery,
   };
+}
+
+it("projects failed cleanup without hiding its failures or settled results", () => {
+  const settled = makeInspectResult(
+    "queued",
+    { kind: "canceled", phase: "not-started" },
+    null,
+  );
   const diagnostics = [
     {
       code: "release-failed",
@@ -471,6 +484,45 @@ it("projects failed cleanup without hiding its failures or settled results", () 
       diagnostics,
     },
   });
+});
+
+it("keeps unavailable (null) body topology distinct from an empty topology list", () => {
+  const body = { kind: "solid" as const, bounds: null };
+  const inspected = makeInspectResult(
+    "inspect",
+    { kind: "completed", change: "unchanged" },
+    {
+      state: documentState,
+      references: [],
+      history: null,
+      model: {
+        features: [],
+        bodies: [
+          { ...body, bodyId: "body_unavailable", topology: null },
+          { ...body, bodyId: "body_empty", topology: [] },
+        ],
+      },
+    },
+  );
+  const output = compactRecipeOutput([inspected], [], {
+    kind: "closed",
+    settled: [],
+    resourcesReleased: true,
+  });
+  expectValidCompact(output);
+  if (output.initialization)
+    throw new Error("Expected an executed compact envelope");
+  const discovery = output.results[0]!.discovery;
+  if (discovery?.detail !== "included")
+    throw new Error("Expected the only discovery to be included");
+  expect(discovery.model!.bodies).toEqual([
+    { ...body, bodyId: "body_unavailable", topology: null },
+    {
+      ...body,
+      bodyId: "body_empty",
+      topology: { detail: "omitted", entries: 0 },
+    },
+  ]);
 });
 
 it("the shipped compact consumer example summarizes success and failure from JSON alone", async () => {
