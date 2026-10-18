@@ -448,14 +448,16 @@ test("T13d: the dimension edit popup renders Make reference / Make driving contr
     0,
   ).toolPresentation?.floatingInput;
   const drivingMarkup = render(driving);
-  expect(drivingMarkup).toContain("Make reference");
+  expect(drivingMarkup).toContain('role="switch"');
+  expect(drivingMarkup).toContain('checked=""');
   expect(drivingMarkup).toContain(">Save<");
   expect(drivingMarkup).not.toContain("data-floating-input-readout");
 
-  const reference = editDimension(
+  const referenceSession = editDimension(
     makeCircleWithDiameterSession({ reference: true }),
     0,
-  ).toolPresentation?.floatingInput;
+  );
+  const reference = referenceSession.toolPresentation?.floatingInput;
   const referenceMarkup = render(reference);
   expect(referenceMarkup).toContain("Diameter (reference)");
   expect(referenceMarkup).toMatch(
@@ -463,12 +465,25 @@ test("T13d: the dimension edit popup renders Make reference / Make driving contr
   );
   expect(referenceMarkup).toContain(">Make driving<");
   expect(referenceMarkup).not.toContain("Make reference");
-  expect(reference?.submitAction.patch).toEqual({
-    intent: "commitAnnotationValue",
+  expect(referenceMarkup).toMatch(/<input[^>]*disabled=""[^>]*value="5"/);
+  expect(referenceMarkup).not.toContain(">Save<");
+  expect(getFloatingInputKeyPatch(reference!, "Enter", false)).toBeNull();
+  expect(referenceMarkup).toContain('role="switch"');
+  expect(reference?.modeSwitch?.action.patch).toEqual({
+    intent: "makeAnnotationDriving",
   });
-  expect(driving?.secondaryAction?.action.patch).toEqual({
+  expect(driving?.modeSwitch?.action.patch).toEqual({
     intent: "makeAnnotationReference",
   });
+  const staged = patchSketchConstraintValue(
+    referenceSession,
+    reference!.modeSwitch!.action.patch,
+  );
+  const stagedMarkup = render(staged.toolPresentation?.floatingInput);
+  expect(stagedMarkup).toContain(">Save<");
+  expect(stagedMarkup).not.toContain('disabled=""');
+  expect(stagedMarkup).not.toContain('readOnly=""');
+  expect(stagedMarkup).toContain('checked=""');
 });
 
 // T13e (D11), UI lane: the Dimension tool's value input in Reference mode

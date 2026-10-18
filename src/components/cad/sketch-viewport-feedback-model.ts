@@ -514,13 +514,14 @@ function getSketchPointAnchor(
 export function getFloatingInputKeyPatch(
   descriptor: Pick<
     SketchToolFloatingInputDescriptor,
-    "submitAction" | "cancelAction"
+    "submitAction" | "cancelAction" | "hideSubmit"
   >,
   key: string,
   isComposing: boolean,
 ): Record<string, unknown> | null {
   if (isComposing) return null;
   if (key === "Escape") return descriptor.cancelAction.patch;
-  if (key === "Enter") return descriptor.submitAction.patch;
+  if (key === "Enter" && !descriptor.hideSubmit)
+    return descriptor.submitAction.patch;
   return null;
 }

@@ -444,9 +444,7 @@ describe("T16f: no commit authors a second driver of a mirrored quantity", () =>
       session,
       dimensionRef(session, "dimension_copy_reference"),
     );
-    expect(editing.toolPresentation!.floatingInput!.confirmLabel).toBe(
-      "Make driving",
-    );
+    expect(editing.toolPresentation!.floatingInput!.hideSubmit).toBe(true);
     // The domain commit itself, not only the popup intent.
     const refused = commitSketchAnnotationEditValue(editing, {
       ...editing.activeAnnotationEdit!,
@@ -550,9 +548,9 @@ describe("T16f: persisted duplicates are explained, never changed", () => {
       "Also sized by Radius 3 through mirror ‘mirror 1’; both must match",
     );
     expect(
-      seedEdit.toolPresentation!.floatingInput!.secondaryAction?.label,
-      "Make reference stays offered",
-    ).toBe("Make reference");
+      seedEdit.toolPresentation!.floatingInput!.modeSwitch?.action.patch,
+      "Make reference stays offered by the mode switch",
+    ).toEqual({ intent: "makeAnnotationReference" });
     const copyEdit = beginSketchAnnotationEdit(
       session,
       dimensionRef(session, "dimension_copy"),

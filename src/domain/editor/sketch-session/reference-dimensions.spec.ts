@@ -1,7 +1,7 @@
 // T13d (logic lane, sketch-session annotation seam): Make reference / Make
 // driving from the dimension's edit popup, the reference's "(value)" label
-// following the geometry under a drag, a conflicting Make driving retained
-// invalid (T13c D6/D7), and Finish → publish → reopen through the mock and
+// following the geometry under a drag, reference/driving editing,
+// and Finish → publish → reopen through the mock and
 // OCC kernel adapters. Every row runs in a rectangle + circle sketch.
 import { expect, test } from "vitest";
 import type { SketchPoint } from "@/contracts/modeling/schema";
@@ -145,11 +145,8 @@ function openEdit(session: SketchSessionState, dimension: DimensionDefinition) {
 function makeReference(session: SketchSessionState, index: number) {
   const editing = openEdit(session, session.definition.dimensions[index]!);
   const input = editing.toolPresentation?.floatingInput;
-  expect(input?.secondaryAction?.label).toBe("Make reference");
-  return patchSketchConstraintValue(
-    editing,
-    input!.secondaryAction!.action.patch,
-  );
+  expect(input?.modeSwitch?.checked).toBe(true);
+  return patchSketchConstraintValue(editing, input!.modeSwitch!.action.patch);
 }
 
 function radiusOf(session: SketchSessionState) {
@@ -235,7 +232,8 @@ test("T13d: a reference's popup shows its measured value read-only and Make driv
   expect(input).toMatchObject({
     label: "Diameter (reference)",
     readout: "Measured 8.00 mm",
-    confirmLabel: "Make driving",
+    readOnly: true,
+    hideSubmit: true,
     value: "8",
   });
   expect(input?.secondaryAction, "no Make reference on a reference").toBe(
@@ -259,6 +257,38 @@ test("T13d: a reference's popup shows its measured value read-only and Make driv
   ).toBeCloseTo(4, 6);
 });
 
+test("O5: reference input ignores typing; Make driving stages editing and switching back discards the draft", () => {
+  const source = dimensioned();
+  const session = patchSketchConstraintValue(
+    openEdit(source, source.definition.dimensions[0]!),
+    { intent: "makeAnnotationReference" },
+  );
+  const editing = openEdit(session, session.definition.dimensions[0]!);
+  expect(patchSketchConstraintValue(editing, { value: "9" })).toBe(editing);
+  const staged = patchSketchConstraintValue(editing, {
+    intent: "makeAnnotationDriving",
+  });
+  expect(staged.definition).toBe(session.definition);
+  expect(staged.toolPresentation?.floatingInput?.readOnly).toBeUndefined();
+  expect(staged.toolPresentation?.floatingInput?.hideSubmit).toBeUndefined();
+  expect(staged.toolPresentation?.floatingInput?.modeSwitch?.checked).toBe(
+    true,
+  );
+  const typed = patchSketchConstraintValue(staged, { value: "9" });
+  const back = patchSketchConstraintValue(typed, {
+    intent: "makeAnnotationReference",
+  });
+  expect(back.definition).toBe(session.definition);
+  expect(back.toolPresentation?.floatingInput?.value).toBe("5");
+  expect(back.toolPresentation?.floatingInput?.hideSubmit).toBe(true);
+  const saved = patchSketchConstraintValue(typed, {
+    intent: "commitAnnotationValue",
+  });
+  expect(isReferenceDimension(saved.definition.dimensions[0]!)).toBe(false);
+  expect(radiusOf(saved)).toBeCloseTo(4.5, 6);
+  expect(saved.liveSolve?.accepted).toBe(true);
+});
+
 test("T13d: Make driving with a conflicting typed value is retained as an invalid edit and explained", () => {
   let session = dimensioned();
   // A second length on the top side, made a reference: it is determined by
@@ -277,7 +307,7 @@ test("T13d: Make driving with a conflicting typed value is retained as an invali
   ).toBe(true);
   expect(session.liveSolve?.accepted, "premise: solved").toBe(true);
   const top = session.definition.dimensions[2]!;
-  const editing = patchSketchConstraintValue(openEdit(session, top), {
+  const editing = patchSketchConstraintValue(patchSketchConstraintValue(openEdit(session, top), { intent: "makeAnnotationDriving" }), {
     value: "6",
   });
   const committed = patchSketchConstraintValue(editing, {

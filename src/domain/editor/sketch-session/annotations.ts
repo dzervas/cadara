@@ -43,7 +43,9 @@ import {
   solvedCubicSpans,
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import {
+  solveSketchDefinitionCore,
+} from "@/contracts/sketch/solver-core";
 import { linkedMirrorRefs } from "@/contracts/sketch/mirror-requirements";
 import {
   type ProjectedSketchReferenceRecord,
@@ -188,8 +190,22 @@ export function patchSketchAnnotationEditValue(
     };
   }
 
+  if (intent === "makeAnnotationDriving") {
+    const nextEdit = { ...edit, driving: true as const };
+    return {
+      ...session,
+      activeAnnotationEdit: nextEdit,
+      toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
+      validationMessage: null,
+    };
+  }
+
   if ("value" in patch) {
-    if (edit.shared?.addsReference) {
+    if (
+      edit.shared?.addsReference ||
+      (getEditableAnnotationValue(session, edit.target)?.reference &&
+        !edit.driving)
+    ) {
       // The reference's measured value is read-only.
       return session;
     }
@@ -211,6 +227,22 @@ export function patchSketchAnnotationEditValue(
   }
 
   if (intent === "makeAnnotationReference") {
+    if (
+      edit.driving &&
+      getEditableAnnotationValue(session, edit.target)?.reference
+    ) {
+      const nextEdit = {
+        ...edit,
+        driving: undefined,
+        pendingValue: getEditableAnnotationValue(session, edit.target)!.value,
+      };
+      return {
+        ...session,
+        activeAnnotationEdit: nextEdit,
+        toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
+        validationMessage: null,
+      };
+    }
     return makeSketchAnnotationReference(session, edit);
   }
 
@@ -1230,7 +1262,7 @@ export function buildAnnotationEditPresentation(
 ): SketchToolPresentationSchema {
   const editable = getEditableAnnotationValue(session, edit.target);
   const label = editable?.label ?? "Value";
-  const reference = editable?.reference ?? null;
+  const reference = edit.driving ? null : (editable?.reference ?? null);
   const shared = edit.shared;
   // T16f ([TECH] T16-12): a routed Dimension tool edits the driver it
   // shares (shown in its own kind) or, with "Add as reference instead",
@@ -1318,32 +1350,37 @@ export function buildAnnotationEditPresentation(
             : getAuthoredFormText(edit.pendingValue),
       unit: editable?.unit,
       min: editable?.min,
-      // T13d: a reference dimension's popup shows its measured value
-      // read-only; confirming commits it as driving with the typed (by
-      // default the measured) value. A driving dimension offers Make reference.
+      // O5: the same visible switch as creation; reference values cannot be
+      // typed or submitted. The switch stages conversion, Save authors it.
       ...(reference
         ? {
-            readout: `Measured ${
-              reference.measuredValue === null
-                ? "—"
-                : `${reference.measuredValue.toFixed(2)} ${editable?.unit ?? ""}`.trim()
-            }`,
+            readOnly: true as const,
+            hideSubmit: true as const,
+            readout: `Measured ${reference.measuredValue === null ? "—" : `${reference.measuredValue.toFixed(2)} ${editable?.unit ?? ""}`.trim()}`,
+            modeSwitch: {
+              label: "Make driving",
+              checked: false,
+              action: {
+                type: "patch" as const,
+                patch: { intent: "makeAnnotationDriving" },
+              },
+            },
           }
-        : sharedPresentation
-          ? sharedPresentation
-          : editable?.canBeReference
+        : (sharedPresentation ??
+          (editable?.canBeReference || edit.driving
             ? {
                 ...(duplicates ? { readout: duplicates } : {}),
-                secondaryAction: {
-                  label: "Make reference",
+                modeSwitch: {
+                  label: "Make driving",
+                  checked: true,
                   action: {
                     type: "patch" as const,
                     patch: { intent: "makeAnnotationReference" },
                   },
                 },
               }
-            : {}),
-      confirmLabel: reference ? "Make driving" : "Save",
+            : {}))),
+      confirmLabel: "Save",
       cancelLabel: "Cancel",
       anchor: editable?.anchor,
       placement: "target",
