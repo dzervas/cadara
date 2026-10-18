@@ -627,12 +627,15 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
     entityTarget(copyLine),
   );
   await glideClick(workbench, at);
+  const refusal = page.getByText(
+    /^This shape is part of mirror ‘mirror \d+’\. To trim it, press Esc, select it, then Mirror → Remove mirror\.$/,
+  );
+  await expect(refusal).toBeVisible({ timeout: 15_000 });
   await expect(
-    page.getByRole("status").filter({
-      hasText:
-        /^This shape is part of mirror ‘mirror \d+’\. To trim it, press Esc, select it, then Mirror → Remove mirror\.$/,
-    }),
-  ).toBeVisible({ timeout: 15_000 });
+    refusal,
+    "one local refusal, no duplicate notification",
+  ).toHaveCount(1);
+  await expect(page.locator("[data-notification-type]")).toHaveCount(0);
   await workbench.waitForAnimationFrames(4);
   expect(geometryOf(await snapshot(page)), "nothing changed").toEqual(
     geometryOf(before),

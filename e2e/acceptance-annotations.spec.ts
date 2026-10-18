@@ -16,7 +16,7 @@ import {
   type CanvasPoint,
 } from "./helpers/acceptance";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
-import { DIMENSION_TOOL, expectSelect } from "./helpers/mechanical-part";
+import { DIMENSION_TOOL, leaveArmedDimension } from "./helpers/mechanical-part";
 import {
   entityTarget,
   expectStaged,
@@ -261,7 +261,7 @@ async function addDistance(
   await waitForCommittedAction(page, "Commit Constraint Value", () =>
     page.keyboard.press("Enter"),
   );
-  await expectSelect(page, workbench, DIMENSION_TOOL);
+  await leaveArmedDimension(page, workbench);
   await expect(chips(page)).toHaveCount(before.length + 1);
   const added = (await labels()).find((label) => !before.includes(label));
   return chips(page).and(page.locator(`[aria-label="${added}"]`));

@@ -86,6 +86,22 @@ export async function expectSelect(
   );
 }
 
+/** A committed dimension resets its picks but stays armed until Escape. */
+export async function leaveArmedDimension(
+  page: Page,
+  workbench: FeatureWorkbenchHarness,
+) {
+  await expect
+    .poll(() => command(page), { timeout: 10_000 })
+    .toBe("dimensionDistance");
+  await expect(workbench.toolbarButton(DIMENSION_TOOL)).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.keyboard.press("Escape");
+  await expectSelect(page, workbench, DIMENSION_TOOL);
+}
+
 const command = (page: Page) =>
   page.evaluate(() => window.__cadaraDebug?.getState()?.command ?? "");
 
@@ -297,9 +313,8 @@ export async function runMechanicalPartFlow(
     page.keyboard.press("Enter"),
   );
   await expect(floatingInput(page)).toBeHidden({ timeout: 10_000 });
-  // T17h fix: the commit disarms the Dimension tool and the toolbar shows
-  // it (Select), instead of keeping Distance pressed.
-  await expectSelect(page, workbench, DIMENSION_TOOL);
+  // Dimension stays armed after commit; explicitly leave it for Select.
+  await leaveArmedDimension(page, workbench);
   let dimensioned = await sketchSnapshot(page);
   expect(dimensioned.dimensions?.map((dimension) => dimension.kind)).toEqual([
     "diameter",

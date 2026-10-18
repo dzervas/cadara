@@ -106,8 +106,10 @@ test("committed distance annotation input keeps Backspace local and saves durabl
 
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   await expect(floatingInput).toBeVisible();
-  await floatingInput.locator("input").fill("24");
+  await floatingInput.getByRole("textbox").fill("24");
   await floatingInput.getByRole("button", { name: "Commit" }).click();
+  await expect(floatingInput).toBeHidden();
+  await page.keyboard.press("Escape"); // Leave the re-armed Dimension tool.
 
   const distanceGlyph = page
     .locator('[data-sketch-annotation-kind="dimension"]')
@@ -117,7 +119,7 @@ test("committed distance annotation input keeps Backspace local and saves durabl
   await distanceGlyph.dblclick();
   await expect(floatingInput).toBeVisible();
 
-  const editInput = floatingInput.locator("input");
+  const editInput = floatingInput.getByRole("textbox");
   await expect(editInput).toHaveValue("24");
   await editInput.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
   await editInput.press("Backspace");
@@ -245,7 +247,9 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
     { x: 520, y: 250 },
   );
   await expect(floatingInput).toContainText("Diameter");
-  const diameter = Number(await floatingInput.locator("input").inputValue());
+  const diameter = Number(
+    await floatingInput.getByRole("textbox").inputValue(),
+  );
   expect(diameter, "measured diameter prefill").toBeCloseTo(2 * 70 * scale, 2);
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
@@ -258,7 +262,7 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
     { x: 800, y: 700 },
   );
   expect(
-    Number(await floatingInput.locator("input").inputValue()),
+    Number(await floatingInput.getByRole("textbox").inputValue()),
     "measured width prefill",
   ).toBeCloseTo(width, 4);
   await floatingInput.getByRole("button", { name: "Commit" }).click();
@@ -350,7 +354,7 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
   await diameterGlyph.dblclick();
   await expect(floatingInput).toBeVisible();
   const conflicting = (diameter * 1.5).toFixed(3);
-  await floatingInput.locator("input").fill(conflicting);
+  await floatingInput.getByRole("textbox").fill(conflicting);
   await floatingInput.getByRole("button", { name: "Save" }).click();
   await expect(floatingInput, "the conflicting edit is committed").toBeHidden();
   await expect(diameterGlyph).toHaveAttribute(
