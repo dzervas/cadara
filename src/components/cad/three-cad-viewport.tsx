@@ -57,6 +57,7 @@ import {
   updateViewCubeVisibility,
 } from "@/components/cad/three-cad-viewport-view-cube";
 import { DocumentRenderableNode } from "@/components/cad/three-cad-viewport-document-nodes";
+import { ViewportInitialCameraFraming } from "@/components/cad/viewport-initial-camera-framing";
 import { SketchDisplayRenderableNode } from "@/components/cad/three-cad-viewport-sketch-nodes";
 import {
   collectProjectedSketchCurveCandidates,
@@ -3658,6 +3659,13 @@ function ThreeCadViewportScene({
           cameraRef={cameraRef}
           controlsRef={controlsRef}
           pendingFrameRef={pendingProjectionFrameRef}
+          controlsReadyVersion={controlsReadyVersion}
+        />
+        <ViewportInitialCameraFraming
+          documentId={model.documentId}
+          renderables={renderables}
+          cameraRef={cameraRef}
+          controlsRef={controlsRef}
           controlsReadyVersion={controlsReadyVersion}
         />
         <ViewportCameraTransitionDriver

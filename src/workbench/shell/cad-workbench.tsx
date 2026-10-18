@@ -1355,6 +1355,7 @@ export function CadWorkbench({
   const viewportModel = useMemo(
     () =>
       createWorkbenchViewportModel({
+        documentId: snapshot?.document.documentId ?? null,
         activeSectionView: activeSectionView ?? null,
         hoverTarget: visibleHoverTarget,
         measurementWitnesses: measurementViewModel?.witnesses ?? [],
@@ -1391,6 +1392,7 @@ export function CadWorkbench({
       sketchAnnotations,
       sketchSession,
       sketchSpecialModeViewportPresentation,
+      snapshot?.document.documentId,
       snapshot?.document.variables,
       sketchToolPresentation,
       viewportRenderables.documentRenderables,
