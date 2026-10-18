@@ -111,6 +111,8 @@ type PendingRequest = {
 
 export interface OccWorkerClientOptions {
   worker: OccWorkerLike;
+  createWorker?: () => OccWorkerLike;
+  onFatalError?: (error: Error) => void;
   assetResolver?: GeometryAssetResolver;
   requestTimeoutMs?: number | null;
 }
@@ -221,7 +223,11 @@ export interface OccWorkerSnapshotClient {
 }
 
 export class OccWorkerClient implements OccWorkerSnapshotClient {
-  private readonly worker: OccWorkerLike;
+  private worker: OccWorkerLike;
+  private readonly createWorker: (() => OccWorkerLike) | undefined;
+  private readonly onFatalError: ((error: Error) => void) | undefined;
+  private documentsInvalidated = false;
+  private readonly restoredDocuments = new Set<string>();
   private readonly assetResolver: GeometryAssetResolver | undefined;
   private readonly requestTimeoutMs: number | null;
   private readonly pending = new Map<RequestId, PendingRequest>();
@@ -231,8 +237,14 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   constructor(options: OccWorkerClientOptions) {
     this.worker = options.worker;
+    this.createWorker = options.createWorker;
+    this.onFatalError = options.onFatalError;
     this.assetResolver = options.assetResolver;
     this.requestTimeoutMs = options.requestTimeoutMs ?? null;
+    this.attachListeners();
+  }
+
+  private attachListeners() {
     this.worker.addEventListener("message", this.handleMessage);
     this.worker.addEventListener("error", this.handleTransportError);
     this.worker.addEventListener("messageerror", this.handleTransportError);
@@ -601,6 +613,20 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
       return Promise.reject(this.terminalError);
     }
 
+    const documentId = "document" in operation ? operation.document.documentId
+      : "documentId" in operation ? operation.documentId
+      : "request" in operation && "documentId" in operation.request
+        ? operation.request.documentId : null;
+    if (this.documentsInvalidated && documentId &&
+        !this.restoredDocuments.has(documentId) &&
+        operation.kind !== "restoreAuthoredModelDocument" &&
+        operation.kind !== "validateAuthoredModelDocument" &&
+        operation.kind !== "releaseDocument") {
+      return Promise.reject(new Error(
+        "OCC worker document state was lost. Reopen the document before continuing.",
+      ));
+    }
+    const worker = this.worker;
     const requestId = this.createRequestId(operation.kind);
 
     return new Promise<T>((resolve, reject) => {
@@ -617,13 +643,19 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
             }, this.requestTimeoutMs);
       this.pending.set(requestId, {
         operation: operation.kind,
-        resolve: (value) =>
-          resolve(this.normalizePayload(operation.kind, value) as T),
+        resolve: (value) => {
+          if (operation.kind === "restoreAuthoredModelDocument") {
+            this.restoredDocuments.add(operation.document.documentId);
+          } else if (operation.kind === "releaseDocument") {
+            this.restoredDocuments.delete(operation.documentId);
+          }
+          resolve(this.normalizePayload(operation.kind, value) as T);
+        },
         reject,
         timeout,
       });
       try {
-        this.worker.postMessage({ kind: "invoke", requestId, operation });
+        worker.postMessage({ kind: "invoke", requestId, operation });
       } catch (error) {
         this.enterTerminalState(
           new Error(`OCC worker postMessage failed: ${describeTransportError(error)}`),
@@ -654,10 +686,18 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     }
 
     const message = event.data;
+    if (message.kind === "fatal") {
+      this.enterTerminalState(new Error(
+        `OpenCascade stopped (out of memory or runtime abort): ${message.error.message}. Reopen the document to continue. The failed operation was not retried.`,
+      ), this.pending.size > 0);
+      return;
+    }
 
     if (message.kind === "resolveGeometryAsset") {
+      const worker = this.worker;
       void this.answerGeometryAssetRequest(message.requestId, message.reference).catch(
         (error: unknown) => {
+          if (worker !== this.worker) return;
           this.enterTerminalState(
             new Error(
               `OCC worker geometry asset resolution failed: ${describeTransportError(error)}`,
@@ -696,14 +736,15 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     requestId: RequestId,
     reference: Parameters<GeometryAssetResolver["resolveGeometryAsset"]>[0],
   ) {
+    const worker = this.worker;
     const resolved =
       (await this.assetResolver?.resolveGeometryAsset(reference)) ?? null;
-    if (this.disposed || this.terminalError) {
+    if (this.disposed || this.terminalError || worker !== this.worker) {
       return;
     }
 
     try {
-      this.worker.postMessage(
+      worker.postMessage(
         {
           kind: "resolveGeometryAssetResult",
           requestId,
@@ -729,7 +770,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     );
   };
 
-  private enterTerminalState(error: Error) {
+  private enterTerminalState(error: Error, replaceAbortedWorker = false) {
     if (this.disposed || this.terminalError) {
       return;
     }
@@ -737,6 +778,24 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.terminalError = error;
     this.detachListeners();
     this.rejectAllPending(error);
+    this.worker.terminate?.();
+    this.documentsInvalidated = true;
+    this.restoredDocuments.clear();
+    // Only request-triggered runtime aborts may replace the worker. Transport or
+    // unsolicited startup failures stay terminal so broken module loads cannot loop.
+    // Never replay a failed request or warmup.
+    if (replaceAbortedWorker && this.createWorker) {
+      try {
+        this.worker = this.createWorker();
+        this.terminalError = null;
+        this.attachListeners();
+      } catch (replacementError) {
+        this.terminalError = new Error(
+          `${error.message} OCC worker replacement failed: ${describeTransportError(replacementError)}`,
+        );
+      }
+    }
+    this.onFatalError?.(this.terminalError ?? error);
   }
 
   private detachListeners() {

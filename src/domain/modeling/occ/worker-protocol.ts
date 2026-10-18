@@ -330,6 +330,7 @@ export type OccWorkerRequest =
     };
 
 export type OccWorkerResponse =
+  | { kind: "fatal"; error: { message: string } }
   | {
       kind: "invoked";
       requestId: RequestId;
@@ -411,4 +412,11 @@ export function normalizeOccWorkerFailure(
       message: describeUnknownError(error, "OCC worker request failed."),
     },
   };
+}
+
+/** Emscripten aborts poison the entire WASM instance, not just one request. */
+export function isOccRuntimeAbort(error: unknown): boolean {
+  const message = describeUnknownError(error, "");
+  return error instanceof WebAssembly.RuntimeError ||
+    /\babort(?:ed)?\b|out[ -]of[ -]memory|\boom\b|cannot enlarge memory|memory access out of bounds|array buffer allocation failed|memory allocation failed|maximum memory size exceeded/i.test(message);
 }

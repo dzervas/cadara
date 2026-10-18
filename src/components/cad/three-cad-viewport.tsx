@@ -1,6 +1,17 @@
 // SLOP: Retained viewport renderer while the workbench/viewport port boundary is introduced and hidden context reads are removed.
 import { Button } from "@mantine/core";
-import { Canvas } from "@react-three/fiber";
+import { ViewportCanvas } from "@/components/cad/viewport-canvas";
+import { WebGlRecoveryPanel } from "@/components/layout/webgl-recovery-panel";
+import { useErrorReporter } from "@/hooks/use-error-reporter";
+import {
+  createReportedWebGlRenderer,
+  WebGlInitializationError,
+  type WebGlSurface,
+} from "@/infrastructure/viewport/webgl-renderer";
+import {
+  noopPerformanceTelemetry,
+  type PerformanceTelemetry,
+} from "@/contracts/performance/telemetry";
 import { Bvh, OrbitControls } from "@react-three/drei";
 import {
   useCallback,
@@ -380,13 +391,80 @@ interface ThreeCadViewportProps {
   model: ViewportModel;
   commands: readonly ViewportCommand[];
   onIntent: (intent: ViewportIntent) => void;
+  performanceTelemetry?: PerformanceTelemetry;
+  onGraphicsUnavailable: () => void;
 }
 
 export function ThreeCadViewport({
+  performanceTelemetry = noopPerformanceTelemetry,
+  onGraphicsUnavailable,
+  ...props
+}: ThreeCadViewportProps) {
+  const reporter = useErrorReporter();
+  const [failure, setFailure] = useState<WebGlInitializationError | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const createRenderer = useCallback(
+    (parameters: THREE.WebGLRendererParameters, surface: WebGlSurface) =>
+      createReportedWebGlRenderer(
+        parameters,
+        surface,
+        reporter,
+        performanceTelemetry,
+      ),
+    [reporter, performanceTelemetry],
+  );
+
+  const handleGraphicsFailure = useCallback(
+    (error: WebGlInitializationError) => {
+      setFailure(error);
+      onGraphicsUnavailable();
+    },
+    [onGraphicsUnavailable],
+  );
+
+  if (failure) {
+    return (
+      <div
+        className="pointer-events-none absolute inset-0 z-40 grid justify-items-center overflow-y-auto px-4 pb-14 md:pl-[268px]"
+        style={{
+          alignItems: "safe center",
+          paddingTop: "var(--workbench-viewport-overlay-top)",
+        }}
+      >
+        <WebGlRecoveryPanel
+          diagnostics={failure.diagnostics}
+          onRetry={() => {
+            setAttempt((current) => current + 1);
+            setFailure(null);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <ThreeCadViewportScene
+      {...props}
+      key={attempt}
+      createRenderer={createRenderer}
+      onGraphicsFailure={handleGraphicsFailure}
+    />
+  );
+}
+
+function ThreeCadViewportScene({
   model,
   commands,
   onIntent,
-}: ThreeCadViewportProps) {
+  createRenderer,
+  onGraphicsFailure,
+}: Omit<ThreeCadViewportProps, "onGraphicsUnavailable" | "performanceTelemetry"> & {
+  createRenderer: (
+    parameters: THREE.WebGLRendererParameters,
+    surface: WebGlSurface,
+  ) => THREE.WebGLRenderer;
+  onGraphicsFailure: (error: WebGlInitializationError) => void;
+}) {
   const {
     activeSectionView,
     hoverTarget,
@@ -1735,8 +1813,15 @@ export function ThreeCadViewport({
       return;
     }
 
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = createRenderer({ antialias: true, alpha: true }, "view-cube");
+    } catch (error) {
+      if (!(error instanceof WebGlInitializationError)) throw error;
+      onGraphicsFailure(error);
+      return;
+    }
     const viewCubeScene = createViewCubeScene();
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setClearColor(0x000000, 0);
     cubeElement.appendChild(renderer.domElement);
@@ -1882,9 +1967,15 @@ export function ThreeCadViewport({
       attachedControls?.removeEventListener("change", requestRender);
       viewCubeScene.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
       cubeElement.removeChild(renderer.domElement);
     };
-  }, [controlsReadyVersion, requestCameraTransition]);
+  }, [
+    controlsReadyVersion,
+    requestCameraTransition,
+    createRenderer,
+    onGraphicsFailure,
+  ]);
 
   // T17c6 (D-4): pick bindings are collected after the R3F commit of the
   // pick root (`ViewportPickRoot`), whenever its objects or the highlight
@@ -3537,12 +3628,9 @@ export function ThreeCadViewport({
           pointerEvents: "none",
         }}
       />
-      <Canvas
-        className="h-full w-full"
-        frameloop="demand"
-        gl={{ antialias: true, alpha: true, localClippingEnabled: true }}
-        orthographic
-        camera={{ near: 0.1, far: 1000, position: [14, -16, 28] }}
+      <ViewportCanvas
+        createRenderer={createRenderer}
+        onGraphicsFailure={onGraphicsFailure}
         onCreated={({ camera, gl }) => {
           const viewportCamera =
             camera instanceof THREE.OrthographicCamera ||
@@ -3671,7 +3759,7 @@ export function ThreeCadViewport({
             RIGHT: THREE.MOUSE.ROTATE,
           }}
         />
-      </Canvas>
+      </ViewportCanvas>
       <div
         ref={viewCubeColumnRef}
         className="pointer-events-none absolute right-4 z-20 flex flex-col items-end gap-1"

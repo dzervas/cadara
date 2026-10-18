@@ -20,11 +20,25 @@ import type { DocumentId } from "@/contracts/shared/ids";
 
 const browserGeometryAssetResolver =
   getBrowserGeometryAssetComposition().resolver;
+let lastWorkerFailure: Error | null = null;
+const workerFailureListeners = new Set<(error: Error) => void>();
+
+/** Retain startup failures until the workbench notification surface mounts. */
+export function subscribeBrowserOccWorkerFailure(listener: (error: Error) => void) {
+  workerFailureListeners.add(listener);
+  if (lastWorkerFailure) listener(lastWorkerFailure);
+  return () => { workerFailureListeners.delete(listener); };
+}
+
 const browserOccWorkerClient =
   typeof window === "undefined"
     ? null
     : createBrowserOccWorkerClient({
         assetResolver: browserGeometryAssetResolver,
+        onFatalError: (error) => {
+          lastWorkerFailure = error;
+          for (const listener of workerFailureListeners) listener(error);
+        },
       });
 let browserOccKernelAdapter: OpenCascadeKernelAdapter | null = null;
 let browserOccWarmupController: OccPreloadController | null = null;

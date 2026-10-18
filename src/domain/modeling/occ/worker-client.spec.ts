@@ -12,6 +12,7 @@ import type {
   OccWorkerResponse,
 } from "@/domain/modeling/occ/worker-protocol";
 import {
+  isOccRuntimeAbort,
   normalizeOccWorkerFailure,
   validateOccWorkerRequestEnvelope,
 } from "@/domain/modeling/occ/worker-protocol";
@@ -667,4 +668,165 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   await testPostMessageFailuresBecomeTerminalAndRejectAllRequests();
   await testDisposeRejectsPendingAndFutureRequests();
   testWorkerFailureNormalizerPreservesUsefulMessages();
+});
+
+test("fatal OCC abort rejects pending requests and replaces without replay; documents require explicit restore", async () => {
+  const worker = new FakeOccWorker();
+  const replacement = new FakeOccWorker();
+  const reported: Error[] = [];
+  let replacements = 0;
+  const client = new OccWorkerClient({
+    worker,
+    createWorker: () => { replacements++; return replacement; },
+    onFatalError: (error) => reported.push(error),
+  });
+  const document = await createSeedAuthoredModelDocument();
+  const mutation = client.renameBody({
+    contractVersion: CONTRACT_VERSION,
+    documentId: document.documentId,
+    baseRevisionId: document.revisionId,
+    bodyId: document.bodyLabels[0]!.bodyId,
+    bodyLabel: "Not replayed",
+  });
+  const snapshot = client.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: document.documentId,
+  });
+  const settled = Promise.allSettled([mutation, snapshot]);
+  worker.emit({ kind: "fatal", error: { message: "Aborted(OOM)" } });
+  expect((await settled).map((result) => result.status)).toEqual(["rejected", "rejected"]);
+  expect(reported).toHaveLength(1);
+  expect(reported[0]?.message).toContain("Reopen the document");
+  expect(worker.terminateCalls).toBe(1);
+  expect(replacements).toBe(1);
+  expect(replacement.posted).toEqual([]);
+  await expect(client.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: document.documentId,
+  })).rejects.toThrow("Reopen the document");
+  expect(replacement.posted).toEqual([]);
+
+  const failedRestore = client.restoreAuthoredModelDocument(document);
+  const failedRestoreRequest = replacement.posted[0]!;
+  const failedRestoreRejection = expect(failedRestore).rejects.toThrow("Invalid saved document");
+  replacement.emit(normalizeOccWorkerFailure(failedRestoreRequest.requestId, new Error("Invalid saved document")));
+  await failedRestoreRejection;
+  await expect(client.exportAuthoredModelDocument(document.documentId)).rejects.toThrow("Reopen the document");
+  expect(replacement.posted).toHaveLength(1);
+
+  const restore = client.restoreAuthoredModelDocument(document);
+  const restoreRequest = replacement.posted[1]!;
+  if (restoreRequest.kind !== "invoke") throw new Error("Expected restore invocation");
+  replacement.emit({ kind: "invoked", requestId: restoreRequest.requestId, operation: "restoreAuthoredModelDocument" });
+  await restore;
+  const exported = client.exportAuthoredModelDocument(document.documentId);
+  const exportRequest = replacement.posted[2]!;
+  if (exportRequest.kind !== "invoke") throw new Error("Expected export invocation");
+  replacement.emit({ kind: "invoked", requestId: exportRequest.requestId, operation: "exportAuthoredModelDocument", payload: document });
+  expect(await exported).toEqual(document);
+  expect(replacement.posted).toHaveLength(3);
+  client.dispose();
+});
+
+test("initialization abort replaces only once with no automatic warmup or retry loop", async () => {
+  const workers = [new FakeOccWorker(), new FakeOccWorker(), new FakeOccWorker()];
+  let generation = 0;
+  const failures: Error[] = [];
+  const client = new OccWorkerClient({
+    worker: workers[0]!,
+    createWorker: () => workers[++generation]!,
+    onFatalError: (error) => failures.push(error),
+  });
+  const warmup = client.warmup();
+  const rejected = expect(warmup).rejects.toThrow("OOM");
+  workers[0]!.emit({ kind: "fatal", error: { message: "OOM" } });
+  await rejected;
+  workers[0]!.emit({ kind: "fatal", error: { message: "duplicate abort" } });
+  expect(generation).toBe(1);
+  expect(workers[1]!.posted).toEqual([]);
+  const followup = client.warmup();
+  const request = workers[1]!.posted[0]!;
+  workers[1]!.emit({ kind: "invoked", requestId: request.requestId, operation: "warmup" });
+  await followup;
+  expect(failures).toHaveLength(1);
+  expect(generation).toBe(1);
+  client.dispose();
+});
+
+
+test("runtime abort classification distinguishes terminal WASM failures from ordinary modeling errors", () => {
+  for (const error of [new WebAssembly.RuntimeError("unreachable"), new Error("Aborted(OOM)"), new Error("out of memory"), new Error("Cannot enlarge memory arrays"), new Error("WebAssembly.instantiate(): Out of memory: wasm memory"), new RangeError("Array buffer allocation failed")]) {
+    expect(isOccRuntimeAbort(error)).toBe(true);
+  }
+  expect(isOccRuntimeAbort(new Error("Feature does not intersect the body"))).toBe(false);
+});
+
+
+test("replacement construction failure remains terminal and is reported without a retry loop", async () => {
+  const worker = new FakeOccWorker();
+  const reported: Error[] = [];
+  let attempts = 0;
+  const client = new OccWorkerClient({
+    worker,
+    createWorker: () => { attempts++; throw new Error("Worker allocation failed"); },
+    onFatalError: (error) => reported.push(error),
+  });
+  const request = client.warmup();
+  const rejected = expect(request).rejects.toThrow("OOM");
+  worker.emit({ kind: "fatal", error: { message: "OOM" } });
+  await rejected;
+  expect(reported[0]?.message).toContain("Worker allocation failed");
+  await expect(client.warmup()).rejects.toThrow("Worker allocation failed");
+  expect(attempts).toBe(1);
+  expect(worker.terminateCalls).toBe(1);
+});
+
+test.each([false, true])("replacement transport failure stays terminal without a replacement loop (pending=%s)", async (hasPendingRequest) => {
+  const worker = new FakeOccWorker();
+  const replacement = new FakeOccWorker();
+  const reported: Error[] = [];
+  let replacements = 0;
+  const client = new OccWorkerClient({
+    worker,
+    createWorker: () => { replacements++; return replacement; },
+    onFatalError: (error) => reported.push(error),
+  });
+  const firstRequest = client.warmup();
+  const firstRejection = expect(firstRequest).rejects.toThrow("OOM");
+  worker.emit({ kind: "fatal", error: { message: "OOM" } });
+  await firstRejection;
+  const followupRejection = hasPendingRequest
+    ? expect(client.warmup()).rejects.toThrow("transport failed")
+    : Promise.resolve();
+
+  replacement.emitTransportError("error");
+  await followupRejection;
+  expect(replacements).toBe(1);
+  expect(replacement.terminateCalls).toBe(1);
+  expect(reported).toHaveLength(2);
+  expect(reported[1]?.message).toContain("transport failed");
+  await expect(client.warmup()).rejects.toThrow("transport failed");
+  replacement.emitTransportError("error");
+  expect(replacements).toBe(1);
+  expect(reported).toHaveLength(2);
+});
+
+test("unsolicited fatal on a replacement stays terminal rather than spawning another idle worker", async () => {
+  const worker = new FakeOccWorker();
+  const replacement = new FakeOccWorker();
+  let replacements = 0;
+  const reported: Error[] = [];
+  const client = new OccWorkerClient({
+    worker,
+    createWorker: () => { replacements++; return replacement; },
+    onFatalError: (error) => reported.push(error),
+  });
+  const rejected = expect(client.warmup()).rejects.toThrow("OOM");
+  worker.emit({ kind: "fatal", error: { message: "OOM" } });
+  await rejected;
+  replacement.emit({ kind: "fatal", error: { message: "Idle runtime abort" } });
+  expect(replacements).toBe(1);
+  expect(replacement.terminateCalls).toBe(1);
+  expect(reported).toHaveLength(2);
+  await expect(client.warmup()).rejects.toThrow("Idle runtime abort");
 });

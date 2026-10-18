@@ -246,6 +246,11 @@ export function CadWorkbench({
   // T17-20 (T17k2): the edited sketch was deleted by another session.
   const deletedSketchNotice = getPeerDeletedSketchNotice(machineState);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
+  const [graphicsUnavailable, setGraphicsUnavailable] = useState(false);
+  const handleGraphicsUnavailable = useCallback(
+    () => setGraphicsUnavailable(true),
+    [],
+  );
   const documentRefreshFailureNotification =
     getDocumentRefreshFailureNotification(machineState, () =>
       dispatch({ type: "document.refreshRequested" }),
@@ -1290,6 +1295,7 @@ export function CadWorkbench({
   };
 
   const handleViewportCanvasCreated = useCallback(() => {
+    setGraphicsUnavailable(false);
     recordPerformanceMark(performanceTelemetry, {
       name: "Startup viewport canvas created",
       op: "cad.startup",
@@ -1471,8 +1477,10 @@ export function CadWorkbench({
               model={viewportModel}
               commands={viewportCommands}
               onIntent={handleViewportIntent}
+              performanceTelemetry={performanceTelemetry}
+              onGraphicsUnavailable={handleGraphicsUnavailable}
             />
-            {initialOccRenderPending ? (
+            {initialOccRenderPending && !graphicsUnavailable ? (
               <div
                 role="status"
                 aria-label="Initial model render pending"
