@@ -51,6 +51,10 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
     infoMarkup.includes("Dismiss notification"),
     "Dismissible notifications should render a dismiss control.",
   ).toBeTruthy();
+  expect(
+    infoMarkup.includes("box-shadow:var(--workbench-shell-elevation-md)"),
+    "Notifications should use the shared floating-shell elevation token.",
+  ).toBeTruthy();
   // T14e review R-1: workbench notifications sit in the right-side column's
   // flow; without a placement the notification positions nothing itself.
   expect(
