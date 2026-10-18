@@ -156,22 +156,22 @@ export function HistoryTimelineShell({
           />
         </div>
       ) : null}
+      {/* Both panels share a grid cell so the taller document panel reserves
+          height during sketch editing. Mode changes fade without moving targets. */}
       <div
-        className={`relative motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
+        className={`grid motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
         aria-hidden={panelMotion.ariaHidden}
         data-history-motion="timeline-panel"
         data-transition-state={panelMotion.transitionState}
         style={panelMotion.style}
       >
         <div
-          className={`transition-transform duration-200 motion-reduce:transition-none ${
-            sketchSession
-              ? "pointer-events-none absolute inset-0 translate-y-16 opacity-0"
-              : "translate-y-0 opacity-100"
+          className={`col-start-1 row-start-1 self-start transition-opacity duration-200 motion-reduce:transition-none ${
+            sketchSession ? "pointer-events-none opacity-0" : "opacity-100"
           }`}
           aria-hidden={sketchSession ? true : undefined}
           data-history-panel="document"
-          data-transition-state={sketchSession ? "leaving-down" : "active"}
+          data-transition-state={sketchSession ? "inactive" : "active"}
         >
           <FeatureTimelineBar
             snapshot={snapshot}
@@ -192,7 +192,7 @@ export function HistoryTimelineShell({
         </div>
         {sketchSession ? (
           <div
-            className="relative translate-y-0 opacity-100 transition-transform duration-200 motion-reduce:transition-none"
+            className="col-start-1 row-start-1 self-start"
             data-history-panel="sketch"
             data-transition-state="active"
           >

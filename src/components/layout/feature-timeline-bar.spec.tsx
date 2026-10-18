@@ -965,9 +965,23 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
     "Sketch history items should expose delete support from their context menu.",
   ).toBeTruthy();
   expect(
-    sketchHistoryMarkup.includes('data-transition-state="leaving-down"'),
-    "Document history should expose a reduced-motion-friendly leaving state while sketch history is active.",
+    sketchHistoryMarkup.includes('data-transition-state="inactive"'),
+    "Document history should remain inactive while sketch history is active.",
   ).toBeTruthy();
+  expect(
+    /class="grid [^"]*"[^>]*data-history-motion="timeline-panel"/.test(
+      sketchHistoryMarkup,
+    ),
+    "The panel container should reserve the taller timeline's height with a grid.",
+  ).toBeTruthy();
+  for (const panel of ["document", "sketch"]) {
+    expect(
+      new RegExp(
+        `class="(?=[^"]*col-start-1)(?=[^"]*row-start-1)(?![^"]*absolute)[^"]*"[^>]*data-history-panel="${panel}"`,
+      ).test(sketchHistoryMarkup),
+      `${panel} history should remain in flow in the shared grid cell during sketch editing.`,
+    ).toBeTruthy();
+  }
 
   const collapsedMotion = getHistoryTimelinePanelMotionState(true);
   expect(
