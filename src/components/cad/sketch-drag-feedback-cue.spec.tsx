@@ -37,10 +37,10 @@ test("a fixed-point refusal stays local instead of repeating on release", () => 
   const session = rebuildSessionForDefinition(clearActiveSketchTool(drawn), {
     definition: {
       ...drawn.definition,
-      constraintIds: ["fixed_point"],
+      constraintIds: ["constraint_fixed_point"],
       constraints: [
         {
-          constraintId: "fixed_point",
+          constraintId: "constraint_fixed_point",
           kind: "fixPoint",
           label: "Fix",
           pointId: point.pointId,
