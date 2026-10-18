@@ -157,9 +157,10 @@ export function HistoryTimelineShell({
         </div>
       ) : null}
       {/* Both panels share a grid cell so the taller document panel reserves
-          height during sketch editing. Mode changes fade without moving targets. */}
+          height during sketch editing. A minmax(0, 1fr) column keeps long histories
+          inside their horizontal scrollers. Mode changes fade without moving targets. */}
       <div
-        className={`grid motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
+        className={`grid grid-cols-1 motion-reduce:transition-none ${collapsed ? "pointer-events-none" : ""}`}
         aria-hidden={panelMotion.ariaHidden}
         data-history-motion="timeline-panel"
         data-transition-state={panelMotion.transitionState}
