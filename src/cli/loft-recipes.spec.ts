@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -82,7 +83,7 @@ test("production Bun loft recipes resolve ordered profile/path/feature aliases a
         code: 0,
         ...(await promisify(execFile)(
           "bun",
-          ["src/cli/main.ts", "document", "recipe", path],
+          [cliEntry(), "document", "recipe", path],
           {
             cwd: resolve(import.meta.dirname, "../.."),
             timeout: 90000,

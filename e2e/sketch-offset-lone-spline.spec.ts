@@ -27,7 +27,7 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // the preview's background certification (derivation worker) → one
 // "Commit Offset" action → the live solve's certified shell; Undo/Redo. The
 // preview drawing and anchor are pinned by the logic row
-// (`sketch-offset-live-cutover.spec.ts`, row 8c).
+// (`sketch-offset-live-cutover.heavy.spec.ts`, row 8c).
 
 const OFFSET_TOOL =
   "Offset a connected chain with a durable offset relationship.";

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
@@ -14,7 +15,7 @@ it("real Bun exports all provider formats with byte-truthful JSON, exact target 
   try {
     const recipe = join(directory, "recipe.json");
     const native = join(directory, "plate.cadara");
-    const invocation = ["src/cli/main.ts", "document", "recipe", recipe];
+    const invocation = [cliEntry(), "document", "recipe", recipe];
     const options = {
       cwd: resolve(import.meta.dirname, "../.."),
       timeout: 90000,

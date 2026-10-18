@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -47,7 +48,7 @@ test("a real Bun recipe certifies a durable offset, publishes it and preserves a
     try {
       const result = await promisify(execFile)(
         "bun",
-        ["src/cli/main.ts", "document", "recipe", path],
+        [cliEntry(), "document", "recipe", path],
         { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
       );
       return { code: 0, ...result };

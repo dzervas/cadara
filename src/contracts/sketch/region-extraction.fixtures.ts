@@ -1,5 +1,5 @@
 /**
- * Spec support for `region-extraction.spec.ts`: small builders for evaluated
+ * Spec support for `region-extraction.heavy.spec.ts`: small builders for evaluated
  * definitions plus accepted solved snapshots. Solved geometry is taken
  * verbatim from the authored positions (the owner consumes a solve; it never
  * solves), so each fixture controls every bitwise coordinate and residual.

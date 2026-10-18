@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -86,11 +87,10 @@ it("Bun recipes share private and document history with current aliases and nati
     }));
     const path = resolve(directory, "recipe.json");
     await writeFile(path, JSON.stringify({ version: 1, operations }));
-    const output = await exec(
-      "bun",
-      ["src/cli/main.ts", "document", "recipe", path],
-      { cwd: resolve(import.meta.dirname, "../.."), timeout: 90000 },
-    );
+    const output = await exec("bun", [cliEntry(), "document", "recipe", path], {
+      cwd: resolve(import.meta.dirname, "../.."),
+      timeout: 90000,
+    });
     const results: SemanticResult[] = JSON.parse(output.stdout).results;
     expect(results.map((r) => r.outcome.kind)).toEqual(
       Array(11).fill("completed"),

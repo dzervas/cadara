@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -90,7 +91,7 @@ it("resolves sketch edit labels through public discoveries and keeps stdout clea
     await writeFile(path, JSON.stringify({ version: 1, operations }));
     const output = await promisify(execFile)(
       "bun",
-      ["src/cli/main.ts", "document", "recipe", path],
+      [cliEntry(), "document", "recipe", path],
       { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
     ).catch((error: unknown) => {
       const failed = error as { stdout?: string; stderr?: string };

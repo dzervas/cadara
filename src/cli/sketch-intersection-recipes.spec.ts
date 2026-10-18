@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -178,7 +179,7 @@ it("a real Bun recipe resolves target and boundary aliases, trims, splits, exten
     await writeFile(path, JSON.stringify({ version: 1, operations: commands }));
     const output = await promisify(execFile)(
       "bun",
-      ["src/cli/main.ts", "document", "recipe", path],
+      [cliEntry(), "document", "recipe", path],
       { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
     );
     const results: SemanticResult[] = JSON.parse(output.stdout).results;
@@ -266,7 +267,7 @@ it("a real Bun recipe resolves target and boundary aliases, trims, splits, exten
       await writeFile(path, JSON.stringify({ version: 1, operations }));
       return promisify(execFile)(
         "bun",
-        ["src/cli/main.ts", "document", "recipe", path],
+        [cliEntry(), "document", "recipe", path],
         { cwd: resolve(import.meta.dirname, "../.."), timeout: 90_000 },
       ).then(
         () => {

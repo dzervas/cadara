@@ -60,4 +60,4 @@ Strategic design context lives in `PRODUCT.md` at the project root — register,
 
 ## Validation
 
-After a set of changes, run `bun run test:all`
+While working, run `bun run test` (about a minute). Before handing off a set of changes, run `bun run test:all`; it is the only pass that spawns the heavy and E2E tiers.

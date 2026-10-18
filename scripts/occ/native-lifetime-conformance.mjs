@@ -512,7 +512,7 @@ const AUDITED_BORROWED_POINTER_CLASSES = [
   "Standard_Transient",
   "TopTools_ListOfShape",
 ];
-// Exact binding inventory mirrored by test/static/occ-borrowed-pointer-guard.spec.ts.
+// Exact binding inventory mirrored by test/static/occ-borrowed-pointer-guard.heavy.spec.ts.
 const AUDITED_BORROWED_POINTER_BINDINGS = [
   "Handle_BRepTools_History.get",
   "Handle_Geom2d_Curve.get",

@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { cliEntry } from "../../test/helpers/cli-recipe-process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -56,7 +57,7 @@ it("gives replacements distinct authoritative bases, accepts the latest alias an
     );
     const failure = await exec(
       "bun",
-      ["src/cli/main.ts", "document", "recipe", file],
+      [cliEntry(), "document", "recipe", file],
       { cwd: root, timeout: 60000 },
     ).then(
       () => {
@@ -116,11 +117,10 @@ it("runs an isolated sequential recipe in a real Bun process with clean JSON std
         ],
       }),
     );
-    const first = await exec(
-      "bun",
-      ["src/cli/main.ts", "document", "recipe", file],
-      { cwd: root, timeout: 60000 },
-    );
+    const first = await exec("bun", [cliEntry(), "document", "recipe", file], {
+      cwd: root,
+      timeout: 60000,
+    });
     expect(first.stderr).toBe("");
     const result = JSON.parse(first.stdout);
     expect(result.results.map((r: { outcome: unknown }) => r.outcome)).toEqual([
@@ -185,7 +185,7 @@ it("runs an isolated sequential recipe in a real Bun process with clean JSON std
       }),
     );
     try {
-      await exec("bun", ["src/cli/main.ts", "document", "recipe", file], {
+      await exec("bun", [cliEntry(), "document", "recipe", file], {
         cwd: root,
         timeout: 60000,
       });
@@ -225,7 +225,7 @@ it("runs an isolated sequential recipe in a real Bun process with clean JSON std
       }),
     );
     await expect(
-      exec("bun", ["src/cli/main.ts", "document", "recipe", file], {
+      exec("bun", [cliEntry(), "document", "recipe", file], {
         cwd: root,
         timeout: 60000,
       }),

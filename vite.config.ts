@@ -98,6 +98,48 @@ export default defineConfig({
         ? configDefaults.exclude
         : [...configDefaults.exclude, "**/.scratch/**"],
     testTimeout: 15_000,
+    // Tiers (docs/testing.md "Tiers"): `fast` is the everyday loop and shares
+    // one module registry per worker (`isolate: false`); specs whose `vi.mock`
+    // factories need a fresh module instance are `*.isolated.spec.ts`; specs
+    // that need minutes of OCC/certification work, and the CLI subprocess
+    // specs, are `heavy` and run only in the final pass.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "fast",
+          isolate: false,
+          include: ["src/**/*.spec.{ts,tsx}", "test/**/*.spec.ts"],
+          exclude: [
+            "**/*.heavy.spec.*",
+            "**/*.isolated.spec.*",
+            "**/src/cli/**",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "isolated",
+          include: [
+            "src/**/*.isolated.spec.{ts,tsx}",
+            "test/**/*.isolated.spec.ts",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "heavy",
+          include: [
+            "src/**/*.heavy.spec.{ts,tsx}",
+            "test/**/*.heavy.spec.ts",
+            "src/cli/**/*.spec.ts",
+          ],
+          globalSetup: ["./test/helpers/cli-bundle-global-setup.ts"],
+        },
+      },
+    ],
   },
   worker: {
     plugins: () => [UnpluginTypia(createTypiaPluginOptions(__dirname))],
