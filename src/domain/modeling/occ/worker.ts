@@ -20,6 +20,7 @@ import {
   type OccNativeTopologyWorkerResultWithBuffers,
 } from "@/domain/modeling/occ/native-topology-payload";
 import {
+  isOccRuntimeAbort,
   normalizeOccWorkerFailure,
   validateOccWorkerRequestEnvelope,
   type OccWorkerAssetConfig,
@@ -36,6 +37,7 @@ import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;
 const adapters = new Map<string, OpenCascadeKernelAdapter>();
+let runtimeAborted = false;
 let requestQueue: Promise<void> = Promise.resolve();
 let assetRequestSequence = 0;
 const pendingAssetRequests = new Map<
@@ -78,7 +80,10 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
 
   if (!openCascadePromise) {
     openCascadePromise = loadDefaultOpenCascadeFactory({ isNodeRuntime: false })
-      .then((initializeOpenCascade) => initializeOpenCascade(lastAssets))
+      .then((initializeOpenCascade) => initializeOpenCascade({
+        ...lastAssets,
+        module: { onAbort: (reason: unknown) => reportRuntimeAbort(reason) },
+      }))
       .catch((error: unknown) => {
         openCascadePromise = null;
         throw error;
@@ -397,6 +402,7 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
   switch (request.kind) {
     case "invoke": {
       const result = await handleWorkerOperation(request.operation);
+      if (runtimeAborted) return;
       if (
         request.operation.kind === "getDocumentSnapshot" &&
         result &&
@@ -489,10 +495,24 @@ function createWorkerAssetResolver(
   };
 }
 
+function reportRuntimeAbort(reason: unknown) {
+  if (runtimeAborted) return;
+  runtimeAborted = true;
+  postOccWorkerMessage({
+    kind: "fatal",
+    error: { message: normalizeOccWorkerFailure("request_occ_abort", reason).error.message },
+  });
+}
+
 function enqueueOccWorkerRequest(request: OccWorkerRequest) {
   requestQueue = requestQueue
-    .then(() => handleOccWorkerRequest(request))
+    .then(() => runtimeAborted ? undefined : handleOccWorkerRequest(request))
     .catch((error: unknown) => {
+      if (runtimeAborted) return;
+      if (isOccRuntimeAbort(error)) {
+        reportRuntimeAbort(error);
+        return;
+      }
       postOccWorkerMessage(
         normalizeOccWorkerFailure(
           request.requestId,

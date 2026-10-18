@@ -7,6 +7,14 @@ import {
   flushMicrotasks,
 } from "./controller-test-harness";
 
+const workerFailures = vi.hoisted(() => ({ listener: null as ((error: Error) => void) | null }));
+vi.mock("@/infrastructure/occ/browser-kernel-runtime", () => ({
+  subscribeBrowserOccWorkerFailure: (listener: (error: Error) => void) => {
+    workerFailures.listener = listener;
+    return () => { workerFailures.listener = null; };
+  },
+}));
+
 const hookHarness = createHookTestHarness();
 vi.mock("react", () => hookHarness.reactModule);
 
@@ -219,4 +227,27 @@ test("useWorkbenchNotifications reports document file action failures and mirror
         "IndexedDB quota exceeded.",
     "Document file action failures should preserve the user-visible message and the low-level reason context.",
   ).toBeTruthy();
+});
+
+
+test("OCC abort is immediately reported and presented through the workbench error notification", async () => {
+  const reporter = createTestErrorReporter();
+  const modelingService = {
+    currentDocumentId: "doc_occ_abort" as const,
+    async getHistoryRestoreState() { return { kind: "empty" as const, entriesReplayed: 0 as const, diagnostics: [] as [] }; },
+  };
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService });
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  const error = new Error("OpenCascade stopped: OOM. Reopen the document to continue.");
+  workerFailures.listener!(error);
+  const controller = hookHarness.render(useNotifications);
+  expect(controller.workbenchStatusNotification).toEqual({
+    type: "error",
+    title: "Workbench action failed",
+    message: error.message,
+  });
+  expect(reporter.reports).toHaveLength(1);
+  expect(reporter.reports[0]?.error.cause).toBe(error);
+  expect(reporter.reports[0]?.metadata.source).toBe("workbench.occ.worker");
 });

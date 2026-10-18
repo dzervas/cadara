@@ -7,6 +7,7 @@ import {
 } from "@/contracts/errors";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
+import { subscribeBrowserOccWorkerFailure } from "@/infrastructure/occ/browser-kernel-runtime";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 
 interface WorkbenchNotificationsInput {
@@ -68,6 +69,25 @@ export function useWorkbenchNotifications({
     },
     [errorReporter, showWorkbenchError],
   );
+
+  useEffect(() => subscribeBrowserOccWorkerFailure((error) => {
+    handleWorkbenchFailure({
+      appError: createAppError({
+        code: "app/operation-failed",
+        message: error.message,
+        cause: error,
+      }),
+      reporter: errorReporter,
+      metadata: {
+        source: "workbench.occ.worker",
+        visibility: "user",
+        dedupeKey: `occ-worker:${error.message}`,
+      },
+      reportability: "reportable",
+      userMessage: error.message,
+      notify: showWorkbenchError,
+    });
+  }), [errorReporter, showWorkbenchError]);
 
   useEffect(() => {
     let disposed = false;

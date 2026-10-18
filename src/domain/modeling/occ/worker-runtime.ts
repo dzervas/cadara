@@ -7,15 +7,19 @@ export function canUseOccModuleWorker() {
 
 export function createBrowserOccWorkerClient(options: {
   assetResolver?: GeometryAssetResolver;
+  onFatalError?: (error: Error) => void;
 } = {}) {
   if (!canUseOccModuleWorker()) {
     return null;
   }
 
+  const createWorker = () => new Worker(new URL("./worker.ts", import.meta.url), {
+    type: "module",
+  });
   return new OccWorkerClient({
-    worker: new Worker(new URL("./worker.ts", import.meta.url), {
-      type: "module",
-    }),
+    worker: createWorker(),
+    createWorker,
+    onFatalError: options.onFatalError,
     assetResolver: options.assetResolver,
     requestTimeoutMs: 30 * 60 * 1000,
   });
