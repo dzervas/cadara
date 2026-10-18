@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { test, expect } from "vitest";
 import type { UserConfig } from "vite";
+import { parseConfigFileTextToJson } from "typescript";
 
 import { shouldTransformWithTypia } from "../../typia-plugin-options";
 import viteConfig, {
@@ -92,4 +93,61 @@ test("test/static/build-config.spec.ts", async () => {
     ]?.includes("immutable"),
     "Versioned custom OpenCascade requests should retain immutable cache headers.",
   ).toBeTruthy();
+});
+
+test("Cloudflare builds distinct landing/editor entries and a landing 404 page", () => {
+  const config = viteConfig as UserConfig;
+  expect(config.base).toBe("/");
+  expect(config.build?.rollupOptions?.input).toEqual({
+    landing: path.resolve("index.html"),
+    editor: path.resolve("app.html"),
+    notFound: path.resolve("404.html"),
+  });
+  for (const file of ["index.html", "404.html"]) {
+    expect(readFileSync(file, "utf8")).toContain('src="/landing/main.tsx"');
+  }
+  expect(readFileSync("app.html", "utf8")).toContain('src="/src/main.tsx"');
+  const parsed = parseConfigFileTextToJson(
+    "wrangler.jsonc",
+    readFileSync("wrangler.jsonc", "utf8"),
+  );
+  expect(parsed.error).toBeUndefined();
+  const cloudflare = parsed.config as {
+    build: { command: string };
+    assets: {
+      directory: string;
+      html_handling: string;
+      not_found_handling: string;
+    };
+  };
+  expect(cloudflare.build.command).toBe("bun run build");
+  expect(cloudflare.assets).toMatchObject({
+    directory: "./dist",
+    html_handling: "drop-trailing-slash",
+    not_found_handling: "404-page",
+  });
+});
+
+test("served example folders contain only native files, manifests and referenced meshes", () => {
+  expect(readdirSync("landing/examples").sort()).toEqual([
+    "bracket",
+    "enclosure",
+    "wheel",
+  ]);
+  for (const id of ["bracket", "wheel", "enclosure"]) {
+    const directory = path.join("landing/examples", id);
+    const manifest = JSON.parse(
+      readFileSync(path.join(directory, "model.json"), "utf8"),
+    ) as { parts: { file: string }[] };
+    expect(readdirSync(directory).sort()).toEqual(
+      [
+        "model.cadara",
+        "model.json",
+        ...manifest.parts.map((part) => part.file),
+      ].sort(),
+    );
+    expect(new Set(manifest.parts.map((part) => part.file)).size).toBe(
+      manifest.parts.length,
+    );
+  }
 });

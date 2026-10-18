@@ -131,7 +131,7 @@ function cadaraSingleHtmlPlugin(): Plugin {
       const assetScript = createSingleAssetsScript(singleAssets);
       const outDir = path.resolve(rootDir, options.dir ?? "dist");
 
-      let html = await readFile(path.join(outDir, "index.html"), "utf8");
+      let html = await readFile(path.join(outDir, "app.html"), "utf8");
       html = html.replace(
         /<link\b(?=[^>]*\brel=["']icon["'])[^>]*\bhref=["'][^"']+["'][^>]*>/,
         () => `<link rel="icon" type="image/svg+xml" href="${favicon}" />`,
@@ -187,6 +187,7 @@ export default defineConfig({
     reportCompressedSize: false,
     chunkSizeWarningLimit: 60000,
     rolldownOptions: {
+      input: path.resolve(rootDir, "app.html"),
       output: {
         codeSplitting: false,
         entryFileNames: "assets/[name].js",

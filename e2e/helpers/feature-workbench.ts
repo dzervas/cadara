@@ -41,7 +41,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     super(page);
   }
 
-  override async open(path = "/") {
+  override async open(path = "/app") {
     await super.open(path);
     await expect
       .poll(() => this.revisionLabel(), { timeout: 30_000 })
@@ -49,7 +49,7 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     await this.waitForRenderIdle();
   }
 
-  override async reloadPreservingStorage(path = "/") {
+  override async reloadPreservingStorage(path = "/app") {
     await super.reloadPreservingStorage(path);
     await expect
       .poll(() => this.revisionLabel(), { timeout: 30_000 })

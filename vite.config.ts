@@ -89,6 +89,8 @@ const shouldUploadSentrySourceMaps = Boolean(
 
 // https://vite.dev/config/
 export default defineConfig({
+  // The editor route is /app; shared assets remain at the origin root.
+  base: "/",
   define: createBuildMetadataDefines(buildMetadata),
   test: {
     exclude:
@@ -151,6 +153,8 @@ export default defineConfig({
     // package dependencies after the browser session has already started.
     entries: [
       "index.html",
+      "app.html",
+      "404.html",
       "src/infrastructure/workers/document-sync.worker.ts",
       "src/domain/modeling/occ/worker.ts",
       "src/domain/modeling/occ/sketch-derivation.worker.ts",
@@ -177,6 +181,11 @@ export default defineConfig({
     reportCompressedSize: false,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
+      input: {
+        landing: path.resolve(__dirname, "index.html"),
+        editor: path.resolve(__dirname, "app.html"),
+        notFound: path.resolve(__dirname, "404.html"),
+      },
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) {

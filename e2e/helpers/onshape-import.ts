@@ -51,7 +51,7 @@ export async function importBundle(
       configurable: true,
     }),
   );
-  await page.goto("/");
+  await page.goto("/app");
   await page.waitForFunction(
     () => window.__cadaraDebug?.getState()?.revision !== "loading",
   );

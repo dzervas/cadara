@@ -37,7 +37,7 @@ export default defineConfig({
   // (`playwright.offline.config.ts`, `bun run test:e2e:offline`).
   testIgnore: runRealCaptures
     ? undefined
-    : [...realCaptureTests, "**/e2e/offline/**"],
+    : [...realCaptureTests, "**/e2e/offline/**", "**/e2e/production/**"],
   timeout: 30_000,
   expect: {
     timeout: 1_000,

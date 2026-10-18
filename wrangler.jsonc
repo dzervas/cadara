@@ -1,8 +1,22 @@
 {
   "name": "cadara",
   "compatibility_date": "2026-04-19",
+  "build": {
+    "command": "bun run build",
+    "watch_dir": [
+      "src",
+      "landing",
+      "public",
+      "index.html",
+      "app.html",
+      "404.html",
+      "vite.config.ts",
+    ],
+  },
   "assets": {
     "directory": "./dist",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
   },
   "observability": {
     "enabled": true,

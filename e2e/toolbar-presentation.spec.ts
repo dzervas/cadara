@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, and search rows", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/app");
 
   const extrudeButton = page.locator('button[data-tool-id="extrude"]').first();
   await expect(
@@ -48,7 +48,7 @@ test("toolbar spills whole tool groups into a second row at narrow desktop width
   page,
 }) => {
   await page.setViewportSize({ width: 1000, height: 900 });
-  await page.goto("/");
+  await page.goto("/app");
 
   const toolbar = page.getByRole("toolbar", { name: "CAD tools" });
   await expect(toolbar).toHaveAttribute("data-toolbar-responsive-rows", "2");

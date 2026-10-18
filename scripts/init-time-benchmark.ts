@@ -22,7 +22,7 @@ const CUSTOM_OCC_ASSET_BASENAMES = [
 ] as const;
 
 function buildPreviewUrl(runId: string) {
-  return `${PREVIEW_URL_BASE}?cadPerfMode=1&cadDisableRepository=1&cadRepositoryDbName=${encodeURIComponent(`load-time-${runId}`)}`;
+  return `${PREVIEW_URL_BASE}app?cadPerfMode=1&cadDisableRepository=1&cadRepositoryDbName=${encodeURIComponent(`load-time-${runId}`)}`;
 }
 
 function sha256File(path: string) {
@@ -171,7 +171,7 @@ async function waitForRestoredGeometry(page: Page) {
 }
 
 async function main() {
-  if (!existsSync("/app/dist/index.html")) {
+  if (!existsSync("/app/dist/app.html")) {
     throw new Error(
       "Preview build is missing. Run `bun run build` once a valid build baseline is available.",
     );
@@ -185,7 +185,7 @@ async function main() {
   const server = startPreviewServer();
 
   try {
-    await waitForServer(previewUrl, SERVER_TIMEOUT_MS);
+    await waitForServer(PREVIEW_URL_BASE, SERVER_TIMEOUT_MS);
 
     const browser = await chromium.launch({ headless: true });
 

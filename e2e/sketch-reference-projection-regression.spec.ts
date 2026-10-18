@@ -14,7 +14,7 @@ test("reload preserves a circle centered on a projected solid vertex", async ({
 }, testInfo) => {
   const workbench = new SketchWorkbenchHarness(page);
   const repositoryName = `reference-circle-${testInfo.workerIndex}-${Date.now()}`;
-  const path = `/?cadRepositoryDbName=${encodeURIComponent(repositoryName)}`;
+  const path = `/app?cadRepositoryDbName=${encodeURIComponent(repositoryName)}`;
 
   await workbench.openWithOperationHistory(
     createVertexReferencedCircleOperationHistory(),
@@ -46,7 +46,7 @@ test("reopen and finish preserves a face-backed referenced-vertex circle sketch"
 }, testInfo) => {
   const workbench = new SketchWorkbenchHarness(page);
   const repositoryName = `face-reference-circle-${testInfo.workerIndex}-${Date.now()}`;
-  const path = `/?cadRepositoryDbName=${encodeURIComponent(repositoryName)}`;
+  const path = `/app?cadRepositoryDbName=${encodeURIComponent(repositoryName)}`;
 
   await workbench.openWithOperationHistory(
     createFaceBackedVertexReferencedCircleOperationHistory(),

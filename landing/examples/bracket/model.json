@@ -1,0 +1,16 @@
+{
+  "name": "Gusseted angle bracket",
+  "dimensions": "60 × 44 × 50 mm",
+  "parts": [
+    {
+      "file": "bracket.stl",
+      "label": "Extrude 1",
+      "finish": "silver",
+      "explode": [
+        0,
+        0,
+        0
+      ]
+    }
+  ]
+}
