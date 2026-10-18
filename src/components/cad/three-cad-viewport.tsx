@@ -13,6 +13,7 @@ import {
   type PerformanceTelemetry,
 } from "@/contracts/performance/telemetry";
 import { Bvh, OrbitControls } from "@react-three/drei";
+import { flushViewportCameraDamping } from "@/infrastructure/viewport/viewport-camera-damping";
 import {
   useCallback,
   useEffect,
@@ -3509,6 +3510,14 @@ function ThreeCadViewportScene({
       return;
     }
 
+    window.__cadFlushCameraDamping = () => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      // Controls change events invalidate the demand-rendered canvas as usual.
+      return Boolean(
+        camera && controls && flushViewportCameraDamping(camera, controls),
+      );
+    };
     window.__cadProjectToScreen = (objectId: string) => {
       const viewportElement = viewportRef.current;
       const rect = viewportElement?.getBoundingClientRect();
@@ -3535,6 +3544,7 @@ function ThreeCadViewportScene({
     };
 
     return () => {
+      delete window.__cadFlushCameraDamping;
       delete window.__cadProjectToScreen;
     };
   }, []);

@@ -7,6 +7,7 @@ interface ImportMetaEnv {
 interface Window {
   __cadaraDebug?: import("@/domain/debug/debug-platform").CadaraDebugNamespace;
   __cadProjectToScreen?: (objectId: string) => { x: number; y: number } | null;
+  __cadFlushCameraDamping?: () => boolean;
   __cadProjectSectionHandleToScreen?: () => {
     handle: { x: number; y: number };
     normal: { x: number; y: number } | null;
