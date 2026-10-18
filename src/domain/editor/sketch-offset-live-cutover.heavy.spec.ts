@@ -107,7 +107,6 @@ import {
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { previewSketchPlacement } from "@/domain/editor/sketch-session/tools";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { TRIM_TOO_FEW_CUTS_MESSAGE } from "@/contracts/sketch/edit-intersections";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
@@ -8070,11 +8069,12 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
     );
     expect(unrelated.validationMessage).toBeNull();
     expect(unrelated.definition).not.toBe(states.failed.definition);
-    // Certified, the output is an ordinary cutter (one crossing: too few).
+    // O14: certified output is an ordinary cutter; one crossing permits an end trim.
     const certified = await completeSketchEditQueriesForTest(
       click(states.certified, states.cutter),
     );
-    expect(certified.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
+    expect(certified.validationMessage).toBeNull();
+    expect(certified.definition).not.toBe(states.certified.definition);
   }, 600_000);
 });
 
@@ -8320,7 +8320,8 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
         targetOf(settled.session, reopened.cutter),
       ),
     );
-    expect(trimmed.validationMessage).toBe(TRIM_TOO_FEW_CUTS_MESSAGE);
+    expect(trimmed.validationMessage).toBeNull();
+    expect(trimmed.definition).not.toBe(settled.session.definition);
     const trimmedOutput = await completeSketchEditQueriesForTest(
       selectSketchEditToolTarget(
         beginSketchTool(settled.session, "trim"),

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
+import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
 import {
@@ -9,6 +11,8 @@ import {
   selectSketchEditToolTarget,
   startSketchDraw,
   withLiveSolveBasis,
+  updateSketchPointer,
+  updateSketchEditToolHover,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import {
@@ -22,7 +26,7 @@ import {
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
-import type { SketchEntityId } from "@/contracts/shared/ids";
+import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import { emitPendingSketchEditQuery } from "./effect-emitters";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
@@ -124,6 +128,56 @@ const sketchState = (result: { state: unknown }) => {
 };
 
 describe("T10g-1 Trim edit query (editor loop)", () => {
+  test("O14: one Undo restores an end trim and Redo restores the clicked removal", async () => {
+    const { state, target } = await trimState();
+    const f = await createSketchActionOwnerFixture(state.session);
+    const before = f.session.definition;
+    const basis = prepareSketchIntersectionEdit(f.session, {kind: "trim", targetEntityId: target, pick: [0.5, 0]});
+    if ("message" in basis) throw Error(basis.message);
+    f.dispatch({ type: "sketch.intersectionEditCompleted", basis,
+      result: await querySketchEditIntersectionsForTest({ requestId: "request_trim_undo",
+        documentId: f.state.document.documentId!, baseRevisionId: f.state.document.revisionId!,
+        sketchId: f.session.sketchId ?? ("sketch_draft" as SketchId), input: basis.input }) });
+    const after = f.session.definition;
+    const line = after.entities.find(e => e.entityId === target);
+    expect(line?.kind === "lineSegment" && after.points.find(p => p.pointId === line.startPointId)?.position).toEqual([1, 0]);
+    expect(f.undoLabels()).toHaveLength(1);
+    f.dispatch({ type: "history.undoRequested" });
+    expect(f.session.definition).toEqual(before);
+    f.dispatch({ type: "history.redoRequested" });
+    expect(f.session.definition).toEqual(after);
+  });
+
+  test("O14: hover stages the clicked end, moving picks the other piece, and click authors only that piece", async () => {
+    const { state, target } = await trimState();
+    const ref = { kind: "sketchEntity" as const, sketchId: state.session.actionContextId, entityId: target };
+    let session = updateSketchEditToolHover(updateSketchPointer(state.session, [0.5, 0]), ref);
+    let emitted = emitPendingSketchEditQuery({ state: { ...state, session }, effects: [] });
+    const first = queryEffects(emitted.effects)[0]!;
+    expect(first.input.operation).toMatchObject({ pick: [0.5, 0] });
+    const previewed = sketchState(await answer(sketchState(emitted), first));
+    expect(previewed.session.definition).toBe(state.session.definition);
+    const preview = previewed.session.toolStagedEntities[0];
+    expect(preview?.kind).toBe("spline");
+    if (preview?.kind !== "spline") throw Error("missing trim preview");
+    expect(preview.points[0]).toEqual([0, 0]);
+    expect(preview.points.at(-1)).toEqual([1, 0]);
+    session = updateSketchPointer(previewed.session, [3.5, 0]);
+    emitted = emitPendingSketchEditQuery({ state: { ...previewed, session }, effects: [] });
+    const moved = queryEffects(emitted.effects)[0]!;
+    const right = sketchState(await answer(sketchState(emitted), moved));
+    const rightPreview = right.session.toolStagedEntities[0];
+    expect(rightPreview?.kind === "spline" && rightPreview.points[0]).toEqual([3, 0]);
+    expect(rightPreview?.kind === "spline" && rightPreview.points.at(-1)).toEqual([4, 0]);
+    const clicked = click(right, target);
+    const applied = sketchState(await answer(sketchState(clicked), queryEffects(clicked.effects)[0]!));
+    const record = applied.session.liveSolve!.solvedSnapshot.solvedEntities.find(e => e.entityId === target);
+    expect(record).toMatchObject({ kind: "lineSegment", startPosition: [0, 0], endPosition: [3, 0] });
+    expect(applied.session.toolStagedEntities).toEqual([]);
+    const left = updateSketchEditToolHover(right.session, null);
+    expect(left.toolStagedEntities).toEqual([]);
+  });
+
   test("a click emits one background query (idempotent) and authors nothing; its result applies once; a result of another request is dropped", async () => {
     const { state, target } = await trimState();
     const clicked = click(state, target);
@@ -216,7 +270,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     const { state, target } = await trimState();
     const first = click(state, target);
     const [firstEffect] = queryEffects(first.effects);
-    // The x = 1 cutter is cut by nothing twice: its own Trim fails, in order.
+    // The x = 1 cutter has a single crossing: its end trim follows in order.
     const cutter = state.session.definition.entities[1]!.entityId;
     const second = click(sketchState(first), cutter);
     expect(queryEffects(second.effects)).toEqual([]);
@@ -232,8 +286,9 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     const afterSecond = sketchState(
       await answer(sketchState(afterFirst), secondEffect!),
     );
-    expect(afterSecond.session.validationMessage).toBe(
-      "Trim needs two unambiguous intersections on the target curve.",
+    expect(afterSecond.session.validationMessage).toBeNull();
+    expect(afterSecond.session.definition.entities.find(e => e.entityId === cutter)).not.toEqual(
+      state.session.definition.entities.find(e => e.entityId === cutter),
     );
   });
 

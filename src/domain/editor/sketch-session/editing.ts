@@ -78,6 +78,7 @@ import {
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import {
+  sketchTrimPreviewPoints,
   EXTEND_TARGET_UNSUPPORTED_MESSAGE,
   SPLIT_ENTITY_KINDS,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
@@ -2239,7 +2240,7 @@ function withEditQuery(
 }
 
 /**
- * T13m: Split records the last sketch pointer (the preview scheduler
+ * Split and Trim record the last sketch pointer (the preview scheduler
  * flushes a pending move before any other event, so at a selection it is
  * the click position); none while the pointer is off the sketch.
  */
@@ -2248,14 +2249,30 @@ export function updateSketchSplitPointer(
   point: SketchPoint | null,
 ): SketchSessionState {
   const tool = session.activeEditTool;
-  if (tool?.toolId !== "sketchSplit") return session;
+  if (tool?.toolId !== "sketchSplit" && tool?.toolId !== "trim") return session;
   if (!point) {
     if (!tool.pointer) return session;
     const withoutPointer = { ...tool };
     delete withoutPointer.pointer;
-    return { ...session, activeEditTool: withoutPointer };
+    return stageSketchTrimHover({ ...session, activeEditTool: withoutPointer });
   }
-  return { ...session, activeEditTool: { ...tool, pointer: point } };
+  return stageSketchTrimHover({ ...session, activeEditTool: { ...tool, pointer: point } });
+}
+
+/** O14: reuse the exact edit-query effect and the edit tools' staged entities.
+ * Replacing a hover query cancels its identity; a late worker reply cannot
+ * publish a piece under an old pointer, and clicks always supersede hovers.
+ */
+function stageSketchTrimHover(session: SketchSessionState): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool?.toolId !== "trim" || tool.editQuery?.queue.some(click => !click.preview)) return session;
+  const cleared = { ...session, toolStagedEntities: [], activeEditTool: {
+    ...tool, editQuery: { queue: [], inFlight: null },
+  }, toolPresentation: buildSketchEditToolPresentation(tool, session.validationMessage) };
+  if (!tool.pointer || tool.hoverTarget?.kind !== "sketchEntity") return cleared;
+  const click = editQueryClick(cleared, tool.hoverTarget.entityId, null);
+  if (!click || editQueryClickRefusal(cleared, "trim", click)) return cleared;
+  return queueSketchEditQueryClick(cleared, cleared.activeEditTool, { ...click, preview: true });
 }
 
 /** The click's entity ids: the target, then the Extend/Split boundary. */
@@ -2325,6 +2342,8 @@ function editQueryClick(
   return {
     targetEntityId,
     entity,
+    ...(session.activeEditTool?.toolId === "trim" && session.activeEditTool.pointer
+      ? { pick: session.activeEditTool.pointer } : {}),
     ...(boundary
       ? { boundary: { entityId: boundaryEntityId!, entity: boundary } }
       : {}),
@@ -2427,7 +2446,8 @@ export function advanceSketchEditQueryQueue(
           // T13m: Split cuts at the crossing nearest its boundary click.
           ...(head.pick ? { pick: [head.pick[0], head.pick[1]] } : {}),
         }
-      : { kind: "trim", targetEntityId: head.targetEntityId };
+      : { kind: "trim", targetEntityId: head.targetEntityId,
+          ...(head.pick ? { pick: [head.pick[0], head.pick[1]] } : {}) };
     return withEditQuery(
       session,
       {
@@ -2461,8 +2481,8 @@ export function prepareSketchIntersectionEdit(
   const offsets = (session.definition.derivedRelationships ?? []).some(r => r.kind === "offset");
   if (gate || (offsets && session.liveRegions.status === "pending"))
     return { message: gate?.message ?? "Sketch edit needs current derived geometry." };
-  if (operation.kind === "split" && operation.pick && !operation.pick.every(Number.isFinite))
-    return { message: "Split crossing selection must be finite." };
+  if ((operation.kind === "split" || operation.kind === "trim") && operation.pick && !operation.pick.every(Number.isFinite))
+    return { message: `${editQueryToolName(operation.kind)} crossing selection must be finite.` };
   return { input: sketchEditIntersectionInput(session, operation), definition: session.definition, generation: session.liveRegions.generation };
 }
 
@@ -2547,6 +2567,21 @@ export function completeSketchEditQuery(
     session.liveSolve?.solvedSnapshot !== inFlight.input.solvedSnapshot
   )
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
+  if (editQuery!.queue[0]?.preview) {
+    const gate = offsetEditInputGate(session, [operation.targetEntityId,
+      ...result.nonAcceptedNearTarget,
+      ...(result.kind === "verified" ? result.cuts.flatMap(cut => cut.cutters.map(cutter => cutter.entityId)) : []),
+    ], "a Trim input");
+    const points = !gate && result.kind === "verified" ? sketchTrimPreviewPoints(inFlight.input, result) : [];
+    const entity = editQuery!.queue[0]!.entity;
+    const preview: SketchDraftEntity[] = points.length > 1 ? [{
+      id: `preview-trim-${entity.entityId}`, kind: "spline", points,
+      entityId: null, status: "preview", label: "Trim removes this piece",
+      isConstruction: entity.isConstruction,
+    }] : [];
+    return { ...withEditQuery(session, popped, null), toolStagedEntities: preview,
+      toolPresentation: buildSketchEditToolPresentation(tool, null, preview) };
+  }
   const completed = completeSketchIntersectionEdit(session, inFlight, result);
   if (completed.pending)
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
@@ -2567,7 +2602,7 @@ export function completeSketchIntersectionEdit(
     return refuse(editQueryStaleMessage(operation.kind));
   const gate = offsetEditInputGate(session, [operation.targetEntityId,
     ...(operation.kind === "trim" ? [] : [operation.boundaryEntityId]),
-    ...(result.kind === "verified" ? [result.cuts[0]!, result.cuts.at(-1)!].flatMap(cut => cut.cutters.map(cutter => cutter.entityId)) : []),
+    ...(result.kind === "verified" ? result.cuts.flatMap(cut => cut.cutters.map(cutter => cutter.entityId)) : []),
     ...result.nonAcceptedNearTarget], `a ${editQueryToolName(operation.kind)} input`);
   if (gate) return refuse(gate.message, gate.pending);
   if (result.kind === "failed") return refuse(result.message);
@@ -2767,6 +2802,8 @@ export function updateSketchEditToolHover(
     ...session.activeEditTool,
     hoverTarget: target,
   };
+  if (activeEditTool.toolId === "trim")
+    return stageSketchTrimHover({ ...session, activeEditTool });
   if (activeEditTool.repair)
     return hoverSketchMirrorRepair(session, {
       ...activeEditTool,
@@ -2832,8 +2869,10 @@ export function selectSketchEditToolTarget(
       return session;
     }
     const click = editQueryClick(session, target.entityId, null);
+    const tool = activeEditTool.editQuery?.queue[0]?.preview
+      ? { ...activeEditTool, editQuery: { queue: [], inFlight: null } } : activeEditTool;
     return click
-      ? queueSketchEditQueryClick(session, activeEditTool, click)
+      ? queueSketchEditQueryClick({ ...session, toolStagedEntities: [] }, tool, click)
       : session;
   }
 

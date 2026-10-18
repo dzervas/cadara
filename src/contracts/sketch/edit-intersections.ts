@@ -86,7 +86,7 @@ export interface SketchEditIntersectionInput {
  * traversal).
  */
 export type SketchEditOperation =
-  | { kind: "trim"; targetEntityId: SketchEntityId }
+  | { kind: "trim"; targetEntityId: SketchEntityId; pick?: [number, number] }
   | {
       kind: "extend";
       targetEntityId: SketchEntityId;
@@ -185,6 +185,8 @@ export type SketchEditIntersectionResult =
       /** Strictly ordered along the target's traversal, disjoint enclosures. */
       cuts: SketchEditCut[];
       parameterOrder: "increasing" | "decreasing";
+      /** O14: removed traversal interval; null bounds are open ends. Both null deletes. */
+      trimInterval?: { from: number | null; to: number | null };
       incidences: SketchEditIncidence[];
       /**
        * [TECH] T-g5: non-accepted offset outputs (never cutters) whose
@@ -829,8 +831,7 @@ async function queryCuts(
   }
   const allCuts = clusters.map((cluster) => cutOf(cluster));
   if (parameterOrder === "decreasing") allCuts.reverse();
-  if (operation.kind === "trim" && allCuts.length < 2)
-    fail("edit-too-few-cuts", TRIM_TOO_FEW_CUTS_MESSAGE, [targetId]);
+
   // Review R-1/A-1: a kept piece must be a valid solver curve. Its end
   // positions (the solved target ends and the cuts' evaluator positions)
   // must be at least the solver's minimum segment length apart
@@ -922,8 +923,37 @@ async function queryCuts(
         ) ?? candidates[0]!;
     }
   }
+  let trimInterval: { from: SketchEditCut | null; to: SketchEditCut | null } | undefined;
+  if (operation.kind === "trim") {
+    const closed = circle || splineClosed;
+    if (allCuts.length === 0 || (closed && allCuts.length < 2)) {
+      selected = [];
+      trimInterval = { from: null, to: null };
+    } else if (operation.pick) {
+      // Select neighbours in SOURCE traversal, not by Euclidean distance to
+      // crossings (which picks the wrong span on a folded spline).
+      const { parameter } = incidenceOnHosts(ordered, operation.pick);
+      const before = allCuts.findLastIndex(cut => parameterOrder === "increasing"
+        ? cut.representative <= parameter : cut.representative >= parameter);
+      const fromIndex = before < 0 ? (closed ? allCuts.length - 1 : -1) : before;
+      const toIndex = before + 1 < allCuts.length ? before + 1 : (closed ? 0 : -1);
+      trimInterval = { from: allCuts[fromIndex] ?? null, to: allCuts[toIndex] ?? null };
+      selected = [...new Set([fromIndex, toIndex].filter(index => index >= 0))].sort((a, b) => a - b);
+    } else {
+      // Browser clicks always carry a pick. Older explicit callers retain
+      // their deterministic two-cut selection; a lone cut trims the end.
+      selected = allCuts.map((_, index) => index);
+      trimInterval = closed
+        ? { from: allCuts.at(-1)!, to: allCuts[0]! }
+        : { from: allCuts[0]!, to: allCuts.length > 1 ? allCuts.at(-1)! : null };
+    }
+  }
   const cuts = selected.map((index) => allCuts[index]!);
-  const tooShort = leavesShortPiece(cuts);
+  const tooShort = trimInterval
+    ? trimKeptPolylines(ordered, parameterOrder, trimInterval, circle || splineClosed).some(polyline =>
+        polyline.slice(1).reduce((length, point, index) => length + Math.hypot(
+          point[0] - polyline[index]![0], point[1] - polyline[index]![1]), 0) < modelingTolerance)
+    : leavesShortPiece(cuts);
   if (tooShort && operation.kind === "split")
     fail("edit-no-crossing", SPLIT_NO_CROSSING_MESSAGE, [
       targetId,
@@ -1082,9 +1112,65 @@ async function queryCuts(
     kind: "verified",
     cuts,
     parameterOrder,
+    ...(trimInterval ? { trimInterval: {
+      from: trimInterval.from ? cuts.indexOf(trimInterval.from) : null,
+      to: trimInterval.to ? cuts.indexOf(trimInterval.to) : null,
+    } } : {}),
     incidences,
     nonAcceptedNearTarget,
   };
+}
+
+/** Source-parameter sampling shared by the trim length gate and staged hover. */
+function trimPolyline(branches: readonly Branch[], from: number, to: number): [number, number][] {
+  if (from > to) return trimPolyline(branches, to, from).reverse();
+  return branches.flatMap(branch => {
+    const lo = Math.max(from, branch.domain[0]);
+    const hi = Math.min(to, branch.domain[1]);
+    if (lo > hi) return [];
+    return Array.from({ length: 17 }, (_, i) => {
+      const point = evaluateNeutralCurve(branch.curve, lo + (hi - lo) * i / 16);
+      return [point[0], point[1]] as [number, number];
+    });
+  });
+}
+
+function trimKeptPolylines(
+  branches: readonly Branch[], order: "increasing" | "decreasing",
+  interval: { from: SketchEditCut | null; to: SketchEditCut | null }, closed: boolean,
+) {
+  const lo = branches[0]!.domain[0], hi = branches.at(-1)!.domain[1];
+  const start = order === "increasing" ? lo : hi, end = order === "increasing" ? hi : lo;
+  if (!interval.from && !interval.to) return [];
+  if (closed) {
+    const from = interval.to!.representative, to = interval.from!.representative;
+    return [from < to ? trimPolyline(branches, from, to)
+      : [...trimPolyline(branches, from, hi), ...trimPolyline(branches, lo, to)]];
+  }
+  return [
+    ...(interval.from ? [trimPolyline(branches, start, interval.from.representative)] : []),
+    ...(interval.to ? [trimPolyline(branches, interval.to.representative, end)] : []),
+  ];
+}
+
+/** O14: tessellate only the certified piece that the next click removes. */
+export function sketchTrimPreviewPoints(
+  input: SketchEditIntersectionInput,
+  result: Extract<SketchEditIntersectionResult, { kind: "verified" }>,
+): [number, number][] {
+  const interval = result.trimInterval;
+  if (!interval) return [];
+  const { branches } = collectArrangementBranches(input.definition, input.solvedSnapshot, [], [], [], { includeConstruction: true });
+  const target = branches.filter(branch => branch.entityId === input.operation.targetEntityId)
+    .sort((a, b) => a.domain[0] - b.domain[0]);
+  if (!target.length) return [];
+  const lo = target[0]!.domain[0], hi = target.at(-1)!.domain[1];
+  const increasing = result.parameterOrder === "increasing";
+  const from = interval.from === null ? (increasing ? lo : hi) : result.cuts[interval.from]!.representative;
+  const to = interval.to === null ? (increasing ? hi : lo) : result.cuts[interval.to]!.representative;
+  return increasing && from > to
+    ? [...trimPolyline(target, from, hi), ...trimPolyline(target, lo, to)]
+    : trimPolyline(target, from, to);
 }
 
 /**

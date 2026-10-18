@@ -903,7 +903,7 @@ export function updateSketchPointer(
     return updateSketchOffsetPointer(session, point);
   }
 
-  if (session.activeEditTool?.toolId === "sketchSplit") {
+  if (session.activeEditTool?.toolId === "sketchSplit" || session.activeEditTool?.toolId === "trim") {
     return updateSketchSplitPointer(session, point);
   }
 

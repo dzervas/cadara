@@ -11,7 +11,6 @@ import {
   SPLIT_CIRCLE_NEEDS_TWO_MESSAGE,
   SPLIT_NO_CROSSING_MESSAGE,
   SPLIT_TARGET_UNSUPPORTED_MESSAGE,
-  TRIM_TOO_FEW_CUTS_MESSAGE,
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
 import {
@@ -217,13 +216,8 @@ describe("querySketchEditIntersections (T10g-1 exact edit-intersection service)"
   test("endpoint rule: a crossing whose enclosure holds an open target's end is a contact at that end, not a cut", async () => {
     const sketch = lineWithCutters([0, 2, 4]);
     const result = await trim(sketch, "target");
-    expect(result).toEqual({
-      kind: "failed",
-      code: "edit-too-few-cuts",
-      message: TRIM_TOO_FEW_CUTS_MESSAGE,
-      entityIds: [entity("target")],
-      nonAcceptedNearTarget: [],
-    });
+    expect(verified(result).cuts.map(cut => cut.position)).toEqual([[2, 0]]);
+    expect(verified(result).trimInterval).toEqual({ from: 0, to: null });
   });
 
   test("knot rule: a crossing through a spline fit point snaps to that knot bitwise (one cut, not two span roots); spans' interior roots stay ordinary", async () => {
@@ -1172,17 +1166,11 @@ describe("Intersect (T13i snap candidates)", () => {
     targetEntityId: entity("target"),
   } as const;
 
-  test("one crossing: Trim still refuses (edit-too-few-cuts); intersect verifies the one cut at the evaluator position", async () => {
+  test("one crossing: Trim permits an end trim; intersect verifies the same evaluator cut", async () => {
     const sketch = splineWithVerticals([1]);
     expect(
       await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
-    ).toEqual({
-      kind: "failed",
-      code: "edit-too-few-cuts",
-      message: TRIM_TOO_FEW_CUTS_MESSAGE,
-      entityIds: [entity("target")],
-      nonAcceptedNearTarget: [],
-    });
+    ).toMatchObject({ kind: "verified", trimInterval: { from: 0, to: null } });
     const result = verified(await query(sketch, intersect));
     expect(result.cuts).toHaveLength(1);
     const [cut] = result.cuts;
@@ -1221,12 +1209,12 @@ describe("Intersect (T13i snap candidates)", () => {
     expect(Math.abs(result.cuts[0]!.position[0] - 1e-4)).toBeLessThan(1e-15);
   });
 
-  test("no crossing: intersect verifies no cut (Trim refuses)", async () => {
+  test("no crossing: intersect verifies no cut and Trim selects whole-entity deletion", async () => {
     const sketch = splineWithVerticals([9]);
     expect(verified(await query(sketch, intersect)).cuts).toEqual([]);
     expect(
       await query(sketch, { kind: "trim", targetEntityId: entity("target") }),
-    ).toMatchObject({ kind: "failed", code: "edit-too-few-cuts" });
+    ).toMatchObject({ kind: "verified", cuts: [], trimInterval: { from: null, to: null } });
   });
 
   test("Extend of a spline target keeps its unsupported refusal; Split (T13m) cuts it at the crossing", async () => {

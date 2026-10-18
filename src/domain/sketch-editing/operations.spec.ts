@@ -1496,6 +1496,108 @@ describe("createSketchTrimMutation (T10g-1 exact Trim, Q1b ties, review R-3)", (
     expect(mutation.message).toBeNull();
     return mutation.definition;
   }
+  // O14: click-side Trim is tested at the certified query → mutation seam,
+  // with solved geometry as the oracle (not just the number of entities).
+  async function pickedTrim(definition: SketchDefinition, pick: [number, number]) {
+    const solvedSnapshot = solve(definition);
+    const result = await querySketchEditIntersections({
+      definition: literalResolvedDefinition(definition), solvedSnapshot,
+      projectedReferences: [], modelingTolerance: 1e-3,
+      operation: { kind: "trim", targetEntityId: entity("target"), pick },
+    }, queries);
+    if (result.kind !== "verified") throw Error(result.message);
+    const mutation = createSketchTrimMutation({ definition, targetEntityId: entity("target"),
+      intersections: result, solvedSnapshot,
+      factories: createSessionCommitFactories(1, FIXTURE_SKETCH_ID as SketchId),
+    });
+    expect(mutation.changed).toBe(true);
+    expect(mutation.message).toBeNull();
+    return { after: mutation.definition, result, solvedSnapshot };
+  }
+
+  test("O14: the middle piece is bounded by adjacent crossings, not the first and last", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("a", 0, 0); sketch.point("b", 10, 0); sketch.line("target", "a", "b");
+    for (const x of [2, 4, 6, 8]) {
+      sketch.point(`a${x}`, x, -2); sketch.point(`b${x}`, x, 2); sketch.line(`v${x}`, `a${x}`, `b${x}`);
+    }
+    const { after } = await pickedTrim(sketch.definition(), [5, 0]);
+    const pieces = solve(after).solvedEntities.filter(e => e.kind === "lineSegment" && e.startPosition[1] === 0 && e.endPosition[1] === 0);
+    expect(pieces.map(e => e.kind === "lineSegment" && [e.startPosition, e.endPosition])).toEqual([
+      [[0, 0], [4, 0]], [[6, 0], [10, 0]],
+    ]);
+  });
+
+  test.each(["start", "end"] as const)("O14 S2.13: one spline crossing trims the clicked %s, preserving the retained shape", async side => {
+    const sketch = makeSketchFixture();
+    sketch.point("a", 0, 0); sketch.point("b", 2, 3); sketch.point("c", 4, 0);
+    sketch.spline("target", ["a", "b", "c"], "open");
+    sketch.point("va", 1, -2); sketch.point("vb", 1, 5); sketch.line("v", "va", "vb");
+    const before = sketch.definition();
+    const { after, result, solvedSnapshot } = await pickedTrim(before, side === "start" ? [0.2, 0.4] : [3, 2]);
+    const spline = splineOf(after, "target");
+    expect(after.entities.filter(e => e.kind === "spline")).toHaveLength(1);
+    const points = spline.pointOccurrences.map(o => after.points.find(p => p.pointId === o.pointId)!.position);
+    if (side === "start") {
+      expect(points[0]).toEqual(result.cuts[0]!.position);
+      expect(points.at(-1)).toEqual([4, 0]);
+    } else {
+      expect(points[0]).toEqual([0, 0]);
+      expect(points.at(-1)).toEqual(result.cuts[0]!.position);
+    }
+    expect(reproductionError(before, solvedSnapshot, after, "target", side === "start" ? result.cuts[0]!.representative : 0)).toBeLessThan(4e-12);
+    expect(accepted(after)).toBe(true);
+  });
+
+  test.each(["line", "circle", "smooth", "positional"] as const)("O14: an isolated %s is deleted", async kind => {
+    const sketch = makeSketchFixture();
+    sketch.point("a", 1, 0); sketch.point("b", 0, 1); sketch.point("c", -1, 0); sketch.point("d", 0, -1);
+    if (kind === "line") sketch.line("target", "a", "b");
+    else if (kind === "circle") sketch.circle("target", "b", 2);
+    else sketch.spline("target", kind === "positional" ? ["a", "b", "c", "d", "a"] : ["a", "b", "c", "d"], kind);
+    const { after } = await pickedTrim(sketch.definition(), [1, 0]);
+    expect(after.entities).toEqual([]);
+    expect(after.entityIds).toEqual([]);
+  });
+
+  test("O14: a circle's one contact deletes it; two contacts remove the clicked arc, including across the seam", async () => {
+    const sketch = makeSketchFixture();
+    sketch.point("o", 0, 0); sketch.circle("target", "o", 2);
+    sketch.point("a", 0, -3); sketch.point("b", 0, 3); sketch.line("v", "a", "b");
+    for (const x of [-2, 2]) {
+      const { after } = await pickedTrim(sketch.definition(), [x, 0]);
+      const arc = solve(after).solvedEntities.find(e => e.entityId === entity("target"));
+      expect(arc?.kind).toBe("arc");
+      if (arc?.kind !== "arc") throw Error("missing arc");
+      expect(arc.startPosition[1]).toBeCloseTo(x > 0 ? 2 : -2, 10);
+      expect(arc.endPosition[1]).toBeCloseTo(x > 0 ? -2 : 2, 10);
+      expect(accepted(after)).toBe(true);
+    }
+    const tangent = makeSketchFixture();
+    tangent.point("o", 0, 0); tangent.circle("target", "o", 2);
+    tangent.point("a", 2, -3); tangent.point("b", 2, 3); tangent.line("v", "a", "b");
+    const { after } = await pickedTrim(tangent.definition(), [0, 2]);
+    expect(after.entities.map(e => e.entityId)).toEqual([entity("v")]);
+  });
+
+  test.each(["smooth", "positional"] as const)("O14: a closed %s spline removes either clicked half, retaining its seam shape", async closure => {
+    const sketch = makeSketchFixture();
+    sketch.point("a", 2, 0); sketch.point("b", 0, 2); sketch.point("c", -2, 0); sketch.point("d", 0, -2);
+    sketch.spline("target", closure === "positional" ? ["a", "b", "c", "d", "a"] : ["a", "b", "c", "d"], closure);
+    sketch.point("va", -4, 0.3); sketch.point("vb", 4, 0.3); sketch.line("v", "va", "vb");
+    for (const y of [-2, 2]) {
+      const { after } = await pickedTrim(sketch.definition(), [0, y]);
+      const records = solve(after).solvedEntities.filter(e => e.kind === "spline");
+      expect(records).toHaveLength(closure === "positional" && y > 0 ? 2 : 1);
+      for (const record of records) {
+        if (record.kind !== "spline" || record.reconstruction.validity !== "valid") throw Error("invalid retained spline");
+        const samples = record.reconstruction.spans.flatMap(span => Array.from({length: 17}, (_, i) => evaluateSplineSpan(span, {kind: "local", value: i / 16}).position));
+        expect(samples.every(p => y > 0 ? p[1] <= 0.30000001 : p[1] >= 0.29999999)).toBe(true);
+      }
+      expect(accepted(after)).toBe(true);
+    }
+  });
+
   /** The largest solved-point move away from the authored positions. */
   const displacement = (definition: SketchDefinition) =>
     Math.max(
