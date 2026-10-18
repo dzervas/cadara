@@ -48,7 +48,8 @@ export function SketchValidationStatus({
   const viewportDrawingFeedback =
     !toolPresentation?.selectionGuide &&
     toolPresentation?.overlays?.some(
-      (overlay) => overlay.kind === "measurement" || overlay.kind === "completionCue",
+      (overlay) =>
+        overlay.kind === "measurement" || overlay.kind === "completionCue",
     );
   if (
     !viewportDrawingFeedback &&
@@ -61,7 +62,10 @@ export function SketchValidationStatus({
       role="status"
       className="pointer-events-none max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
     >
-      {message}
+      {/* O32: only the text takes the pointer; panel padding stays canvas-through. */}
+      <span style={{ pointerEvents: "auto", userSelect: "text" }}>
+        {message}
+      </span>
     </div>
   );
 }

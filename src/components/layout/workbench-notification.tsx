@@ -97,7 +97,11 @@ export function WorkbenchNotification({
             fw={600}
             size="xs"
             className="min-w-0"
-            style={{ color: "var(--workbench-notification-active-title)" }}
+            // O32: diagnostics must remain mouse-selectable regardless of shell styles.
+            style={{
+              color: "var(--workbench-notification-active-title)",
+              userSelect: "text",
+            }}
           >
             {title}
           </Text>
@@ -105,7 +109,10 @@ export function WorkbenchNotification({
             component="div"
             size="xs"
             className="min-w-0"
-            style={{ color: "var(--workbench-notification-text-muted)" }}
+            style={{
+              color: "var(--workbench-notification-text-muted)",
+              userSelect: "text",
+            }}
           >
             {message}
           </Text>
