@@ -1,3 +1,4 @@
+import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type {
   ConstraintId,
@@ -298,9 +299,11 @@ function getStructuralTangentSourceEntityId(
       ),
     );
     const ending = definition.entities.flatMap((entity) =>
-      (entity.kind === "lineSegment" || entity.kind === "arc") &&
+      (entity.kind === "lineSegment" || entity.kind === "arc" || entity.kind === "spline") &&
       canUseTangentArcSourceAtPoint(definition, entity.entityId, candidate.point) &&
-      (pointIds.has(entity.startPointId) || pointIds.has(entity.endPointId))
+      (entity.kind === "spline"
+        ? [orderedSplinePointIds(entity)[0], orderedSplinePointIds(entity).at(-1)].some(id => id && pointIds.has(id))
+        : pointIds.has(entity.startPointId) || pointIds.has(entity.endPointId))
         ? [entity.entityId]
         : [],
     );
@@ -337,7 +340,7 @@ export function canUseTangentArcSourceAtPoint(
   ) return false;
   const atEndpoint = getEntityEndpointAtPoint(definition, entityId, position) !== null;
   return atEndpoint
-    ? (entity.kind === "lineSegment" || entity.kind === "arc") && !entity.isConstruction
+    ? (entity.kind === "lineSegment" || entity.kind === "arc" || (entity.kind === "spline" && entity.closure === "open")) && !entity.isConstruction
     : entity.kind === "lineSegment" || entity.kind === "circle" || entity.kind === "arc";
 }
 
@@ -1098,6 +1101,8 @@ function getEntityEndpointAtPoint(
   const candidatePointIds =
     entity?.kind === "lineSegment" || entity?.kind === "arc"
       ? [entity.startPointId, entity.endPointId]
+      : entity?.kind === "spline" && entity.closure === "open"
+        ? [orderedSplinePointIds(entity)[0], orderedSplinePointIds(entity).at(-1)].filter((id): id is SketchPointId => !!id)
       : entity?.kind === "point"
         ? [entity.pointId]
         : [];

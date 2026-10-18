@@ -574,15 +574,12 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "3-point arc should preserve its through-point relationship.",
     ).toBeTruthy();
 
-    const tangentArc = drawSketchTool("tangentArc", [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-    ]);
-    expect(
-      tangentArc.definition.entities[0]?.kind,
-      "Tangent arc should commit a durable arc.",
-    ).toBe("arc");
+    // O25: only a curve endpoint can start the two-click tangent tool.
+    const tangentBase = drawSketchTool("line", [[-2, 0], [0, 0]]);
+    const tangentDraft = startSketchDraw(beginSketchTool({ ...tangentBase, sketchUnitsPerPixel: 0.01 }, "tangentArc"), [0, 0]);
+    const tangentArc = acceptSketchDraw(tangentDraft, [1, 1]);
+    expect(tangentArc.definition.entities.at(-1)?.kind).toBe("arc");
+    expect(tangentArc.definition.entities).toHaveLength(2);
 
     const inscribedPolygon = drawSketchTool("inscribedPolygon", [
       [0, 0],

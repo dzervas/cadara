@@ -1858,6 +1858,28 @@ function createDerivedParameterProjection(input: {
   };
 }
 
+/** O25: endpoint tangency is defined by the declared join, not a nearest
+ * interior point that could jump to another spline span during a solve. */
+function splineArcEndpointTangency(
+  definition: SketchDefinition,
+  first: SketchEntityDefinition | undefined,
+  second: SketchEntityDefinition | undefined,
+) {
+  const spline = first?.kind === "spline" ? first : second?.kind === "spline" ? second : null;
+  const arc = first?.kind === "arc" ? first : second?.kind === "arc" ? second : null;
+  if (!spline || !arc || spline.closure !== "open") return null;
+  const occurrences = orderedSplineOccurrences(spline);
+  if (!occurrences?.length) return null;
+  for (const [atStart, occurrence] of [[true, occurrences[0]!], [false, occurrences.at(-1)!]] as const) {
+    for (const arcPointId of [arc.startPointId, arc.endPointId]) {
+      const joined = occurrence.pointId === arcPointId || definition.constraints.some(c =>
+        c.kind === "coincident" && c.pointIds.includes(occurrence.pointId) && c.pointIds.includes(arcPointId));
+      if (joined) return { spline, arc, atStart };
+    }
+  }
+  return null;
+}
+
 function isAdvancedSketchEntity(entity: SketchEntityDefinition) {
   return (
     entity.kind === "ellipse" ||
@@ -3750,6 +3772,31 @@ function buildSystem(
         (entity) => entity.entityId === constraint.entityIds[1],
       );
       if (!first || !second) {
+        continue;
+      }
+
+      const endpointPair = splineArcEndpointTangency(definition, first, second);
+      if (endpointPair) {
+        const { spline, arc, atStart } = endpointPair;
+        scalarConstraints.push(createNumericalScalarConstraint({
+          id: constraint.constraintId,
+          targetKind: "constraint",
+          parameterCount,
+          affectedVariableIndices: [...entityIdx(spline.entityId), ...entityIdx(arc.entityId)],
+          evaluateResidual(values) {
+            const geometry = reconstructCurrentSpline(values, spline);
+            const span = atStart ? geometry.spans[0] : geometry.spans.at(-1);
+            const circle = getLocalCircleLike(values, arc);
+            if (!span || !circle) return Number.POSITIVE_INFINITY;
+            const point = atStart ? span.poles[0] : span.poles[3];
+            const adjacent = atStart ? span.poles[1] : span.poles[2];
+            const tangent = subtract(point, adjacent);
+            const magnitude = length(tangent);
+            return magnitude > 1e-10
+              ? dot2(subtract(point, circle.center), tangent) / magnitude
+              : Number.POSITIVE_INFINITY;
+          },
+        }));
         continue;
       }
 
@@ -5818,6 +5865,7 @@ function validateDefinition(
             ),
           );
         } else if (
+          !splineArcEndpointTangency(definition, entities[0], entities[1]) &&
           !entities.every(
             (entity) =>
               entity &&
@@ -11450,13 +11498,13 @@ function buildConstraintStatuses(
           (candidate) => candidate.entityId === entityId,
         ),
       );
-      status = entities.every(
+      status = (splineArcEndpointTangency(definition, entities[0], entities[1]) || entities.every(
         (entity) =>
           entity &&
           (entity.kind === "lineSegment" ||
             entity.kind === "circle" ||
             entity.kind === "arc"),
-      )
+      ))
         ? isConstraintResidualWithinTolerance(residual, residualTolerance)
           ? "satisfied"
           : "unsatisfied"
