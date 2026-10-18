@@ -6,6 +6,7 @@ import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-fe
 import {
   collectSketchViewportFeedbackAnchors,
   getFloatingInputKeyPatch,
+  getSketchToolLabelObstacles,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -28,6 +29,9 @@ import {
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { transitionEditorState } from "@/core/editor/state-machine/reducer-root";
+import type { SketchEditorState } from "@/core/editor/state-machine/types";
 import {
   eid,
   entityRef,
@@ -44,6 +48,98 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+
+test.each([
+  {
+    point: [3, 0.01] as const,
+    detail: "On Line 1",
+    candidate: "nearestOnLine",
+  },
+  {
+    point: [5, 0.01] as const,
+    detail: "Midpoint of Line 1",
+    candidate: "midpoint",
+  },
+  {
+    point: [10, 0.01] as const,
+    detail: "Coincident · Line 1 end",
+    candidate: "endpoint",
+  },
+])(
+  "Point hover shows one offset inferred-constraint hint: $candidate",
+  async ({ point, detail, candidate }) => {
+    const { state } = await makeAnnotationLifecycleState();
+    const armed = transitionEditorState(state, {
+      type: "tool.activated",
+      toolId: "point",
+    }).state;
+    const hovered = transitionEditorState(armed, {
+      type: "sketch.pointerMoved",
+      point,
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+    }).state as SketchEditorState;
+    expect(hovered.session.activeInference?.candidate?.kind).toBe(candidate);
+    const schema = hovered.session.toolPresentation;
+    const projections = collectSketchViewportFeedbackAnchors(schema).map(
+      ({ id, anchor }) => ({
+        id,
+        x: 300 + (anchor.offset?.x ?? 0),
+        y: 200 + (anchor.offset?.y ?? 0),
+      }),
+    );
+    const markup = renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={schema}
+        projections={projections}
+        onPatch={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain(
+      'data-sketch-viewport-overlay="constraintPreview"',
+    );
+    expect(markup).toContain("left:318px;top:218px");
+    expect(markup.match(/Inferred constraint/g)).toHaveLength(1);
+    expect(markup.split(detail)).toHaveLength(2);
+    expect(markup).not.toContain(
+      'data-sketch-viewport-overlay="snapIndicator"',
+    );
+    expect(
+      markup.match(/data-sketch-viewport-geometry="snapIndicator"/g),
+    ).toHaveLength(1);
+    expect(getSketchToolLabelObstacles(schema, projections)).toEqual([
+      { x: 228, y: 207, width: 180, height: 22 },
+    ]);
+
+    const suppressed = transitionEditorState(hovered, {
+      type: "sketch.inferenceSuppressionChanged",
+      held: true,
+    }).state as SketchEditorState;
+    const free = renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={suppressed.session.toolPresentation}
+        projections={projections}
+        onPatch={() => undefined}
+      />,
+    );
+    expect(free).not.toContain("Inferred constraint");
+    expect(free).not.toContain('data-sketch-viewport-geometry="snapIndicator"');
+
+    const away = transitionEditorState(hovered, {
+      type: "sketch.pointerMoved",
+      point: [40, 40],
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+    }).state as SketchEditorState;
+    const cleared = renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={away.session.toolPresentation}
+        projections={projections}
+        onPatch={() => undefined}
+      />,
+    );
+    expect(cleared).not.toContain("Inferred constraint");
+  },
+);
 
 test("src/components/cad/sketch-viewport-feedback.spec.tsx", () => {
   const schema: SketchToolPresentationSchema = {

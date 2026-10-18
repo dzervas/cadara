@@ -339,8 +339,9 @@ export function getSketchToolLabelObstacles(
     projections.map((projection) => [projection.id, projection]),
   );
 
-  return (schema?.overlays ?? []).flatMap((overlay) => {
-    const parts = getSketchToolOverlayLabelParts(overlay);
+  const overlays = schema?.overlays ?? [];
+  return overlays.flatMap((overlay) => {
+    const parts = getSketchToolOverlayLabelParts(overlay, overlays);
     const projection = projectionById.get(getOverlayProjectionId(overlay.id));
 
     if (!parts || !projection) {
@@ -373,8 +374,9 @@ const SKETCH_TOOL_LABEL_MAX_WIDTH_PX = 180;
 const SKETCH_TOOL_LABEL_PART_GAP_PX = 8;
 
 /** The text parts of a rendered tool label (`SketchViewportFeedbackLayer`), or null when it renders none. */
-function getSketchToolOverlayLabelParts(
+export function getSketchToolOverlayLabelParts(
   overlay: SketchToolOverlayDescriptor,
+  overlays: readonly SketchToolOverlayDescriptor[],
 ): string[] | null {
   switch (overlay.kind) {
     case "measurement":
@@ -398,8 +400,19 @@ function getSketchToolOverlayLabelParts(
             ...(overlay.referenceLabel ? [overlay.referenceLabel] : []),
           ]
         : null;
-    case "referenceLabel":
+    case "constraintPreview":
+      return [overlay.label, overlay.detail];
     case "snapIndicator":
+      // Placement inference owns an offset label; keep the snap glyph at the
+      // point without repeating its text underneath the pointer.
+      return overlays.some(
+        (candidate) =>
+          candidate.kind === "constraintPreview" &&
+          candidate.id === `${overlay.id}-inferred-constraint`,
+      )
+        ? null
+        : [overlay.label];
+    case "referenceLabel":
       return [overlay.label];
     default:
       return null;

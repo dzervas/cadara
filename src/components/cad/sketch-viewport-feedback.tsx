@@ -16,6 +16,7 @@ import {
   getFloatingInputProjectionId,
   getOverlayGeometryProjectionId,
   getOverlayProjectionId,
+  getSketchToolOverlayLabelParts,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 
@@ -125,7 +126,10 @@ export function SketchViewportFeedbackLayer({
             getOverlayProjectionId(overlay.id),
           );
 
-          if (!projection || !shouldRenderOverlayLabel(overlay)) {
+          if (
+            !projection ||
+            !getSketchToolOverlayLabelParts(overlay, overlays)
+          ) {
             return null;
           }
 
@@ -244,16 +248,6 @@ function getOverlayContent(overlay: SketchToolOverlayDescriptor) {
     case "helperMarker":
       return overlay.label;
   }
-}
-
-function shouldRenderOverlayLabel(overlay: SketchToolOverlayDescriptor) {
-  return (
-    overlay.kind === "measurement" ||
-    (overlay.kind === "dimensionLine" && overlay.labelled === true) ||
-    (overlay.kind === "angleArc" && overlay.labelled === true) ||
-    overlay.kind === "referenceLabel" ||
-    overlay.kind === "snapIndicator"
-  );
 }
 
 function renderOverlayGeometry(
