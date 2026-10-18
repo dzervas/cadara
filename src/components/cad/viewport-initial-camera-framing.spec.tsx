@@ -11,6 +11,7 @@ import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-
 import {
   captureViewportCameraFrame,
   createViewportCamera,
+  FIT_PADDING_FACTOR,
   updateViewportCameraAspect,
   type ViewportProjectionMode,
 } from "@/infrastructure/viewport/viewport-projection";
@@ -127,8 +128,12 @@ function expectVisibleWithMargin(camera: THREE.Camera, points: Point[]) {
   camera.updateMatrixWorld();
   for (const point of points) {
     const projected = new THREE.Vector3(...point).project(camera);
-    expect(Math.abs(projected.x)).toBeLessThanOrEqual(1 / 1.18 + 1e-6);
-    expect(Math.abs(projected.y)).toBeLessThanOrEqual(1 / 1.18 + 1e-6);
+    expect(Math.abs(projected.x)).toBeLessThanOrEqual(
+      1 / FIT_PADDING_FACTOR + 1e-6,
+    );
+    expect(Math.abs(projected.y)).toBeLessThanOrEqual(
+      1 / FIT_PADDING_FACTOR + 1e-6,
+    );
     expect(Math.abs(projected.z)).toBeLessThanOrEqual(1);
   }
 }
@@ -145,7 +150,11 @@ test("initial camera framing waits for committed body bounds and controls, then 
     seam.controlsRef.current = seam.controls;
     const scaffold = body(largePart);
     scaffold.renderable.ownerBodyId = null;
-    await seam.render("doc_opened", [scaffold, { ...part, origin: "preview" }], 1);
+    await seam.render(
+      "doc_opened",
+      [scaffold, { ...part, origin: "preview" }],
+      1,
+    );
     expect(seam.updates()).toBe(0);
 
     await seam.render("doc_opened", [part], 1);
