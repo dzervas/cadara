@@ -116,10 +116,19 @@ import {
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import {
+  cross,
+  dot,
+  magnitude,
+  normalize,
+  scale,
+  subtract,
+} from "@/domain/modeling/occ/math";
+import {
   collectOccCleanupErrors,
   combineOccCleanupError,
   releaseDiscardedOccAuthoringStateObjects,
   releaseOccAuthoringStateObjects,
+  releaseOccObjects,
 } from "@/domain/modeling/occ/memory";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import { getOpenCascadeInstance } from "@/infrastructure/occ/runtime";
@@ -2347,12 +2356,64 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
+  private resolveRebuiltSketchPlane(
+    document: AuthoredModelDocument,
+    plane: SketchPlaneDefinition,
+    state: OccAuthoringState,
+  ): SketchPlaneDefinition {
+    const rebuilt = structuredClone(plane);
+    if (plane.support.kind !== "face") return rebuilt;
+
+    const extracted = extractPlanarFaceData(
+      state.oc,
+      this.requireLiveFace(state, plane.support.bodyId, plane.support.faceId),
+    );
+    const live = extracted.frame;
+    releaseOccObjects([extracted.plane]);
+
+    // Face sketches have mesh-derived local axes, not the native surface axes.
+    // Re-embed that authored frame rather than replacing it with OCC's frame.
+    const captured = plane.frame;
+    const normal = scale(
+      live.normal,
+      dot(live.normal, captured.normal) < 0 ? -1 : 1,
+    );
+    const distance = dot(subtract(captured.origin, live.origin), normal);
+    const parallel =
+      magnitude(cross(captured.normal, normal)) <=
+      document.settings.angularToleranceRadians;
+    if (parallel && Math.abs(distance) <= document.settings.modelingTolerance)
+      return rebuilt;
+
+    const origin = subtract(captured.origin, scale(normal, distance));
+    if (parallel) {
+      rebuilt.frame = { ...captured, origin };
+    } else {
+      const xAxis = normalize(
+        subtract(captured.xAxis, scale(normal, dot(captured.xAxis, normal))),
+      );
+      rebuilt.frame = {
+        ...captured,
+        origin,
+        normal,
+        xAxis,
+        yAxis: normalize(cross(normal, xAxis)),
+      };
+    }
+    return rebuilt;
+  }
+
   private async rebuildAuthoredSketchRecord(
     document: AuthoredModelDocument,
     sketch: AuthoredModelDocument["sketches"][number],
     sourceState: OccAuthoringState,
   ): Promise<SketchSnapshotRecord> {
     const sketchId = sketch.sketchId;
+    const plane = this.resolveRebuiltSketchPlane(
+      document,
+      sketch.plane,
+      sourceState,
+    );
     const definition = normalizeSketchDefinitionForSketchId(
       structuredClone(sketch.definition),
       sketchId,
@@ -2381,7 +2442,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           ),
           sketchId,
           sketchLabel: sketch.label,
-          plane: structuredClone(sketch.plane),
+          plane,
           definition,
         },
         sketchId,
@@ -2408,7 +2469,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         documentId: document.documentId,
         revisionId: document.revisionId,
         sketchId,
-        plane: sketch.plane.frame,
+        plane: plane.frame,
         tolerances,
         references: definition.references.map((reference) => ({
           referenceId: reference.referenceId,
@@ -2423,7 +2484,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       documentId: document.documentId,
       revisionId: document.revisionId,
       sketchId,
-      plane: sketch.plane.frame,
+      plane: plane.frame,
       tolerances,
       modelingTolerance: document.settings.modelingTolerance,
       definition: resolvedDefinition.definition,
@@ -2439,7 +2500,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           documentId: document.documentId,
           revisionId: document.revisionId,
           sketchId,
-          plane: sketch.plane.frame,
+          plane: plane.frame,
           tolerances,
           modelingTolerance: document.settings.modelingTolerance,
           partialSolvePolicy: "bestEffort",
@@ -2480,7 +2541,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         solverCorrelation: correlation,
         sketchId,
         sketchLabel: sketch.label,
-        plane: structuredClone(sketch.plane),
+        plane,
         definition,
       },
       sketchId,
