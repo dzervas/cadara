@@ -2281,13 +2281,20 @@ function buildSystem(
     }),
   });
 
-  const currentSplinePositions = (values: Float64Array) =>
-    Object.fromEntries(
-      [...pointRecords.entries()].map(([pointId, record]) => [
-        pointId,
-        getPoint(values, record),
-      ]),
-    ) as Record<SketchPointId, SketchPoint2D>;
+  // Only the spline's own occurrence points: `resolveSplineAggregate` reads
+  // nothing else, and building every sketch point per reconstruction was 44%
+  // of the spline constraints' reconstruction time (cadara-b3k.26).
+  const currentSplinePositions = (
+    values: Float64Array,
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+  ) => {
+    const positions: Record<SketchPointId, SketchPoint2D> = {};
+    for (const occurrence of entity.pointOccurrences) {
+      const record = pointRecords.get(occurrence.pointId);
+      if (record) positions[occurrence.pointId] = getPoint(values, record);
+    }
+    return positions;
+  };
 
   const reconstructCurrentSpline = (
     values: Float64Array,
@@ -2296,7 +2303,7 @@ function buildSystem(
   ) =>
     reconstructSplineAggregate(
       currentSplineAggregate(values, entity),
-      currentSplinePositions(values),
+      currentSplinePositions(values, entity),
       variation,
     );
 
@@ -2348,7 +2355,11 @@ function buildSystem(
       evaluate(values) {
         const gradient = zeroVector(parameterCount);
         const position = getPoint(values, point);
-        const geometry = reconstructCurrentSpline(values, entity);
+        // One aggregate and one position map for the base reconstruction and
+        // every directional variation below (1 + N reconstructions per call).
+        const aggregate = currentSplineAggregate(values, entity);
+        const positions = currentSplinePositions(values, entity);
+        const geometry = reconstructSplineAggregate(aggregate, positions);
         const closest = closestSplineLocation(position, geometry);
         if (!closest || geometry.validity !== "valid") {
           return { residual: Number.POSITIVE_INFINITY, gradient };
@@ -2360,9 +2371,9 @@ function buildSystem(
         });
         const delta = subtract(evaluated.position, position);
         for (const variableIndex of affectedVariableIndices) {
-          const varied = reconstructCurrentSpline(
-            values,
-            entity,
+          const varied = reconstructSplineAggregate(
+            aggregate,
+            positions,
             splineVariationForVariable(entity, variableIndex),
           );
           if (varied.validity !== "valid") continue;
@@ -6415,6 +6426,7 @@ function evaluateLoss(
   const gradient = zeroVector(values.length);
   const evaluations: ConstraintEvaluationRecord[] = [];
   let loss = 0;
+  if (solverWorkTrace) solverWorkTrace.lossEvaluations += 1;
 
   for (const constraint of constraints) {
     const evaluation = constraint.evaluate(values);
@@ -6473,18 +6485,25 @@ function addScaledMatrix(
   }
 }
 
+/**
+ * `current` is the caller's evaluation at `values` (cadara-b3k.26): every
+ * caller keeps `state` in step with `values`, so re-evaluating the loss here
+ * was one redundant `evaluateLoss` per iteration (39% of all evaluations in
+ * the drag-frame profile) that returned the same numbers.
+ */
 function lineSearchWolfe(
   values: Float64Array,
   direction: Float64Array,
-  gradient: Float64Array,
+  current: { loss: number; gradient: Float64Array },
   constraints: ScalarConstraintRecord[],
 ) {
-  const slope = dot(gradient, direction);
+  const slope = dot(current.gradient, direction);
   if (slope >= 0) {
     return null;
   }
   let alpha = 1;
-  const initial = evaluateLoss(values, constraints);
+  const initial = current;
+  if (solverWorkTrace) solverWorkTrace.lineSearches += 1;
   for (
     let iteration = 0;
     iteration < LINE_SEARCH_MAX_ITERATIONS;
@@ -6492,6 +6511,7 @@ function lineSearchWolfe(
   ) {
     const candidate = cloneValues(values);
     addScaled(candidate, alpha, direction);
+    if (solverWorkTrace) solverWorkTrace.lineSearchTrials += 1;
     const next = evaluateLoss(candidate, constraints);
     if (next.loss <= initial.loss + WOLFE_C1 * alpha * slope) {
       const curvature = dot(next.gradient, direction);
@@ -6567,12 +6587,7 @@ function solveBfgsOver(
       fullDirection[indices[index]!] = searchDirection[index]!;
     }
 
-    const step = lineSearchWolfe(
-      values,
-      fullDirection,
-      state.gradient,
-      constraints,
-    );
+    const step = lineSearchWolfe(values, fullDirection, state, constraints);
     if (!step) {
       if (recentlyReset) {
         break;
@@ -6632,12 +6647,7 @@ function solveGradientDescent(
       direction[index] = -direction[index]!;
     }
 
-    const step = lineSearchWolfe(
-      values,
-      direction,
-      state.gradient,
-      constraints,
-    );
+    const step = lineSearchWolfe(values, direction, state, constraints);
     if (!step) {
       break;
     }
@@ -7008,20 +7018,47 @@ export interface SketchGaussNewtonFallbackTrace {
 let gaussNewtonFallbackTrace: SketchGaussNewtonFallbackTrace[] | null = null;
 
 /**
+ * cadara-b3k.26: deterministic work counters of one traced run, so specs
+ * can pin solver work without timing it. `lossEvaluations` counts every
+ * `evaluateLoss`; `lineSearches` every Wolfe line search and
+ * `lineSearchTrials` the candidate evaluations inside them. A line search
+ * evaluates only its trial points (the start is the caller's current
+ * state), so `lossEvaluations − lineSearchTrials` is the number of solver
+ * starts, never a per-iteration cost.
+ */
+export interface SketchSolverWorkTrace {
+  lossEvaluations: number;
+  lineSearches: number;
+  lineSearchTrials: number;
+}
+
+let solverWorkTrace: SketchSolverWorkTrace | null = null;
+
+/**
  * T13e2: runs `run` and returns the Gauss–Newton fallback runs it made, so
- * specs can pin the fallback's behaviour without timing it.
+ * specs can pin the fallback's behaviour without timing it; with the
+ * cadara-b3k.26 work counters.
  */
 export function traceSketchSolverForTest<T>(run: () => T): {
   result: T;
   gaussNewtonFallbacks: SketchGaussNewtonFallbackTrace[];
+  work: SketchSolverWorkTrace;
 } {
   const previous = gaussNewtonFallbackTrace;
+  const previousWork = solverWorkTrace;
   const trace: SketchGaussNewtonFallbackTrace[] = [];
+  const work: SketchSolverWorkTrace = {
+    lossEvaluations: 0,
+    lineSearches: 0,
+    lineSearchTrials: 0,
+  };
   gaussNewtonFallbackTrace = trace;
+  solverWorkTrace = work;
   try {
-    return { result: run(), gaussNewtonFallbacks: trace };
+    return { result: run(), gaussNewtonFallbacks: trace, work };
   } finally {
     gaussNewtonFallbackTrace = previous;
+    solverWorkTrace = previousWork;
   }
 }
 
