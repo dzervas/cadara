@@ -157,6 +157,15 @@ it("refuses ambiguous or missing requirement labels and unknown aliases before l
         primitive: { kind: "point", position: [3, 4] },
         construction: false,
         intent: "fulfill",
+        as: "authored",
+      },
+      {
+        operation: "sketch.label.set",
+        basis: { alias: "authored" },
+        draft: { alias: "authored" },
+        target: { alias: "authored", label: "Point entity 1" },
+        label: "Point 1",
+        intent: "fulfill",
         as: "point",
       },
       {
@@ -212,8 +221,8 @@ it("refuses ambiguous or missing requirement labels and unknown aliases before l
         const output = JSON.parse(failed.stdout);
         expect(
           output.results.map((r: SemanticResult) => r.correlation.commandId),
-        ).toEqual(["refusal-0", "refusal-1", "refusal-2"]);
-        expect(output.unexecuted).toEqual(["refusal-3", "refusal-4"]);
+        ).toEqual(["refusal-0", "refusal-1", "refusal-2", "refusal-3"]);
+        expect(output.unexecuted).toEqual(["refusal-4", "refusal-5"]);
         expect(failed.stderr).toContain("missing or ambiguous");
       }
     }

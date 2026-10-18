@@ -135,7 +135,7 @@ describe("recipe operation discovery", () => {
     };
     collect(entry);
     expect([...references].filter((name) => !(name in entry.components!))).toEqual([]);
-    expect(entry.components!.RevolveSolidFeatureParameters).toBeDefined();
+    expect(entry.components!.SemanticRevolveSolidParameters).toBeDefined();
     expect(entry.components!.ExtrudeSurfaceFeatureParameters, "Unrelated components are not included.").toBeUndefined();
   }, 120000);
 

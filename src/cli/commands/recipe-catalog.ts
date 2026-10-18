@@ -6,7 +6,7 @@
  * the production kernel capability matrix. Nothing here is a hand-maintained
  * operation inventory. Importing this module never starts the kernel.
  */
-import { contractJsonSchemas } from "@/cli/commands/recipe-catalog.runtime-schema";
+import { contractJsonSchemas } from "@/contracts/semantic/catalog.runtime-schema";
 import {
   headlessDocumentSettings,
   headlessKernelCapabilities,

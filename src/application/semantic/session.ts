@@ -1,8 +1,10 @@
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 import { semanticResultIssues } from "@/contracts/semantic/validation";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
+import type { DurableRef } from "@/contracts/shared/references";
 import type {
   SemanticCommand,
+  CanonicalSemanticCommand,
   SemanticResult,
   SemanticState,
 } from "@/contracts/semantic/schema";
@@ -119,6 +121,40 @@ async function closeOwner(
     ? { kind: "failed", settled, resourcesReleased, failures, diagnostics }
     : { kind: "closed", settled, resourcesReleased: true };
 }
+/** Normalize only selector slots, never identities inside a canonical reference. */
+function canonicalCommand(command: SemanticCommand, state: SemanticState): CanonicalSemanticCommand | null {
+  let owned = true;
+  function id(value: unknown): unknown {
+    if (!value || typeof value !== "object" || !("kind" in value)) return value;
+    if ((value.kind === "sketchPoint" || value.kind === "dimension") && "sketchId" in value &&
+        (state.editingContext.kind !== "sketch" || state.editingContext.sketchId !== value.sketchId)) owned = false;
+    const target = value as DurableRef;
+    switch (target.kind) {
+      case "feature": return target.featureId;
+      case "body": return target.bodyId;
+      case "sketch": return target.sketchId;
+      case "sketchPoint": return target.pointId;
+      case "dimension": return target.dimensionId;
+      default: return value;
+    }
+  }
+  const normalized: Record<string, unknown> & Pick<SemanticCommand, "version" | "commandId" | "operation" | "basis"> = { ...command };
+  for (const key of ["featureId", "beforeFeatureId", "bodyId", "sketchId", "dimensionId"])
+    if (key in normalized) normalized[key] = id(normalized[key]);
+  if (command.operation === "sketch.dimension.add") normalized.points = command.points.map(id);
+  if ("parameters" in command && command.parameters) {
+    const parameters = { ...command.parameters };
+    if ("sourceFeatureIds" in parameters) parameters.sourceFeatureIds = parameters.sourceFeatureIds.map(id) as typeof parameters.sourceFeatureIds;
+    if ("booleanScope" in parameters) {
+      const scope = parameters.booleanScope;
+      parameters.booleanScope = scope.kind === "targetBody" ? { ...scope, bodyId: id(scope.bodyId) as typeof scope.bodyId }
+        : scope.kind === "targetBodies" ? { ...scope, bodyIds: scope.bodyIds.map(id) as typeof scope.bodyIds } : scope;
+    }
+    normalized.parameters = parameters;
+  }
+  return owned ? normalized as CanonicalSemanticCommand : null;
+}
+
 class DocumentSession implements SemanticSession {
   private closing = false;
   private closePromise: Promise<SemanticCloseResult> | null = null;
@@ -166,9 +202,9 @@ class DocumentSession implements SemanticSession {
     );
     return task;
   }
-  private async run(command: SemanticCommand): Promise<SemanticResult> {
-    const terminal = createSemanticResult(command, this.state);
-    if (command.basis && !sameBasis(this.state, command.basis))
+  private async run(input: SemanticCommand): Promise<SemanticResult> {
+    const terminal = createSemanticResult(input, this.state);
+    if (input.basis && !sameBasis(this.state, input.basis))
       return {
         ...terminal,
         outcome: {
@@ -180,6 +216,8 @@ class DocumentSession implements SemanticSession {
           },
         },
       };
+    const command = canonicalCommand(input, this.state);
+    if (!command) return { ...terminal, outcome: { kind: "rejected", reasonCode: "target-owner-mismatch" } };
     try {
       if (command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.") || command.operation.startsWith("variable.") || command.operation.startsWith("sketch.") || command.operation.startsWith("extrude.") || command.operation.startsWith("revolve.") || command.operation.startsWith("plane.") || command.operation.startsWith("fillet.") || command.operation.startsWith("chamfer.") || command.operation.startsWith("shell.") || command.operation.startsWith("thicken.") || command.operation.startsWith("hole.") || command.operation.startsWith("sweep.") || command.operation.startsWith("loft.") || command.operation.startsWith("combine.") || command.operation.startsWith("split.") || command.operation.startsWith("deleteSolid.") || command.operation.startsWith("mirror.") || command.operation.startsWith("transform.") || command.operation.startsWith("linearPattern.") || command.operation.startsWith("circularPattern.") || command.operation.startsWith("featureReplay.") || command.operation.startsWith("history.") || command.operation.startsWith("export.")) {
         const execute = command.operation.startsWith("timeline.") || command.operation === "target.delete" || command.operation === "body.rename" || command.operation.startsWith("feature.")
@@ -218,7 +256,7 @@ class DocumentSession implements SemanticSession {
             ...terminal,
             outcome: { kind: "unavailable", capability: command.operation },
           };
-        const executed = await (execute as (input: SemanticCommand) => Promise<SemanticResult>)(command);
+        const executed = await (execute as (input: CanonicalSemanticCommand) => Promise<SemanticResult>)(command);
         if (executed.completion.live.state)
           this.state = executed.completion.live.state;
         const issues = semanticResultIssues(terminal.correlation, executed);
@@ -358,6 +396,14 @@ class DocumentSession implements SemanticSession {
         if (terminal.completion.live.kind === "unchanged")
           terminal.completion.live.state = this.state;
         terminal.discovery = current.discovery;
+        if (command.operation === "document.inspect" && command.owner) {
+          const owner = command.owner;
+          const matches = (target: DurableRef | null) => target !== null &&
+            (target.kind === "sketch" && owner.kind === "sketch" ? target.sketchId === owner.sketchId
+              : target.kind === "feature" && owner.kind === "feature" ? target.featureId === owner.featureId
+                : target.kind === "body" && owner.kind === "body" && target.bodyId === owner.bodyId);
+          terminal.discovery = { ...current.discovery, references: current.discovery.references.filter(reference => matches(reference.owner) || matches(reference.target)) };
+        }
         // A successful open already returned the imported snapshot diagnostics.
         // Use the authoritative handoff once, but retain mutation failures.
         terminal.diagnostics =

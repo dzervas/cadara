@@ -136,7 +136,7 @@ export const pointSketchToolDefinition: SketchToolDefinition<"point"> = {
     return {
       points: [factories.createPoint(`Point ${sequence}`, pointId, end)],
       entities: [
-        factories.createPointEntity(`Point ${sequence}`, entityId, pointId),
+        factories.createPointEntity(`Point entity ${sequence}`, entityId, pointId),
       ],
       placementPointIds: [pointId],
     };

@@ -1,7 +1,6 @@
 import typia from "typia";
 import type {
   SemanticCommand,
-  SemanticExtrudeCommand,
   SemanticCorrelation,
   SemanticResult,
 } from "./schema";
@@ -11,12 +10,12 @@ import {
 } from "@/contracts/shared/validation";
 import { semanticResultIssues } from "./validation";
 
-const commandValidator = typia.createValidateEquals<Exclude<SemanticCommand, SemanticExtrudeCommand>>();
+const commandValidator = typia.createValidateEquals<Exclude<SemanticCommand, { operation: "extrude.create" | "extrude.update" }>>();
 // Keep both extrusion forms fully generated and exact. The generator's large
 // command-union dispatch otherwise selects one extrude.update branch from their
 // shared operation/featureId keys before checking depth versus parameters.
-const extrudeDepthValidator = typia.createValidateEquals<Extract<SemanticExtrudeCommand, { depth: number | string }>>();
-const extrudeParametersValidator = typia.createValidateEquals<Extract<SemanticExtrudeCommand, { parameters: unknown }>>();
+const extrudeDepthValidator = typia.createValidateEquals<Extract<SemanticCommand, { operation: "extrude.create" | "extrude.update"; depth: number | string }>>();
+const extrudeParametersValidator = typia.createValidateEquals<Extract<SemanticCommand, { operation: "extrude.create" | "extrude.update"; parameters: unknown }>>();
 const resultValidator = typia.createValidateEquals<SemanticResult>();
 
 export function validateSemanticCommand(input: unknown): ContractValidationResult<SemanticCommand> {

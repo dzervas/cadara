@@ -84,6 +84,37 @@ For example, append `{ "version": 1, "commandId": "save", "operation":
 "document.save", "path": "bracket.cadara", "basis": { "alias": "part" } }`.
 Help, capture and invalid recipes do not start the modeling runtime.
 
+### Typed targets and owner-scoped discovery
+
+Semantic target fields accept the corresponding typed `target` copied from
+`discovery.references`, including fields named `bodyId`, `featureId`,
+`beforeFeatureId`, `sketchId`, `dimensionId`, dimension `points`, nested
+`booleanScope.bodyId` / `bodyIds`, and replay `sourceFeatureIds`. Existing raw
+IDs and recipe label selectors remain supported. Typed point and dimension
+selectors must belong to the current draft's sketch; an ID from another owner
+is not silently reinterpreted as a local target. Canonical references themselves
+still contain raw IDs, and basis/draft certificates are unchanged.
+
+Every `discovery.references[]` entry is `{ label, target, owner }`. Sketch
+geometry belongs to its sketch; body topology belongs to its body; produced
+bodies and construction planes belong to their producing feature. Sketch and
+feature roots own themselves. Document construction planes have `owner: null`.
+`discovery.sketch.sketchId` identifies a draft immediately, before publication.
+
+`document.inspect` accepts an optional typed `owner` (`sketch`, `feature` or
+`body`). It returns references with that exact owner plus the owner's own target
+(so a body includes itself). It filters **only** `discovery.references`, not
+`model`, draft details, history or other metadata. Omit it for document-wide
+references. For example, after copying a sketch target from discovery:
+
+```json
+{ "version": 1, "commandId": "inspect-sketch", "operation": "document.inspect", "basis": { "alias": "latest" }, "owner": { "kind": "sketch", "sketchId": "<discovered sketchId>" } }
+```
+
+New point primitives generate distinct `Point N` (point) and `Point entity N`
+(entity) labels. Authored duplicate labels are still allowed and ambiguous
+selection still refuses; existing saved labels are not rewritten.
+
 ### Sketch-owner-qualified target selectors
 
 Generated labels are local to a sketch: two sketches each have an `Outer region`,
@@ -653,9 +684,11 @@ rebuild them; it does not retain private session history.
 ### Private sketch dimensions
 
 `sketch.dimension.add` takes the current `basis` and `draft`, an `axis`
-(`horizontal` or `vertical`), two canonical sketch point IDs in `points`,
+(`horizontal` or `vertical`), two discovered sketch-point targets (or raw point
+IDs) in `points`,
 and either `mode: "driving", value: <positive number>` or `mode: "reference"`.
-`sketch.dimension.update` takes `dimensionId` and `value`; updating a reference
+`sketch.dimension.update` takes `dimensionId` (a discovered dimension target or
+raw ID) and `value`; updating a reference
 makes it driving through the existing annotation owner. Both commands take
 `intent: "fulfill"` or explicit `"author-invalid"`. Conflicting requirements are
 never fulfilled; explicit invalid authoring remains editable without usable

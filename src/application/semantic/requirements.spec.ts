@@ -84,6 +84,7 @@ it("constrains an existing line horizontally, exposes the requirement and remove
     expect(restored.discovery!.references).toContainEqual({
       label: added.discovery!.sketch!.constraints[0]!.label,
       target: ref,
+      owner: { kind: "sketch", sketchId: restored.discovery!.sketch!.sketchId },
     });
   } finally {
     await f.close();

@@ -155,7 +155,7 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
     expect(
       after.references.filter((reference) => reference.target.kind === "body"),
     ).toEqual([
-      { label: body.label, target: { kind: "body", bodyId: body.bodyId } },
+      { label: body.label, target: { kind: "body", bodyId: body.bodyId }, owner: { kind: "feature", featureId: "feature_chamfer-1" } },
     ]);
     expect(after.model!.features).toEqual(before.model!.features);
     const geometry = (discovery: typeof before) =>

@@ -29,11 +29,14 @@ test("replay commands use the exact canonical source and disjoint transform cont
         parameters: { sourceFeatureIds: ["feature_source"], transform },
       };
       expect(validateSemanticCommand(command).success).toBe(true);
+      expect(validateSemanticCommand({ ...command, parameters: {
+        ...command.parameters, sourceFeatureIds: [{ kind: "feature", featureId: "feature_source" }],
+      } }).success).toBe(true);
       for (const parameters of [
         { ...command.parameters, unknown: true },
         {
           ...command.parameters,
-          sourceFeatureIds: [{ kind: "feature", featureId: "feature_source" }],
+          sourceFeatureIds: [{ kind: "body", bodyId: "body_wrong_kind" }],
         },
         { ...command.parameters, transform: { ...transform, unknown: true } },
         {

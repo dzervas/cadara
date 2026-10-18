@@ -379,14 +379,36 @@ export type HoleAdvancedOptions =
       counterboreDepth?: never;
     };
 
-// Distribute over existing styles without intersecting authored scalar unions.
-// Overlapping MaybeAuthoredValue fields otherwise create nonsensical intersections.
-type HoleWithExplicitTermination<Options> = Options extends unknown
-  ? Omit<Options, "termination" | "depth"> & (
-      | { termination: MaybeAuthoredValue<"blind">; depth: MaybeAuthoredValue<number> }
-      | { termination: MaybeAuthoredValue<"throughAll">; depth?: never }
-    )
-  : never;
+// Named style/termination combinations keep published schemas readable without
+// intersecting overlapping authored scalar unions.
+export interface SimpleBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style?: MaybeAuthoredValue<"simple"> }>, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"blind">;
+  depth: MaybeAuthoredValue<number>;
+}
+export interface SimpleThroughHoleOptions extends Omit<SimpleBlindHoleOptions, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"throughAll">;
+  depth?: never;
+}
+export interface CounterboreBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"counterbore"> }>, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"blind">;
+  depth: MaybeAuthoredValue<number>;
+}
+export interface CounterboreThroughHoleOptions extends Omit<CounterboreBlindHoleOptions, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"throughAll">;
+  depth?: never;
+}
+export interface CountersinkBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"countersink"> }>, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"blind">;
+  depth: MaybeAuthoredValue<number>;
+}
+export interface CountersinkThroughHoleOptions extends Omit<CountersinkBlindHoleOptions, "termination" | "depth"> {
+  termination: MaybeAuthoredValue<"throughAll">;
+  depth?: never;
+}
+
+export type HoleOptions = SimpleBlindHoleOptions | SimpleThroughHoleOptions
+  | CounterboreBlindHoleOptions | CounterboreThroughHoleOptions
+  | CountersinkBlindHoleOptions | CountersinkThroughHoleOptions;
 
 /** Canonical hole inputs retain existing style options and explicit subtractive scope. */
 export interface HoleFeatureParameters {
@@ -394,7 +416,7 @@ export interface HoleFeatureParameters {
     { role: "location"; targets: readonly Extract<DurableRef, { kind: "sketchPoint" }>[] },
     { role: "body"; targets: readonly Extract<DurableRef, { kind: "body" }>[] },
   ];
-  options: HoleWithExplicitTermination<HoleAdvancedOptions>;
+  options: HoleOptions;
 }
 
 /** Copy-only body pattern: selected seed bodies remain and each instance produces a new body. */
