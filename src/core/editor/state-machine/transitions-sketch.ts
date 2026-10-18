@@ -343,12 +343,12 @@ export function handleSketchToolPatched(
     // T17j3 F-1: a tool's value commit leaves its picks unselected, whatever
     // received the placement press. A press on the canvas cleared them
     // (its blank click); one on the preview's dimension-line handle placed
-    // the label without that click and left them selected.
+    // the label without that click and left them selected. O3/D2 re-arms
+    // Dimension, so detect an authored commit, not the tool leaving.
     const toolCommitted =
+      event.patch.intent === "commitConstraintValue" &&
       state.session.constraintAuthoring !== null &&
-      session.constraintAuthoring === null &&
-      session.activeAnnotationEdit === null &&
-      session.activeTool === null;
+      session.definition !== state.session.definition;
 
     return {
       state: {
