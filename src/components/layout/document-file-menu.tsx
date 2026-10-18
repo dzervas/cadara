@@ -1,4 +1,4 @@
-import { useRef, type ChangeEvent, type ReactElement } from "react";
+import { useRef, useState, type ChangeEvent, type ReactElement } from "react";
 import {
   ActionIcon,
   Button,
@@ -10,6 +10,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 
+import { AboutModal } from "@/components/layout/about-modal";
 import {
   DOCUMENT_FILE_MENU_ITEMS,
   getDocumentFileMenuCommand,
@@ -65,6 +66,7 @@ export function DocumentFileMenu({
   onSaveDocumentAs,
   trigger,
 }: DocumentFileMenuProps) {
+  const [aboutOpened, setAboutOpened] = useState(false);
   const handleMenuItemSelect = (itemId: DocumentFileMenuItemId) => {
     switch (getDocumentFileMenuCommand(itemId)) {
       case "newDocument":
@@ -75,6 +77,9 @@ export function DocumentFileMenu({
         return;
       case "saveDocumentAs":
         onSaveDocumentAs();
+        return;
+      case "about":
+        setAboutOpened(true);
         return;
     }
   };
@@ -149,6 +154,7 @@ export function DocumentFileMenu({
           </Tooltip>
         ) : null}
       </div>
+      <AboutModal opened={aboutOpened} onClose={() => setAboutOpened(false)} />
     </>
   );
 }
