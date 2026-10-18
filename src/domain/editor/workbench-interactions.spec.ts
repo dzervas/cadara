@@ -783,16 +783,17 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       "D3a(c): zero handle selected by cycling → handle.",
     ).toEqual(handleTip);
 
-    // (d) An unrelated selected curve in the stack still wins over
-    //     stack[0] (unchanged D3).
+    // (d) O4: this line also owns the fit point. A single selected line
+    // must not override a press on its endpoint (the same vertex rule as
+    // for a rectangle side).
     expect(
       resolveSketchDragTarget(
         [{ target: fitPoint }, { target: otherLine }],
         [otherLine],
         def,
       ),
-      "D3a(d): unrelated selected curve in stack → that curve (D3).",
-    ).toEqual(otherLine);
+      "O4: a selected line's endpoint remains a vertex drag.",
+    ).toEqual(fitPoint);
   }
 });
 

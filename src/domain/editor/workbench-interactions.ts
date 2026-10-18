@@ -338,7 +338,9 @@ function shouldTreatBackgroundDatumClickAsEmpty(
  * return the target to drag.
  *
  * If the current selection contains a draggable candidate that appears in the
- * pick stack, use that one (most recently selected first). Otherwise use
+ * pick stack, use that one (most recently selected first), except that a
+ * single selected line never overrides its top-picked endpoint, and a
+ * selected spline yields to its own fit points and handles. Otherwise use
  * `stack[0]` if draggable. Otherwise return null (no drag).
  * Draggability is D9′ (`resolveHandleFromTarget`), judged against
  * `acceptance`, the session's solve (a failed mirror's copy is not).
@@ -362,6 +364,28 @@ export function resolveSketchDragTarget(
       resolveHandleFromTarget(definition, sel, acceptance) === null
     ) {
       continue;
+    }
+    // O4: a single selected side must not turn a vertex grab into a body
+    // drag. Keep multi-selection precedence for intentional group drags,
+    // and leave covered-curve cycling intact away from the line's ends.
+    const top = stack[0]?.target;
+    if (
+      selection.length === 1 &&
+      sel.kind === "sketchEntity" &&
+      top?.kind === "sketchPoint" &&
+      top.sketchId === sel.sketchId
+    ) {
+      const entity = definition.entities.find(
+        (entry) => entry.entityId === sel.entityId,
+      );
+      if (
+        entity?.kind === "lineSegment" &&
+        (entity.startPointId === top.pointId ||
+          entity.endPointId === top.pointId) &&
+        resolveHandleFromTarget(definition, top, acceptance) !== null
+      ) {
+        return top;
+      }
     }
     // D3a: skip if sel is a spline entity and the stack contains one of
     // its own sub-targets (a fit point or handle belonging to the spline).
