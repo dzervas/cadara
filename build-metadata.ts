@@ -17,7 +17,9 @@ function readGitCommit(rootDir: string, length: "short" | "full") {
   try {
     return execFileSync(
       "git",
-      ["rev-parse", length === "short" ? "--short" : "HEAD"],
+      length === "short"
+        ? ["rev-parse", "--short", "HEAD"]
+        : ["rev-parse", "HEAD"],
       {
         cwd: rootDir,
         encoding: "utf8",
