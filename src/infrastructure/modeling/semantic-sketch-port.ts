@@ -30,7 +30,7 @@ import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
 } from "@/contracts/sketch/region-boundary-curves";
-import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
+import { isUnevaluatedMetadataOnlySketch, sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 
 import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";
 import { isReferenceDimension } from "@/contracts/sketch/schema";
@@ -851,10 +851,7 @@ export function createSemanticSketchPort(input: {
           // with notEvaluated geometry. Like an empty draft, it has no profile
           // obligation; do not manufacture a solved status or native faces.
           const imageOnly = (sketch.definition.referenceImages?.length ?? 0) > 0 &&
-            sketch.definition.entities.length === 0 && sketch.definition.points.length === 0 &&
-            sketch.definition.constraints.length === 0 && sketch.definition.dimensions.length === 0 &&
-            sketch.definition.references.length === 0 && (sketch.definition.derivedRelationships?.length ?? 0) === 0 &&
-            sketch.solvedSnapshot.status.solveState === "notEvaluated";
+            isUnevaluatedMetadataOnlySketch(sketch.definition, sketch.solvedSnapshot);
           const usable =
             !snapshot.document.diagnostics.some(d => d.severity === "error") &&
             (sketch.derivedValidity.state === "current" || imageOnly) &&
