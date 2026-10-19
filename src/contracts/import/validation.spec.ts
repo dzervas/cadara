@@ -507,6 +507,44 @@ test("src/contracts/import/validation.spec.ts", async () => {
     "Prepared action validation should accept blessed deferred body references to earlier feature actions.",
   ).toBeTruthy();
 
+  // Lane: logic (contract validation seam). A body-scope binding's ownerRef is
+  // the exclusive bodyOf witness resolveDeferredBodyScope consumes, so it is a
+  // blessed deferred position tied to the binding's own producer action.
+  const bodyScopeActions = (ownerActionIndex: number, producerActionIndex = 2) => ({
+    commitSketches: [sketchRequest()],
+    createFeatures: [extrudeRequest(0), extrudeRequest(0, 1), extrudeRequest(0, 2)],
+    orderedActions: [
+      { kind: "commitSketch" as const, index: 0 },
+      { kind: "createFeature" as const, index: 0 },
+      { kind: "createFeature" as const, index: 1 },
+      { kind: "createFeature" as const, index: 2 },
+    ],
+    bodyScopeBindings: [{
+      probeBodyId: "body_probe" as never,
+      consumerActionIndex: 3,
+      source: { consumerFeatureId: "F_CONSUMER", parameterId: "entities", deterministicId: "JHD" },
+      producerActionIndex,
+      ownerRef: { kind: "bodyOf" as const, actionIndex: ownerActionIndex },
+      siblingSignatures: [],
+    }],
+  });
+  expect(
+    validateImportPreparedActions(bodyScopeActions(2)).success,
+    "A body-scope ownerRef naming its own earlier producer action should validate.",
+  ).toBe(true);
+  expect(
+    validateImportPreparedActions(bodyScopeActions(1)).success,
+    "A body-scope ownerRef must name the binding's producer action.",
+  ).toBe(false);
+  expect(
+    validateImportPreparedActions(bodyScopeActions(0, 0)).success,
+    "A body-scope ownerRef must point to a createFeature producer.",
+  ).toBe(false);
+  expect(
+    validateImportPreparedActions(bodyScopeActions(3, 3)).success,
+    "A body-scope ownerRef must point backward from its consumer action.",
+  ).toBe(false);
+
   const planeRequest = () => ({
     contractVersion: "modeling-contract/v1alpha1" as const,
     documentId: "doc_workspace",

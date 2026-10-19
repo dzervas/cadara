@@ -776,6 +776,27 @@ function validateImportDeferredValueInvariants(
     );
   });
 
+  // A body-scope ownerRef is the exclusive bodyOf witness the materializer
+  // reuses instead of a sibling-signature vote, so it must name exactly the
+  // binding's earlier producer action.
+  actions.bodyScopeBindings?.forEach((binding, bindingIndex) => {
+    const ownerRef = binding.ownerRef;
+    if (!isDeferredValue(ownerRef)) return;
+    const path = `bodyScopeBindings.${bindingIndex}.ownerRef`;
+    blessed.add(ownerRef);
+    issues.push(
+      ...validateDeferredReference(actions, ownerRef, binding.consumerActionIndex, path),
+    );
+    if (ownerRef.actionIndex !== binding.producerActionIndex) {
+      issues.push({
+        path: `${path}.actionIndex`,
+        expected: `body-scope producer action ${binding.producerActionIndex}`,
+        value: ownerRef.actionIndex,
+        message: "A body-scope ownerRef must name the binding's producer action.",
+      });
+    }
+  });
+
   collectUnblessedDeferredValues(actions, "", blessed, issues);
   collectTopologySlots(actions, "", issues);
 
