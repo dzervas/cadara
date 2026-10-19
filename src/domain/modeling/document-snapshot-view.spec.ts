@@ -5,9 +5,12 @@ import {
   getEntityRecordForTarget,
   getFeatureSnapshot,
   getSelectionDetail,
+  getSketchErrorSummary,
   getTargetContributingFeatureIds,
 } from "@/domain/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { SketchDerivedValidity } from "@/contracts/sketch/schema";
 
 test("document snapshot view resolves selection details, contributing features, and selection catalogs", async () => {
   const snapshot = await createSeedDocumentSnapshot();
@@ -137,4 +140,63 @@ test("document snapshot view resolves selection details, contributing features, 
   ).toBe(
     "Related target feature:feature_missing is missing from snapshot.presentation.entities.",
   );
+});
+
+function withFirstSketchValidity(
+  snapshot: WorkspaceSnapshot,
+  derivedValidity: SketchDerivedValidity,
+): WorkspaceSnapshot {
+  const [first, ...rest] = snapshot.document.sketches;
+  return {
+    ...snapshot,
+    document: {
+      ...snapshot.document,
+      sketches: [
+        { ...first!, sketch: { ...first!.sketch, derivedValidity } },
+        ...rest,
+      ],
+    },
+  };
+}
+
+test("getSketchErrorSummary explains a non-current committed sketch and is null otherwise (cadara-dyh)", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketchId = snapshot.document.sketches[0]!.sketchId;
+
+  expect(snapshot.document.sketches[0]!.sketch.derivedValidity.state).toBe(
+    "current",
+  );
+  expect(getSketchErrorSummary(snapshot, sketchId)).toBeNull();
+  expect(getSketchErrorSummary(null, sketchId)).toBeNull();
+
+  const conflicting = withFirstSketchValidity(snapshot, {
+    state: "invalid",
+    diagnostics: [
+      {
+        code: "solver-info",
+        severity: "info",
+        message: "Solved in 3 iterations.",
+        target: null,
+      },
+      {
+        code: "constraint-conflicting",
+        severity: "warning",
+        message: "Horizontal 2 conflicts with Vertical 1.",
+        target: null,
+      },
+    ],
+  });
+  expect(
+    getSketchErrorSummary(conflicting, sketchId),
+    "the first non-info diagnostic is the summary",
+  ).toBe("Horizontal 2 conflicts with Vertical 1.");
+
+  const unexplained = withFirstSketchValidity(snapshot, {
+    state: "invalid",
+    diagnostics: [],
+  });
+  expect(
+    getSketchErrorSummary(unexplained, sketchId),
+    "without a diagnostic the label-free explanation is the summary",
+  ).toMatch(/so its geometry is not current/);
 });
