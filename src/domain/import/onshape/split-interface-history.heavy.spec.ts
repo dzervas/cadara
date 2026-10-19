@@ -25,7 +25,7 @@ import { createGeometryAssetComposition } from "@/infrastructure/modeling/browse
 // OCC adapter and the real kernel history probe, without browser behavior).
 // Seam: a split-interface sketch plane names its tool side face by the
 // source-authored profile entity id, so every review probe, the tool lineage
-// key, the Split alias and the committed sketch support agree exactly.
+// key, the Split's output-slot claims and the committed sketch support agree.
 //
 // Runtime/reuse policy: one real OCC runtime per file; the tracked 9841 capture
 // is trimmed to its first 19 features (through Sketch 4), the smallest prefix
@@ -82,10 +82,7 @@ function sourceFromBundle(bundle: unknown): ResolvedImportSource {
   };
 }
 
-// Known baseline failure, filed as cadara-6o1 ("Live topology rematch failed
-// for FcPi2PXMdBYVGkq_1:externalSketchReference:JHo"); a todo until that
-// importer fix lands so the heavy tier reports its real state.
-test.todo(
+test(
   "9841 Sketch 3/4 bind their own authored Cutter entity's split-interface face through review and apply",
   async () => {
     const bundle = await readPrefixBundle();
@@ -201,30 +198,38 @@ test.todo(
       const split1Id = committed.features.find((feature) => feature.label === "Split 1")!.featureId;
       const lineage =
         (await workspace.adapter.exportAuthoredModelDocument(workspaceDocumentId)).topologyLineage ?? [];
-      const facesClaimedBy = (lineageFeatureId: string, sourceKey: string) =>
+      const facesClaimedBy = (
+        lineageFeatureId: string,
+        claims: (sourceKey: string) => boolean,
+      ) =>
         lineage
           .filter((entry) => entry.featureId === lineageFeatureId)
           .flatMap((entry) => entry.outputs)
           .flatMap((output) => output.sourceTargets)
-          .filter((entry) => entry.sourceKey === sourceKey)
+          .filter((entry) => claims(entry.sourceKey))
           .flatMap((entry) => entry.targets)
           .filter((target): target is Extract<DurableRef, { kind: "face" }> => target.kind === "face");
 
-      const aliasFaces = new Map<string, Extract<DurableRef, { kind: "face" }>>();
+      // Each Cutter side face splits into one interface face per Split output,
+      // so the kernel deliberately omits the unscoped tool-successor alias and
+      // apply picks the captured owner's occurrence among the output-slot
+      // claims. The committed support must be one of its own entity's claims.
+      const supports = new Map<string, Extract<DurableRef, { kind: "face" }>>();
       for (const label of ["Sketch 3", "Sketch 4"] as const) {
         const toolKey = `extrude:${extrude4Id}:profile-sketch:${cutterSketchId}:end:one-side-end:sketch-entity:${cutterSketchId}:${expectedEntity[label]}:generated-side-face`;
-        const toolFaces = facesClaimedBy(extrude4Id, toolKey);
+        const toolFaces = facesClaimedBy(extrude4Id, (sourceKey) => sourceKey === toolKey);
         expect(toolFaces, `${toolKey} must resolve exactly one tool face.`).toHaveLength(1);
-        const aliasKey = `sheet-split-tool-successor:${split1Id}:${toolFaces[0]!.bodyId}:face:${toolFaces[0]!.faceId}`;
-        const outputFaces = facesClaimedBy(split1Id, aliasKey);
-        expect(outputFaces, `${aliasKey} must resolve exactly one output face.`).toHaveLength(1);
-        aliasFaces.set(label, outputFaces[0]!);
+        const claimPrefix = `generated-from:${split1Id}:${toolFaces[0]!.bodyId}:face:${encodeURIComponent(toolKey)}:sheet-split-interface-face:output-slot:`;
+        const outputFaces = facesClaimedBy(split1Id, (sourceKey) => sourceKey.startsWith(claimPrefix));
+        expect(outputFaces, `${claimPrefix} must claim the tool face's Split occurrences.`).not.toHaveLength(0);
+        const support = committed.sketches.find((sketch) => sketch.label === label)?.plane.support;
         expect(
-          committed.sketches.find((sketch) => sketch.label === label)?.plane.support,
-          `${label} must commit on the exact Split alias of its own entity's tool face.`,
-        ).toEqual(outputFaces[0]);
+          outputFaces,
+          `${label} must commit on a Split occurrence of its own entity's tool face.`,
+        ).toContainEqual(support);
+        supports.set(label, support as Extract<DurableRef, { kind: "face" }>);
       }
-      expect(aliasFaces.get("Sketch 3")).not.toEqual(aliasFaces.get("Sketch 4"));
+      expect(supports.get("Sketch 3")).not.toEqual(supports.get("Sketch 4"));
     } finally {
       await reviewHistory.dispose?.();
       await prepareHistory.dispose?.();

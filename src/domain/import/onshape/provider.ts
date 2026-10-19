@@ -126,7 +126,10 @@ import {
   computeCaptureFrameToWorld,
   computeParametricTransformReframe,
 } from "@/domain/import/onshape/capture-frame";
-import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
+import {
+  createRollbackTopologyTimeline,
+  type RollbackTopologySnapshot,
+} from "@/domain/import/onshape/rollback-topology-reader";
 import { readCompressedQueryLiteralFields } from "@/domain/import/onshape/compressed-query-decoder";
 import {
   resolveExactBodyProducerBindings,
@@ -2883,6 +2886,36 @@ function sketchVerificationGeometry(input: {
   return null;
 }
 
+/**
+ * Every B-rep vertex is a facet vertex of the captured face tessellation, so a
+ * body vertex or line edge must have a facet vertex at each defining point.
+ */
+function capturedBodyWitnessesGeometry(
+  snapshot: RollbackTopologySnapshot | null,
+  geometry: SketchExternalReferenceVerificationGeometry,
+): boolean {
+  const body = snapshot?.bodies.length === 1 ? snapshot.bodies[0]! : null;
+  if (!body) return false;
+  // Captured coordinates are metres; the live rematch tolerance is millimetres.
+  const tolerance = LIVE_TOPOLOGY_MATCH_TOLERANCE.linear / 1000;
+  const points = geometry.kind === "point"
+    ? [geometry.position3d]
+    : [geometry.start3d, geometry.end3d];
+  return points.every((point) =>
+    body.faces.some((face) =>
+      face.facets.some((facet) =>
+        facet.vertices.some((vertex) =>
+          Math.hypot(
+            vertex[0] - point[0],
+            vertex[1] - point[1],
+            vertex[2] - point[2],
+          ) <= tolerance
+        )
+      )
+    )
+  );
+}
+
 /** Classify captured sketch references using query provenance or a unique prior body witness. */
 export function classifySketchExternalReferences(input: {
   read: ReturnType<typeof readPartStudio>;
@@ -3000,6 +3033,14 @@ export function classifySketchExternalReferences(input: {
           : null)
       : lineVerificationGeometry(capturedSignatureRecord.signature);
     if (!verificationGeometry) continue;
+    // An ID without decoded provenance may equally name another sketch's
+    // vertex/edge (9841 JHo is a Screen Outline corner). Body fallback is only
+    // sound when the captured body before the consumer has a B-rep vertex at
+    // every defining point, at the tolerance the apply-time rematch uses.
+    if (!capturedBodyWitnessesGeometry(
+      timeline.snapshotBeforeFeature(input.consumerFeatureId),
+      verificationGeometry,
+    )) continue;
     const referenceId = `ref_${sanitizeCorrelationPart(input.consumerFeatureId)}_${sanitizeCorrelationPart(deterministicId)}` as ReferenceId;
     references.set(deterministicId, {
       geometryKind,
