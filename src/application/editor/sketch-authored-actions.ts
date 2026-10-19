@@ -544,6 +544,21 @@ export class SketchAuthoredActions {
     const entered =
       before.kind !== "editingSketch" ||
       before.session.actionContextId !== state.session.actionContextId;
+    // The entering snapshot can lack repository provenance; the actor then
+    // resolves on a later snapshot. That is the same session: carry its own
+    // entry base and accepted state to the resolved identity, never reuse
+    // what an earlier session left there (cadara-7j8).
+    if (!entered && beforeKey !== null && beforeKey !== key) {
+      for (const records of [
+        this.accepted,
+        this.publicationBases,
+        this.annotationGestures,
+      ] as Map<string, unknown>[]) {
+        if (records.has(beforeKey)) records.set(key, records.get(beforeKey));
+        else records.delete(key);
+        records.delete(beforeKey);
+      }
+    }
     if (entered || !this.accepted.has(key)) {
       this.accepted.set(key, authoredState(documentId, state.session));
       if (entered || !this.publicationBases.has(key)) {
