@@ -41,7 +41,7 @@ export default async function model(doc: SemanticDocument) {
 }
 ```
 
-This deliberately small example is not a fully constrained sketch: its XY size and position remain free. Use driving dimensions, expressions and geometric requirements for design intent; see README operation sections and the modelling skills. `examples/sdk-plate.js` is the runnable equivalent.
+This deliberately small example is not a fully constrained sketch: its XY size and position remain free. In a source checkout, start with `.agents/skills/cadara-sdk-modelling/SKILL.md` for authoring/editing and its **Design intent** reference; `.agents/skills/cadara-cli-modelling/SKILL.md` covers existing recipes, replay and envelopes. See README operation sections for driving dimensions, expressions and geometric requirements. `examples/sdk-plate.js` is the runnable equivalent.
 
 **Trusted code only.** `script` executes ordinary Bun JavaScript/TypeScript with your process permissions, filesystem and network access. It is not sandboxed, time-bounded or a persistent runtime. Run only code you trust, inside your normal external sandbox. TypeScript is transpiled, not typechecked, by Bun; run your TypeScript checker when static assurance is needed. Scripts should return JSON-compatible values and use stderr for their own logs if they need one parseable stdout envelope.
 

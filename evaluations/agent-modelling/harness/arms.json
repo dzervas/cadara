@@ -2,33 +2,36 @@
   "cli": {
     "title": "CLI recipes",
     "docs": [
+      "SDK_SKILL.md",
       "CLI_SKILL.md",
       "CLI_README.md",
       "CLI_COVERAGE.md",
       "examples/"
     ],
-    "instructions": "Use the CADara CLI: `{BIN}/cadara document recipe [--output compact] <recipe.json>` (also `--help`, `--schema [operation]`). Read CLI_SKILL.md first and follow it. Each invocation is a fresh process with its own private document; only files you save persist between invocations. The CLI is already built: ignore the skill's build step and use the command above in place of `bun <cli>/main.js`."
+    "instructions": "Use the CADara CLI: `{BIN}/cadara document recipe [--output compact] <recipe.json>` (also `--help`, `--schema [operation]`). Read CLI_SKILL.md for recipe execution and SDK_SKILL.md's Design intent for modelling guidance. Each invocation is a fresh process with its own private document; only files you save persist between invocations. The CLI is already built; use the command above in place of `bun <cli>/main.js`."
   },
   "sdk": {
     "title": "SDK script per process",
     "docs": [
       "SDK.md",
+      "SDK_SKILL.md",
       "CLI_SKILL.md",
       "CLI_README.md",
       "CLI_COVERAGE.md"
     ],
-    "instructions": "Use the CADara SDK. Read SDK.md first, then CLI_SKILL.md for modelling guidance. Run a script with `{BIN}/cadara-sdk run <script.ts>`. Each run is a fresh process with a fresh document (open a saved file to continue from it). `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape."
+    "instructions": "Use the CADara SDK. Read SDK.md first, then SDK_SKILL.md's Design intent for modelling guidance (its workflow targets the shipped SDK, not this prototype). Run a script with `{BIN}/cadara-sdk run <script.ts>`. Each run is a fresh process with a fresh document (open a saved file to continue from it). `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape."
   },
   "rt": {
     "title": "Persistent runtime",
     "docs": [
       "SDK.md",
       "RUNTIME.md",
+      "SDK_SKILL.md",
       "CLI_SKILL.md",
       "CLI_README.md",
       "CLI_COVERAGE.md"
     ],
-    "instructions": "Use the persistent CADara runtime. Read SDK.md and RUNTIME.md first, then CLI_SKILL.md for modelling guidance. `{BIN}/cadara-rt start` once; then `{BIN}/cadara-rt run <script.ts>` runs scripts against the SAME open document, which persists between runs until `{BIN}/cadara-rt stop`. `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape. Stop the runtime when you are done."
+    "instructions": "Use the persistent CADara runtime. Read SDK.md and RUNTIME.md first, then SDK_SKILL.md's Design intent for modelling guidance (its workflow targets the shipped SDK, not this prototype). `{BIN}/cadara-rt start` once; then `{BIN}/cadara-rt run <script.ts>` runs scripts against the SAME open document, which persists between runs until `{BIN}/cadara-rt stop`. `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape. Stop the runtime when you are done."
   },
   "rtlook": {
     "title": "Persistent runtime + rendered views",
@@ -36,11 +39,12 @@
       "SDK.md",
       "RUNTIME.md",
       "LOOK.md",
+      "SDK_SKILL.md",
       "CLI_SKILL.md",
       "CLI_README.md",
       "CLI_COVERAGE.md"
     ],
-    "instructions": "Use the persistent CADara runtime. Read SDK.md, RUNTIME.md and LOOK.md first, then CLI_SKILL.md for modelling guidance. `{BIN}/cadara-rt start` once; then `{BIN}/cadara-rt run <script.ts>` runs scripts against the SAME open document, which persists between runs until `{BIN}/cadara-rt stop`. `{BIN}/cadara-rt look` renders the current model to a PNG you can view with your file-read tool. `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape. Stop the runtime when you are done."
+    "instructions": "Use the persistent CADara runtime. Read SDK.md, RUNTIME.md and LOOK.md first, then SDK_SKILL.md's Design intent for modelling guidance (its workflow targets the shipped SDK, not this prototype). `{BIN}/cadara-rt start` once; then `{BIN}/cadara-rt run <script.ts>` runs scripts against the SAME open document, which persists between runs until `{BIN}/cadara-rt stop`. `{BIN}/cadara-rt look` renders the current model to a PNG you can view with your file-read tool. `{BIN}/cadara document recipe --schema <operation>` prints an operation's exact shape. Stop the runtime when you are done."
   },
   "sdk-shipped": {
     "title": "Shipped TypeScript SDK (cadara-kkl.15)",
@@ -51,6 +55,6 @@
       "CLI_README.md",
       "CLI_COVERAGE.md"
     ],
-    "instructions": "Use the shipped CADara SDK in cadara-cli/sdk. Read SDK.md and SDK_SKILL.md first. Default-export async (doc) => value; run `{BIN}/cadara script <script.ts> --trace <trace.json>`. Each invocation owns a fresh isolated document. Use live owner-scoped references and the SDK probe to verify parametric edits before saving. The existing sdk/rt/rtlook arms refer to historical prototypes, not this shipped arm."
+    "instructions": "Use the shipped CADara SDK in cadara-cli/sdk. Read SDK.md and SDK_SKILL.md first for modelling; consult CLI_SKILL.md for recipe replay and envelopes. Default-export async (doc) => value; run `{BIN}/cadara script <script.ts> --trace <trace.json>`. Each invocation owns a fresh isolated document. Use live owner-scoped references and the SDK probe to verify parametric edits before saving. The existing sdk/rt/rtlook arms refer to historical prototypes, not this shipped arm."
   }
 }

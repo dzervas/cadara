@@ -12,6 +12,8 @@ Materialize these canonical documents into each isolated run directory:
 | `CLI_README.md` | `src/cli/README.md` |
 | `CLI_COVERAGE.md` | `src/cli/COVERAGE.md` |
 
+Read `SDK.md` and `SDK_SKILL.md` first for modelling and design intent; consult `CLI_SKILL.md` for recipe replay, envelopes and compact output.
+
 For TypeScript imports, install/link the built package as `cadara-cli` in the run directory (the package exports `cadara-cli/sdk`). Scripts that only consume the injected `doc` need no runtime import; use `import type {SemanticDocument} from "cadara-cli/sdk"` when a typechecked script is desired. Run `{BIN}/cadara script model.ts --trace model.recipe.json`. Input task prompts, time/tool budgets, model pair and independent checker stay unchanged.
 
 `../verify-sdk-references.sh` qualifies the same saved reference parts through the shipped SDK `replay` and script seams. This is a deterministic SDK/package qualification, not an agent performance measurement or evidence that a generated-ops agent script was used.
