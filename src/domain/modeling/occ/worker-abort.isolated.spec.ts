@@ -17,6 +17,9 @@ vi.mock("@/infrastructure/occ/runtime", () => ({
   },
 }));
 
+// The budget covers the in-test `import("./worker")`: Vite/Typia transform of
+// the worker graph takes ~5.4 s alone, ~11.6 s inside `bun run test`, and
+// 13-15+ s with a busy CPU; the abort path itself takes ~80 ms (cadara-74s).
 test("initialization onAbort reports immediately and prevents queued work on the poisoned runtime", async () => {
   const responses: OccWorkerResponse[] = [];
   let receive: ((event: MessageEvent<OccWorkerRequest>) => void) | undefined;
@@ -40,4 +43,4 @@ test("initialization onAbort reports immediately and prevents queued work on the
   } finally {
     vi.unstubAllGlobals();
   }
-});
+}, 60_000);
