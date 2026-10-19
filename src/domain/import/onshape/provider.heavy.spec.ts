@@ -114,6 +114,7 @@ test("classifies external sketch IDs by authoritative provenance before body wit
             queryParameter("IB"),
             queryParameter("JFB"),
             queryParameter("BODY_EDGE"),
+            queryParameter("OFF_BODY_VERTEX"),
           ],
         }],
       },
@@ -122,7 +123,21 @@ test("classifies external sketch IDs by authoritative provenance before body wit
       rollbackSnapshots: [{
         featureId: "SOLID",
         tessellationTolerance: 0.001,
-        tessellatedFaces: { bodies: [{ id: "captured-body", faces: [] }] },
+        tessellatedFaces: {
+          bodies: [{
+            id: "captured-body",
+            faces: [{
+              id: "captured-face",
+              facets: [{
+                vertices: [
+                  { x: 0, y: 0, z: 0 },
+                  { x: 0.01, y: 0, z: 0 },
+                  { x: 0, y: 0.01, z: 0 },
+                ],
+              }],
+            }],
+          }],
+        },
       }],
       resolvedReferences: [
         {
@@ -142,6 +157,19 @@ test("classifies external sketch IDs by authoritative provenance before body wit
           evaluatedAt: "historyPoint",
           consumingFeatureId: "SKETCH_CONSUMER",
           signature: { entityClass: "vertex", geometryType: "point" },
+        },
+        {
+          // 9841 JHo shape: an undecodable vertex that is another sketch's
+          // point, 2.5 mm from every captured body vertex.
+          deterministicId: "OFF_BODY_VERTEX",
+          evaluatedAt: "historyPoint",
+          consumingFeatureId: "SKETCH_CONSUMER",
+          signature: {
+            entityClass: "vertex",
+            geometryType: "point",
+            boundingBox: { low: [0.0025, 0, 0], high: [0.0025, 0, 0] },
+            centroid: [0.0025, 0, 0],
+          },
         },
       ],
     },
@@ -181,6 +209,10 @@ test("classifies external sketch IDs by authoritative provenance before body wit
     source: { kind: "topologyOf", expectedKind: "edge" },
   });
   expect(references.has("IB"), "IB has no decoded provenance and occurs before any body exists.").toBe(false);
+  expect(
+    references.has("OFF_BODY_VERTEX"),
+    "Body fallback needs a captured body vertex at the referenced point.",
+  ).toBe(false);
 
   const resolvedReferences = read.studio.resolvedReferences as unknown as Array<Record<string, unknown>>;
   const earlierIndex = resolvedReferences.findIndex(
