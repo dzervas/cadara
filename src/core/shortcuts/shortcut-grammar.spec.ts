@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 
 import {
   formatShortcut,
+  isModifierOnlyShortcutEvent,
   normalizeShortcut,
   parseShortcut,
   serializeShortcut,
@@ -43,8 +44,36 @@ test("src/core/shortcuts/shortcut-grammar.spec.ts", () => {
         shortcutFromKeyboardEvent(
           { key: "Z", ctrlKey: true },
           { platform: "windows" },
-        ),
+        )!,
       ),
     "Keyboard events should normalize from logical event.key and platform modifiers.",
   ).toBe("mod+z");
+});
+
+test("shortcutFromKeyboardEvent rejects keydown events without a usable shortcut key", () => {
+  for (const event of [
+    { key: undefined },
+    { key: "" },
+    { key: "Unidentified" },
+    { key: "Process" },
+    { key: "Dead" },
+    { key: "a", isComposing: true },
+  ]) {
+    expect(
+      shortcutFromKeyboardEvent(event, { platform: "windows" }),
+      `Keydown ${JSON.stringify(event)} has no shortcut key.`,
+    ).toBeNull();
+    expect(
+      isModifierOnlyShortcutEvent(event),
+      `Keydown ${JSON.stringify(event)} is not a modifier-only event.`,
+    ).toBe(false);
+  }
+  expect(
+    isModifierOnlyShortcutEvent({ key: "Shift", shiftKey: true }),
+    "Modifier keydowns should still be recognised.",
+  ).toBe(true);
+  expect(
+    () => parseShortcut("ctrl+"),
+    "Authored shortcut parse failures must still throw.",
+  ).toThrow();
 });

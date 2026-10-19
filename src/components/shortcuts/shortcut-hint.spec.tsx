@@ -124,4 +124,8 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
     getRecordedShortcutStep({ key: ">" }),
     "Shortcut recording should ignore the sequence separator key.",
   ).toBe(null);
+  expect(
+    getRecordedShortcutStep({ key: undefined }),
+    "Shortcut recording should ignore keydown events without a key (Chrome autofill).",
+  ).toBe(null);
 });
