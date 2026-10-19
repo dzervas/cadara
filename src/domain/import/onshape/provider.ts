@@ -2916,7 +2916,11 @@ function capturedBodyWitnessesGeometry(
   );
 }
 
-/** Classify captured sketch references using query provenance or a unique prior body witness. */
+/**
+ * Classify captured sketch references using query provenance or a unique prior
+ * body witness. Every result is an Onshape constraint target, so it is marked
+ * `constraintTargetOnly` (see `SketchReferenceDefinition`).
+ */
 export function classifySketchExternalReferences(input: {
   read: ReturnType<typeof readPartStudio>;
   consumerFeatureId: string;
@@ -2966,6 +2970,9 @@ export function classifySketchExternalReferences(input: {
           kind: "sketchReference",
           label: deterministicId,
           projectionMode: "useExistingCoplanarGeometry",
+          // Onshape constraint targets never bound regions; only Use creates
+          // sketch geometry, and Use entities translate as local geometry.
+          constraintTargetOnly: true,
           source: {
             kind: "sketchEntity",
             sketchId: { kind: "sketchIdOf", actionIndex },
@@ -3050,6 +3057,7 @@ export function classifySketchExternalReferences(input: {
         kind: "modelReference",
         label: deterministicId,
         projectionMode: "projectAlongPlaneNormal",
+        constraintTargetOnly: true,
         source: {
           kind: "topologyOf",
           expectedKind: geometryKind === "point" ? "vertex" : "edge",

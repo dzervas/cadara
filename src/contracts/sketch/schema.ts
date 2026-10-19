@@ -1215,6 +1215,18 @@ export function isReferenceDimension<TDimension extends { kind: string }>(
 /**
  * Durable authored external sketch reference definition.
  * These records describe solver inputs that originate outside the local sketch graph.
+ *
+ * `constraintTargetOnly: true` on a model or sketch reference: its projection
+ * still drives the solver (constraints may target it), but it never bounds a
+ * region. Absent: the projection is also a region boundary (native CADara,
+ * like Fusion's projected geometry).
+ *
+ * Importers: Onshape and SolidWorks keep "constrain to an external edge"
+ * separate from "bring the edge into the sketch" (Onshape Use, SolidWorks
+ * Convert Entities); only the latter bounds regions. Translate a bare external
+ * constraint target with this flag, and a Use/Convert entity as local sketch
+ * geometry, or imported profiles gain boundaries the source never had
+ * (cadara-5jz: Laptop Stand Sketch 4 lost every region).
  */
 export type SketchReferenceDefinition =
   | {
@@ -1238,6 +1250,8 @@ export type SketchReferenceDefinition =
       source: FaceRef | EdgeRef | VertexRef;
       /** Declared projection mode into sketch-space coordinates. */
       projectionMode: "projectAlongPlaneNormal" | "useExistingCoplanarGeometry";
+      /** Solver-only constraint target, never a region boundary (see above). */
+      constraintTargetOnly?: true;
     }
   | {
       /** Durable authored reference identity within the containing sketch definition. */
@@ -1249,6 +1263,8 @@ export type SketchReferenceDefinition =
       source: SketchEntityRef | SketchPointRef | SketchRef;
       /** Declared projection mode into sketch-space coordinates. */
       projectionMode: "useExistingCoplanarGeometry";
+      /** Solver-only constraint target, never a region boundary (see above). */
+      constraintTargetOnly?: true;
     }
   | {
       /** Runtime-only reference identity synthesized for display/solving within the active sketch session. */

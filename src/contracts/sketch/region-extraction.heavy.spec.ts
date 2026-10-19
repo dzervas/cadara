@@ -2018,6 +2018,38 @@ describe("region arrangement owner: coverage carried from the former proximity o
     ).toHaveLength(3);
   });
 
+  test("a constraint-target-only projection drives nothing in regions: it neither splits nor blocks them (cadara-5jz)", async () => {
+    const rectangleCrossedBy = (options?: { constraintTargetOnly: true }) => {
+      const sketch = makeSketchFixture();
+      addRectangle(sketch, "r", [0, 0, 4, 3]);
+      sketch.project(
+        "edge",
+        [
+          {
+            geometryId: "projected_geometry_edge",
+            kind: "lineSegment",
+            startPosition: [2, -1],
+            endPosition: [2, 4],
+          },
+        ],
+        options,
+      );
+      return sketch;
+    };
+    const boundary = await derive(rectangleCrossedBy());
+    expect(
+      boundary.regions,
+      "an ordinary projection is a boundary and splits the rectangle",
+    ).toHaveLength(2);
+    const target = await derive(
+      rectangleCrossedBy({ constraintTargetOnly: true }),
+    );
+    expect(target.diagnostics).toEqual([]);
+    expect(target.regions.map(boundaryEntities)).toEqual([
+      ["r_s0", "r_s1", "r_s2", "r_s3"],
+    ]);
+  });
+
   test("a projected-only circle derives one projected-sourced region", async () => {
     const sketch = makeSketchFixture();
     sketch.project("profile", [

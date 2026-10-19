@@ -5276,10 +5276,8 @@ test("a real OCC split consumes a sheet bodyOf tool without a baked fallback", a
 const LAPTOP_STAND_CAPTURE_FIXTURE =
   "test/fixtures/onshape-captures/5151a4c877c9493b733ad52f.onshape-capture.json";
 
-// Known baseline failure, filed as cadara-5jz ("Unable to resolve deferred
-// regionOf for createFeature:5 ... live regions []"); a todo until that
-// importer fix lands so the heavy tier reports its real state.
-test.todo(
+// The capture is local-only (gitignored), so the row skips without it.
+test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
   "Laptop Stand preserves Sketch 4's Extrude 5 region through Wall 3→4 in real OCC",
   async () => {
     const bundle = JSON.parse(

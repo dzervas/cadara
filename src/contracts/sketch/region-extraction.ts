@@ -593,11 +593,23 @@ function outwardBox(center: SplineVector, radius: number): Box {
   };
 }
 
+/** Constraint targets drive the solver but never bound a region. */
+function constraintTargetOnlyIds(definition: DerivableSketchDefinition) {
+  return new Set(
+    definition.references
+      .filter((reference) => "constraintTargetOnly" in reference && reference.constraintTargetOnly)
+      .map((reference) => reference.referenceId),
+  );
+}
+
 function authoredReferenceIds(
   definition: DerivableSketchDefinition,
 ): Set<ReferenceId> {
+  const constraintOnly = constraintTargetOnlyIds(definition);
   const recorded = new Set(
-    definition.references.map((reference) => reference.referenceId),
+    definition.references
+      .map((reference) => reference.referenceId)
+      .filter((referenceId) => !constraintOnly.has(referenceId)),
   );
   return new Set(
     definition.referenceIds.filter((referenceId) => recorded.has(referenceId)),
@@ -3656,6 +3668,7 @@ function projectedReferenceDiagnostics(
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
 ): SketchSolveDiagnostic[] {
   const authored = authoredReferenceIds(definition);
+  const constraintOnly = constraintTargetOnlyIds(definition);
   const byId = new Map(
     projectedReferences.map((reference) => [reference.referenceId, reference]),
   );
@@ -3664,7 +3677,11 @@ function projectedReferenceDiagnostics(
       (reference) => reference.referenceId === referenceId,
     )!.label;
   const diagnostics = projectedReferences
-    .filter((reference) => !authored.has(reference.referenceId))
+    .filter(
+      (reference) =>
+        !authored.has(reference.referenceId) &&
+        !constraintOnly.has(reference.referenceId),
+    )
     .map(() =>
       makeDiagnostic(
         "projected-region-reference-unauthored",
@@ -3673,6 +3690,7 @@ function projectedReferenceDiagnostics(
       ),
     );
   for (const referenceId of definition.referenceIds) {
+    if (constraintOnly.has(referenceId)) continue;
     if (!authored.has(referenceId)) {
       diagnostics.push(
         makeDiagnostic(

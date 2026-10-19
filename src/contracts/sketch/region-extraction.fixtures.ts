@@ -98,6 +98,7 @@ export interface SketchFixture {
   project(
     name: string,
     geometry: ProjectedSketchReferenceGeometry[],
+    options?: { constraintTargetOnly?: true },
   ): ReferenceId;
   /** Moves an authored point (the solved position follows it verbatim). */
   move(name: string, x: number, y: number): void;
@@ -426,7 +427,7 @@ export function makeSketchFixture(): SketchFixture {
       });
       return id;
     },
-    project(name, geometry) {
+    project(name, geometry, options) {
       const referenceId = `ref_${name}` as ReferenceId;
       references.push({
         referenceId,
@@ -438,6 +439,7 @@ export function makeSketchFixture(): SketchFixture {
           edgeId: `edge_${name}`,
         },
         projectionMode: "projectAlongPlaneNormal",
+        ...options,
       } as SketchReferenceDefinition);
       projected.push({
         referenceId,
