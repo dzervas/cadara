@@ -1,4 +1,5 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
@@ -27,11 +28,12 @@ import { createGeometryAssetComposition } from "@/infrastructure/modeling/browse
 // source-authored profile entity id, so every review probe, the tool lineage
 // key, the Split's output-slot claims and the committed sketch support agree.
 //
-// Runtime/reuse policy: one real OCC runtime per file; the tracked 9841 capture
-// is trimmed to its first 19 features (through Sketch 4), the smallest prefix
-// containing the Split target chain and both split-interface consumers. The
-// review+apply takes about a minute on real OCC; 900 s is an explicit upper
-// bound for this real integration only. Every probe session and the workspace
+// Runtime/reuse policy: one real OCC runtime per file; the 9841 capture is
+// local-only (gitignored, so the row skips without it) and is trimmed to its
+// first 19 features (through Sketch 4), the smallest prefix containing the
+// Split target chain and both split-interface consumers. The review+apply
+// takes about a minute on real OCC; 900 s is an explicit upper bound for this
+// real integration only. Every probe session and the workspace
 // service are disposed in `finally`. The complete 9841 gate lives unchanged in
 // apply-pipeline.spec.ts.
 const CAPTURE_9841 =
@@ -82,7 +84,7 @@ function sourceFromBundle(bundle: unknown): ResolvedImportSource {
   };
 }
 
-test(
+test.skipIf(!existsSync(CAPTURE_9841))(
   "9841 Sketch 3/4 bind their own authored Cutter entity's split-interface face through review and apply",
   async () => {
     const bundle = await readPrefixBundle();
