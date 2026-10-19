@@ -34,7 +34,9 @@ import {
   type OccNativeBooleanOperandHistoryPayload,
   type OccNativeFeatureTransactionHistoryPayload,
   type OccNativeFeatureTransactionHistoryRecord,
-  type OccNativeShimPayload,
+  type OccNativeShimTopologyRecord,
+  recallNativeTopologyRecords,
+  rememberNativeTopologyRecords,
   type OpenCascadeNativeFeatureTransactionResult,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
@@ -750,15 +752,15 @@ function sameTopologyTargetKind(target: DurableRef, successor: DurableRef) {
 
 function createNativeCurrentTargetAliases(
   current: OccTrackedBody,
-  nativePayload: OccNativeShimPayload | null,
+  nativeTopology: readonly OccNativeShimTopologyRecord[] | null,
 ) {
   const aliases = new Map<string, DurableRef>();
 
-  if (!nativePayload) {
+  if (!nativeTopology) {
     return aliases;
   }
 
-  for (const record of nativePayload.topology) {
+  for (const record of nativeTopology) {
     if (record.bodyId !== current.bodyId) {
       continue;
     }
@@ -996,14 +998,14 @@ function collectNativeGeneratedClaims(input: {
 function collectNativeHistoryResolution(input: {
   current: OccTrackedBody;
   history: OccNativeFeatureTransactionHistoryPayload;
-  currentNativePayload?: OccNativeShimPayload | null;
+  currentTopology?: readonly OccNativeShimTopologyRecord[] | null;
 }) {
   const preservedTargetsBySuccessorKey = new Map<string, DurableRef>();
   const successorTargetsByPreviousKey = new Map<string, DurableRef>();
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
   const currentTargetAliases = createNativeCurrentTargetAliases(
     input.current,
-    input.currentNativePayload ?? null,
+    input.currentTopology ?? null,
   );
   const claims: OccNativeSuccessorClaim[] = [];
   const generatedClaims: OccNativeGeneratedClaim[] = [];
@@ -1246,7 +1248,7 @@ function reconcileNativeHistoryReplacement(
   replacement: OccTrackedBody,
   history: OccNativeFeatureTransactionHistoryPayload,
   ownerFeatureId: FeatureId,
-  currentNativePayload: OccNativeShimPayload | null,
+  currentTopology: readonly OccNativeShimTopologyRecord[] | null,
 ) {
   if (history.status !== "available") {
     return {
@@ -1265,7 +1267,7 @@ function reconcileNativeHistoryReplacement(
   } = collectNativeHistoryResolution({
     current,
     history,
-    currentNativePayload,
+    currentTopology,
   });
   const faces = assignNativeHistoryIds<FaceId>({
     kind: "face",
@@ -1480,23 +1482,32 @@ export function resolveNativeFeatureTransactionReplacement(
   }
   const nativeHost =
     context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
-  const currentNativePayloadJson =
-    nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
-      current.shape,
-      current.bodyId,
-      current.topologyToken,
-      context.modelingTolerance,
-      0.5,
-    );
-  const currentNativePayload = currentNativePayloadJson
-    ? parseNativeShimPayloadJson(currentNativePayloadJson)
-    : null;
+  let currentTopology =
+    recallNativeTopologyRecords(current.shape, current.bodyId) ?? null;
+  if (!currentTopology) {
+    const currentNativePayloadJson =
+      nativeHost.CadaraBuildNativeTopologyPayload?.BuildJson?.(
+        current.shape,
+        current.bodyId,
+        current.topologyToken,
+        context.modelingTolerance,
+        0.5,
+      );
+    currentTopology = currentNativePayloadJson
+      ? parseNativeShimPayloadJson(currentNativePayloadJson).topology
+      : null;
+  }
   const reconciled = reconcileNativeHistoryReplacement(
     current,
     replacement,
     history,
     ownerFeatureId,
-    currentNativePayload,
+    currentTopology,
+  );
+  rememberNativeTopologyRecords(
+    reconciled.body.shape,
+    reconciled.body.bodyId,
+    payload.topology,
   );
 
   return {

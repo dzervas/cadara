@@ -1048,6 +1048,30 @@ function createBodyTopologyRecords(
   ];
 }
 
+// Native topology records are a pure function of the exact OCC shape and body
+// id: canonical ids hash each subshape's geometry and indices follow
+// TopExp::MapShapes order, independent of tessellation settings and topology
+// token. Records a native call already returned for a shape handle therefore
+// stand in for a later BuildJson on that handle. Keyed by the JS handle, so a
+// replaced or re-wrapped shape misses and is rebuilt natively.
+const nativeTopologyRecordsByShape = new WeakMap<
+  object,
+  { bodyId: string; topology: readonly OccNativeShimTopologyRecord[] }
+>();
+
+export function rememberNativeTopologyRecords(
+  shape: object,
+  bodyId: string,
+  topology: readonly OccNativeShimTopologyRecord[],
+) {
+  nativeTopologyRecordsByShape.set(shape, { bodyId, topology });
+}
+
+export function recallNativeTopologyRecords(shape: object, bodyId: string) {
+  const remembered = nativeTopologyRecordsByShape.get(shape);
+  return remembered?.bodyId === bodyId ? remembered.topology : undefined;
+}
+
 export function parseNativeShimPayloadJson(json: string): OccNativeShimPayload {
   const parsed = JSON.parse(json) as unknown;
   const result = nativeShimPayloadValidator(parsed);
