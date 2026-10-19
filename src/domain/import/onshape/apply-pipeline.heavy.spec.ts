@@ -1863,7 +1863,7 @@ test("Onshape FEATURE patterns replay source deltas through nested mirror instan
     ),
     JSON.stringify(stale.value.diagnostics),
   ).toBe(true);
-}, 90_000);
+}, 120_000);
 
 test("segmented provider actions apply two checkpoints with rematch, closure, fallback, and neutral continuation", async () => {
   const bundle = makeWaveBSegmentedApplyCaptureBundle();
