@@ -567,6 +567,76 @@ test("applyBooleanPolicy preserves unique native boolean history successors", as
   ).toBeTruthy();
 });
 
+test("chained native booleans reuse the producing transaction's topology records for the previous body", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const seed = makeTrackedBox(
+    oc,
+    "body_native_record_reuse" as BodyId,
+    "feature_native_record_reuse_seed" as FeatureId,
+    [4, 4, 4],
+  );
+  const cutCorner = (body: OccTrackedBody, corner: number) => {
+    const tool = new oc.BRepPrimAPI_MakeBox_3(
+      toGpPnt(oc, [corner, corner, corner]),
+      1,
+      1,
+      1,
+    );
+    tool.Build(new oc.Message_ProgressRange_1());
+    return applyBooleanPolicy(
+      createOccAuthoringState(oc, { bodies: [body] }),
+      `feature_native_record_reuse_cut_${corner}` as FeatureId,
+      "cut",
+      { kind: "targetBody", bodyId: body.bodyId },
+      tool.Shape(),
+    );
+  };
+  const previous = cutCorner(seed, 0).bodies[0]!;
+  const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  const buildJson = nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson;
+  const builtShapes: unknown[] = [];
+  nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = (...args) => {
+    builtShapes.push(args[0]);
+    return buildJson(...args);
+  };
+  try {
+    const reused = cutCorner(previous, 3);
+    expect(
+      builtShapes.includes(previous.shape),
+      "The previous body came from a native transaction, so its topology records must be reused, not rebuilt natively.",
+    ).toBe(false);
+
+    // A fresh handle to the same OCC shape has no remembered records, so it
+    // takes the native rebuild and serves as the reconciliation baseline.
+    const handle = {
+      ...previous,
+      shape: previous.shape.Located(previous.shape.Location_1(), false),
+    };
+    const rebuilt = cutCorner(handle, 3);
+    expect(
+      builtShapes.includes(handle.shape),
+      "An unknown shape handle must rebuild its topology records natively.",
+    ).toBe(true);
+
+    const reconciliation = (result: ReturnType<typeof cutCorner>) => ({
+      topology: result.bodies[0]!.topology,
+      invalidations: [...result.historyInvalidations.entries()],
+    });
+    expect(
+      reused.bodies[0]!.topology.faceIds.filter((faceId) =>
+        seed.topology.faceIds.includes(faceId),
+      ).length,
+      "The chained cut should keep seed face ids through native history aliases.",
+    ).toBeGreaterThan(0);
+    expect(
+      reconciliation(reused),
+      "Reused records must reconcile history exactly like a native rebuild.",
+    ).toEqual(reconciliation(rebuilt));
+  } finally {
+    nativeHost.CadaraBuildNativeTopologyPayload!.BuildJson = buildJson;
+  }
+});
+
 test("applyBooleanPolicy uses native boolean transactions for per-target multi-body policy", async () => {
   const oc = await loadCustomOpenCascadeForTest();
   const bodyA = makeTrackedBox(

@@ -28,6 +28,7 @@ import {
 import {
   assertNativeMeshFaceBindings,
   parseNativeShimPayloadJson,
+  rememberNativeTopologyRecords,
   type OccNativeShimPayload,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/domain/modeling/occ/native-topology-payload";
@@ -607,17 +608,19 @@ function buildNativeTopologyPayloadForTrackedBody(
     );
   }
 
+  const rawPayload = parseNativeShimPayloadJson(
+    buildJson(
+      input.solid,
+      input.bodyId,
+      input.topologyToken,
+      NATIVE_TOPOLOGY_IDENTITY_LINEAR_DEFLECTION,
+      NATIVE_TOPOLOGY_IDENTITY_ANGULAR_DEFLECTION,
+    ),
+  );
+  rememberNativeTopologyRecords(input.solid, input.bodyId, rawPayload.topology);
   const nativePayload = disambiguateNativeTopologyPayloadIdentity(
     input.bodyId,
-    parseNativeShimPayloadJson(
-      buildJson(
-        input.solid,
-        input.bodyId,
-        input.topologyToken,
-        NATIVE_TOPOLOGY_IDENTITY_LINEAR_DEFLECTION,
-        NATIVE_TOPOLOGY_IDENTITY_ANGULAR_DEFLECTION,
-      ),
-    ),
+    rawPayload,
   );
   assertReleasableNativeTopologyPayload(
     oc,
