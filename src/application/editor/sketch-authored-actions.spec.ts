@@ -873,6 +873,97 @@ test("Finish carries the original private base and reconciles retained history t
   }
 });
 
+// cadara-7j8: the snapshot that enters a reopened sketch can lack repository
+// provenance; the actor identity then resolves on the next snapshot. That is
+// the same session, so it must keep its own entry base, never the base or
+// accepted state a previous session left under the resolved identity.
+test("an actor identity resolved mid-session keeps this session's publication base, not a previous session's", async () => {
+  const f = await fixture();
+  const sketchId = "sketch_existing" as SketchId;
+  const editing = (session: SketchSessionState, actorId?: string) => {
+    const snapshot = f.state.snapshot!;
+    return {
+      ...f.state,
+      snapshot: {
+        ...snapshot,
+        provenance: actorId
+          ? { actorId, repositoryHeads: ["head"], repositorySource: "local" }
+          : null,
+        document: {
+          ...snapshot.document,
+          sketches: [
+            {
+              sketchId,
+              label: session.sketchLabel,
+              plane: session.plane,
+              sketch: { definition: session.definition },
+            },
+          ],
+        },
+      },
+      session,
+    } as unknown as SketchEditorState;
+  };
+  const reopen = (session: SketchSessionState) => {
+    const entered = f.owner.transition(
+      initialEditorState,
+      { type: "selection.cleared" },
+      () => ({ state: editing(session), effects: [] }),
+    );
+    return f.owner.transition(
+      entered.state,
+      { type: "selection.cleared" },
+      () => ({ state: editing(session, "actor_repository"), effects: [] }),
+    ).state as SketchEditorState;
+  };
+  const finishBase = (state: SketchEditorState) => {
+    const event: EditorEvent = { type: "tool.activated", toolId: "finishSketch" };
+    const finish = f.owner.transition(state, event, (current) =>
+      transitionEditorState(current, event),
+    );
+    const commit = finish.effects.find(
+      (effect) => effect.type === "sketch.commit",
+    );
+    if (commit?.type !== "sketch.commit")
+      throw new Error("Expected sketch commit.");
+    return commit.publicationBase?.expectedSketch?.definition.points.map(
+      (point) => point.position,
+    );
+  };
+  const positions = (session: SketchSessionState) =>
+    session.definition.points.map((point) => point.position);
+
+  const original = { ...f.session, sketchId, actionContextId: sketchId };
+  const first = reopen(original);
+  const edited = mutations.drag(first.session);
+  const firstEdited = f.owner.transition(
+    first,
+    { type: "selection.cleared" },
+    () => ({ state: { ...first, session: edited }, effects: [] }),
+  ).state as SketchEditorState;
+  expect(finishBase(firstEdited)).toEqual(positions(original));
+  f.owner.transition(
+    firstEdited,
+    {
+      type: "effect.sketchCommitted",
+      requestId: "request_publish",
+      documentId: "doc_workspace",
+      commandSessionId: "command_test",
+      baseRevisionId: "rev_1",
+      revisionId: "rev_2",
+      accepted: true,
+      diagnostics: [],
+      publishedSketchId: sketchId,
+    },
+    () => ({ state: initialEditorState, effects: [] }),
+  );
+
+  expect(
+    finishBase(reopen(edited)),
+    "the second session publishes from the sketch it reopened",
+  ).toEqual(positions(edited));
+});
+
 test("a post-write restore failure finishes the authored owner once; Finish again is harmless and direct re-entry keeps the published identity", async () => {
   const { service, receipts } = createSketchPublicationFailureFixture();
   try {
