@@ -27,6 +27,7 @@ import {
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
+import { getSketchErrorSummary } from "@/domain/modeling/document-snapshot-view";
 import { useEditorState } from "@/hooks/use-editor-state";
 
 interface FloatingPartsTreeProps {
@@ -112,6 +113,10 @@ export function FloatingPartsTree({
             selectionCatalog,
           );
           const itemToolIcon = getObjectTreeNodeToolIcon(item);
+          const errorSummary =
+            target.kind === "sketch"
+              ? getSketchErrorSummary(snapshot, target.sketchId)
+              : null;
 
           const menuItems: WorkbenchContextMenuEntry[] =
             getPartsObjectMenuEntries({
@@ -140,6 +145,7 @@ export function FloatingPartsTree({
                 isHidden={isHidden}
                 isAllowed={isAllowed}
                 label={itemLabel}
+                errorSummary={errorSummary}
                 onActivate={() => {
                   if (!isAllowed || isHidden) return;
                   onSelectTarget(target);
@@ -176,6 +182,8 @@ interface RowProps extends HTMLAttributes<HTMLDivElement> {
   isSelected: boolean;
   isHidden: boolean;
   isAllowed: boolean;
+  /** Why the row's sketch is not current (cadara-dyh); null when it is. */
+  errorSummary: string | null;
   onActivate: () => void;
   onReopen?: () => void;
   onToggleHidden: () => void;
@@ -204,6 +212,7 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
     isSelected,
     isHidden,
     isAllowed,
+    errorSummary,
     onActivate,
     onReopen,
     onToggleHidden,
@@ -217,7 +226,9 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
   const showLift = isSelected || isHover;
   const style: CSSProperties = {
     ...ROW_BASE,
-    color: "var(--workbench-shell-text)",
+    color: errorSummary
+      ? "var(--workbench-shell-danger-text)"
+      : "var(--workbench-shell-text)",
     fontWeight: isSelected ? 600 : 500,
     opacity: isHidden ? 0.55 : !isAllowed ? 0.65 : 1,
     background: showLift
@@ -244,6 +255,7 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
       data-parts-tree-row
       data-active={isSelected ? "true" : undefined}
       data-hidden={isHidden ? "true" : undefined}
+      data-object-error={errorSummary ? "true" : undefined}
       style={style}
       onMouseEnter={(event) => {
         onMouseEnter?.(event);
@@ -261,9 +273,11 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
           width: 14,
           height: 14,
           flexShrink: 0,
-          color: isSelected
-            ? "var(--workbench-shell-sidebar-item-selected-icon)"
-            : "var(--workbench-shell-text-muted)",
+          color: errorSummary
+            ? "var(--workbench-shell-danger-text)"
+            : isSelected
+              ? "var(--workbench-shell-sidebar-item-selected-icon)"
+              : "var(--workbench-shell-text-muted)",
           filter: "var(--workbench-icon-drop-shadow-canvas)",
           display: "inline-flex",
           alignItems: "center",
@@ -280,11 +294,13 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
         title={
           isHidden
             ? "Hidden in the viewport"
-            : onReopen
-              ? "Double-click to reopen authoring in place"
-              : !isAllowed
-                ? "Filtered out by the current command"
-                : undefined
+            : errorSummary
+              ? errorSummary
+              : onReopen
+                ? "Double-click to reopen authoring in place"
+                : !isAllowed
+                  ? "Filtered out by the current command"
+                  : undefined
         }
         className="min-w-0 flex-1 truncate text-left bg-transparent border-0 p-0"
         style={{
@@ -296,6 +312,22 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
       >
         {label}
       </button>
+      {errorSummary ? (
+        <span
+          role="img"
+          aria-label={`${label} error: ${errorSummary}`}
+          title={errorSummary}
+          data-object-error-marker
+          style={{
+            display: "inline-flex",
+            flexShrink: 0,
+            color: "var(--workbench-shell-danger-text)",
+            filter: "var(--workbench-icon-drop-shadow-canvas)",
+          }}
+        >
+          <WorkbenchIcon name="error" className="h-3.5 w-3.5" />
+        </span>
+      ) : null}
       <ActionIcon
         component="button"
         onClick={(event) => {

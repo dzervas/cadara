@@ -5,7 +5,8 @@ import type {
   FeatureSnapshotRecord,
   SnapshotEntityRecord,
 } from "@/contracts/modeling/schema";
-import type { FeatureId } from "@/contracts/shared/ids";
+import type { FeatureId, SketchId } from "@/contracts/shared/ids";
+import { sketchNotCurrentExplanation } from "@/contracts/sketch/derived-validity";
 import type { SelectionTargetCatalog } from "@/core/editor/schema";
 
 export interface DocumentSelectionDetail {
@@ -195,4 +196,25 @@ export function getMissingRegionSketchLabel(
   target: Extract<PrimitiveRef, { kind: "region" }>,
 ) {
   return snapshot ? getSketchLabel(snapshot, target.sketchId) : null;
+}
+
+/**
+ * cadara-dyh: why a committed sketch's output is not current, for the parts
+ * tree's error marker: its first non-info diagnostic, else the label-free
+ * explanation. Null when the sketch is current or not in the snapshot.
+ */
+export function getSketchErrorSummary(
+  snapshot: WorkspaceSnapshot | null | undefined,
+  sketchId: SketchId,
+): string | null {
+  const sketch = snapshot?.document.sketches.find(
+    (entry) => entry.sketchId === sketchId,
+  );
+  const notCurrent = sketch ? sketchNotCurrentExplanation(sketch.sketch) : null;
+  if (!sketch || !notCurrent) return null;
+  return (
+    sketch.sketch.derivedValidity.diagnostics.find(
+      (diagnostic) => diagnostic.severity !== "info",
+    )?.message ?? notCurrent.explanation
+  );
 }

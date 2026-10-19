@@ -264,6 +264,76 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
       floatingPartsTreeMarkup.includes('aria-haspopup="menu"'),
     "Floating parts tree rows should forward the custom context menu affordance to the DOM row.",
   ).toBeTruthy();
+  expect(
+    floatingPartsTreeMarkup,
+    "current sketches carry no error marker",
+  ).not.toContain("data-object-error");
+
+  // cadara-dyh: a finished sketch whose output is not current is marked.
+  const [invalidSketch, ...otherSketches] = snapshot.document.sketches;
+  const conflictMessage = "Horizontal 2 conflicts with Vertical 1.";
+  const invalidSketchTreeMarkup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider value={editorValue}>
+        <FloatingPartsTree
+          snapshot={{
+            ...snapshot,
+            document: {
+              ...snapshot.document,
+              sketches: [
+                {
+                  ...invalidSketch!,
+                  sketch: {
+                    ...invalidSketch!.sketch,
+                    derivedValidity: {
+                      state: "invalid",
+                      diagnostics: [
+                        {
+                          code: "constraint-conflicting",
+                          severity: "warning",
+                          message: conflictMessage,
+                          target: null,
+                        },
+                      ],
+                    },
+                  },
+                },
+                ...otherSketches,
+              ],
+            },
+          }}
+          hiddenTargetKeys={{}}
+          objectLabelOverrides={{}}
+          visibleSelection={[]}
+          onObjectDelete={() => undefined}
+          onObjectExport={() => undefined}
+          onRenameTarget={() => undefined}
+          onReopenTarget={() => undefined}
+          onSelectTarget={() => undefined}
+          onToggleTargetVisibility={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  );
+  const invalidRowStart = invalidSketchTreeMarkup.indexOf(
+    `data-parts-tree-target="sketch:${invalidSketch!.sketchId}"`,
+  );
+  expect(invalidRowStart).toBeGreaterThan(-1);
+  const invalidRow = invalidSketchTreeMarkup.slice(
+    invalidSketchTreeMarkup.lastIndexOf("<div", invalidRowStart),
+    invalidSketchTreeMarkup.indexOf("data-trail", invalidRowStart),
+  );
+  expect(invalidRow).toContain('data-object-error="true"');
+  expect(invalidRow).toContain("var(--workbench-shell-danger-text)");
+  expect(invalidRow).toMatch(
+    new RegExp(
+      `<span[^>]*role="img"[^>]*title="${conflictMessage}"[^>]*data-object-error-marker`,
+    ),
+  );
+  expect(
+    (invalidSketchTreeMarkup.match(/data-object-error="true"/g) ?? []).length,
+    "only the invalid sketch row is marked",
+  ).toBe(1);
 
   const selectedSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
