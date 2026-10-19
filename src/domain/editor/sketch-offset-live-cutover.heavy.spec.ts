@@ -5328,9 +5328,10 @@ describe("T08b-g7-F Fillet relationships through the session (issue 06)", () => 
     );
     expect(response.revisionState.kind, "Finish is accepted.").toBe("accepted");
     if (!record) throw new Error("no saved record");
+    // The fillet radius stays free: sizing decision B adds no radius dimension.
     expect(record.solvedSnapshot.status).toEqual({
       solveState: "solved",
-      constraintState: "wellConstrained",
+      constraintState: "underConstrained",
     });
     expect(
       record.solvedSnapshot.constraintStatuses
@@ -6833,9 +6834,10 @@ describe("T08b-g7b relationship-scoped solve-frame failures ([TECH] G16′, U-G9
       ["core", core],
       ["live", live],
     ] as const) {
+      // Three DOF remain: P slides along the shell; the other line endpoint is free in x/y.
       expect(snapshot.status, label).toEqual({
         solveState: "solved",
-        constraintState: "wellConstrained",
+        constraintState: "underConstrained",
       });
       expect(
         snapshot.offsetFramePlans?.map((plan) => plan.derivationId),
