@@ -11,6 +11,10 @@ export function getRecordedShortcutStep(event: KeyboardShortcutEvent) {
   }
 
   const shortcut = shortcutFromKeyboardEvent(event);
+  if (!shortcut) {
+    return null;
+  }
+
   const key = shortcut.chords[0]?.key;
 
   if (key === "+" || key === ">") {

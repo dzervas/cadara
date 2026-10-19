@@ -66,6 +66,11 @@ export class ShortcutResolver {
     const chord = shortcutFromKeyboardEvent(event, {
       platform: options.platform,
     });
+    if (!chord) {
+      this.clearSequence();
+      return { handled: false, commandId: null, pendingSequence: false };
+    }
+
     const candidate = this.pendingSequence
       ? { chords: [...this.pendingSequence.chords, ...chord.chords] }
       : chord;

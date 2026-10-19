@@ -14,7 +14,12 @@ export interface ShortcutFormatOptions {
 }
 
 export interface KeyboardShortcutEvent {
-  key: string;
+  /**
+   * Optional because window keydown listeners also receive trusted events
+   * without one (Chrome autofill dispatches a plain `Event`, Sentry CADARA-16).
+   */
+  key?: string;
+  isComposing?: boolean;
   altKey?: boolean;
   ctrlKey?: boolean;
   metaKey?: boolean;
@@ -81,6 +86,22 @@ function normalizeToken(token: string) {
 function normalizeKey(key: string) {
   const normalized = normalizeToken(key);
   return keyAliases[normalized] ?? normalized;
+}
+
+/** `event.key` placeholders for keys that carry no logical key (UI Events). */
+const unsupportedEventKeys = new Set(["Dead", "Process", "Unidentified"]);
+
+function getShortcutEventKey(event: KeyboardShortcutEvent) {
+  if (
+    event.isComposing ||
+    typeof event.key !== "string" ||
+    event.key === "" ||
+    unsupportedEventKeys.has(event.key)
+  ) {
+    return null;
+  }
+
+  return event.key;
 }
 
 function sortModifiers(modifiers: Iterable<ShortcutModifier>) {
@@ -161,9 +182,14 @@ export function serializeChord(chord: ShortcutChord) {
 export function shortcutFromKeyboardEvent(
   event: KeyboardShortcutEvent,
   options: ShortcutFormatOptions = {},
-): ShortcutSequence {
+): ShortcutSequence | null {
+  const eventKey = getShortcutEventKey(event);
+  if (eventKey === null) {
+    return null;
+  }
+
   const platform = options.platform ?? getCurrentPlatform();
-  const key = normalizeKey(event.key);
+  const key = normalizeKey(eventKey);
   const modifiers: ShortcutModifier[] = [];
 
   if (event.altKey) {
@@ -200,7 +226,10 @@ export function shortcutFromKeyboardEvent(
 }
 
 export function isModifierOnlyShortcutEvent(event: KeyboardShortcutEvent) {
-  return modifierAliases[normalizeToken(event.key)] !== undefined;
+  const eventKey = getShortcutEventKey(event);
+  return (
+    eventKey !== null && modifierAliases[normalizeToken(eventKey)] !== undefined
+  );
 }
 
 export function formatShortcut(
