@@ -5650,9 +5650,11 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
 const PART_STUDIO_9841_CAPTURE_FIXTURE =
   "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json";
 
-// Known importer failure (deferred with the other Onshape split-interface
-// rows); it runs ~16 minutes of real OCC before failing, so it is a todo until
-// the importer fix lands.
+// Known importer failure: prepared actions now validate (cadara-nh0), but the
+// Cutter sketch plane is prepared as a live topologyOf selector instead of the
+// action-relative historicalTopologyOf g22 witness at action 9 (cadara-2f6).
+// It runs ~18 minutes of real OCC before failing, so it is a todo until that
+// importer fix lands.
 test.todo(
   "9841 applies its reviewed prepared action sequence through real OCC",
   async () => {
