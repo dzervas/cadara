@@ -49,6 +49,7 @@ export class EditorEventLoop {
   private readonly executeEffect: (
     effect: EditorEffect,
     runtime: EditorEffectRuntime,
+    runSignal: AbortSignal,
   ) => Promise<EditorEvent>;
   private state: EditorState = initialEditorState;
   private readonly sketchActions: SketchAuthoredActions;
@@ -79,6 +80,8 @@ export class EditorEventLoop {
   private processing = false;
   private running = false;
   private runToken = 0;
+  /** Aborted by stop(): in-flight effects observe that their run is stale. */
+  private runAbort = new AbortController();
   private traceSequence = 0;
   private currentCorrelation: string | null = null;
   private readonly effectCorrelations = new WeakMap<EditorEffect, string>();
@@ -129,6 +132,7 @@ export class EditorEventLoop {
     executeEffect: (
       effect: EditorEffect,
       runtime: EditorEffectRuntime,
+      runSignal: AbortSignal,
     ) => Promise<EditorEvent>,
     sketchActions: SketchAuthoredActions = new SketchAuthoredActions(),
   ) {
@@ -185,6 +189,7 @@ export class EditorEventLoop {
     if (this.running) return Promise.reject(new Error("Editor event loop already started."));
     this.running = true;
     this.runToken += 1;
+    this.runAbort = new AbortController();
     return this.dispatchAndSettle(commandId, { type: "session.started" });
   }
 
@@ -195,6 +200,7 @@ export class EditorEventLoop {
 
     this.running = true;
     this.runToken += 1;
+    this.runAbort = new AbortController();
     this.dispatch({ type: "session.started" });
   }
 
@@ -205,6 +211,7 @@ export class EditorEventLoop {
 
     this.running = false;
     this.runToken += 1;
+    this.runAbort.abort(new Error("Editor event loop run stopped."));
     for (const effect of [...this.effectQueue, ...this.backgroundEffects]) {
       const id = this.effectCorrelations.get(effect);
       if (id) {
@@ -311,6 +318,7 @@ export class EditorEventLoop {
   /** Runs one effect and applies its completion; false once the run is stopped. */
   private async runEffect(effect: EditorEffect, runToken: number) {
     this.activeEffects += 1;
+    const runSignal = this.runAbort.signal;
     const correlation = this.effectCorrelations.get(effect);
     this.emitTrace(
       createEffectStartedTraceEntry({
@@ -321,7 +329,11 @@ export class EditorEventLoop {
     );
 
     try {
-      const effectEvent = await this.executeEffect(effect, this.runtime);
+      const effectEvent = await this.executeEffect(
+        effect,
+        this.runtime,
+        runSignal,
+      );
       if (correlation) this.settlements.get(correlation)?.events.push(effectEvent);
 
       if (!this.running || runToken !== this.runToken) {
@@ -344,6 +356,10 @@ export class EditorEventLoop {
         }),
       );
     } catch (error: unknown) {
+      // An effect that observed stop() dropped its stale continuation (e.g.
+      // a read from the stopped document's disposed service, cadara-4x2).
+      // Only this run's own abort reason is dropped; real failures report.
+      if (runSignal.aborted && error === runSignal.reason) return false;
       const appError = normalizeUnknownError(error, {
         code: "editor/invocation-failed",
         fallbackMessage: "Editor runtime invocation failed.",
@@ -436,6 +452,7 @@ export function createEditorEventLoop(
   executeEffect: (
     effect: EditorEffect,
     runtime: EditorEffectRuntime,
+    runSignal: AbortSignal,
   ) => Promise<EditorEvent> = runEditorEffect,
   dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
   sketchActions?: SketchAuthoredActions,
