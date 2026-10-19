@@ -198,6 +198,7 @@ test("classifies external sketch IDs by authoritative provenance before body wit
 
   expect(references.get("JFB")?.definition).toMatchObject({
     kind: "sketchReference",
+    constraintTargetOnly: true,
     source: {
       kind: "sketchEntity",
       sketchId: { kind: "sketchIdOf", actionIndex: 0 },
@@ -206,6 +207,7 @@ test("classifies external sketch IDs by authoritative provenance before body wit
   });
   expect(references.get("BODY_EDGE")?.definition).toMatchObject({
     kind: "modelReference",
+    constraintTargetOnly: true,
     source: { kind: "topologyOf", expectedKind: "edge" },
   });
   expect(references.has("IB"), "IB has no decoded provenance and occurs before any body exists.").toBe(false);
