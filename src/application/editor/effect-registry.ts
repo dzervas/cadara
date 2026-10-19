@@ -62,7 +62,15 @@ import {
 } from "@/core/editor/state-machine/error-mapping";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
 
-export function createEffectExecutor(runtime: EditorEffectRuntime) {
+/**
+ * `runSignal` is the owning event loop's run: aborted once the loop stops
+ * (document switch/close, teardown), after which the runtime's service may
+ * already be disposed.
+ */
+export function createEffectExecutor(
+  runtime: EditorEffectRuntime,
+  runSignal?: AbortSignal,
+) {
   return async function executeEffect(
     effect: EditorEffect,
   ): Promise<EditorEvent> {
@@ -530,6 +538,9 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
           cursor: effect.cursor,
           transient: effect.transient,
         });
+        // cadara-4x2: a run stopped while the mutation was in flight drops
+        // its continuation; the loop discards this exact abort reason.
+        runSignal?.throwIfAborted();
 
         const snapshot = result.accepted
           ? await runtime.getCurrentDocumentSnapshot()
@@ -563,8 +574,9 @@ export function createEffectExecutor(runtime: EditorEffectRuntime) {
 export async function runEditorEffect(
   effect: EditorEffect,
   runtime: EditorEffectRuntime,
+  runSignal?: AbortSignal,
 ): Promise<EditorEvent> {
-  return createEffectExecutor(runtime)(effect);
+  return createEffectExecutor(runtime, runSignal)(effect);
 }
 
 export function createModelingServiceEditorEffectRuntime(modelingService: {

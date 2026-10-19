@@ -423,6 +423,62 @@ test("T17o review: a thrown sketch open and a thrown history move are reported a
   loop.stop();
 });
 
+// cadara-4x2 (Sentry CADARA-15). Logic lane; seam: the event loop over the
+// real history-cursor effect. The workbench stops a document's loop on
+// switch/close and disposes its modeling service a microtask later; a cursor
+// mutation accepted after that must not read the snapshot from the disposed
+// service. Red on base: the stale run read it and reported "Modeling service
+// has been disposed." as a user-visible editor-runtime failure.
+test("cadara-4x2: a history move accepted after its loop stopped and its service was disposed drops its snapshot read", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const reporter = createTestErrorReporter();
+  let disposed = false;
+  let snapshotReadsAfterDisposal = 0;
+  let acceptCursorMove: (() => void) | null = null;
+  const loop = createEditorEventLoop(
+    {
+      ...createRuntime(snapshot),
+      async getCurrentDocumentSnapshot() {
+        if (disposed) {
+          snapshotReadsAfterDisposal += 1;
+          throw new Error("Modeling service has been disposed.");
+        }
+        return snapshot;
+      },
+      setDocumentCursor: () =>
+        new Promise((resolve) => {
+          acceptCursorMove = () =>
+            resolve({
+              revisionId: snapshot.document.revisionId,
+              accepted: true,
+              diagnostics: [],
+            });
+        }),
+    },
+    reporter,
+  );
+  loop.start();
+  await waitForState(loop, (state) => state.snapshot !== null);
+  const previous = getPreviousDocumentHistoryCursor(snapshot);
+  expect(previous, "premise: a previous history cursor").not.toBeNull();
+  loop.dispatch({ type: "document.historyCursorRequested", cursor: previous! });
+  await waitForCondition(() => acceptCursorMove !== null);
+
+  loop.stop();
+  disposed = true;
+  acceptCursorMove!();
+  await loop.drain();
+
+  expect(
+    snapshotReadsAfterDisposal,
+    "A stopped run must not read the snapshot from its disposed service.",
+  ).toBe(0);
+  expect(
+    reporter.reports.map(({ error }) => error.message),
+    "A stopped run's dropped continuation is not a user-visible failure.",
+  ).toEqual([]);
+});
+
 // [TECH] T17-11 (T17o). Logic lane; seam: the loop's report policy for an
 // escaped effect failure. Red on base: every escaped failure was `user`.
 // T17o review fixes (review A-3). Logic lane; seam: the loop's escaped-effect
