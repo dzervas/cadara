@@ -364,19 +364,23 @@ for (const fixture of WAVE_T_TIMELINES) {
 //    cannot abort the studio.
 //
 // The remaining bakes are honest and each names a specific reason; they are not
-// tuned away. Extrude 4 (the real severing THROUGH_ALL cut) does not build
-// against the live prefix and is contained as `feature-kernel-build-failed`; its
-// preserved probe diagnostic (X.9.3) names the exact kernel cause, and the
-// downstream extent/evidence bakes all quote that same first failure rather than
-// a generic no-match. Sketch 5 is now parametric: its Onshape circle OFFSET was
-// being translated with an inverted sign (collapsing the circle at solve time)
-// and its radial-gap DISTANCE dimensions were being forged into line dimensions
-// the solver rejects; both now translate honestly.
+// tuned away. Fillet 2 is parametric: all four of its edge targets rematch
+// the captured Onshape edges exactly (`topologyOf` captured signatures), so the
+// first live-kernel refusal is now Chamfer 1, whose OCC chamfer build fails
+// against the live prefix and is contained as `feature-kernel-build-failed`
+// (cadara-1le). Its preserved probe diagnostic (X.9.3) names the exact kernel
+// cause, and the downstream extent/evidence bakes all quote that same first
+// failure rather than a generic no-match; Extrude 4's own kernel failure is
+// therefore no longer reached. Sketch 5 is parametric: its Onshape circle OFFSET
+// was being translated with an inverted sign (collapsing the circle at solve
+// time) and its radial-gap DISTANCE dimensions were being forged into line
+// dimensions the solver rejects; both now translate honestly.
 
 const LAPTOP_STAND_FEATURE_IDS = [
   "feature_extrude-1",
   "feature_extrude-2",
   "feature_fillet-1",
+  "feature_fillet-2",
   "feature_bakedBody-1",
   "feature_extrude-3",
   "feature_bakedBody-2",
@@ -391,23 +395,22 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
   );
   test.setTimeout(1_800_000);
   const { reviewText } = await importBundle(page, LAPTOP_STAND_BUNDLE_PATH, true);
-  expect(reviewText).toContain("11 parametric, 13 baked, 0 geometry-only features.");
+  expect(reviewText).toContain("12 parametric, 12 baked, 0 geometry-only features.");
+  expect(reviewText, "Fillet 2 must be parametric.").toMatch(/Fillet 2\s+parametric/);
   for (const [label, reason] of [
-    ["Fillet 2", "topology reference did not match"],
-    ["Chamfer 1", "topology reference could not be rematched while applying"],
-    ["Extrude 4", "the modeling kernel could not build this feature against the live prefix"],
-    ["Chamfer 2", "topology reference could not be rematched while applying"],
-    // Extrude 6 / 7 author an Onshape `startOffset` start plane (bound ENTITY)
-    // over live body topology. The start extent now binds to a durable entity, so
-    // their honest reason is the unresolved start-entity slot behind their baked
-    // producer rather than an unsupported start extent.
-    ["Extrude 6", "could not be resolved as a durable reference"],
+    ["Chamfer 1", "the modeling kernel could not build this feature against the live prefix"],
+    ["Extrude 4", "could not be resolved as a durable reference"],
+    ["Chamfer 2", "captured history topology evidence is missing"],
+    // Extrude 6 / 7 sit inside the Chamfer 2 bake segment; their review reports
+    // the unresolved Sketch 5 profile region ahead of their Onshape
+    // `startOffset` (bound ENTITY) start-entity slot.
+    ["Extrude 6", "sketch region could not be resolved"],
     ["Linear pattern 1", "depends on previously baked geometry"],
-    ["Extrude 7", "could not be resolved as a durable reference"],
+    ["Extrude 7", "sketch region could not be resolved"],
     ["Linear pattern 2", "depends on previously baked geometry"],
     ["Mirror 1", "depends on previously baked geometry"],
     ["Boolean 1", "captured history topology evidence is missing"],
-    ["Chamfer 3", "topology reference did not match"],
+    ["Chamfer 3", "captured history topology evidence is missing"],
     ["Extrude 8", "could not be resolved as a durable reference"],
     ["Extrude 3", "could not be resolved as a durable reference"],
   ] as const) {
@@ -421,28 +424,26 @@ test("Laptop Stand commits its honest real-kernel tier split", async ({
   // instead of collapsing every downstream bake into "evidence missing".
   expect(
     reviewText,
-    "Extrude 4 must expose the kernel's own first build diagnostic.",
-  ).toMatch(/Extrude 4 boolean target is incorrect\./);
+    "Chamfer 1 must expose the kernel's own first build diagnostic.",
+  ).toMatch(
+    /Chamfer 1\s+baked \(suppressed\) — [^\n]*OCC chamfer build failed for body body_feature_extrude-1\./,
+  );
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(imported.snapshotDiagnosticsCount).toBe(0);
   expect(imported.featureIds).toEqual(LAPTOP_STAND_FEATURE_IDS);
   await expectNoWorkbenchAlerts(page);
 
-  // `Wall` drives Extrude 1's blind distance directly. The edit does rebuild and
-  // the committed timeline survives it, but it surfaces exactly one diagnostic:
-  // `occ-missing-reference` on Extrude 5's profile selection, because Sketch 4's
-  // region durable ids are re-minted on any re-solve. That is the same
-  // pre-existing region-identity defect already documented for d3cd9's `walls`
-  // lever and is unrelated to this import gate; all four of this bundle's
-  // variables (Wall/Margin/LaptopWidth/LaptopThickness) hit it identically, so
-  // there is no clean lever to substitute. Pinned at 1 rather than 0 so the
-  // count cannot silently grow, and flip to 0 when region identity is stable.
+  // `Wall` drives Extrude 1's blind distance directly, so the edit rebuilds the
+  // whole parametric prefix (including Fillet 2) ahead of the baked checkpoints.
+  // Since cadara-5jz Sketch 4 keeps Extrude 5's region through the re-solve
+  // (the heavy apply-pipeline row pins the same Wall 3→4 lever), so no
+  // `occ-missing-reference` survives the edit.
   const rebuilt = await editVariable(page, "Wall", "4");
   expect(
     rebuilt.snapshotDiagnosticsCount,
-    "Only the pre-existing Sketch 4 region-identity diagnostic may survive a variable edit.",
-  ).toBe(1);
+    "A variable edit must rebuild without diagnostics.",
+  ).toBe(0);
   expect(rebuilt.featureIds).toEqual(LAPTOP_STAND_FEATURE_IDS);
 });
 
