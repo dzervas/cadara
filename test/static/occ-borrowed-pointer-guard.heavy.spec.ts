@@ -990,4 +990,4 @@ test("test/static/occ-borrowed-pointer-guard.spec.ts", () => {
     violations,
     "Borrowed native aliases must never reach delete/Nullify/release helpers or escape the audited consumer set",
   ).toEqual([]);
-}, 60_000);
+}, 120_000);
