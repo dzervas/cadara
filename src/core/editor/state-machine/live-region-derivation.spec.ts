@@ -743,7 +743,14 @@ test("T10i R-1: a settled live-region round re-evaluates the active edit tool's 
   // A stale tool state, as a gate message left from the pending round.
   const stale: SketchSessionState = {
     ...withLiveSolveBasis(selected, selected.definition),
-    validationMessage: "stale: still being checked",
+    toolPresentation: {
+      ...selected.toolPresentation!,
+      validation: [{
+        id: "stale-tool-validation",
+        message: "stale: still being checked",
+        severity: "warning",
+      }],
+    },
     toolStagedEntities: [],
   };
   const first = transitionEditorState(withSession(state, stale), {
@@ -768,8 +775,8 @@ test("T10i R-1: a settled live-region round re-evaluates the active edit tool's 
     ).state as SketchEditorState;
     expect(settled.session.liveRegions.status).not.toBe("pending");
     expect(
-      settled.session.validationMessage,
-      `${event.type}: the message is re-evaluated`,
+      settled.session.toolPresentation?.validation?.[0]?.message ?? null,
+      `${event.type}: the tool message is re-evaluated`,
     ).toBe(null);
     expect(
       settled.session.toolStagedEntities.length,

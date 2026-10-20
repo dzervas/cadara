@@ -259,7 +259,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       "Duplicate external references should not be appended.",
     ).toBe(1);
     expect(
-      session.validationMessage?.includes("already authored"),
+      session.toolPresentation?.validation?.[0]?.message?.includes("already authored"),
       "Duplicate rejection should surface explicit feedback.",
     ).toBeTruthy();
   }

@@ -863,7 +863,7 @@ describe("T16e: the Mirror tool's repair sub-state", () => {
       entityRef(armed, eid("c")),
     );
     expect(refused.activeEditTool?.selectedTargets).toEqual([]);
-    expect(refused.validationMessage).toBe(
+    expect(refused.toolPresentation?.validation?.[0]?.message).toBe(
       "A circle can't be a mirror line. Pick a straight line or a sketch axis.",
     );
     expect(getEnterEvent({ sketchSession: refused })).toBeNull();

@@ -952,7 +952,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Readonly-only Collinear targets should not commit constraints.",
     ).toBe(readonlyInitialConstraintCount);
     expect(
-      readonlySession.validationMessage?.includes("Collinear needs"),
+      readonlySession.toolPresentation?.validation?.[0]?.message?.includes("Collinear needs"),
       "Readonly-only Collinear should report validation feedback.",
     ).toBeTruthy();
 
@@ -1017,7 +1017,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Degenerate Collinear references should not commit constraints.",
     ).toBe(0);
     expect(
-      degenerateSession.validationMessage?.includes("Collinear needs"),
+      degenerateSession.toolPresentation?.validation?.[0]?.message?.includes("Collinear needs"),
       "Degenerate Collinear references should report validation feedback.",
     ).toBeTruthy();
   }
@@ -1160,7 +1160,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       "Invalid normal targets should not commit a partial constraint.",
     ).toBe(0);
     expect(
-      invalidSession.validationMessage?.includes("Normal needs"),
+      invalidSession.toolPresentation?.validation?.[0]?.message?.includes("Normal needs"),
       "Invalid normal targets should report validation feedback.",
     ).toBeTruthy();
   }
@@ -2227,7 +2227,7 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
       documentVariables: [],
     });
     expect(
-      missingVariableSession.validationMessage?.includes("unknown symbol"),
+      missingVariableSession.toolPresentation?.validation?.[0]?.message?.includes("unknown symbol"),
       "Editing a dimension to an undefined variable should surface an unknown-symbol diagnostic.",
     ).toBeTruthy();
 

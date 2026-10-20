@@ -131,7 +131,6 @@ import { buildCommitRequest } from "./history";
 import {
   describeSketchSessionWithheldRegions,
   isSketchWithheldRegionText,
-  keptSketchWithheldRegionText,
 } from "./region-feedback";
 import type { SketchExactIntersection } from "@/domain/sketch-snapping/snap-candidates";
 
@@ -148,6 +147,24 @@ export const CONSTRAINED_DRAG_MOVE_FRACTION = 0.01;
 export const REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS = 0.28;
 export const REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS = 0.4;
 export const REFERENCE_IMAGE_ANCHOR_MARKER_COLOR = 0xf6c453;
+
+/** Tool diagnostics never enter the session/region notification channel. */
+export function withSketchToolValidation(
+  session: SketchSessionState,
+  message: string | null,
+): SketchSessionState {
+  return {
+    ...session,
+    toolPresentation: {
+      ...session.toolPresentation,
+      prompts: session.toolPresentation?.prompts ?? [],
+      validation: message
+        ? [{ id: "tool-validation", message, severity: "warning" }]
+        : [],
+    },
+  };
+}
+
 export function createPointId(sequence: number, suffix: string): SketchPointId {
   return `sketch_point_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchPointId;
 }
@@ -2169,7 +2186,7 @@ function reinferSketchToolPlacements(
         placedPoints: [], settings: {}, validationMessage: "Pick a curve end (line, arc or spline)." };
       return { status: "idle", pointerDownPoint: null, livePoint: null, toolPlacedPoints: [],
         toolSettings: {}, toolPlacements: [], toolStagedEntities: [], toolTangentSourceEntityId: null,
-        validationMessage: state.validationMessage, toolPresentation: toolDefinition.getPresentation(state) };
+        toolPresentation: toolDefinition.getPresentation(state) };
     }
     session = { ...session, toolSettings: { ...session.toolSettings,
       tangentDirectionX: source.direction[0], tangentDirectionY: source.direction[1],
@@ -2194,7 +2211,7 @@ function reinferSketchToolPlacements(
         livePoint: session.livePoint,
         placedPoints: toolPlacedPoints,
         settings: session.toolSettings,
-        validationMessage: session.validationMessage,
+        validationMessage: session.toolPresentation?.validation?.[0]?.message ?? null,
       }),
       recomputed,
       null,
@@ -2394,8 +2411,6 @@ export function restageSketchToolChain(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage:
-      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: result.presentation,
     activeInference: null,
     // D20: the next segment starts structurally at the anchor's id; a

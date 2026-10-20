@@ -452,7 +452,7 @@ describe("T16f: no commit authors a second driver of a mirrored quantity", () =>
     expect(refused.activeAnnotationEdit?.target).toEqual(
       dimensionRef(session, "dimension_copy_reference"),
     );
-    expect(refused.validationMessage).toContain("Radius 2");
+    expect(refused.toolPresentation?.validation?.[0]?.message).toContain("Radius 2");
     const offer = refused.toolPresentation!.floatingInput!.secondaryAction!;
     expect(offer.label).toBe("Make those references");
     const replaced = patch(refused, offer.action.patch);
@@ -479,7 +479,7 @@ describe("T16f: no commit authors a second driver of a mirrored quantity", () =>
     expect(refused.activeAnnotationEdit?.target).toEqual(
       dimensionRef(session, "dimension_seed"),
     );
-    expect(refused.validationMessage).toBe(REFUSAL);
+    expect(refused.toolPresentation?.validation?.[0]?.message).toBe(REFUSAL);
     // Review R-2: Fix has no value of its own, so no "Add as reference
     // instead" (it would commit a driving Fix of the centre).
     const input = refused.toolPresentation!.floatingInput!;

@@ -105,12 +105,12 @@ test("tool refusals render once across the tool panel and session status", () =>
     [offset, PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE],
   ] as const) {
     const schema = getSketchToolPresentation(session);
+    expect(session.validationMessage, "the tool is the only diagnostic owner").toBeNull();
     const markup = renderToStaticMarkup(
       <MantineProvider>
         <SketchToolPanel schema={schema} onPatch={() => undefined} />
         <SketchValidationStatus
-          message={session.validationMessage!}
-          toolPresentation={schema}
+          message={session.validationMessage ?? ""}
         />
       </MantineProvider>,
     );

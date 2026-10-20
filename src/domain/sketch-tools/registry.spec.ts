@@ -1058,7 +1058,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "Invalid ellipse input should not mutate the authored sketch definition.",
     ).toBe(0);
     expect(
-      session.validationMessage,
+      session.toolPresentation?.validation?.[0]?.message,
       "Invalid ellipse input should report validation feedback.",
     ).toBe("Ellipse requires non-zero major and minor radii.");
   }
@@ -1179,7 +1179,7 @@ test("src/domain/sketch-tools/registry.spec.ts", async () => {
       "Invalid text input should not commit a partial profileText entity.",
     ).toBe(0);
     expect(
-      session.validationMessage,
+      session.toolPresentation?.validation?.[0]?.message,
       "Invalid text should report validation feedback.",
     ).toBe("Text content is required.");
   }

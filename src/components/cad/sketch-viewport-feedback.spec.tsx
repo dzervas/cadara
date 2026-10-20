@@ -836,7 +836,7 @@ test("T17f: a refused pick after a staged merge keeps the Merge popup", () => {
         onPatch={() => undefined}
       />,
     );
-  expect(refused.validationMessage, "premise: the pick is refused").toMatch(
+  expect(refused.toolPresentation?.validation?.[0]?.message, "premise: the pick is refused").toMatch(
     /centre/,
   );
   expect(refused.activeEditTool?.selectedTargets).toHaveLength(2);

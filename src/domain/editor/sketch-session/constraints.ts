@@ -473,7 +473,6 @@ export function authorSketchConstraintTarget(
     return {
       session: {
         ...session,
-        validationMessage,
         toolPresentation: buildConstraintToolPresentation(
           authoring,
           validationMessage,
@@ -956,13 +955,14 @@ export function prepareSketchConstraintCommit(
         : (contribution.refusal ?? null);
 
     if (refusal) {
-      // The tool restarts with nothing authored and says why.
+      // The tool restarts with nothing authored and says why. Explicit clients
+      // have no active authoring tool and retain the session diagnostic result.
       const restarted = activateSketchConstraintTool(session, authoring.toolId);
       const sketchId = getSessionSketchId(session);
       return {
         session: {
           ...restarted,
-          validationMessage: refusal,
+          ...(!session.constraintAuthoring ? { validationMessage: refusal } : {}),
           toolPresentation: buildConstraintToolPresentation(
             restarted.constraintAuthoring!,
             refusal,
@@ -981,7 +981,7 @@ export function prepareSketchConstraintCommit(
     return {
       session: {
         ...session,
-        validationMessage,
+        ...(!session.constraintAuthoring ? { validationMessage } : {}),
         toolPresentation: buildConstraintToolPresentation(
           authoring,
           validationMessage,

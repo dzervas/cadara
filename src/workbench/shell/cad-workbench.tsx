@@ -1618,7 +1618,6 @@ export function CadWorkbench({
                       message={sketchSession.validationMessage}
                       displayMessage={sketchDiagnostic.message}
                       severity={sketchDiagnostic.severity}
-                      toolPresentation={sketchToolPresentation}
                       onUndo={requestUndo}
                       onHover={
                         sketchDiagnostic.target

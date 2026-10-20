@@ -108,6 +108,7 @@ import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
   CONSTRAINED_DRAG_MOVE_FRACTION,
   CONSTRAINED_DRAG_REQUEST_EPSILON,
+  withSketchToolValidation,
   applySketchContribution,
   cloneDefinition,
   createSessionCommitFactories,
@@ -692,7 +693,6 @@ function commitOffsetContribution(
       return {
         ...session,
         activeEditTool: tool,
-        validationMessage: gate.message,
         toolPresentation: buildSketchEditToolPresentation(
           tool,
           gate.message,
@@ -787,7 +787,6 @@ function withOffsetPublication(
   return {
     ...session,
     activeEditTool: nextEditTool,
-    validationMessage: publication.status === "failed" ? message : null,
     toolPresentation: buildSketchEditToolPresentation(
       nextEditTool,
       message,
@@ -867,7 +866,6 @@ export function completeSketchOffsetPreviewPublication(
           }
         : staged,
       toolStagedEntities: preview.previewEntities,
-      validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(
         staged,
         preview.valid ? null : preview.message,
@@ -926,7 +924,6 @@ export function updateSketchOffsetPointer(
     ...session,
     activeEditTool: nextEditTool,
     toolStagedEntities: preview.previewEntities,
-    validationMessage: preview.valid ? null : preview.message,
     toolPresentation: buildSketchEditToolPresentation(
       nextEditTool,
       preview.message,
@@ -1279,7 +1276,12 @@ export function buildSketchMergePointsPresentation(
       {
         id: `${tool.toolId}-prompt`,
         text,
-        tone: validationMessage ? "warning" : notice ? "success" : "neutral",
+        tone:
+          validationMessage || (notice && session.validationMessage)
+            ? "warning"
+            : notice
+              ? "success"
+              : "neutral",
       },
     ],
     overlays: destination
@@ -1778,7 +1780,7 @@ function hoverSketchMirrorRepair(
     toolPresentation: buildSketchMirrorRepairPresentation(
       session,
       tool,
-      message ?? session.validationMessage,
+      message ?? session.toolPresentation?.validation?.[0]?.message ?? null,
       preview,
     ),
   };
@@ -1813,7 +1815,6 @@ function selectSketchMirrorRepairTarget(
     ...session,
     activeEditTool: next,
     toolStagedEntities: preview,
-    validationMessage: message,
     toolPresentation: buildSketchMirrorRepairPresentation(
       session,
       next,
@@ -1846,7 +1847,7 @@ export function leaveSketchMirrorRepair(
  * T16e: the repair tool on the current definition (entering it, after
  * Undo/Redo or an offset round; it ends when the mirror or its copy is
  * gone): a picked candidate is re-judged and
- * re-staged as its solved candidate (the session's own message kept), or
+ * re-staged as its solved candidate (the session's own message untouched), or
  * dropped with its refusal.
  */
 export function restageSketchMirrorRepair(
@@ -1872,10 +1873,7 @@ export function restageSketchMirrorRepair(
   const picked = tool.selectedTargets[0];
   if (picked) {
     // A still-valid pick keeps the session's own message (as T16d's re-stage).
-    const next = selectSketchMirrorRepairTarget(session, repairTool, picked);
-    return next.activeEditTool?.selectedTargets.length
-      ? { ...next, validationMessage: session.validationMessage }
-      : next;
+    return selectSketchMirrorRepairTarget(session, repairTool, picked);
   }
   return hoverSketchMirrorRepair(session, { ...repairTool, hoverTarget: null });
 }
@@ -1896,12 +1894,11 @@ export function restageSketchMirrorTool(
     return session;
   const staged = getSketchEditOperatorResult(session, tool);
   const validationMessage = staged.valid
-    ? session.validationMessage
+    ? (session.toolPresentation?.validation?.[0]?.message ?? null)
     : staged.message;
   return {
     ...session,
     toolStagedEntities: staged.previewEntities,
-    validationMessage,
     toolPresentation: buildSketchMirrorPresentation(
       session,
       tool,
@@ -1921,7 +1918,6 @@ function withSketchMergePointsTool(
     ...session,
     activeEditTool: tool,
     toolStagedEntities: preview.previewEntities,
-    validationMessage,
     toolPresentation: buildSketchMergePointsPresentation(
       session,
       tool,
@@ -1957,7 +1953,7 @@ export function restageSketchMergePointsTool(
     session,
     next,
     pair.valid || pair.message === null
-      ? session.validationMessage
+      ? (session.toolPresentation?.validation?.[0]?.message ?? null)
       : pair.message,
   );
 }
@@ -2088,13 +2084,13 @@ function commitSketchMergePoints(
     explanation === null
       ? null
       : `Merging ${sourceLabel} into ${destinationLabel}: ${explanation}`;
+  const next = { ...committed, validationMessage };
   return {
-    ...committed,
-    validationMessage,
+    ...next,
     toolPresentation: buildSketchMergePointsPresentation(
-      committed,
+      next,
       reset,
-      validationMessage,
+      null,
       notice,
     ),
   };
@@ -2127,10 +2123,9 @@ export function refreshSketchEditToolAfterOffsetRound(
     if (tool.selectedTargets.length === 0) return advanced;
     const message =
       editSelectionMessage(advanced, advanced.activeEditTool!) ??
-      advanced.validationMessage;
+      advanced.toolPresentation?.validation?.[0]?.message ?? null;
     return {
       ...advanced,
-      validationMessage: message,
       toolPresentation: buildSketchEditToolPresentation(
         advanced.activeEditTool!,
         message,
@@ -2142,7 +2137,9 @@ export function refreshSketchEditToolAfterOffsetRound(
   // Other errors are recomputed: a failed round must replace a pending gate.
   const parseMessage = `Enter a number for the ${getSketchEditToolValueLabel(tool.toolId).toLowerCase()}.`;
   const retainedValueMessage =
-    session.validationMessage === parseMessage ? parseMessage : null;
+    session.toolPresentation?.validation?.[0]?.message === parseMessage
+      ? parseMessage
+      : null;
   if (tool.toolId === "offset") {
     if (tool.offsetPublication) return session;
     const preview = getOffsetPreview(session, tool);
@@ -2156,7 +2153,6 @@ export function refreshSketchEditToolAfterOffsetRound(
       ...session,
       activeEditTool: stageOffsetPreviewPublication(session, tool, preview),
       toolStagedEntities: preview.previewEntities,
-      validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(
         tool,
         preview.message,
@@ -2174,7 +2170,6 @@ export function refreshSketchEditToolAfterOffsetRound(
   return {
     ...session,
     toolStagedEntities: preview.previewEntities,
-    validationMessage: preview.valid ? null : preview.message,
     toolPresentation:
       tool.toolId === "sketchMirror"
         ? buildSketchMirrorPresentation(session, tool, preview.message, preview)
@@ -2245,7 +2240,6 @@ function withEditQuery(
   return {
     ...session,
     activeEditTool: tool,
-    validationMessage: message,
     toolPresentation: buildSketchEditToolPresentation(
       tool,
       message ??
@@ -2285,7 +2279,7 @@ function stageSketchTrimHover(session: SketchSessionState): SketchSessionState {
   if (tool?.toolId !== "trim" || tool.editQuery?.queue.some(click => !click.preview)) return session;
   const cleared = { ...session, toolStagedEntities: [], activeEditTool: {
     ...tool, editQuery: { queue: [], inFlight: null },
-  }, toolPresentation: buildSketchEditToolPresentation(tool, session.validationMessage) };
+  }, toolPresentation: buildSketchEditToolPresentation(tool, (session.toolPresentation?.validation?.[0]?.message ?? null)) };
   if (!tool.pointer || tool.hoverTarget?.kind !== "sketchEntity") return cleared;
   const click = editQueryClick(cleared, tool.hoverTarget.entityId, null);
   if (!click || editQueryClickRefusal(cleared, "trim", click)) return cleared;
@@ -2603,7 +2597,8 @@ export function completeSketchEditQuery(
   if (completed.pending)
     return advanceSketchEditQueryQueue(withEditQuery(session, cleared, null));
   return advanceSketchEditQueryQueue(
-    withEditQuery(completed.session, popped, null), completed.session.validationMessage,
+    withEditQuery(completed.session, popped, null),
+    completed.session.toolPresentation?.validation?.[0]?.message ?? null,
   );
 }
 
@@ -2614,7 +2609,13 @@ export function completeSketchIntersectionEdit(
   result: SketchEditIntersectionResult,
 ): { session: SketchSessionState; pending: boolean } {
   const { operation } = basis.input;
-  const refuse = (message: string | null, pending = false) => ({ session: { ...session, validationMessage: message }, pending });
+  // Explicit clients have no active tool; interactive refusals belong to its prompt.
+  const refuse = (message: string | null, pending = false) => ({
+    session: session.activeEditTool
+      ? withSketchToolValidation(session, message)
+      : { ...session, validationMessage: message },
+    pending,
+  });
   if (session.definition !== basis.definition || session.liveRegions.generation !== basis.generation || session.liveSolve?.solvedSnapshot !== basis.input.solvedSnapshot)
     return refuse(editQueryStaleMessage(operation.kind));
   const gate = offsetEditInputGate(session, [operation.targetEntityId,
@@ -2626,11 +2627,17 @@ export function completeSketchIntersectionEdit(
   const nextSequence = session.sequence + 1;
   const mutation = buildEditQueryMutation(session, basis.input, result, nextSequence);
   if (!mutation.changed) return refuse(mutation.message);
-  return { pending: false, session: withLiveSolveBasis({ ...session,
+  const next = withLiveSolveBasis({ ...session,
     definition: mutation.definition, toolStagedEntities: [], sequence: nextSequence,
     commitRequest: rebuildSessionCommitRequest(session, mutation.definition), activeEditTarget: null, activeDrag: null,
-    validationMessage: freedFitPointsMessage(session.definition, mutation.definition, operation.targetEntityId),
-  }, mutation.definition) };
+  }, mutation.definition);
+  const message = freedFitPointsMessage(session.definition, mutation.definition, operation.targetEntityId);
+  return {
+    pending: false,
+    session: session.activeEditTool
+      ? withSketchToolValidation(next, message)
+      : { ...next, validationMessage: message },
+  };
 }
 
 /**
@@ -2737,7 +2744,6 @@ function selectSketchEditQueryTargets(
       ...session,
       activeEditTool: reset,
       toolStagedEntities: [],
-      validationMessage: targetRefusal,
       toolPresentation: buildSketchEditToolPresentation(reset, targetRefusal),
     };
   }
@@ -2760,7 +2766,6 @@ function selectSketchEditQueryTargets(
     ...session,
     activeEditTool: tool,
     toolStagedEntities: [],
-    validationMessage: message,
     toolPresentation: buildSketchEditToolPresentation(tool, message),
   };
 }
@@ -2795,7 +2800,9 @@ export function completeSketchEditOperation(
   session: SketchSessionState,
   result: SketchEditOperationResult,
 ): SketchSessionState {
-  if (!result.valid) return { ...session, validationMessage: result.message };
+  if (!result.valid) return session.activeEditTool
+    ? withSketchToolValidation(session, result.message)
+    : { ...session, validationMessage: result.message };
   const applied = applySketchEditOperationResult(session, result);
   return applied ? withLiveSolveBasis({
     ...session,
@@ -2833,7 +2840,7 @@ export function updateSketchEditToolHover(
       toolPresentation: buildSketchMergePointsPresentation(
         session,
         activeEditTool,
-        session.validationMessage,
+        session.toolPresentation?.validation?.[0]?.message ?? null,
       ),
     };
   const preview =
@@ -2851,12 +2858,12 @@ export function updateSketchEditToolHover(
         ? buildSketchMirrorPresentation(
             session,
             activeEditTool,
-            session.validationMessage,
+            session.toolPresentation?.validation?.[0]?.message ?? null,
             preview ?? getSketchEditOperatorResult(session, activeEditTool),
           )
         : buildSketchEditToolPresentation(
             activeEditTool,
-            session.validationMessage,
+            session.toolPresentation?.validation?.[0]?.message ?? null,
             preview?.valid === false
               ? session.toolStagedEntities
               : preview?.previewEntities ?? [],
@@ -2928,7 +2935,6 @@ export function selectSketchEditToolTarget(
       ...session,
       activeEditTool: stagedEditTool,
       toolStagedEntities: preview.previewEntities,
-      validationMessage: preview.valid ? null : preview.message,
       toolPresentation: buildSketchEditToolPresentation(
         nextEditTool,
         preview.message,
@@ -2947,7 +2953,6 @@ export function selectSketchEditToolTarget(
       .validationMessages.unsupportedTarget;
     return {
       ...session,
-      validationMessage: message,
       // T16d review R-1: a staged Mirror keeps its popup next to the message.
       toolPresentation:
         activeEditTool.toolId === "sketchMirror"
@@ -2985,7 +2990,6 @@ export function selectSketchEditToolTarget(
     return {
       ...session,
       toolStagedEntities: [],
-      validationMessage: pickRefusal,
       toolPresentation: buildSketchEditToolPresentation(
         activeEditTool,
         pickRefusal,
@@ -3015,7 +3019,6 @@ export function selectSketchEditToolTarget(
     ...session,
     activeEditTool: nextEditTool,
     toolStagedEntities: preview.previewEntities,
-    validationMessage: preview.valid ? null : preview.message,
     toolPresentation:
       nextEditTool.toolId === "sketchMirror"
         ? buildSketchMirrorPresentation(
@@ -3045,7 +3048,6 @@ function withInvalidSketchEditValue(
   return {
     ...session,
     activeEditTool: nextEditTool,
-    validationMessage: message,
     toolPresentation: buildSketchEditToolPresentation(
       nextEditTool,
       message,
@@ -3079,7 +3081,6 @@ export function patchSketchEditToolValue(
       ...session,
       activeEditTool: nextEditTool,
       toolStagedEntities: [],
-      validationMessage: null,
       toolPresentation: buildSketchEditToolPresentation(nextEditTool),
     };
   }
@@ -3118,8 +3119,6 @@ export function patchSketchEditToolValue(
       ...session,
       activeEditTool: stagedEditTool,
       toolStagedEntities: preview.previewEntities,
-      validationMessage:
-        distance?.message ?? (preview.valid ? null : preview.message),
       toolPresentation: buildSketchEditToolPresentation(
         nextEditTool,
         distance?.message ?? preview.message,
@@ -3202,7 +3201,6 @@ export function patchSketchEditOperatorValue(
       ...session,
       activeEditTool: nextEditTool,
       toolStagedEntities: [],
-      validationMessage: null,
       toolPresentation: buildSketchEditToolPresentation(nextEditTool),
     };
   }
@@ -3232,8 +3230,6 @@ export function patchSketchEditOperatorValue(
       ...session,
       activeEditTool: nextEditTool,
       toolStagedEntities: preview.previewEntities,
-      validationMessage:
-        value.message ?? (preview.valid ? null : preview.message),
       toolPresentation: buildSketchEditToolPresentation(
         nextEditTool,
         value.message ?? preview.message,

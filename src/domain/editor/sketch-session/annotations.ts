@@ -98,6 +98,7 @@ import {
   createSketchPointRef,
   getSketchSessionDerivationSettings,
   getSketchSessionSolvedSnapshot,
+  withSketchToolValidation,
 } from "./internals";
 import {
   addAnchorOffset,
@@ -160,7 +161,6 @@ export function beginSketchAnnotationEdit(
     activeAnnotationEdit: edit,
     activeEditTarget: null,
     activeDrag: null,
-    validationMessage: options.message ?? null,
   };
 }
 
@@ -232,7 +232,6 @@ export function patchSketchAnnotationEditValue(
       ...session,
       activeAnnotationEdit: nextEdit,
       toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
-      validationMessage: null,
     };
   }
 
@@ -256,9 +255,7 @@ export function patchSketchAnnotationEditValue(
       ...session,
       activeAnnotationEdit: nextEdit,
       toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
-      // T16f review A-2: typing clears a refusal shown by this popup, in the
-      // popup and the session alike.
-      validationMessage: null,
+      // Typing clears this popup's refusal, not the session's region diagnostics.
     };
   }
 
@@ -276,7 +273,6 @@ export function patchSketchAnnotationEditValue(
         ...session,
         activeAnnotationEdit: nextEdit,
         toolPresentation: buildAnnotationEditPresentation(session, nextEdit),
-        validationMessage: null,
       };
     }
     return makeSketchAnnotationReference(session, edit);
@@ -659,7 +655,9 @@ export function makeSketchAnnotationReference(
   // A satisfied no-op must not inherit another command's refusal feedback or create an authored action.
   if (alreadyReference) return { ...session, validationMessage: null };
   if (definition === session.definition) {
-    return { ...session, validationMessage: "This requirement cannot be a reference measurement." };
+    return session.activeAnnotationEdit
+      ? withSketchToolValidation(session, "This requirement cannot be a reference measurement.")
+      : { ...session, validationMessage: "This requirement cannot be a reference measurement." };
   }
   return commitEditedAnnotationDefinition(session, edit, definition);
 }
@@ -747,7 +745,7 @@ function refuseDrivingConversion(
   return {
     ...session,
     activeAnnotationEdit: nextEdit,
-    validationMessage: message,
+    ...(!session.activeAnnotationEdit ? { validationMessage: message } : {}),
     toolPresentation: buildAnnotationEditPresentation(
       session,
       nextEdit,
@@ -763,7 +761,9 @@ export function updateSketchDimensionValue(
   value: number | string,
 ): SketchSessionState {
   const pendingValue = normalizeConstraintValue(value);
-  if (pendingValue === null) return { ...session, validationMessage: "Enter a value before saving." };
+  if (pendingValue === null) return session.activeAnnotationEdit
+    ? withSketchToolValidation(session, "Enter a value before saving.")
+    : { ...session, validationMessage: "Enter a value before saving." };
   return commitSketchAnnotationEditValue(session, {
     target: createSketchDimensionRef(getSessionSketchId(session), dimensionId),
     pendingValue,
@@ -955,7 +955,7 @@ function commitEditedAnnotationDefinition(
         edit,
         solved.message,
       ),
-      validationMessage: solved.message,
+      ...(!session.activeAnnotationEdit ? { validationMessage: solved.message } : {}),
     };
   }
 

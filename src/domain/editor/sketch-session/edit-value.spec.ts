@@ -46,11 +46,13 @@ test.each(["offset", "sketchFillet", "sketchChamfer"] as const)(
       selected = selectSketchEditToolTarget(selected, entity.target);
     const valid = patchSketchEditToolValue(selected, { value: "1" });
     expect(valid.validationMessage).toBeNull();
+    expect(valid.toolPresentation?.validation).toEqual([]);
     expect(valid.toolStagedEntities.length).toBeGreaterThan(0);
     const anchor = valid.toolPresentation!.floatingInput!.anchor;
     expect(anchor).toBeTruthy();
     const zero = patchSketchEditToolValue(valid, { value: "0" });
-    expect(zero.validationMessage).toMatch(/greater than zero/);
+    expect(zero.validationMessage, "tool errors do not enter session notifications").toBeNull();
+    expect(zero.toolPresentation?.validation?.[0]?.message).toMatch(/greater than zero/);
     expect(zero.activeTool).toBe(toolId);
     expect(zero.activeEditTool!.selectedTargets).toEqual(
       valid.activeEditTool!.selectedTargets,
@@ -63,12 +65,12 @@ test.each(["offset", "sketchFillet", "sketchChamfer"] as const)(
     const refreshed = refreshSketchEditToolAfterOffsetRound(hovered);
     expect(refreshed.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
     expect(refreshed.toolStagedEntities).toBe(valid.toolStagedEntities);
-    expect(refreshed.validationMessage).toMatch(/greater than zero/);
+    expect(refreshed.toolPresentation?.validation?.[0]?.message).toMatch(/greater than zero/);
     const refused = patchSketchEditToolValue(zero, {
       intent: toolId === "offset" ? "commitOffset" : "commitSketchEditOperator",
     });
     expect(refused.definition).toBe(valid.definition);
-    expect(refused.validationMessage).toMatch(/greater than zero/);
+    expect(refused.toolPresentation?.validation?.[0]?.message).toMatch(/greater than zero/);
     expect(refused.toolPresentation!.floatingInput!.anchor).toEqual(anchor);
     expect(refused.toolStagedEntities).toBe(valid.toolStagedEntities);
     const recovered = patchSketchEditToolValue(refused, { value: "0.5" });
@@ -77,11 +79,15 @@ test.each(["offset", "sketchFillet", "sketchChamfer"] as const)(
     expect(recovered.toolStagedEntities.length).toBeGreaterThan(0);
     expect(recovered.toolStagedEntities).not.toEqual(valid.toolStagedEntities);
     const nonNumeric = patchSketchEditToolValue(recovered, { value: "-" });
-    expect(nonNumeric.validationMessage).toMatch(/^Enter a number for the /);
+    expect(nonNumeric.toolPresentation?.validation?.[0]?.message).toMatch(/^Enter a number for the /);
     const refreshedNonNumeric =
-      refreshSketchEditToolAfterOffsetRound(nonNumeric);
-    expect(refreshedNonNumeric.validationMessage).toBe(
-      nonNumeric.validationMessage,
+      refreshSketchEditToolAfterOffsetRound({
+        ...nonNumeric,
+        validationMessage: "Session profiles unavailable.",
+      });
+    expect(refreshedNonNumeric.validationMessage).toBe("Session profiles unavailable.");
+    expect(refreshedNonNumeric.toolPresentation?.validation?.[0]?.message).toBe(
+      nonNumeric.toolPresentation?.validation?.[0]?.message,
     );
     expect(refreshedNonNumeric.toolStagedEntities).toBe(
       recovered.toolStagedEntities,
@@ -106,7 +112,7 @@ test.each(["offset", "sketchSlot"] as const)(
       ),
       { value: "0.2" },
     );
-    expect(selected.validationMessage).toContain("still being checked");
+    expect(selected.toolPresentation?.validation?.[0]?.message).toContain("still being checked");
     const failed = publishSketchLiveRegions(
       selected,
       [],
@@ -125,10 +131,10 @@ test.each(["offset", "sketchSlot"] as const)(
       ],
     );
     const refreshed = refreshSketchEditToolAfterOffsetRound(failed);
-    expect(refreshed.validationMessage).toContain("which is not certified");
-    expect(refreshed.validationMessage).not.toContain("still being checked");
-    expect(refreshed.toolPresentation!.validation![0]!.message).toBe(
-      refreshed.validationMessage,
+    expect(refreshed.toolPresentation?.validation?.[0]?.message).toContain("which is not certified");
+    expect(refreshed.toolPresentation?.validation?.[0]?.message).not.toContain("still being checked");
+    expect(refreshed.validationMessage, "the failed tool gate is not a session message").not.toBe(
+      refreshed.toolPresentation?.validation?.[0]?.message,
     );
     expect(refreshed.definition).toBe(selected.definition);
     expect(refreshed.activeEditTool!.offsetPublication).toBeUndefined();

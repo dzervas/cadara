@@ -813,7 +813,7 @@ describe("T17e: cause-neutral and label-based texts around Close spline", () => 
       beginSketchTool(moved, "trim"),
       entityRef(moved, line.entityId),
     );
-    expect(trimmed.validationMessage).toBe(
+    expect(trimmed.toolPresentation?.validation?.[0]?.message).toBe(
       "Trim needs a solved sketch; fix the problem shown above first, or Undo.",
     );
     expect(trimmed.definition).toBe(moved.definition);

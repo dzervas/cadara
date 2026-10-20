@@ -3651,7 +3651,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     const session = await trimTarget(started, "sketch_entity_ab", "line");
 
     expect(
-      session.validationMessage,
+      session.toolPresentation?.validation?.[0]?.message ?? null,
       "Accepted trim should not leave validation feedback.",
     ).toBe(null);
     expect(
@@ -3750,7 +3750,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       "Trimming a circle should preserve the selected id as an authored arc.",
     ).toBe("arc");
     expect(
-      circleSession.validationMessage,
+      circleSession.toolPresentation?.validation?.[0]?.message ?? null,
       "Circle trim should not leave validation feedback.",
     ).toBe(null);
     expect(
@@ -3815,7 +3815,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     const arcSession = await trimTarget(arcStarted, "sketch_entity_arc", "arc");
 
     expect(
-      arcSession.validationMessage,
+      arcSession.toolPresentation?.validation?.[0]?.message ?? null,
       "Arc trim should not leave validation feedback.",
     ).toBe(null);
     expect(
@@ -3924,7 +3924,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       "Q-g2: the fit point only the removed part used stays as a free point.",
     ).toBe(true);
     expect(
-      splineSession.validationMessage,
+      splineSession.toolPresentation?.validation?.[0]?.message,
       "The tool message says how many fit points were left free.",
     ).toBe(
       "Trim left 1 fit point of Spline as a free point (with its constraints): the removed part used it.",
@@ -4014,7 +4014,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       "Invalid offset should not mutate the sketch draft.",
     ).toBe(beforeInvalidCommit);
     expect(
-      session.validationMessage,
+      session.toolPresentation?.validation?.[0]?.message,
       "Invalid offset should report validation feedback.",
     ).toBe("Offset distance must be greater than zero.");
 
@@ -4525,7 +4525,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       "Projected spline offset should preview nothing.",
     ).toEqual([]);
     expect(
-      splineSession.validationMessage,
+      splineSession.toolPresentation?.validation?.[0]?.message,
       "Projected spline offset should say it is not supported yet.",
     ).toBe(PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE);
     expect(
@@ -4534,13 +4534,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toEqual([PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE]);
     const emptyDefinition = splineSession.definition;
     splineSession = patchSketchEditToolValue(splineSession, { value: 1 });
-    expect(splineSession.validationMessage).toBe(
+    expect(splineSession.toolPresentation?.validation?.[0]?.message).toBe(
       PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
     );
     splineSession = patchSketchEditToolValue(splineSession, {
       intent: "commitOffset",
     });
-    expect(splineSession.validationMessage).toBe(
+    expect(splineSession.toolPresentation?.validation?.[0]?.message).toBe(
       PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
     );
     expect(
@@ -4675,7 +4675,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     );
     expect(splineSlotSession.toolStagedEntities).toEqual([]);
     expect(
-      splineSlotSession.validationMessage,
+      splineSlotSession.toolPresentation?.validation?.[0]?.message,
       "Slot along a spline should say it is not supported yet.",
     ).toBe(SPLINE_SLOT_UNSUPPORTED_MESSAGE);
     const unchanged = splineSlotSession.definition;
@@ -4685,7 +4685,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     splineSlotSession = patchSketchEditToolValue(splineSlotSession, {
       intent: "commitSketchEditOperator",
     });
-    expect(splineSlotSession.validationMessage).toBe(
+    expect(splineSlotSession.toolPresentation?.validation?.[0]?.message).toBe(
       SPLINE_SLOT_UNSUPPORTED_MESSAGE,
     );
     expect(
@@ -4694,7 +4694,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(unchanged);
   }
 
-  async function testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState() {
+  async function testSketchExtendSplitAndUnsupportedDiagnosticsUseToolPresentation() {
     const extendDefinition = makeDefinition({
       pointIds: [
         "sketch_point_a",
@@ -4871,7 +4871,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         selectSketchEditToolTarget(begun, definition.entities[0]!.target),
         definition.entities[1]!.target,
       );
-      expect(refused.validationMessage, `${toolId}: today's message`).toBe(
+      expect(refused.toolPresentation?.validation?.[0]?.message, `${toolId}: today's message`).toBe(
         message,
       );
       expect(refused.definition).toBe(begun.definition);
@@ -4892,7 +4892,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       splitDefinition.entities[1]!.target,
     );
     expect(
-      unsupportedSession.validationMessage,
+      unsupportedSession.toolPresentation?.validation?.[0]?.message,
       "Sketch edit operators should report unsupported valid combinations without mutating.",
     ).toBe("Sketch fillet needs two lines that share a corner.");
     expect(
@@ -5452,7 +5452,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testOffsetAddsCircleArcAndSplineCopies();
   testOffsetAddsProjectedCircleAndSplineCopies();
   testSketchFilletChamferAndSlotUseSessionPreviewAndCommit();
-  await testSketchExtendSplitAndUnsupportedDiagnosticsUseSessionState();
+  await testSketchExtendSplitAndUnsupportedDiagnosticsUseToolPresentation();
   testSketchDerivedTransformOperatorsCreateDurableRelationships();
   testSketchPatternAndTransformOperatorsCommitWithoutPartFeatureSessions();
   await testDerivedLinearPatternGeometryParticipatesInProfiles();
@@ -5537,7 +5537,7 @@ test("T10g-1 R-6: Trim needs the accepted live solve of the current definition",
     beginSketchTool(conflicted, "trim"),
     target.target,
   );
-  expect(refused.validationMessage).toBe(TRIM_BASIS_NOT_ACCEPTED_MESSAGE);
+  expect(refused.toolPresentation?.validation?.[0]?.message).toBe(TRIM_BASIS_NOT_ACCEPTED_MESSAGE);
   expect(refused.activeEditTool?.editQuery?.queue).toEqual([]);
   expect(refused.definition).toBe(conflicted.definition);
   // The accepted sketch queries and applies.
@@ -5594,7 +5594,7 @@ test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch ac
   const trimmed = await completeSketchEditQueriesForTest(
     selectSketchEditToolTarget(beginSketchTool(session, "trim"), circle.target),
   );
-  expect(trimmed.validationMessage).toBeNull();
+  expect(trimmed.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
   expect(
     trimmed.definition.entities.find(
       (entity) => entity.entityId === circle.entityId,
@@ -5637,7 +5637,7 @@ test("T10g-1: trimming a circle with a Radius-tool dimension keeps the sketch ac
   const second = await completeSketchEditQueriesForTest(
     selectSketchEditToolTarget(trimmed, line.target),
   );
-  expect(second.validationMessage).toBeNull();
+  expect(second.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
   expect(second.definition.entityIds.length).toBe(
     trimmed.definition.entityIds.length + 1,
   );
@@ -6873,16 +6873,13 @@ test.each([
       toolId === "offset"
         ? session.activeEditTool!.offsetDistance
         : session.activeEditTool!.toolValue;
-    const messages = (session: SketchSessionState) => [
-      session.validationMessage,
-      ...(session.toolPresentation?.validation ?? []).map(
-        (entry) => entry.message,
-      ),
-    ];
+    const messages = (session: SketchSessionState) =>
+      (session.toolPresentation?.validation ?? []).map((entry) => entry.message);
 
     const typed = patchSketchEditToolValue(selected, { value: " 0.25 " });
     expect(valueOf(typed), `${toolId}: "0.25" sets the value`).toBe(0.25);
     expect(typed.validationMessage, `${toolId}: valid`).toBeNull();
+    expect(messages(typed), `${toolId}: no tool validation for a valid value`).toEqual([]);
     expect(
       typed.toolStagedEntities.length,
       `${toolId}: previews the typed value`,
@@ -6901,8 +6898,9 @@ test.each([
 
     const invalid = patchSketchEditToolValue(typed, { value: "w + 1" });
     expect(valueOf(invalid), `${toolId}: a non-number clears it`).toBeNull();
+    expect(invalid.validationMessage, `${toolId}: no duplicate session diagnostic`).toBeNull();
     expect(messages(invalid), `${toolId}: the message names the field`).toEqual(
-      [`Enter a number for the ${field}.`, `Enter a number for the ${field}.`],
+      [`Enter a number for the ${field}.`],
     );
 
     const numeric = patchSketchEditToolValue(invalid, { value: 0.5 });
@@ -6910,6 +6908,7 @@ test.each([
       0.5,
     );
     expect(numeric.validationMessage).toBeNull();
+    expect(messages(numeric), `${toolId}: the parse refusal cleared`).toEqual([]);
   },
 );
 

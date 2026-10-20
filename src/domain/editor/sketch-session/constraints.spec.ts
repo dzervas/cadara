@@ -733,7 +733,7 @@ test("T13c D8: Tangent line↔line is refused with an explanation and authors no
     entity(session, "Rectangle 1 right").target,
   );
   expect(refused.definition).toBe(session.definition);
-  expect(refused.validationMessage).toBe("Tangent needs a circle or arc.");
+  expect(refused.toolPresentation?.validation?.[0]?.message).toBe("Tangent needs a circle or arc.");
   expect(refused.activeTool, "the tool stays armed").toBe("constraintTangent");
   expect(refused.constraintAuthoring?.selectedTargets).toEqual([]);
 });
@@ -766,12 +766,12 @@ test("T13c D8: a user Tangent on a fillet pair is refused as already constrained
   ).toBeTruthy();
   const refused = tangentTool(session, bottom.target, arc.target);
   expect(refused.definition).toBe(session.definition);
-  expect(refused.validationMessage).toBe(
+  expect(refused.toolPresentation?.validation?.[0]?.message).toBe(
     `Already constrained: ${filletTangent!.label}`,
   );
   // Selection order does not matter.
   expect(
-    tangentTool(session, arc.target, bottom.target).validationMessage,
+    tangentTool(session, arc.target, bottom.target).toolPresentation?.validation?.[0]?.message,
   ).toBe(`Already constrained: ${filletTangent!.label}`);
 });
 
@@ -788,7 +788,7 @@ test("T13c D8: any constraint tool refuses an exact duplicate (Horizontal on a r
     bottom.target,
   );
   expect(refused.definition).toBe(session.definition);
-  expect(refused.validationMessage).toBe(
+  expect(refused.toolPresentation?.validation?.[0]?.message).toBe(
     `Already constrained: ${existing.label}`,
   );
 });

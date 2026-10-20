@@ -54,7 +54,8 @@ test("O25: empty space and line interiors refuse the first click", () => {
     const refused = startSketchDraw(beginSketchTool(base, "tangentArc"), point);
     expect(refused.status).toBe("idle");
     expect(refused.toolPlacedPoints).toEqual([]);
-    expect(refused.validationMessage).toMatch(/curve end/i);
+    expect(refused.validationMessage).toBeNull();
+    expect(refused.toolPresentation?.validation?.[0]?.message).toMatch(/curve end/i);
     expect(refused.definition).toEqual(base.definition);
   }
 });
@@ -74,5 +75,5 @@ test("O25: a restored draft cannot keep a removed source's tangent", () => {
   expect(after.status).toBe("idle");
   expect(after.toolPlacedPoints).toEqual([]);
   expect(after.toolTangentSourceEntityId).toBeNull();
-  expect(after.validationMessage).toMatch(/curve end/i);
+  expect(after.toolPresentation?.validation?.[0]?.message).toMatch(/curve end/i);
 });

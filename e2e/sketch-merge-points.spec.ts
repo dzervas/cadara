@@ -246,14 +246,12 @@ test("T17f: a refused pick keeps the Merge popup and Enter merges it; Escape dro
   const refusePick = async () => {
     await hoveredPoint(workbench, R);
     await glideClick(workbench, R);
-    // The tool panel's validation (the status line repeats it).
-    await expect(
-      page
-        .getByText(
-          /^Both points are ends of .+; merging them would collapse it\.$/,
-        )
-        .first(),
-    ).toBeVisible();
+    // The tool owns this refusal; the session notification does not repeat it.
+    const refusal = page.getByText(
+      /^Both points are ends of .+; merging them would collapse it\.$/,
+    );
+    await expect(refusal).toHaveCount(1);
+    await expect(refusal).toBeVisible();
   };
 
   await stage();
