@@ -454,3 +454,46 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
     }
   }
 });
+
+test("unsupported constraint diagnostics reach annotation and list explanations", () => {
+  const session = drawWith(newSpecSession(), "rectangle", [
+    [1, 1],
+    [5, 4],
+  ]);
+  const live = session.liveSolve!;
+  const constraintId = session.definition.constraints[0]!.constraintId;
+  const message =
+    "Unsupported operand combination: no solver rows were admitted.";
+  const unsupported = {
+    ...session,
+    liveSolve: {
+      ...live,
+      solvedSnapshot: {
+        ...live.solvedSnapshot,
+        status: {
+          solveState: "failed" as const,
+          constraintState: "inconsistent" as const,
+        },
+        constraintStatuses: [{ constraintId, status: "conflicting" as const }],
+        diagnostics: [
+          {
+            code: "unsupported-constraint-operands",
+            severity: "error" as const,
+            message,
+            target: { kind: "constraint" as const, constraintId },
+          },
+        ],
+      },
+    },
+  };
+  const descriptors = getSketchAnnotationDescriptors(unsupported);
+  expect(descriptors.find((d) => d.id === constraintId)?.problem).toEqual({
+    status: "conflict",
+    explanation: message,
+  });
+  expect(
+    getSketchAnnotationListRows(descriptors).find(
+      (r) => r.annotation.id === constraintId,
+    )?.problemText,
+  ).toBe(`Conflict: ${message}`);
+});

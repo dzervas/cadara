@@ -188,3 +188,54 @@ it.each(["fulfill", "author-invalid"])(
   },
   60000,
 );
+
+it("SDK line/line tangent refusal preserves the tool diagnostic across native save/open", async () => {
+  const { createHeadlessSessionFactory } =
+    await import("@/composition/headless");
+  const { SemanticDocument } = await import("./sdk");
+  let saved = "";
+  const opened = await createHeadlessSessionFactory({
+    nativeFileIO: {
+      read: async () => saved,
+      write: async (_path, text) => {
+        saved = text;
+        return { kind: "written", bytesWritten: text.length, diagnostics: [] };
+      },
+    },
+  }).open();
+  if (opened.kind !== "ready") throw new Error(JSON.stringify(opened));
+  const doc = new SemanticDocument(opened.session, opened.initialization.state);
+  try {
+    await doc.ops.sketch.begin({ plane: "xy" });
+    for (const y of [0, 5])
+      await doc.ops.sketch.author({
+        primitive: { kind: "line", start: [0, y], end: [10, y] },
+        construction: false,
+      });
+    const published = await doc.ops.sketch.publish({ requireProfiles: false });
+    const sketchId = published.discovery!.sketch!.sketchId!;
+    await doc.ops.document.save({ path: "tangent.cadara" });
+    await doc.ops.document.open({ path: "tangent.cadara" });
+    await doc.ops.sketch.open({ sketchId });
+    const targets = doc.current!.discovery!.references.flatMap((r) =>
+      r.target.kind === "sketchEntity" ? [r.target] : [],
+    );
+    const refused = await doc.tryOp("sketch.requirement.add", {
+      tool: "constraintTangent",
+      targets,
+      mode: "driving",
+      value: null,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) throw new Error("Expected tangent refusal");
+    if (!("result" in refused.error)) throw refused.error;
+    expect(refused.error.result.outcome.kind).toBe("rejected");
+    expect(refused.error.result.diagnostics).toContainEqual(
+      expect.objectContaining({ message: "Tangent needs a circle or arc." }),
+    );
+    const inspected = await doc.ops.sketch.inspect({});
+    expect(inspected.discovery!.sketch!.constraints).toEqual([]);
+  } finally {
+    await doc.close();
+  }
+}, 60000);

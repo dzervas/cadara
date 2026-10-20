@@ -2196,7 +2196,13 @@ function createSketchAnnotationProblemResolver(
         : diagnostic.target?.kind === "dimension"
           ? diagnostic.target.dimensionId
           : null;
-    if (id && diagnostic.severity !== "info" && !diagnosticMessages.has(id)) {
+    // Generic residual warnings keep the actionable multi-requirement conflict
+    // explanation; operand admission errors carry their own precise refusal.
+    if (
+      id && diagnostic.severity !== "info" &&
+      diagnostic.code !== "solver-requirement-unsatisfied" &&
+      !diagnosticMessages.has(id)
+    ) {
       diagnosticMessages.set(id, diagnostic.message);
     }
   }
@@ -2213,7 +2219,10 @@ function createSketchAnnotationProblemResolver(
     if (status === "unsatisfied" || status === "conflicting") {
       conflictExplanation ??=
         describeSketchSessionUnsatisfiedRequirements(session);
-      return { status: "conflict", explanation: conflictExplanation };
+      return {
+        status: "conflict",
+        explanation: diagnosticMessages.get(id) ?? conflictExplanation,
+      };
     }
     return { status: "error", explanation: diagnosticMessages.get(id) ?? null };
   };
