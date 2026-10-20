@@ -1,8 +1,8 @@
 /**
  * T16a ([TECH] T16-22, review R-1): the left floating panel column of the
- * sketch session: the validation status first, then the selection-context
- * panels (Mirror, Offset (T17c), Tangent). One positioned column, so they flow and never
- * overlap. Only the panels take the pointer.
+ * sketch session: selection-context panels (Mirror, Offset, Spline).
+ * One positioned column, so they flow and never overlap. Only the panels
+ * take the pointer. Session diagnostics use the notification column.
  */
 
 import { Paper } from "@mantine/core";
@@ -15,6 +15,7 @@ import {
   VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
 } from "@/components/cad/viewport-overlay-layout";
 import { SECTION_HEADER_CLASSES } from "@/components/ui/workbench-panel-styles";
+import { WorkbenchNotification } from "@/components/layout/workbench-notification";
 
 export function SketchSelectionContextStack({
   children,
@@ -35,14 +36,25 @@ export function SketchSelectionContextStack({
   );
 }
 
-/** The sketch session's validation message, the first item of the column. */
+/** Session diagnostics share the generic notification presentation. */
 export function SketchValidationStatus({
   message,
+  displayMessage = message,
   toolPresentation,
+  severity = "error",
+  onUndo,
+  onHover,
+  onClearHover,
 }: {
   message: string;
+  displayMessage?: string;
   toolPresentation?: SketchToolPresentationSchema | null;
+  severity?: "warning" | "error";
+  onUndo?: () => void;
+  onHover?: () => void;
+  onClearHover?: () => void;
 }) {
+  if (!message) return null;
   // O16: tool refusals already belong beneath the target prompt. Only
   // session-wide status should be forwarded to this separate floating panel.
   const viewportDrawingFeedback =
@@ -59,13 +71,18 @@ export function SketchValidationStatus({
   }
   return (
     <div
-      role="status"
-      className="pointer-events-none max-w-sm rounded-md border border-(--cad-border-strong) bg-(--cad-surface-overlay) px-3 py-2 text-xs text-(--cad-foreground) shadow-(--cad-panel-shadow)"
+      className="pointer-events-none"
+      data-sketch-diagnostic={onHover ? "linked" : ""}
+      onPointerEnter={onHover}
+      onPointerLeave={onClearHover}
     >
-      {/* O32: only the text takes the pointer; panel padding stays canvas-through. */}
-      <span style={{ pointerEvents: "auto", userSelect: "text" }}>
-        {message}
-      </span>
+      <WorkbenchNotification
+        className="pointer-events-none"
+        type={severity}
+        title="Sketch geometry"
+        message={displayMessage}
+        action={onUndo ? { label: "Undo", onClick: () => onUndo() } : undefined}
+      />
     </div>
   );
 }

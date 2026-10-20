@@ -3,6 +3,11 @@ import { expect } from "@playwright/test";
 
 import type { ModelingOperationHistoryPayload } from "../../src/contracts/modeling/operation-history";
 
+/** Session messages use the generic notification renderer; inspect its message, not title/actions. */
+export function sketchDiagnosticMessage(page: Page): Locator {
+  return page.locator("[data-sketch-diagnostic] [data-notification-message]");
+}
+
 const WORKSPACE_DOCUMENT_ID = "doc_workspace";
 const MODELING_OPERATION_HISTORY_STORAGE_KEY = `cad.modeling.operationHistory.${WORKSPACE_DOCUMENT_ID}.v1`;
 /** The default namespace's Automerge URL store (`document-repository-url-store.ts`). */

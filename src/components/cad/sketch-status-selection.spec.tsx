@@ -10,11 +10,13 @@ import { WorkbenchNotification } from "@/components/layout/workbench-notificatio
 // only the text takes pointers, not the status panel's canvas overlay.
 test("sketch status text is selectable without capturing the surrounding overlay", () => {
   const markup = renderToStaticMarkup(
-    <SketchValidationStatus message="Profiles are blocked." />,
+    <MantineProvider>
+      <SketchValidationStatus message="Profiles are blocked." />
+    </MantineProvider>,
   );
   expect(markup).toMatch(/<div[^>]*class="[^"]*pointer-events-none/);
   expect(markup).toMatch(
-    /<span[^>]*style="[^"]*pointer-events:auto[^"]*user-select:text[^>]*>Profiles are blocked\.<\/span>/,
+    /<div[^>]*style="[^"]*pointer-events:auto[^"]*user-select:text[^>]*>Profiles are blocked\.<\/div>/,
   );
   const toolMarkup = renderToStaticMarkup(
     <MantineProvider>
@@ -30,7 +32,7 @@ test("sketch status text is selectable without capturing the surrounding overlay
     </MantineProvider>,
   );
   expect(toolMarkup).toMatch(
-    /<span[^>]*style="[^"]*pointer-events:auto[^"]*user-select:text[^>]*>Cannot trim\.<\/span>/,
+    /<div[^>]*style="[^"]*pointer-events:auto[^"]*user-select:text[^>]*>Cannot trim\.<\/div>/,
   );
 });
 

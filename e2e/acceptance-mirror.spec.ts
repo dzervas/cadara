@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -242,8 +243,7 @@ async function expectNoInternalIds(page: Page, context: string) {
 }
 
 const brokenStatus = (page: Page) =>
-  page
-    .getByRole("status")
+  sketchDiagnosticMessage(page)
     .filter({ hasText: /^Mirror ‘mirror \d+’ is broken/ });
 
 const lengthChip = (page: Page) =>
@@ -739,8 +739,7 @@ test("§4 E2E-4: a circle mirrored about the Y datum, then an arc + spline + con
   ).toBeLessThan(SOLVE_RESIDUAL);
   expectMirrorImages(removed, "A after the removal");
   await expect(brokenStatus(page)).toHaveCount(0, { timeout: 15_000 });
-  const lineProblem = page
-    .getByRole("status")
+  const lineProblem = sketchDiagnosticMessage(page)
     .filter({ hasText: /^‘Line 4’ solved to length/ });
   await expect(lineProblem).toHaveText(
     /^‘Line 4’ solved to length [\d.e-]+, shorter than the minimum segment length tolerance\.$/,

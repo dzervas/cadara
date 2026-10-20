@@ -18,7 +18,7 @@ import {
   type MirrorSketchSnapshot,
   type Vec,
 } from "./helpers/mirror-workbench";
-import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import { SketchWorkbenchHarness, sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 
 test.setTimeout(180_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -171,7 +171,7 @@ test("T17c: a spline offset's shell → Offset panel → Remove offset: one Remo
   // and the text names the panel.
   await page.keyboard.press("Delete");
   await expect(
-    page.getByRole("status").filter({ hasText: /offset spline curve/ }),
+    sketchDiagnosticMessage(page).filter({ hasText: /offset spline curve/ }),
   ).toHaveText(
     "An offset spline curve is part of its offset and can't be deleted on its own. To remove the whole offset, select it, then Offset → Remove offset.",
     { timeout: 15_000 },

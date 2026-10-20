@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -41,7 +42,7 @@ const TEXT =
   "Spline 1 has two consecutive fit points at the same place (Spline 1 point 2 and Spline 1 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).";
 
 const status = (page: Page) =>
-  page.getByRole("status").filter({ hasText: TEXT });
+  sketchDiagnosticMessage(page).filter({ hasText: TEXT });
 const liveRegions = async (page: Page) =>
   (await sketchSnapshot(page)).liveRegions;
 /**

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import { SketchWorkbenchHarness, sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 
 test.setTimeout(60_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -114,7 +114,7 @@ test("T13e: a determined opposite width is offered as a reference; committing sh
   await expect(reference).toHaveCount(1);
   await expect(reference).toHaveText(`(${width.toFixed(2)})`);
   await expect(
-    page.getByRole("status").filter({ hasText: "conflicts with" }),
+    sketchDiagnosticMessage(page).filter({ hasText: "conflicts with" }),
   ).toHaveCount(0);
 
   // The height still drags: the top-right corner up 80 px.

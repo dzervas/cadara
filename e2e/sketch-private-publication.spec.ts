@@ -11,7 +11,7 @@ import {
 } from "./helpers/acceptance";
 import { saveDocumentCopy } from "./helpers/document-files";
 import { glideClick, glidePress } from "./helpers/mirror-workbench";
-import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import { SketchWorkbenchHarness, sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 
 test.setTimeout(120_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -195,7 +195,7 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
   const retainedReason =
     "Can't undo Create Sketch Geometry: ‘Line 1 start’, ‘Line 1 end’ and ‘Line 1’ were deleted by another session.";
   await expect(
-    pageA.getByRole("status").filter({ hasText: retainedReason }),
+    sketchDiagnosticMessage(pageA).filter({ hasText: retainedReason }),
   ).toHaveText(retainedReason, { timeout: 10_000 });
   await expect(retained).toHaveAttribute(
     "aria-label",

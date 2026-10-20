@@ -14,7 +14,7 @@ import {
   SketchSelectionContextStack,
   SketchValidationStatus,
 } from "./sketch-selection-context";
-import { SketchTangentActions } from "./sketch-tangent-actions";
+import { SketchSplineActions } from "./sketch-spline-actions";
 
 test("T16a (T16-22, R-1): the validation status, Mirror and Tangent flow in one positioned column; none is positioned on its own", () => {
   const markup = renderToStaticMarkup(
@@ -37,11 +37,10 @@ test("T16a (T16-22, R-1): the validation status, Mirror and Tangent flow in one 
           onRemove={() => {}}
           onReplace={() => {}}
         />
-        <SketchTangentActions
-          resetEnabled
-          zeroEnabled
-          onReset={() => {}}
-          onZero={() => {}}
+        <SketchSplineActions
+          closeSpline={null}
+          tangent={{ visible: true, resetEnabled: true, zeroEnabled: true }}
+          onPatch={() => {}}
         />
       </SketchSelectionContextStack>
     </MantineProvider>,
@@ -56,7 +55,7 @@ test("T16a (T16-22, R-1): the validation status, Mirror and Tangent flow in one 
   );
   expect(positioned[0]).toMatch(/class="[^"]*\bflex-col\b/);
   const stack = markup.indexOf("sketch-selection-context-stack");
-  const status = markup.indexOf('role="status"');
+  const status = markup.indexOf('role="alert"');
   const mirror = markup.indexOf('data-testid="sketch-mirror-actions"');
   const tangent = markup.indexOf('data-testid="sketch-tangent-actions"');
   expect(stack).toBeGreaterThan(-1);

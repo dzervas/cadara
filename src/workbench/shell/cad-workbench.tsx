@@ -8,12 +8,12 @@ import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
 import { SketchOffsetActions } from "@/components/cad/sketch-offset-actions";
-import { SketchCloseSplineAction } from "@/components/cad/sketch-close-spline-action";
+import { SketchSplineActions } from "@/components/cad/sketch-spline-actions";
+import { getSketchSessionDiagnosticPresentation } from "@/domain/editor/sketch-session/diagnostic-presentation";
 import {
   SketchSelectionContextStack,
   SketchValidationStatus,
 } from "@/components/cad/sketch-selection-context";
-import { SketchTangentActions } from "@/components/cad/sketch-tangent-actions";
 import { SketchDeletedNotice } from "@/components/cad/sketch-deleted-notice";
 import { getPeerDeletedSketchNotice } from "@/core/editor/state-machine";
 import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
@@ -753,6 +753,9 @@ export function CadWorkbench({
         : null,
     [sketchSession, selection],
   );
+  const sketchDiagnostic = sketchSession
+    ? getSketchSessionDiagnosticPresentation(sketchSession)
+    : null;
   const sketchSpecialModePanel = sketchSession
     ? getSketchSpecialModePanel(sketchSession, sketchSpecialModes)
     : null;
@@ -1502,14 +1505,13 @@ export function CadWorkbench({
             <div className="contents" data-viewport-annotation-obstacles="">
               <SketchToolPanel
                 schema={sketchToolPresentation}
+                onUndo={requestUndo}
                 onPatch={(patch) =>
                   dispatch({ type: "sketch.toolPatched", patch })
                 }
               />
-              {/* T16a (T16-22, review R-1): the validation message and the
-                  selection-context panels, one column (never overlapping). */}
+              {/* Selection actions flow together; diagnostics use the notification column. */}
               {deletedSketchNotice ||
-              sketchSession?.validationMessage ||
               sketchMirrorActionState ||
               sketchOffsetActionState ||
               sketchCloseSplineState ||
@@ -1526,12 +1528,6 @@ export function CadWorkbench({
                             machineState.command.commandSessionId,
                         })
                       }
-                    />
-                  ) : null}
-                  {sketchSession?.validationMessage ? (
-                    <SketchValidationStatus
-                      message={sketchSession.validationMessage}
-                      toolPresentation={sketchToolPresentation}
                     />
                   ) : null}
                   {sketchMirrorActionState ? (
@@ -1566,35 +1562,13 @@ export function CadWorkbench({
                       }
                     />
                   ) : null}
-                  {sketchCloseSplineState ? (
-                    <SketchCloseSplineAction
-                      state={sketchCloseSplineState}
-                      onClose={() =>
-                        dispatch({
-                          type: "sketch.toolPatched",
-                          patch: { intent: "closeSpline" },
-                        })
-                      }
-                    />
-                  ) : null}
-                  {sketchTangentActionState?.visible ? (
-                    <SketchTangentActions
-                      resetEnabled={sketchTangentActionState.resetEnabled}
-                      zeroEnabled={sketchTangentActionState.zeroEnabled}
-                      onReset={() =>
-                        dispatch({
-                          type: "sketch.toolPatched",
-                          patch: { intent: "resetTangentToAutomatic" },
-                        })
-                      }
-                      onZero={() =>
-                        dispatch({
-                          type: "sketch.toolPatched",
-                          patch: { intent: "setTangentToZero" },
-                        })
-                      }
-                    />
-                  ) : null}
+                  <SketchSplineActions
+                    closeSpline={sketchCloseSplineState}
+                    tangent={sketchTangentActionState}
+                    onPatch={(patch) =>
+                      dispatch({ type: "sketch.toolPatched", patch })
+                    }
+                  />
                 </SketchSelectionContextStack>
               ) : null}
               <SketchSpecialModePanel
@@ -1639,6 +1613,25 @@ export function CadWorkbench({
             >
               <div className="contents" data-viewport-annotation-chrome="">
                 <div className="pointer-events-auto relative z-30 col-start-1 row-start-1 flex flex-col items-end gap-2">
+                  {sketchDiagnostic && sketchSession?.validationMessage ? (
+                    <SketchValidationStatus
+                      message={sketchSession.validationMessage}
+                      displayMessage={sketchDiagnostic.message}
+                      severity={sketchDiagnostic.severity}
+                      toolPresentation={sketchToolPresentation}
+                      onUndo={requestUndo}
+                      onHover={
+                        sketchDiagnostic.target
+                          ? () => handleViewportHover(sketchDiagnostic.target!)
+                          : undefined
+                      }
+                      onClearHover={
+                        sketchDiagnostic.target
+                          ? handleViewportHoverClear
+                          : undefined
+                      }
+                    />
+                  ) : null}
                   {restoreMessage ? (
                     <WorkbenchNotification
                       type="error"
