@@ -217,7 +217,7 @@ export interface DocumentVariableRecord {
  * never inferred from hidden loop-selection conventions.
  */
 export type ExtrudeProfileRef =
-  | { kind: "region"; sketchId: SketchId; regionId: RegionId }
+  | { kind: "region"; sketchId: SketchId; regionId: RegionId; selector?: import("@/contracts/sketch/region-selector").RegionSelector }
   | { kind: "face"; bodyId: BodyId; faceId: FaceId };
 
 /**
@@ -844,6 +844,7 @@ export type ModelingDiagnosticDetail =
       affectedFeatureIds: FeatureId[];
       /** Durable targets invalidated or implicated by the rebuild failure. */
       affectedTargets: PrimitiveRef[];
+      regionSelection?: import("@/contracts/sketch/region-selector").RegionSelectionFailure;
     }
   | {
       /** Stable discriminant for advanced-feature contract and adapter gaps. */

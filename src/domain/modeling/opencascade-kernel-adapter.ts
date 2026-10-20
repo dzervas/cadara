@@ -1,3 +1,8 @@
+import { resolveRegionProfile } from "@/contracts/sketch/region-selector";
+import {
+  ProfileRegionSelectionError,
+  requireRegion,
+} from "@/domain/modeling/occ/features/shared";
 import { createRevisionId, parseRevisionSequence } from "./document-revision";
 import type {
   AuthoredDocumentRestoreOptions,
@@ -696,6 +701,17 @@ function createRegionProfileFailureDiagnostic(
     kind: "rebuildFailure" as const,
     affectedFeatureIds: [feature.featureId],
     affectedTargets,
+    ...(error instanceof ProfileRegionSelectionError ? {
+      regionSelection: {
+        ...error.regionSelection,
+        profileIndex: "profiles" in feature.definition.parameters
+          ? feature.definition.parameters.profiles.findIndex(p =>
+              p.kind === "region" &&
+              p.regionId === error.regionSelection.oldRegionId &&
+              p.sketchId === error.regionSelection.sketchId)
+          : null,
+      },
+    } : {}),
   };
   if (
     code === PROFILE_REGION_RESELECT_CODE ||
@@ -1771,6 +1787,19 @@ function collectInvalidConsumedTargetDiagnostics(
       const sketch = state.sketches.find(
         (entry) => entry.sketchId === target.sketchId,
       );
+      if (target.kind === "region" && target.selector && sketch) {
+        try {
+          requireRegion(sketch, target.regionId, target.selector);
+        } catch (error) {
+          if (!(error instanceof ProfileRegionSelectionError)) throw error;
+          const diagnostic = createRegionProfileFailureDiagnostic(
+            feature, error.code, error, [target], state.sketches,
+          );
+          if (!diagnostic) throw error;
+          diagnostics.push(diagnostic);
+        }
+        continue;
+      }
       const validity = sketch?.sketch.derivedValidity;
       if (sketch && validity && validity.state !== "current") {
         diagnostics.push(
@@ -1795,12 +1824,8 @@ function collectInvalidConsumedTargetDiagnostics(
       }
       if (
         target.kind === "region" &&
-        sketch?.sketch.regions.some(
-          (region) => region.regionId === target.regionId,
-        )
-      ) {
-        continue;
-      }
+        sketch?.sketch.regions.some(region => region.regionId === target.regionId)
+      ) continue;
     }
     const resolved = resolveOccReference(
       {
@@ -1824,6 +1849,9 @@ function collectInvalidConsumedTargetDiagnostics(
 function isRepairableFeatureDiagnostic(diagnostic: ModelingDiagnostic) {
   return (
     diagnostic.detail?.kind === "invalidReference" ||
+    (diagnostic.detail?.kind === "rebuildFailure" &&
+      diagnostic.detail.regionSelection !== undefined &&
+      diagnostic.code === PROFILE_REGION_RESELECT_CODE) ||
     diagnostic.code === "feature-dependency-blocked"
   );
 }
@@ -3383,6 +3411,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         this.rethrowCleanupFailure(error);
         const consumedTargets = getFeatureConsumedTargets(feature.definition);
         const invalidDiagnostics = consumedTargets.flatMap((target) => {
+          if (target.kind === "region" && target.selector) {
+            const sketch = current.sketches.find(s => s.sketchId === target.sketchId);
+            if (sketch && resolveRegionProfile(sketch.sketch, target).ok) return [];
+          }
           const resolved = resolveOccReference(
             {
               documentId: this.documentId,

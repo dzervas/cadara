@@ -17,7 +17,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
-import type { ImportRegionBoundaryIdentity } from "@/contracts/import/region-boundary-identity";
+import type { InteriorPointRegionSelector } from "@/contracts/sketch/region-selector";
 import type {
   BodyId,
   FeatureId,
@@ -27,7 +27,6 @@ import type {
 } from "@/contracts/shared/ids";
 import type {
   SketchDefinition,
-  SketchPoint2D,
   SketchReferenceDefinition,
 } from "@/contracts/sketch/schema";
 import type {
@@ -61,11 +60,7 @@ export type ImportDeferredValue =
   | ({ kind: "sketchIdOf" } & ImportDeferredActionOutputRef)
   | ({
       kind: "regionOf";
-      selector: {
-        kind: "interiorPoint";
-        point: SketchPoint2D;
-        /** Import-only boundary provenance rematched against the committed sketch. */
-        expectedBoundaryIdentity?: ImportRegionBoundaryIdentity;
+      selector: InteriorPointRegionSelector & {
         /** Optional exact Onshape selected-face provenance retained for import diagnostics. */
         source?: {
           consumerFeatureId: string;

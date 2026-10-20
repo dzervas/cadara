@@ -1,3 +1,4 @@
+import { isRegionSelector } from "@/contracts/sketch/region-selector";
 import typia from "typia";
 
 import type {
@@ -56,6 +57,24 @@ function validateFeatureDefinitionStructuralInvariants(
   definition: FeatureDefinition,
 ): ContractValidationIssue[] {
   const issues = validateFeatureDefinitionAuthoredValueInvariants(definition);
+  if (
+    "profiles" in definition.parameters &&
+    Array.isArray(definition.parameters.profiles)
+  ) {
+    definition.parameters.profiles.forEach((profile, index) => {
+      if (
+        profile.kind === "region" && profile.selector &&
+        !isRegionSelector(profile.selector)
+      ) {
+        issues.push({
+          path: `parameters.profiles[${index}].selector`,
+          expected: "finite interior point and import-region-boundary/v1 identity",
+          value: profile.selector,
+          message: "Invalid native region selector.",
+        });
+      }
+    });
+  }
   if (definition.kind === "featureReplay") {
     issues.push(...validateFeatureReplayStructuralInvariants(definition));
   }

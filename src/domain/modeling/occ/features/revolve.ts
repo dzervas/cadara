@@ -203,7 +203,7 @@ function buildSurfaceRevolveProfile(
   const profile = parameters.profiles[0]!;
   if (profile.kind === "region") {
     const sketch = requireSketchSnapshot(context, profile.sketchId);
-    const region = requireRegion(sketch, profile.regionId);
+    const region = requireRegion(sketch, profile.regionId, profile.selector);
     const built = buildRegionProfileWire(
       context.oc,
       {
@@ -263,7 +263,7 @@ function buildRevolveFeatureShape(
     const profile = parameters.profiles[0];
     if (profile.kind === "region") {
       const sketch = requireSketchSnapshot(context, profile.sketchId);
-      const region = requireRegion(sketch, profile.regionId);
+      const region = requireRegion(sketch, profile.regionId, profile.selector);
       const profileFace = buildRegionProfileFace(
         context.oc,
         {

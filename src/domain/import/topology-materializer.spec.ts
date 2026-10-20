@@ -666,7 +666,7 @@ test("regionOf rematches importer boundary provenance on the committed sketch", 
         return {
           document: {
             revisionId: "rev_live",
-            sketches: [{ sketchId: "sketch_live", regions: [live] }],
+            sketches: [{ sketchId: "sketch_live", regions: [live], derivedValidity: { state: "current", diagnostics: [] }, definition: { entities: [] } }],
           },
         } as never;
       },
@@ -709,7 +709,7 @@ test("regionOf rejects when neither boundary provenance nor the interior point r
         return {
           document: {
             revisionId: "rev_live",
-            sketches: [{ sketchId: "sketch_live", regions: [live] }],
+            sketches: [{ sketchId: "sketch_live", regions: [live], derivedValidity: { state: "current", diagnostics: [] }, definition: { entities: [] } }],
           },
         } as never;
       },

@@ -190,6 +190,7 @@ export interface RegionRef {
   sketchId: SketchId;
   /** Durable derived region identity within `sketchId`. */
   regionId: RegionId;
+  selector?: import("@/contracts/sketch/region-selector").RegionSelector;
 }
 
 /**
