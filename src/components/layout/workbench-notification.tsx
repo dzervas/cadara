@@ -101,6 +101,7 @@ export function WorkbenchNotification({
             // O32: diagnostics must remain mouse-selectable regardless of shell styles.
             style={{
               color: "var(--workbench-notification-active-title)",
+              pointerEvents: "auto",
               userSelect: "text",
             }}
           >
@@ -108,10 +109,12 @@ export function WorkbenchNotification({
           </Text>
           <Text
             component="div"
+            data-notification-message=""
             size="xs"
             className="min-w-0"
             style={{
               color: "var(--workbench-notification-text-muted)",
+              pointerEvents: "auto",
               userSelect: "text",
             }}
           >
@@ -121,7 +124,7 @@ export function WorkbenchNotification({
             <Button
               variant="default"
               size="xs"
-              className="mt-1 self-start border-[var(--cad-border-strong)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]"
+              className="pointer-events-auto mt-1 self-start border-[var(--cad-border-strong)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]"
               onClick={action.onClick}
             >
               {action.label}

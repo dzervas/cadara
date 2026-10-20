@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import { SketchWorkbenchHarness, sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 
 const MODELING_OPERATION_HISTORY_STORAGE_KEY =
   "cad.modeling.operationHistory.doc_workspace.v1";
@@ -343,8 +343,7 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
   await expect(floatingInput).toBeHidden();
   await page.keyboard.press("Escape");
   await expect(dimensionGlyphs).toHaveCount(3);
-  const explanation = page
-    .getByRole("status")
+  const explanation = sketchDiagnosticMessage(page)
     .filter({ hasText: "profiles from it are blocked" });
   await expect(explanation, "premise: still solved").toHaveCount(0);
 

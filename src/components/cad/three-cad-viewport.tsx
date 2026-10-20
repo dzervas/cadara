@@ -3140,14 +3140,17 @@ function ThreeCadViewportScene({
         lastPickedTargetRef.current = null;
         return;
       }
-      // T14e: the same hand-over to the Constraints list. React dispatches
+      // T14e/O11: the same hand-over to the Constraints list and linked
+      // sketch diagnostics. React dispatches
       // the row's `onPointerEnter` while handling the native `pointerout`,
       // which fires before this native `pointerleave`, so the row's hover is
       // already the editor's: it must not be cleared here. The canvas
       // forgets its own hover, so its next pick is dispatched again.
       if (
         event.relatedTarget instanceof Element &&
-        event.relatedTarget.closest("[data-sketch-constraint-list]")
+        event.relatedTarget.closest(
+          '[data-sketch-constraint-list], [data-sketch-diagnostic="linked"]',
+        )
       ) {
         lastPickedTargetRef.current = null;
         hoverTargetRef.current = null;

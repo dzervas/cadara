@@ -1,4 +1,5 @@
 import { NumberInput, Paper, Select, Switch, TextInput } from "@mantine/core";
+import { WorkbenchNotification } from "@/components/layout/workbench-notification";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
@@ -20,13 +21,18 @@ type SketchToolControl = NonNullable<
 interface SketchToolPanelProps {
   schema: SketchToolPresentationSchema | null;
   onPatch: (patch: Record<string, unknown>) => void;
+  onUndo?: () => void;
 }
 
 function formatNumber(value: number | null) {
   return value === null ? "n/a" : value.toFixed(2);
 }
 
-export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
+export function SketchToolPanel({
+  schema,
+  onPatch,
+  onUndo,
+}: SketchToolPanelProps) {
   if (!schema) {
     return null;
   }
@@ -119,20 +125,16 @@ export function SketchToolPanel({ schema, onPatch }: SketchToolPanelProps) {
           </div>
         ) : null}
         {validation.map((message) => (
-          <div
+          <WorkbenchNotification
             key={message.id}
-            className="rounded-[3px] px-2 py-1"
-            style={{
-              background: "var(--workbench-shell-danger-surface)",
-              boxShadow: "0 0 0 1px var(--workbench-shell-danger-border)",
-              color: "var(--workbench-shell-danger-text)",
-            }}
-          >
-            {/* O32: select diagnostics without capturing the panel's empty canvas area. */}
-            <span style={{ pointerEvents: "auto", userSelect: "text" }}>
-              {message.message}
-            </span>
-          </div>
+            className="pointer-events-none"
+            type={message.severity === "error" ? "error" : "warning"}
+            title="Sketch tool"
+            message={message.message}
+            action={
+              onUndo ? { label: "Undo", onClick: () => onUndo() } : undefined
+            }
+          />
         ))}
         {controlGroups.length > 0 ? (
           <div className="pointer-events-auto grid gap-3 border-t border-[var(--workbench-shell-border)] pt-2">

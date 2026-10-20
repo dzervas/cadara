@@ -17,6 +17,7 @@ import {
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
   VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+  VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX,
 } from "@/components/cad/viewport-overlay-layout";
 import type {
   SketchSpecialModePanelAction,
@@ -34,11 +35,14 @@ import {
 interface SketchSpecialModePanelProps {
   schema: SketchSpecialModePanelSchema | null;
   onAction: (action: SketchSpecialModePanelAction) => void;
+  /** Selection actions share the renderer but flow in the selection column. */
+  inline?: boolean;
 }
 
 export function SketchSpecialModePanel({
   schema,
   onAction,
+  inline = false,
 }: SketchSpecialModePanelProps) {
   if (!schema) {
     return null;
@@ -47,17 +51,20 @@ export function SketchSpecialModePanel({
   return (
     <Paper
       component="aside"
-      className="pointer-events-auto absolute z-20 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden rounded-[6px]"
+      className={`pointer-events-auto ${inline ? "" : "absolute"} z-20 flex max-h-[70vh] w-[320px] max-w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden rounded-[6px]`}
       style={{
-        left: VIEWPORT_FLOATING_PANEL_LEFT_PX,
-        top: VIEWPORT_FLOATING_PANEL_TOP_STYLE,
+        width: inline ? VIEWPORT_SKETCH_TOOL_PANEL_WIDTH_PX : undefined,
+        left: inline ? undefined : VIEWPORT_FLOATING_PANEL_LEFT_PX,
+        top: inline ? undefined : VIEWPORT_FLOATING_PANEL_TOP_STYLE,
         background: "var(--workbench-shell-surface-panel-elev)",
         boxShadow: "var(--workbench-shell-elevation-md)",
       }}
     >
-      <header className="px-3 pb-2.5 pt-3">
+      <header className={inline ? "px-3 pb-1 pt-2" : "px-3 pb-2.5 pt-3"}>
         <Stack gap={4}>
-          <p className={SECTION_HEADER_CLASSES}>Special mode</p>
+          {inline ? null : (
+            <p className={SECTION_HEADER_CLASSES}>Special mode</p>
+          )}
           <Text size="13px" fw={500} c="dark.0">
             {schema.title}
           </Text>
@@ -102,13 +109,15 @@ export function SketchSpecialModePanel({
         ) : null}
 
         {schema.sections.map((section) => (
-          <section key={section.id} className="pb-1">
-            <div className="flex items-center justify-between px-3 pb-1 pt-3">
+          <section key={section.id} data-testid={section.id} className="pb-1">
+            <div
+              className={`flex items-center justify-between px-3 ${inline ? "pt-1" : "pb-1 pt-3"}`}
+            >
               <p className={SECTION_HEADER_CLASSES}>{section.title}</p>
             </div>
             <div className="space-y-0.5 px-2">
               <div
-                className="rounded-[6px] px-3 py-3"
+                className={`rounded-[6px] ${inline ? "px-2 py-1" : "px-3 py-3"}`}
                 style={{
                   background: "var(--workbench-shell-overlay-soft)",
                   border: "1px solid var(--workbench-shell-border)",
@@ -130,6 +139,7 @@ export function SketchSpecialModePanel({
                   {section.diagnostics?.map((diagnostic) => (
                     <Alert
                       key={diagnostic.id}
+                      data-testid={diagnostic.id}
                       variant="light"
                       color={
                         diagnostic.severity === "error"
@@ -150,6 +160,7 @@ export function SketchSpecialModePanel({
                               : "1px solid var(--workbench-shell-border)",
                         },
                         body: {
+                          userSelect: "text",
                           color:
                             diagnostic.severity === "error"
                               ? "var(--workbench-shell-danger-text)"
@@ -166,6 +177,7 @@ export function SketchSpecialModePanel({
                         <PanelButton
                           key={button.id}
                           button={button}
+                          compact={inline}
                           onAction={onAction}
                         />
                       ))}
@@ -380,14 +392,17 @@ function SpecialModePanelField({
 function PanelButton({
   button,
   onAction,
+  compact = false,
 }: {
   button: SketchSpecialModePanelButton;
   onAction: (action: SketchSpecialModePanelAction) => void;
+  compact?: boolean;
 }) {
   return (
     <Button
       type="button"
-      size="xs"
+      data-testid={button.id}
+      size={compact ? "compact-xs" : "xs"}
       disabled={button.disabled}
       variant={
         button.tone === "primary"

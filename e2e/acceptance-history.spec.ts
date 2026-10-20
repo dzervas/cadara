@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import type { SketchDefinition } from "../src/contracts/sketch/schema";
@@ -592,7 +593,7 @@ test("§5 E2E-5 invalid by merge, workbench surface: after an endpoint merge ret
   // T17k2 (T17k F-1): leaving the tool keeps the invalid sketch's
   // explanation on the status line (base: Escape cleared it).
   await expect(
-    page.getByRole("status").filter({ hasText: CONFLICT }),
+    sketchDiagnosticMessage(page).filter({ hasText: CONFLICT }),
     "the explanation outlives the tool",
   ).toHaveText(CONFLICT, { timeout: 15_000 });
   await expect(

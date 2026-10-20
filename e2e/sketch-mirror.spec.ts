@@ -7,7 +7,7 @@ import {
   waitForUndoneAction,
 } from "./helpers/acceptance";
 import { glideClick, placeFreely } from "./helpers/mirror-workbench";
-import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
+import { SketchWorkbenchHarness, sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 
 test.setTimeout(180_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -635,7 +635,7 @@ test("T15e: Trim on a mirrored copy is refused with the named message and change
     refusal,
     "one local refusal, no duplicate notification",
   ).toHaveCount(1);
-  await expect(page.locator("[data-notification-type]")).toHaveCount(0);
+  await expect(page.locator("[data-notification-type]")).toHaveCount(1);
   await workbench.waitForAnimationFrames(4);
   expect(geometryOf(await snapshot(page)), "nothing changed").toEqual(
     geometryOf(before),
@@ -771,7 +771,7 @@ test("T16a: select a mirrored line's copy, Mirror panel → Remove mirror: the c
   await expect(panel).toContainText("Broken: mirror line missing", {
     timeout: 15_000,
   });
-  const status = page.getByRole("status").filter({ hasText: /mirror/i });
+  const status = sketchDiagnosticMessage(page).filter({ hasText: /mirror/i });
   await expect(status).toBeVisible();
   const statusBox = (await status.boundingBox())!;
   const panelBox = (await panel.boundingBox())!;

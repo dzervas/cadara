@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -214,7 +215,7 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   const workbench = new FeatureWorkbenchHarness(page);
   await workbench.openWithRepository();
   await openTopSketch(workbench);
-  const { line, spline, fit, map } = await drawMixedOutline(workbench);
+  const { line, arc, spline, fit, map } = await drawMixedOutline(workbench);
 
   // Step 2a: an uneven fit-point drag: F1 only moves; one action.
   const beforeFitDrag = await mixedSnapshot(page);
@@ -305,9 +306,8 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
     { status: "current", count: 0 },
     "a zero tangent at a join: no region is offered",
   );
-  const withheld = page.getByRole("status").filter({
-    hasText:
-      "The declared-join query of ‘3-point arc 2’ and ‘Spline 3’ span 1 is uncertain (join-zero-end-tangent): A cubic has a zero tangent at a declared join location. Affects ‘3-point arc 2’. No region is formed there. Undo, or edit that geometry.",
+  const withheld = sketchDiagnosticMessage(page).filter({
+    hasText: "The join near ‘3-point arc 2’ cannot form a region.",
   });
   await expect(
     withheld,
@@ -315,6 +315,36 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   ).toBeVisible({
     timeout: 15_000,
   });
+  await withheld
+    .getByText("The join near ‘3-point arc 2’ cannot form a region.", {
+      exact: true,
+    })
+    .hover();
+  await expect
+    .poll(() => workbench.currentHoverTarget())
+    .toMatch(entityTarget(arc.id));
+  await waitForUndoneAction(page, "Move Sketch Geometry", () =>
+    glidePress(
+      page,
+      page
+        .getByRole("status")
+        .filter({
+          hasText: "The join near ‘3-point arc 2’ cannot form a region.",
+        })
+        .getByRole("button", { name: "Undo", exact: true }),
+    ),
+  );
+  await expectLiveRegions(
+    page,
+    { status: "current", count: 1 },
+    "notification Undo restores the region",
+  );
+  await page.keyboard.press("Control+Shift+z");
+  await expectLiveRegions(
+    page,
+    { status: "current", count: 0 },
+    "Redo restores the withheld-region diagnostic",
+  );
   await page.keyboard.press("Escape");
   await glideClick(workbench, BLANK);
   await expect
@@ -402,7 +432,7 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   await waitForCommittedAction(page, "Move Sketch Geometry", () =>
     glideDrag(workbench, third, second),
   );
-  const degenerateStatus = page.getByRole("status").filter({
+  const degenerateStatus = sketchDiagnosticMessage(page).filter({
     hasText:
       "Spline 3 has two consecutive fit points at the same place (Spline 3 point 2 and Spline 3 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).",
   });

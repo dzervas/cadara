@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -402,8 +403,7 @@ test("T16g rows 3–4: delete the mirror line → copy invalid, no region; Undo/
   await expect(undoEntries(page, "Delete Sketch Item")).toHaveCount(1, {
     timeout: 15_000,
   });
-  const brokenStatus = page
-    .getByRole("status")
+  const brokenStatus = sketchDiagnosticMessage(page)
     .filter({ hasText: /^Mirror ‘mirror \d+’ is broken/ });
   await expect(brokenStatus).toHaveText(
     /^Mirror ‘mirror \d+’ is broken: its mirror line was deleted\. Its copies stay where they were last solved and can't be used; profiles from this sketch are blocked\. Undo, replace the mirror line, or remove the mirror from the Mirror panel\.$/,

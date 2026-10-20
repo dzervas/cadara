@@ -1,3 +1,4 @@
+import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
 import { glideDoubleClick } from "./helpers/acceptance";
@@ -61,7 +62,7 @@ async function reenterAndFinish(
   await workbench.expectSketchSessionActive();
   if (expectStatus)
     await expect(
-      page.getByRole("status").filter({ hasText: expectStatus }),
+      sketchDiagnosticMessage(page).filter({ hasText: expectStatus }),
     ).toBeVisible({ timeout: 15_000 });
   const before = await revision(page);
   await glidePress(
