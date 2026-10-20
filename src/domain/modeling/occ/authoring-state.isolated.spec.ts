@@ -72,7 +72,7 @@ const {
 const { OpenCascadeKernelAdapter } =
   await import("@/domain/modeling/opencascade-kernel-adapter");
 
-const { seedOccTopologyNaming, reconcileReplacementTopology } =
+const { seedOccTopologyNaming, reconcileReplacementTopology, deriveGeneratedTopologyContributors } =
   await import("@/domain/modeling/occ/topology-naming");
 
 // Lane: logic (docs/testing.md — domain ownership handoff at exported seams).
@@ -129,7 +129,7 @@ async function loadOpenCascade() {
  * instance: documents, labels, TNaming builders/selectors and the NamedShape
  * attribute handles they expose. Every observed call still runs natively.
  */
-function observeNaming(oc: OpenCascadeInstance): NamingLedger {
+function observeNaming(oc: OpenCascadeInstance, historyReads = false): NamingLedger {
   const ledger: NamingLedger = {
     documents: [],
     labels: [],
@@ -208,6 +208,10 @@ function observeNaming(oc: OpenCascadeInstance): NamingLedger {
   const temporary = (wrapper: Wrapper) => ledger.temporaries.push(wrapper);
   for (const method of ["GetShape", "CurrentShape_1", "CurrentShape_2"]) {
     returnTracked(classes.TNaming_Tool!, method, temporary);
+  }
+  if (historyReads) {
+    returnTracked(classes.TopTools_ListOfShape!.prototype, "First_1", temporary);
+    constructTracked("TopTools_ListOfShape_3", temporary);
   }
   constructTracked("TCollection_ExtendedString_2", temporary);
   constructTracked("TNaming_Builder", attributeOwner);
@@ -1028,4 +1032,80 @@ test("TNaming builders and fresh labels have zero retained growth on success and
   expect(ledger.labels.slice(beforeLabels).every((w) => w.isDeleted())).toBe(true);
   expect(ledger.attributeOwnersLiveAtDocumentDelete.every((n) => n === 0)).toBe(true);
   releaseOccAuthoringStateObjects(first);
+});
+
+
+test("owning history copies have zero retained growth on success, dropped candidates and injected failures (cadara-hfo)", async () => {
+  const { oc, first } = await createJoinScenario();
+  // Observe history only after the extrude fixture: other feature helpers
+  // read lists too, but their ownership is outside this naming seam.
+  const ledger = observeNaming(oc, true);
+  const body = first.bodies[0]!;
+  const retained = bodyWrappers(body);
+  const modified = new oc.TopTools_ListOfShape_1();
+  const generated = new oc.TopTools_ListOfShape_1();
+  const faces = [...body.facesById.values()];
+  modified.Append_1(faces[0]!);
+  modified.Append_1(faces[0]!);
+  generated.Append_1(faces[0]!);
+  // Pin production First_1 ownership: deleting one copy never invalidates
+  // another copy, the list's element, or the indexed body's original owner.
+  const a = modified.First_1();
+  const b = modified.First_1();
+  expect(a).not.toBe(b);
+  a.delete();
+  expect(b.IsSame(faces[0]!)).toBe(true);
+  b.delete();
+  const primary = new Error("injected history read failure");
+  const history = {
+    Generated: () => generated,
+    Modified: () => modified,
+    IsDeleted: () => false,
+  };
+  const derive = () => deriveGeneratedTopologyContributors(oc, {
+    previous: body, generated: body, historySources: [history],
+  });
+  const assertReleased = () => {
+    expect(ledger.temporaries.filter((w) => !w.isDeleted()),
+      "Every owning history copy/list must be released, including dropped candidates.").toEqual([]);
+    expect(ledger.liveAttributeOwners.size).toBe(0);
+    for (const wrapper of retained) expect(wrapper.isDeleted()).toBe(false);
+  };
+  try {
+    const before = ledger.temporaries.length;
+    const result = derive();
+    expect(ledger.temporaries.length).toBeGreaterThan(before);
+    expect(result.facesById).toBe(body.facesById);
+    expect(faces[0]!.IsNull()).toBe(false);
+    assertReleased();
+
+    // Distinct modifications trigger the ambiguous early return; duplicates
+    // above exercise the uniqueShapes drop without changing resolution.
+    modified.Append_1(faces[1]!);
+    derive();
+    assertReleased();
+
+    history.IsDeleted = () => true;
+    derive();
+    assertReleased();
+    history.IsDeleted = () => false;
+    history.Modified = () => { throw primary; };
+    expect(derive).toThrow(primary);
+    assertReleased();
+    history.Modified = () => modified;
+
+    const prototype = oc.TopTools_ListOfShape.prototype;
+    const removeFirst = prototype.RemoveFirst;
+    prototype.RemoveFirst = function () { throw primary; };
+    try {
+      expect(derive).toThrow(primary);
+    } finally {
+      prototype.RemoveFirst = removeFirst;
+    }
+    assertReleased();
+  } finally {
+    modified.delete();
+    generated.delete();
+    releaseOccAuthoringStateObjects(first);
+  }
 });

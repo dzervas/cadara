@@ -746,19 +746,29 @@ export function seedOccTopologyNaming(
   return createInitialNamingState(oc, body);
 }
 
-function listShapes(oc: OpenCascadeInstance, list: { Size(): number }) {
+/** Appends every owning First_1 copy before any later native call can fail. */
+function listShapes(
+  oc: OpenCascadeInstance,
+  list: { Size(): number },
+  owned: OccDisposable[],
+) {
   const shapes: OccShape[] = [];
   const copy = new oc.TopTools_ListOfShape_3(
     list as InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>,
   );
 
-  while (copy.Size() > 0) {
-    shapes.push(copy.First_1());
-    copy.RemoveFirst();
-  }
-
-  copy.delete();
-  return shapes;
+  return releaseAfter(
+    () => {
+      while (copy.Size() > 0) {
+        const shape = copy.First_1();
+        owned.push(shape);
+        shapes.push(shape);
+        copy.RemoveFirst();
+      }
+      return shapes;
+    },
+    () => [copy],
+  );
 }
 
 function hasSameShape(shapes: readonly OccShape[], candidate: OccShape) {
@@ -930,59 +940,69 @@ function resolveFinalSuccessors(
   historySources: readonly OccTopologyHistorySource[],
   includeGenerated = false,
 ) {
-  let candidates = [previousShape];
-  let deleted = false;
-  let ambiguous = false;
+  // previousShape and indexed result subshapes are borrowed; only history
+  // list reads are local owners, including duplicate/ambiguous candidates.
+  const owned: OccDisposable[] = [];
+  return releaseAfter(
+    () => {
+      let candidates = [previousShape];
+      let deleted = false;
+      let ambiguous = false;
 
-  for (const historySource of historySources) {
-    const nextCandidates: OccShape[] = [];
+      for (const historySource of historySources) {
+        const nextCandidates: OccShape[] = [];
 
-    for (const candidate of candidates) {
-      if (includeGenerated) {
-        nextCandidates.push(...listShapes(oc, historySource.Generated(candidate)));
+        for (const candidate of candidates) {
+          if (includeGenerated) {
+            nextCandidates.push(
+              ...listShapes(oc, historySource.Generated(candidate), owned),
+            );
+          }
+          if (isOccTopologyHistoryDeleted(historySource, candidate)) {
+            deleted = true;
+            continue;
+          }
+
+          const modified = uniqueShapes(
+            listShapes(oc, historySource.Modified(candidate), owned),
+          );
+          if (includeGenerated && modified.length > 0) {
+            nextCandidates.push(...modified);
+            continue;
+          }
+          if (modified.length > 1) {
+            ambiguous = true;
+            continue;
+          }
+          if (modified.length === 1) {
+            nextCandidates.push(modified[0]!);
+            continue;
+          }
+
+          // A history source that omits Modified proves retention only when its
+          // own result still contains the exact native subshape. This is a
+          // TopoDS_Shape.IsSame check, never a geometric match.
+          if (
+            historySource.resultShape &&
+            !isExactSubshapeOfResult(oc, historySource.resultShape, candidate)
+          ) {
+            continue;
+          }
+          nextCandidates.push(candidate);
+        }
+
+        if (ambiguous) {
+          return { finalIndexes: [], deleted, ambiguous };
+        }
+        candidates = uniqueShapes(nextCandidates);
       }
-      if (isOccTopologyHistoryDeleted(historySource, candidate)) {
-        deleted = true;
-        continue;
-      }
 
-      const modified = uniqueShapes(
-        listShapes(oc, historySource.Modified(candidate)),
-      );
-      if (includeGenerated && modified.length > 0) {
-        nextCandidates.push(...modified);
-        continue;
-      }
-      if (modified.length > 1) {
-        ambiguous = true;
-        continue;
-      }
-      if (modified.length === 1) {
-        nextCandidates.push(modified[0]!);
-        continue;
-      }
+      const finalIndexes = mapFinalIndexes(finalShapeMap, candidates);
 
-      // A history source that omits Modified proves retention only when its
-      // own result still contains the exact native subshape. This is a
-      // TopoDS_Shape.IsSame check, never a geometric match.
-      if (
-        historySource.resultShape &&
-        !isExactSubshapeOfResult(oc, historySource.resultShape, candidate)
-      ) {
-        continue;
-      }
-      nextCandidates.push(candidate);
-    }
-
-    if (ambiguous) {
-      return { finalIndexes: [], deleted, ambiguous };
-    }
-    candidates = uniqueShapes(nextCandidates);
-  }
-
-  const finalIndexes = mapFinalIndexes(finalShapeMap, candidates);
-
-  return { finalIndexes, deleted, ambiguous };
+      return { finalIndexes, deleted, ambiguous };
+    },
+    () => owned,
+  );
 }
 
 function buildShapeMap(
