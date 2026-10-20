@@ -5652,9 +5652,10 @@ const PART_STUDIO_9841_CAPTURE_FIXTURE =
 
 // Prepared actions validate (cadara-nh0). Cutter correctly prefers a unique
 // live match for its captured Extrude 1 start-cap face (cadara-2f6); historical
-// witnesses are fallback evidence, not required source ownership. Keep this
-// ~18-minute real-OCC acceptance row todo pending a separate full apply run.
-test.todo(
+// witnesses are fallback evidence, not required source ownership. This full
+// real-OCC acceptance also checks retained shell support through walls edits
+// and authored-document restore; allow an hour for review/apply plus rebuilds.
+test(
   "9841 applies its reviewed prepared action sequence through real OCC",
   async () => {
     const bundle = JSON.parse(
@@ -5879,9 +5880,12 @@ test.todo(
         ),
       ),
     );
+    // The cavity cut retains this outer face by native IsSame identity, not a
+    // Modified hop. The stage publishes exact-identity for unchanged topology;
+    // historical selectors follow its public-id continuity without rebinding.
     expect(
-      sketch2SupportClaims?.some((entry) => entry.sourceKey.includes("exact-successor")),
-      "Closed-hollow Shell 1 must publish Sketch 2's face as an exact successor.",
+      sketch2SupportClaims?.some((entry) => entry.sourceKey.startsWith("exact-identity:")),
+      "Closed-hollow Shell 1 must publish Sketch 2's retained outer face as exact identity.",
     ).toBe(true);
     expect(
       sketch2SupportClaims?.some((entry) => entry.sourceKey.startsWith("generated-from:")),
