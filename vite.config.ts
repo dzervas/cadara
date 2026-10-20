@@ -11,6 +11,7 @@ import {
   readBuildMetadata,
 } from "./build-metadata";
 import { createTypiaPluginOptions } from "./typia-plugin-options";
+import { createAppShellCachePlugin } from "./app-shell-cache-plugin";
 
 export function getBuildSourcemap(uploadToSentry: boolean) {
   return uploadToSentry ? ("hidden" as const) : false;
@@ -151,6 +152,7 @@ export default defineConfig({
   },
   plugins: [
     createOpenCascadeAssetHeadersPlugin(),
+    createAppShellCachePlugin(),
     UnpluginTypia(createTypiaPluginOptions(__dirname)),
     react(),
     tailwindcss(),
