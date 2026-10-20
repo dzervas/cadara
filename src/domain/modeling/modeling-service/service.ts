@@ -1,3 +1,4 @@
+import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -142,6 +143,11 @@ export function createModelingService(
     : null;
   const operationHistoryStore = options.operationHistoryStore ?? null;
   const documentRepository = options.documentRepository ?? null;
+  const initialLoadingStatus = createLoadingStatus(
+    documentRepository || operationHistoryStore
+      ? "opening-document"
+      : "preparing-geometry",
+  );
   const documentRepositoryPersistence =
     options.documentRepositoryPersistence ?? "blocking";
   let operationHistoryPayload: ModelingOperationHistoryPayload =
@@ -1427,6 +1433,9 @@ export function createModelingService(
       .finally(() => {
         isRestoringRepositoryDocument = false;
         initializationSettled = true;
+        initialLoadingStatus.set(
+          historyRestoreState.kind === "failed" ? "failed" : "preparing-geometry",
+        );
         if (disposed) disposeAdapter();
       });
     subscribeToDocumentRepository();
@@ -1634,12 +1643,14 @@ export function createModelingService(
   }
 
   return {
+    initialLoadingStatus,
     currentDocumentId,
     sketchSolver,
     neutralCurveQueries: adapter,
     dispose() {
       if (disposed) return;
       disposed = true;
+      initialLoadingStatus.dispose();
       unsubscribeDocumentRepository?.();
       unsubscribeDocumentRepository = undefined;
       documentChangeListeners.clear();
@@ -1688,17 +1699,23 @@ export function createModelingService(
       return adapter.setSnapshotLodTier?.(tierId) ?? false;
     },
     async getCurrentDocumentSnapshot() {
-      await ensureInitialized();
-      for (;;) {
-        const changes = repositoryChangePromise;
-        await changes;
-        await recoverPublishedDocument();
-        const generation = stateGeneration;
-        const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
-        // An adapter read can capture the old runtime while a peer event queues
-        // a restore. Retry against that queue, never stamp its new heads on it.
-        if (generation !== stateGeneration || changes !== repositoryChangePromise) continue;
-        return attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId));
+      try {
+        await ensureInitialized();
+        for (;;) {
+          const changes = repositoryChangePromise;
+          await changes;
+          await recoverPublishedDocument();
+          const generation = stateGeneration;
+          const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
+          // Retry reads that raced a repository restore before publishing readiness.
+          if (generation !== stateGeneration || changes !== repositoryChangePromise) continue;
+          const snapshot = attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId));
+          if (historyRestoreState.kind !== "failed") initialLoadingStatus.set("ready");
+          return snapshot;
+        }
+      } catch (error) {
+        initialLoadingStatus.set("failed");
+        throw error;
       }
     },
     async buildNativeExactBrepPayload(input) {

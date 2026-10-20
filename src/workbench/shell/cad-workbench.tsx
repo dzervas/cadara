@@ -1,6 +1,7 @@
 // SLOP: Retained shell orchestrator while document/object/debug actions and visible regions are split into named workbench modules.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader } from "@mantine/core";
+import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
+import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
 import { appVersion, gitCommit } from "@/build-info";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
@@ -245,6 +246,7 @@ export function CadWorkbench({
   const snapshot = machineState.snapshot;
   // T17-20 (T17k2): the edited sketch was deleted by another session.
   const deletedSketchNotice = getPeerDeletedSketchNotice(machineState);
+  const loading = useInitialLoadingPhase(modelingService);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
   const [graphicsUnavailable, setGraphicsUnavailable] = useState(false);
   const handleGraphicsUnavailable = useCallback(
@@ -1239,7 +1241,7 @@ export function CadWorkbench({
   };
 
   const handleOpenDocumentCopy = async (file: File) => {
-    const result = await onOpenDocumentCopy(file);
+    const result = await loading.openDocument(() => onOpenDocumentCopy(file));
     handleDocumentActionResult(result);
     if (result.status === "success") {
       setOpenDocumentModalOpened(false);
@@ -1247,7 +1249,7 @@ export function CadWorkbench({
   };
 
   const handleOpenLinkedDocument = async () => {
-    const result = await onOpenLinkedDocument();
+    const result = await loading.openDocument(onOpenLinkedDocument);
     handleDocumentActionResult(result);
     if (result.status === "success") {
       setOpenDocumentModalOpened(false);
@@ -1482,13 +1484,15 @@ export function CadWorkbench({
               performanceTelemetry={performanceTelemetry}
               onGraphicsUnavailable={handleGraphicsUnavailable}
             />
-            {initialOccRenderPending && !graphicsUnavailable ? (
+            {(initialOccRenderPending ||
+              (!openDocumentModalOpened && loading.filePhase === "opening-document")) &&
+            !graphicsUnavailable ? (
               <div
                 role="status"
                 aria-label="Initial model render pending"
                 className="absolute inset-0 z-30 grid place-items-center bg-(--workbench-viewport-background)/85"
               >
-                <Loader color="gray" size="lg" />
+                <InitialLoadingStatus phase={loading.phase} />
               </div>
             ) : null}
             {/* T14d (A-11): the left floating panel stack. The sketch
@@ -1742,6 +1746,7 @@ export function CadWorkbench({
             <OpenDocumentModal
               opened={openDocumentModalOpened}
               onClose={() => setOpenDocumentModalOpened(false)}
+              loadingPhase={loading.filePhase}
               onOpenCopy={handleOpenDocumentCopy}
               onOpenLinked={handleOpenLinkedDocument}
             />
