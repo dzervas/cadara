@@ -1,6 +1,9 @@
 // SLOP: Retained workbench session host while provider composition and document-tab persistence are separated from browser app bootstrap.
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 
+import { normalizeUnknownError } from "@/contracts/errors";
+import { useErrorReporter } from "@/hooks/use-error-reporter";
+
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
 import { noopPerformanceTelemetry } from "@/contracts/performance/telemetry";
@@ -24,6 +27,7 @@ import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
 import { CadWorkbench } from "@/workbench/shell/cad-workbench";
+import { WorkbenchModelingServices } from "@/application/workspace/workbench-modeling-services";
 import { createDurableHistoryService } from "@/application/history/durable-history";
 import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
 import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
@@ -70,6 +74,7 @@ interface WorkbenchAppProps {
     performanceTelemetry?: PerformanceTelemetry,
   ) => ModelingKernelAdapter;
   documentSyncWorkerClient: DocumentSyncWorkerClient | null;
+  releaseDocumentResources?: (documentId: DocumentId) => Promise<void>;
   performanceTelemetry?: PerformanceTelemetry;
   runtimeExtensionRegistries: RuntimeExtensionRegistryComposition;
 }
@@ -77,9 +82,11 @@ interface WorkbenchAppProps {
 export function WorkbenchApp({
   createKernelAdapter,
   documentSyncWorkerClient,
+  releaseDocumentResources,
   performanceTelemetry = noopPerformanceTelemetry,
   runtimeExtensionRegistries,
 }: WorkbenchAppProps) {
+  const errorReporter = useErrorReporter();
   const tabsStorage = useMemo(
     () =>
       typeof window === "undefined"
@@ -131,45 +138,52 @@ export function WorkbenchApp({
       runtimeExtensionRegistries.sketchSpecialModes,
     ],
   );
-  const modelingService = useMemo(() => {
-    const kernelAdapter = createKernelAdapter(
-      tabsState.activeDocumentId,
-      performanceTelemetry,
-    );
-    return createInstrumentedModelingService(
-      createModelingService(kernelAdapter, {
-        currentDocumentId: tabsState.activeDocumentId,
-        sketchSolver: createInstrumentedSketchSolverAdapter(
-          new SketchConstraintSolverAdapter({
-            documentId: tabsState.activeDocumentId,
-            revisionId: null,
-            neutralCurveQueries: kernelAdapter,
-            // Live regions derive in a dedicated worker, never behind the
-            // OCC kernel worker's feature preview/commit queue.
-            regionDerivation: getBrowserSketchRegionDerivation() ?? undefined,
+  const modelingServices = useMemo(
+    () =>
+      new WorkbenchModelingServices((documentId) => {
+        const kernelAdapter = createKernelAdapter(
+          documentId,
+          performanceTelemetry,
+        );
+        return createInstrumentedModelingService(
+          createModelingService(kernelAdapter, {
+            currentDocumentId: documentId,
+            sketchSolver: createInstrumentedSketchSolverAdapter(
+              new SketchConstraintSolverAdapter({
+                documentId,
+                revisionId: null,
+                neutralCurveQueries: kernelAdapter,
+                // Live regions derive in a dedicated worker, never behind the
+                // OCC kernel worker's feature preview/commit queue.
+                regionDerivation:
+                  getBrowserSketchRegionDerivation() ?? undefined,
+              }),
+              performanceTelemetry,
+            ),
+            exportProviders: runtimeExtensionRegistries.exportProviders,
+            operationHistoryStore:
+              typeof window === "undefined"
+                ? null
+                : createLocalStorageOperationHistoryStore(
+                    window.localStorage,
+                    createWorkbenchOperationHistoryKey(documentId),
+                  ),
+            documentRepositoryPersistence: "background",
+            documentRepository,
           }),
           performanceTelemetry,
-        ),
-        exportProviders: runtimeExtensionRegistries.exportProviders,
-        operationHistoryStore:
-          typeof window === "undefined"
-            ? null
-            : createLocalStorageOperationHistoryStore(
-                window.localStorage,
-                createWorkbenchOperationHistoryKey(tabsState.activeDocumentId),
-              ),
-        documentRepositoryPersistence: "background",
-        documentRepository,
-      }),
+        );
+      }, releaseDocumentResources),
+    [
+      createKernelAdapter,
+      documentRepository,
       performanceTelemetry,
-    );
-  }, [
-    createKernelAdapter,
-    documentRepository,
-    performanceTelemetry,
-    runtimeExtensionRegistries.exportProviders,
-    tabsState.activeDocumentId,
-  ]);
+      runtimeExtensionRegistries.exportProviders,
+      releaseDocumentResources,
+    ],
+  );
+  const modelingService = modelingServices.get(tabsState.activeDocumentId);
+
   const durableHistory = useMemo(
     () =>
       createDurableHistoryService({
@@ -179,18 +193,32 @@ export function WorkbenchApp({
     [documentRepository, modelingService],
   );
 
-  const mountedModelingServicesRef = useRef(new Set([modelingService]));
+  const mountedModelingServicesRef = useRef(new Set([modelingServices]));
   useEffect(() => {
-    // Strict Mode replays effects; defer disposal so its immediate remount can retain this service.
+    // Strict Mode replays effects; defer disposal so its immediate remount can retain this owner.
     const mountedServices = mountedModelingServicesRef.current;
-    mountedServices.add(modelingService);
+    mountedServices.add(modelingServices);
     return () => {
-      mountedServices.delete(modelingService);
+      mountedServices.delete(modelingServices);
       queueMicrotask(() => {
-        if (!mountedServices.has(modelingService)) modelingService.dispose();
+        if (!mountedServices.has(modelingServices)) modelingServices.dispose();
       });
     };
-  }, [modelingService]);
+  }, [modelingServices]);
+
+  useEffect(() => {
+    void modelingServices
+      .retainOpenDocuments(tabsState.tabs.map((tab) => tab.documentId))
+      .catch((error: unknown) => {
+        errorReporter.report(
+          normalizeUnknownError(error, {
+            code: "app/operation-failed",
+            fallbackMessage: "Closed document resources could not be released.",
+          }),
+          { source: "workbench-tabs.close", visibility: "user" },
+        );
+      });
+  }, [errorReporter, modelingServices, tabsState.tabs]);
 
   useEffect(() => {
     if (!tabsStorage) {

@@ -269,6 +269,7 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
         operation.documentId,
       ).exportAuthoredModelDocument?.(operation.documentId);
     case "releaseDocument":
+      adapters.get(operation.documentId)?.dispose();
       adapters.delete(operation.documentId);
       return undefined;
     case "getDocumentSnapshot": {

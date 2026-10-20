@@ -1898,6 +1898,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   /** With a worker client, queries run in the worker so the main thread never loads OCC for them. */
   queryNeutralCurves(request: NeutralCurveQueryRequest) {
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.queryNeutralCurves(request);
     }
@@ -1907,6 +1908,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   queryNeutralCurveSelfIntersections(
     request: NeutralCurveSelfIntersectionRequest,
   ) {
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.queryNeutralCurveSelfIntersections(
         request,
@@ -1916,6 +1918,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   queryNeutralCurveJoin(request: NeutralCurveJoinRequest) {
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.queryNeutralCurveJoin(request);
     }
@@ -2863,6 +2866,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async exportAuthoredModelDocument(
     documentId: AuthoredModelDocument["documentId"],
   ) {
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.exportAuthoredModelDocument(documentId);
     }
@@ -3641,6 +3645,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<GetDocumentSnapshotResponse> {
     assertSupportedModelingRequest(request, this.documentId);
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.getDocumentSnapshot(
         request,
@@ -3697,6 +3702,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<OccNativeTopologyWorkerResult<OccNativeTopologyPayload>> {
     assertSupportedModelingRequest(request, this.documentId);
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.buildNativeTopologySnapshot(
         request,
@@ -3768,6 +3774,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.buildNativeBooleanFeatureTransactionPayload(
         documentId,
@@ -3920,6 +3927,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.buildNativeMeshExportPayload(
         documentId,
@@ -4040,6 +4048,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.buildNativeExactBrepPayload(
         documentId,
@@ -4178,6 +4187,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<ProjectSketchExternalReferencesResponse> {
     assertSupportedModelingRequest(request, this.documentId);
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.projectSketchExternalReferences(request);
     }
@@ -5998,6 +6008,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   async getExportCapabilities(
     baseRevisionId: RevisionId,
   ): Promise<ExportCapabilities | DocumentExportDiagnostic> {
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.getExportCapabilities(
         this.documentId,
@@ -6024,6 +6035,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   ): Promise<ResolveReferenceResponse> {
     assertSupportedModelingRequest(request, this.documentId);
 
+    this.assertNotDisposed();
     if (this.workerSnapshotClient) {
       return this.workerSnapshotClient.resolveReference(request);
     }
