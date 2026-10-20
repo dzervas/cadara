@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, test } from "vitest";
 
+import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { SketchPoint2D } from "@/contracts/sketch/schema";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import {
   makeSketchFixture,
@@ -14,7 +16,10 @@ import {
   sketchSnapshotRecordForTest,
 } from "@/contracts/sketch/region-record.fixtures";
 import type { SplinePoles } from "@/contracts/sketch/spline-geometry";
-import { measureSketchRegion } from "@/domain/measure/measurement";
+import {
+  deriveMeasurementViewModel,
+  measureSketchRegion,
+} from "@/domain/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
 
@@ -167,4 +172,131 @@ describe("measurement: committed region area and perimeter come from the exact b
       "profile-boundary-unresolved",
     );
   }, 60_000);
+});
+
+function polygon(sketch: SketchFixture, points: readonly SketchPoint2D[]) {
+  points.forEach(([x, y], index) => sketch.point(`corner${index}`, x, y));
+  points.forEach((_, index) =>
+    sketch.line(
+      `side${index}`,
+      `corner${index}`,
+      `corner${(index + 1) % points.length}`,
+    ),
+  );
+}
+
+function pointToRegion(
+  record: Awaited<ReturnType<typeof committed>>["record"],
+  point: readonly [number, number, number],
+  loopCount = 1,
+) {
+  const region = record.sketch.regions.find(
+    (entry) => entry.loops.length === loopCount,
+  )!;
+  const probe = makeSketchFixture();
+  const pointId = probe.point("probe", 0, 0);
+  const plane = createStandardPlaneDefinition("xy");
+  const probeRecord = {
+    ...sketchSnapshotRecordForTest(probe.build(), [], {
+      ...plane,
+      frame: { ...plane.frame, origin: point },
+    }),
+    sketchId: "sketch_probe",
+  };
+  const result = deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [
+      { kind: "sketchPoint", sketchId: "sketch_probe", pointId },
+      { kind: "region", sketchId: record.sketchId, regionId: region.regionId },
+    ],
+    snapshot: {
+      document: { sketches: [record, probeRecord] },
+      presentation: { entities: [] },
+    } as unknown as WorkspaceSnapshot,
+  });
+  if (!result) throw new Error("measurement unavailable");
+  const connector = result.witnesses.find((entry) =>
+    entry.id.endsWith(":distance"),
+  );
+  if (connector?.kind !== "polyline")
+    throw new Error("distance witness unavailable");
+  return { result, end: connector.points[1]! };
+}
+
+describe("measurement: distance to region material", () => {
+  test("point above an annular hole measures to material, not a filled disk", async () => {
+    const { record } = await committed(addCircleAnnulusForTest);
+    const { result, end } = pointToRegion(record, [1, -1, 3], 2);
+    expect(result.rows[0]!.value).toBe("≈ 3.6 mm");
+    expect(Math.hypot(end[0] - 1, end[1] + 1)).toBeGreaterThan(1.99);
+    expect(Math.hypot(end[0] - 1, end[1] + 1)).toBeLessThanOrEqual(2);
+    expect(end[2]).toBe(0);
+  });
+
+  test("point in a concave notch is not over the face", async () => {
+    const { record } = await committed((sketch) =>
+      polygon(sketch, [
+        [0, 0],
+        [6, 0],
+        [6, 6],
+        [4, 6],
+        [4, 2],
+        [2, 2],
+        [2, 6],
+        [0, 6],
+      ]),
+    );
+    const { result, end } = pointToRegion(record, [3, 4, 3]);
+    expect(result.rows[0]!.value).toBe("≈ 3.16 mm");
+    expect(Math.abs(end[0] - 3)).toBe(1);
+    expect(end[1]).toBe(4);
+    expect(end[2]).toBe(0);
+  });
+
+  test("both holes keep distance witnesses on the intended region", async () => {
+    const { record } = await committed((sketch) => {
+      polygon(sketch, [
+        [-8, -5],
+        [8, -5],
+        [8, 5],
+        [-8, 5],
+      ]);
+      sketch.point("left", -3, 0);
+      sketch.point("right", 3, 0);
+      sketch.circle("leftHole", "left", 2);
+      sketch.circle("rightHole", "right", 1);
+    });
+    for (const [x, radius, value] of [
+      [-3, 2, "≈ 3.6 mm"],
+      [3, 1, "≈ 3.16 mm"],
+    ] as const) {
+      const { result, end } = pointToRegion(record, [x, 0, 3], 3);
+      expect(result.rows[0]!.value).toBe(value);
+      expect(Math.hypot(end[0] - x, end[1])).toBeGreaterThan(radius * 0.995);
+      expect(Math.hypot(end[0] - x, end[1])).toBeLessThanOrEqual(
+        radius + 1e-12,
+      );
+      expect(end[2]).toBe(0);
+    }
+  });
+
+  test("simple convex results stay byte-identical", async () => {
+    const { record } = await committed((sketch) =>
+      polygon(sketch, [
+        [0, 0],
+        [6, 0],
+        [6, 6],
+        [0, 6],
+      ]),
+    );
+    const results = [
+      [2, 1, 3],
+      [7, 3, 3],
+      [7, 7, 3],
+    ].map(
+      (point) =>
+        pointToRegion(record, point as [number, number, number]).result,
+    );
+    expect(JSON.stringify(results)).toMatchSnapshot();
+  });
 });

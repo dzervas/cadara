@@ -19,6 +19,7 @@
         "@typia/unplugin": "^12.1.1",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
+        "earcut": "^3.2.4",
         "fflate": "^0.8.2",
         "mathjs": "^15.2.0",
         "neverthrow": "^8.2.0",
@@ -676,6 +677,8 @@
     "draco3d": ["draco3d@1.5.7", "", {}, "sha512-m6WCKt/erDXcw+70IJXnG7M3awwQPAsZvJGX5zY7beBqpELw6RDGkYVU0W43AFxye4pDZ5i2Lbyc/NNGqwjUVQ=="],
 
     "drange": ["drange@1.1.1", "", {}, "sha512-pYxfDYpued//QpnLIm4Avk7rsNtAtQkUES2cwAYSvD/wd2pKD71gN2Ebj3e7klzXwjocvE8c5vx/1fxwpqmSxA=="],
+
+    "earcut": ["earcut@3.2.4", "", {}, "sha512-FHc6yNpnTORB0tM5kmZ03iD2mDuNakDE2lvf4Hw1XkfxtEHIGVi01B/GqUSwx+NcC1WGjidAfpTXzeALtPtfpg=="],
 
     "electron-to-chromium": ["electron-to-chromium@1.5.332", "", {}, "sha512-7OOtytmh/rINMLwaFTbcMVvYXO3AUm029X0LcyfYk0B557RlPkdpTpnH9+htMlfu5dKwOmT0+Zs2Aw+lnn6TeQ=="],
 
