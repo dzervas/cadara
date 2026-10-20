@@ -43,6 +43,8 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
     "editor.cancel": { shortcuts: [] },
   });
   const context = {
+    pointingDevice: "mouse" as const,
+    setPointingDevice: () => undefined,
     activeScopes: ["global" as const],
     commands,
     effectiveKeymap,
@@ -128,4 +130,16 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
     getRecordedShortcutStep({ key: undefined }),
     "Shortcut recording should ignore keydown events without a key (Chrome autofill).",
   ).toBe(null);
+});
+
+test("settings exposes the default Mouse and opt-in Touchpad navigation choices", () => {
+  const markup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme}>
+      <ShortcutSettings />
+    </MantineProvider>,
+  );
+  expect(markup).toContain("Pointing device");
+  expect(markup).toContain('value="mouse" selected=""');
+  expect(markup).toContain('value="touchpad"');
+  expect(markup).toContain("Middle-drag pans");
 });

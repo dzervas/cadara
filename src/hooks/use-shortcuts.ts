@@ -23,6 +23,8 @@ export function useShortcuts() {
   }
 
   return {
+    pointingDevice: "mouse" as const,
+    setPointingDevice: (_scheme: "mouse" | "touchpad") => undefined,
     activeScopes: ["global"] as const,
     commands: defaultCommands,
     effectiveKeymap: defaultEffectiveKeymap,

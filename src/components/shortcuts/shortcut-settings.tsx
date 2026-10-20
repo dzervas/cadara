@@ -5,6 +5,7 @@ import {
   Group,
   Modal,
   ScrollArea,
+  NativeSelect,
   Table,
   Text,
 } from "@mantine/core";
@@ -113,6 +114,15 @@ export function ShortcutSettings() {
 
   return (
     <div className="flex min-h-0 flex-col gap-3" data-shortcut-settings>
+      <NativeSelect
+        label="Pointing device"
+        value={shortcuts.pointingDevice}
+        onChange={(event) => shortcuts.setPointingDevice(event.currentTarget.value === "touchpad" ? "touchpad" : "mouse")}
+        data={[{ value: "mouse", label: "Mouse" }, { value: "touchpad", label: "Touchpad" }]}
+        description={shortcuts.pointingDevice === "touchpad"
+          ? "Two-finger scroll pans · Shift+scroll orbits · Pinch zooms"
+          : "Scroll zooms · Right-drag orbits · Middle-drag pans"}
+      />
       <Group justify="space-between" gap="sm">
         <Text size="sm" c="dimmed">
           {shortcuts.commands.length} commands
