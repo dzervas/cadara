@@ -1,4 +1,6 @@
 import { test, expect } from "vitest";
+import { makeOccWrapperTracker } from "../../../../test/helpers/occ-wrapper-tracker";
+import { releaseDiscardedOccAuthoringStateObjects } from "@/domain/modeling/occ/memory";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureDefinition,
@@ -52,6 +54,8 @@ import { parseNativeShimPayloadJson } from "@/domain/modeling/occ/native-topolog
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 import {
   OCC_REFERENCE_INVALIDATION_REASONS,
+  trackNewSolidBody,
+  reconcileReplacementSolidBody,
   resolveOccReference,
   type OccTrackedBody,
 } from "@/domain/modeling/occ/topology";
@@ -2369,3 +2373,158 @@ test("durable naming qualification survives legal independent feature reorder an
   expect(reenabled.features.at(-1)?.definition.kind).toBe("fillet");
   expect(requireBody(reenabled, targetBodyId)).toBeTruthy();
 }, 15000);
+
+// Logic lane: production OCC body construction and replacement owner transfer.
+test("cadara-4uj: partial and replacement bodies retain no local handles", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const rectangle = createRectangleSketch(
+    "sketch_body_release",
+    createStandardPlaneDefinition("xy"),
+  );
+  const id = featureId("body_release");
+  const initial = createOccAuthoringState(oc, { sketches: [rectangle.sketch] });
+  const extrude = (distance: number) =>
+    applyFeature(initial, {
+      featureId: id,
+      suppressed: false,
+      definition: createExtrudeDefinition(
+        rectangle.sketch,
+        rectangle.region,
+        distance,
+        {
+          operation: "newBody",
+          booleanScope: { kind: "standalone" },
+        },
+      ),
+    });
+  const previous = requireBody(extrude(2), bodyIdForFeature(id))!;
+  const edited = requireBody(extrude(3), bodyIdForFeature(id))!;
+  const injected = new Error("injected local construction failure");
+  for (const stage of [
+    "success",
+    "payload",
+    "face",
+    "edge",
+    "vertex",
+    "seed",
+    "reconcile",
+  ] as const) {
+    const tracker = makeOccWrapperTracker(oc);
+    tracker.result(oc.TopoDS as never, "Solid_1", "TopoDS_Solid");
+    tracker.result(oc.TopoDS as never, "Edge_1", "TopoDS_Edge");
+    tracker.result(oc.TopoDS as never, "Vertex_1", "TopoDS_Vertex");
+    if (stage === "payload") {
+      const host = oc as unknown as {
+        CadaraBuildNativeTopologyPayload: Record<string, unknown>;
+      };
+      tracker.patch(
+        host.CadaraBuildNativeTopologyPayload,
+        "BuildJson",
+        () => () => {
+          throw injected;
+        },
+      );
+    } else if (stage === "seed" || stage === "reconcile") {
+      // Throw before allocating the naming collaborator: this row owns topology.ts locals.
+      tracker.patch(
+        oc as never,
+        stage === "seed" ? "TDocStd_Document" : "TNaming_Builder",
+        () =>
+          function () {
+            throw injected;
+          },
+      );
+    } else if (stage !== "success") {
+      const method = { face: "Face_1", edge: "Edge_1", vertex: "Vertex_1" }[
+        stage
+      ];
+      let reads = 0;
+      tracker.patch(
+        oc.TopoDS as never,
+        method,
+        (original) =>
+          function (this: unknown, ...args: unknown[]) {
+            const inIndex = new Error().stack?.includes("ByNativePayload");
+            if (inIndex && ++reads === 2) throw injected;
+            return original.apply(this, args);
+          },
+      );
+    }
+    try {
+      if (stage === "success") {
+        const built = await tracker.record(() =>
+          trackNewSolidBody(oc, {
+            bodyId: "body_release_success",
+            label: "release success",
+            ownerFeatureId: id,
+            shape: edited.shape,
+          }),
+        );
+        releaseDiscardedOccAuthoringStateObjects({ bodies: [built] }, [
+          { bodies: [previous, edited] },
+        ]);
+        const replaced = await tracker.record(() =>
+          reconcileReplacementSolidBody(oc, {
+            previous,
+            ownerFeatureId: id,
+            shape: edited.shape,
+            historySources: [],
+          }),
+        );
+        releaseDiscardedOccAuthoringStateObjects({ bodies: [replaced.body] }, [
+          { bodies: [previous, edited] },
+        ]);
+      } else {
+        await expect(
+          tracker.record(() =>
+            stage === "reconcile"
+              ? reconcileReplacementSolidBody(oc, {
+                  previous,
+                  ownerFeatureId: id,
+                  shape: edited.shape,
+                  historySources: [],
+                })
+              : trackNewSolidBody(oc, {
+                  bodyId: "body_release_failure",
+                  label: "release failure",
+                  ownerFeatureId: id,
+                  shape: edited.shape,
+                }),
+          ),
+        ).rejects.toBe(injected);
+      }
+      const local = [
+        "TopoDS_Solid",
+        "TopoDS_Shape(FindKey)",
+        "TopoDS_Face(Face_1)",
+        "TopoDS_Edge",
+        "TopoDS_Vertex",
+        "TopTools_IndexedMapOfShape",
+      ]
+        .flatMap((kind) => tracker.of(kind))
+        .filter((wrapper) =>
+          /index(?:Faces|Edges|Vertices)ByNativePayload|extractSolidShapes/.test(
+            tracker.stack(wrapper),
+          ),
+        );
+      expect(local.length, stage).toBeGreaterThan(0);
+      expect(
+        local.filter((wrapper) => !wrapper.isDeleted?.()),
+        stage,
+      ).toHaveLength(0);
+      expect(
+        local.filter((wrapper) => tracker.attempts(wrapper) !== 1),
+        stage,
+      ).toHaveLength(0);
+      expect(previous.shape.IsNull(), stage).toBe(false);
+      expect(edited.shape.IsNull(), stage).toBe(false);
+      expect(
+        [...previous.facesById.values()].every((face) => !face.IsNull()),
+        stage,
+      ).toBe(true);
+    } finally {
+      tracker.leftovers();
+      tracker.restore();
+    }
+  }
+});
