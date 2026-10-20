@@ -98,6 +98,7 @@ export function makeOccWrapperTracker(oc: OC) {
   return {
     patch,
     proto,
+    result,
     async record<T>(f: () => T | Promise<T>) {
       on = true;
       try {

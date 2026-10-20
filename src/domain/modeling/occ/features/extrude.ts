@@ -475,20 +475,32 @@ export function getShapeVertexPoints(
   oc: OpenCascadeInstance,
   shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
 ) {
-  const vertexMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(
-    shape,
-    oc.TopAbs_ShapeEnum.TopAbs_VERTEX as never,
-    vertexMap,
-  );
+  const owned: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(value: T) => {
+    owned.push(value);
+    return value;
+  };
   const points: Vec3[] = [];
-
-  for (let index = 1; index <= vertexMap.Size(); index += 1) {
-    const vertex = oc.TopoDS.Vertex_1(vertexMap.FindKey(index));
-    points.push(toVec3FromGpPoint(oc.BRep_Tool.Pnt(vertex)));
+  try {
+    const vertexMap = own(new oc.TopTools_IndexedMapOfShape_1());
+    oc.TopExp.MapShapes_1(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_VERTEX as never,
+      vertexMap,
+    );
+    for (let index = 1; index <= vertexMap.Size(); index += 1) {
+      const vertex = own(oc.TopoDS.Vertex_1(own(vertexMap.FindKey(index))));
+      points.push(toVec3FromGpPoint(own(oc.BRep_Tool.Pnt(vertex))));
+    }
+  } catch (error) {
+    try {
+      releaseOccObjects(owned);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
-
-  vertexMap.delete();
+  releaseOccObjects(owned);
   return points;
 }
 
@@ -989,6 +1001,18 @@ function registerSurfaceExtrudeProvenance(
   return { sourceShapes, unsupportedSourceKeys };
 }
 
+/** Completed local prisms have no authoring-state owner until assembly succeeds. */
+function releaseBuiltExtrudeShapes(shapes: readonly BuiltExtrudeShape[]) {
+  releaseOccObjects(
+    shapes.flatMap((built) => [
+      built.shape,
+      ...[...built.sourceShapes.values()].flat(),
+      ...[...built.compositeSourceShapes.values()].flat(),
+      ...built.compositeOperands.map((operand) => operand.shape),
+    ]),
+  );
+}
+
 function buildExtrudeProfileShapes(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -1057,21 +1081,34 @@ function buildExtrudeProfileShapes(
           ]
         : [{ end: extent.end, role: "one-side-end" }];
 
-  return ends.map(({ end, role }) =>
-    buildExtrudeEndShape(context, {
-      ownerFeatureId,
-      profileShape,
-      baseNormal,
-      end,
-      startExtent,
-      endRole: role,
-      sketchId,
-      sketchProvenance,
-      profileRegionId,
-      faceProfileKey:
-        profile.kind === "face" ? getOccDurableRefKey(profile) : null,
-    }),
-  );
+  const built: BuiltExtrudeShape[] = [];
+  try {
+    for (const { end, role } of ends) {
+      built.push(
+        buildExtrudeEndShape(context, {
+          ownerFeatureId,
+          profileShape,
+          baseNormal,
+          end,
+          startExtent,
+          endRole: role,
+          sketchId,
+          sketchProvenance,
+          profileRegionId,
+          faceProfileKey:
+            profile.kind === "face" ? getOccDurableRefKey(profile) : null,
+        }),
+      );
+    }
+  } catch (error) {
+    try {
+      releaseBuiltExtrudeShapes(built);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  return built;
 }
 
 function createPlaneFrameForNormal(origin: Vec3, normal: Vec3) {
@@ -1715,7 +1752,6 @@ export function buildExtrudeFeatureShape(
   ownerFeatureId: FeatureId,
   parameters: ExtrudeFeatureParameters,
 ): BuiltExtrudeShape {
-
   const extent = getExtrudeFeatureExtent(parameters);
 
   const profileKeys = new Set<string>();
@@ -1729,39 +1765,51 @@ export function buildExtrudeFeatureShape(
     profileKeys.add(key);
   }
 
-  const extrudedShapes = parameters.profiles.flatMap((profile) =>
-    buildExtrudeProfileShapes(
-      context,
-      ownerFeatureId,
-      profile,
-      extent,
-      parameters.startExtent,
-    ),
-  );
-
-  // Whole-profile termination: every profile of one up-to-next end must be a
-  // region of one sketch stopping on exactly the same proven plane level. No
-  // tolerance merges distinct levels; anything else fails closed.
-  if (parameters.profiles.length > 1) {
-    const levelsByEndRole = new Map<string, number>();
-    for (const built of extrudedShapes) {
-      if (!built.upToNextTermination) continue;
-      const { endRole, projection } = built.upToNextTermination;
-      const firstProfile = parameters.profiles[0]!;
-      const oneSketch = parameters.profiles.every(
-        (profile) =>
-          profile.kind === "region" &&
-          firstProfile.kind === "region" &&
-          profile.sketchId === firstProfile.sketchId,
+  const extrudedShapes: BuiltExtrudeShape[] = [];
+  try {
+    for (const profile of parameters.profiles) {
+      extrudedShapes.push(
+        ...buildExtrudeProfileShapes(
+          context,
+          ownerFeatureId,
+          profile,
+          extent,
+          parameters.startExtent,
+        ),
       );
-      const level = levelsByEndRole.get(endRole) ?? projection;
-      if (!oneSketch || level !== projection) {
-        throw new Error(
-          "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next profiles of one end do not terminate on one plane.",
-        );
-      }
-      levelsByEndRole.set(endRole, level);
     }
+
+    // Whole-profile termination: every profile of one up-to-next end must be a
+    // region of one sketch stopping on exactly the same proven plane level. No
+    // tolerance merges distinct levels; anything else fails closed.
+    if (parameters.profiles.length > 1) {
+      const levelsByEndRole = new Map<string, number>();
+      for (const built of extrudedShapes) {
+        if (!built.upToNextTermination) continue;
+        const { endRole, projection } = built.upToNextTermination;
+        const firstProfile = parameters.profiles[0]!;
+        const oneSketch = parameters.profiles.every(
+          (profile) =>
+            profile.kind === "region" &&
+            firstProfile.kind === "region" &&
+            profile.sketchId === firstProfile.sketchId,
+        );
+        const level = levelsByEndRole.get(endRole) ?? projection;
+        if (!oneSketch || level !== projection) {
+          throw new Error(
+            "advanced-feature-unsupported-kernel-case: OCC extrude up-to-next profiles of one end do not terminate on one plane.",
+          );
+        }
+        levelsByEndRole.set(endRole, level);
+      }
+    }
+  } catch (error) {
+    try {
+      releaseBuiltExtrudeShapes(extrudedShapes);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
 
   if (extrudedShapes.length === 1) {

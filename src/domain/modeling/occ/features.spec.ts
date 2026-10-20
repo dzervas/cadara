@@ -1,4 +1,6 @@
 import { describe, test, expect } from "vitest";
+import { makeOccWrapperTracker } from "../../../../test/helpers/occ-wrapper-tracker";
+import { releaseOccObjects } from "@/domain/modeling/occ/memory";
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
@@ -65,7 +67,7 @@ import {
   toGpDir,
   toGpPnt,
 } from "@/domain/modeling/occ/planes";
-import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
+import { buildExtrudeFeatureShape, getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
 
 describe("src/domain/modeling/occ/features.spec.ts", () => {
@@ -5586,6 +5588,183 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       "Repeated rebuilds with the same feature list should not duplicate render artifacts.",
     ).toBe(second.renderRecords.length);
   }
+
+  test("cadara-0c6: vertex reads and refused assemblies retain no local handles", async () => {
+    const oc = await getDefaultOpenCascadeInstance();
+    const base = await makeBoxBody(
+      oc,
+      "body_release_base",
+      4,
+      3,
+      1,
+      "feature_release_base",
+    );
+    const slab = await makeBoxBody(
+      oc,
+      "body_release_slab",
+      4,
+      3,
+      1,
+      "feature_release_slab",
+      [0, 0, 3],
+    );
+    const faceIds = [...base.facesById]
+      .filter(([, face]) => {
+        const data = extractPlanarFaceData(oc, face);
+        data.plane.delete();
+        return Math.abs(data.frame.normal[2]) === 1;
+      })
+      .map(([faceId]) => faceId);
+    const profiles = faceIds.map((faceId) => ({
+      kind: "face" as const,
+      bodyId: base.bodyId,
+      faceId,
+    }));
+    expect(profiles).toHaveLength(2);
+    const context: OccFeatureExecutionContext = {
+      ...(await createContext({ bodies: [base, slab] })()),
+      assets: { records: [] },
+      assetBlobs: new Map(),
+      resolvedGeometryAssets: new Map(),
+      bakedShapeCache: new Map(),
+      previousTopologyStage: null,
+      topologyProvenanceIndex: createOccTopologyProvenanceIndex({
+        stages: new Map(),
+        previousLineage: new Map(),
+        historyOrder: [],
+      }),
+    };
+    const rectangle = createRectangleSketch(
+      "sketch_release_profile",
+      createStandardPlaneDefinition("xy"),
+    );
+    context.sketches = [rectangle.sketch];
+    const regionProfile = {
+      kind: "region" as const,
+      sketchId: rectangle.sketch.sketchId,
+      regionId: rectangle.region.regionId,
+    };
+    const parameters: ExtrudeFeatureParameters = {
+      resultBodyType: "solid",
+      profiles: [profiles[0]!, profiles[1]!],
+      startExtent: { kind: "profilePlane" },
+      extent: {
+        mode: "oneSide",
+        end: {
+          kind: "blind",
+          direction: "positive",
+          distance: { source: "literal", value: 1 },
+        },
+      },
+      operation: { source: "literal", value: "newBody" },
+      booleanScope: { kind: "standalone" },
+    };
+    const tracker = makeOccWrapperTracker(oc);
+    tracker.result(oc.TopoDS as never, "Vertex_1", "TopoDS_Vertex");
+    try {
+      expect(
+        await tracker.record(() => getShapeVertexPoints(oc, base.shape)),
+      ).toHaveLength(8);
+      expect(tracker.liveByKind()).toEqual({});
+      const injected = new Error("injected coordinate read");
+      tracker.patch(oc.BRep_Tool as never, "Pnt", () => () => {
+        throw injected;
+      });
+      await expect(
+        tracker.record(() => getShapeVertexPoints(oc, base.shape)),
+      ).rejects.toBe(injected);
+      expect(tracker.liveByKind()).toEqual({});
+    } finally {
+      tracker.leftovers();
+      tracker.restore();
+    }
+
+    const assembly = makeOccWrapperTracker(oc);
+    for (const method of ["Shape", "FirstShape_1", "LastShape_1"]) {
+      assembly.result(
+        assembly.proto("BRepPrimAPI_MakePrism"),
+        method,
+        "prism result",
+      );
+    }
+    try {
+      // Success transfers both shape wrappers; the caller disposes them.
+      const built = await assembly.record(() =>
+        buildExtrudeFeatureShape(context, "feature_release_success", {
+          ...parameters,
+          profiles: [regionProfile],
+        }),
+      );
+      releaseOccObjects([
+        built.shape,
+        ...built.compositeOperands.map((operand) => operand.shape),
+        ...[...built.sourceShapes.values()].flat(),
+        ...[...built.compositeSourceShapes.values()].flat(),
+      ]);
+      expect(
+        assembly.of("prism result").filter((shape) => !shape.isDeleted?.()),
+      ).toHaveLength(0);
+      const count = assembly.of("prism result").length;
+      await expect(
+        assembly.record(() =>
+          buildExtrudeFeatureShape(context, "feature_release_later", {
+            ...parameters,
+            profiles: [
+              regionProfile,
+              { kind: "face", bodyId: base.bodyId, faceId: "face_missing" },
+            ],
+          }),
+        ),
+      ).rejects.toThrow("does not resolve");
+      expect(assembly.of("prism result").length).toBeGreaterThan(count);
+      expect(
+        assembly.of("prism result").filter((shape) => !shape.isDeleted?.()),
+      ).toHaveLength(0);
+      await expect(
+        assembly.record(() =>
+          buildExtrudeFeatureShape(context, "feature_release_end", {
+            ...parameters,
+            profiles: [regionProfile],
+            extent: {
+              mode: "twoSide",
+              firstEnd:
+                parameters.extent.mode === "oneSide"
+                  ? parameters.extent.end
+                  : null!,
+              secondEnd: {
+                kind: "blind",
+                direction: "negative",
+                distance: { source: "literal", value: -1 },
+              },
+            },
+          }),
+        ),
+      ).rejects.toThrow();
+      expect(
+        assembly.of("prism result").filter((shape) => !shape.isDeleted?.()),
+      ).toHaveLength(0);
+      await expect(
+        assembly.record(() =>
+          buildExtrudeFeatureShape(context, "feature_release_plane", {
+            ...parameters,
+            extent: {
+              mode: "oneSide",
+              end: { kind: "upToNext", direction: "positive" },
+            },
+          }),
+        ),
+      ).rejects.toThrow("do not terminate on one plane");
+      // Up-to-next proof prisms are scoped separately; all result owners are gone.
+      expect(
+        assembly.of("prism result").filter((shape) => !shape.isDeleted?.()),
+      ).toHaveLength(0);
+      expect(base.shape.IsNull()).toBe(false);
+      expect(slab.shape.IsNull()).toBe(false);
+    } finally {
+      assembly.leftovers();
+      assembly.restore();
+    }
+  });
 
   for (const scenario of [
     testPlaneFeatureDuplicatesConstructionGeometryAndProducesPresentationArtifacts,
