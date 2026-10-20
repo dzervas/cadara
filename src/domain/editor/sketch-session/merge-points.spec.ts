@@ -312,17 +312,17 @@ describe("Merge Points session (T13j)", () => {
     const session = open();
     const centre = pick(session, "o");
     expect(centre.activeEditTool?.selectedTargets).toEqual([]);
-    expect(centre.validationMessage).toBe(
+    expect(centre.toolPresentation?.validation?.[0]?.message).toBe(
       "o is the centre of ring; centres are not merged. Use Concentric or Coincident instead.",
     );
     const same = pick(session, "a", "a");
     expect(same.activeEditTool?.selectedTargets).toEqual([point(session, "a")]);
-    expect(same.validationMessage).toBe(
+    expect(same.toolPresentation?.validation?.[0]?.message).toBe(
       "Pick two different points: a point cannot be merged into itself.",
     );
     const line = pick(session, "a", "b");
     expect(line.activeEditTool?.selectedTargets).toEqual([point(session, "a")]);
-    expect(line.validationMessage).toBe(
+    expect(line.toolPresentation?.validation?.[0]?.message).toBe(
       "Both points are ends of ab; merging them would collapse it.",
     );
     expect(isSketchMergePointsReady(line)).toBe(false);
@@ -338,7 +338,7 @@ describe("Merge Points session (T13j)", () => {
         geometryKind: "point",
       } satisfies PrimitiveRef,
     );
-    expect(projected.validationMessage).toBe(
+    expect(projected.toolPresentation?.validation?.[0]?.message).toBe(
       "Projected and datum points are not local sketch points; they cannot be merged.",
     );
     expect(projected.activeEditTool?.selectedTargets).toEqual([]);
@@ -353,7 +353,7 @@ describe("Merge Points session (T13j)", () => {
       point(session, "a2"),
       point(session, "a"),
     ]);
-    expect(refused.validationMessage).toBe(
+    expect(refused.toolPresentation?.validation?.[0]?.message).toBe(
       "Both points are ends of ca; merging them would collapse it.",
     );
     expect(refused.toolPresentation?.overlays?.[0]).toEqual(
@@ -677,15 +677,13 @@ describe("T17f: Merge Points popup ⇔ Enter ⇔ staged; two-stage Escape", () =
         target: refused(f.session),
       });
       expect(f.session.activeEditTool?.selectedTargets).toEqual(picks);
-      expect(f.session.validationMessage).toBe(message);
+      expect(f.session.toolPresentation?.validation?.[0]?.message).toBe(message);
       expect(popup(f.session), "the popup stays").toEqual(shown);
       expect(f.session.toolPresentation?.prompts[0]).toMatchObject({
         text: "Merge a2 into a \u2014 Enter or Merge to confirm",
         tone: "warning",
       });
-      expect(f.session.toolPresentation?.validation?.[0]?.message).toBe(
-        message,
-      );
+      expect(f.session.validationMessage, "the tool is the sole refusal owner").toBeNull();
       f.dispatch({ type: "viewport.hovered", target: point(f.session, "b") });
       expect(popup(f.session), "a later hover keeps it").toEqual(shown);
       const event = enter(f.session);
@@ -740,7 +738,7 @@ describe("T17f: Merge Points popup ⇔ Enter ⇔ staged; two-stage Escape", () =
     expect(f.session.activeTool).toBe("sketchMergePoints");
     expect(enter(f.session), "Enter is not consumed").toBe(null);
     expect(popup(f.session), "and no popup offers it").toBe(null);
-    expect(f.session.validationMessage).toBe(
+    expect(f.session.toolPresentation?.validation?.[0]?.message).toBe(
       "Both points are ends of bc; merging them would collapse it.",
     );
     // Redo deletes bc again: the pair is valid, staged and confirmable.

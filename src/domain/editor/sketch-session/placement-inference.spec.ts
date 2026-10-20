@@ -1034,7 +1034,7 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
       expect(arc).toBeUndefined();
       const refused = startSketchDraw(hovered, start);
       expect(refused.status).toBe("idle");
-      expect(refused.validationMessage).toMatch(/curve end/i);
+      expect(refused.toolPresentation?.validation?.[0]?.message).toMatch(/curve end/i);
     },
   );
 
@@ -1162,7 +1162,7 @@ describe("T13h placement inference suppression (D22) and the Tangent arc source"
     ]);
     expect(result.authored, "a centre cannot start a tangent arc").toEqual([]);
     const refused = startSketchDraw(beginSketchTool(session, "tangentArc"), [10.02, 10.02]);
-    expect(refused.validationMessage).toMatch(/curve end/i);
+    expect(refused.toolPresentation?.validation?.[0]?.message).toMatch(/curve end/i);
     expect(result.shown[0]!.detail).toBe(`Coincident with Circle 2 centre`);
   });
 

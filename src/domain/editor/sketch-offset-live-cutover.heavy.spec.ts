@@ -1356,7 +1356,7 @@ describe("T08b-g5a live offset cutover", () => {
     expect(failed.definition, "A failed check commits nothing.").toBe(
       staged.definition,
     );
-    expect(failed.validationMessage).toBe(failure.diagnostic!.message);
+    expect(failed.toolPresentation?.validation?.[0]?.message).toBe(failure.diagnostic!.message);
     expect(failed.activeEditTool?.offsetPublication).toMatchObject({
       status: "failed",
       commitRequested: false,
@@ -1543,7 +1543,7 @@ describe("T08b-g5a live offset cutover", () => {
         committed.definition.entities.map((entity) => entity.kind),
         `${side}: Create commits the certified shell`,
       ).toEqual(["spline", "derivedPiecewiseCubic"]);
-      expect(committed.validationMessage).toBe(null);
+      expect(committed.toolPresentation?.validation?.[0]?.message ?? null).toBe(null);
     }
   });
 
@@ -1651,7 +1651,7 @@ describe("T08b-g5a live offset cutover", () => {
       (entity) => entity.kind === "derivedPiecewiseCubic",
     )!;
     const reoffset = stagedOffset(committed, [shell.entityId], 0.1);
-    expect(reoffset.validationMessage).toBe(
+    expect(reoffset.toolPresentation?.validation?.[0]?.message).toBe(
       "An offset spline curve cannot be offset again yet.",
     );
     expect(reoffset.activeEditTool?.offsetPublication).toBeUndefined();
@@ -7057,7 +7057,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       ] as const) {
         const result = runEditTool(state, toolId, selection, value);
         expect(
-          result.validationMessage,
+          result.toolPresentation?.validation?.[0]?.message,
           `${toolId} on a ${label} output is ${label === "failed" ? "refused" : "still being checked"}`,
         ).toEqual(
           (label === "failed" ? gateMessage : checkingMessage)(
@@ -7066,7 +7066,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
             states.derivationId,
           ),
         );
-        expectNoInternalIds([result.validationMessage]);
+        expectNoInternalIds([result.toolPresentation?.validation?.[0]?.message]);
         expect(
           result.definition,
           `${toolId} on a ${label} output authors nothing`,
@@ -7084,7 +7084,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
           ? await completeSketchEditQueriesForTest(clicked)
           : clicked;
       expect(
-        result.validationMessage ?? "",
+        result.toolPresentation?.validation?.[0]?.message ?? "",
         `${toolId} on a certified output is not refused`,
       ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
       if (toolId === "offset")
@@ -7120,12 +7120,12 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       ["sketchSlot", 0.2],
     ] as const) {
       expect(
-        runEditTool(failed, toolId, [copy], value).validationMessage,
+        runEditTool(failed, toolId, [copy], value).toolPresentation?.validation?.[0]?.message,
         `${toolId} of the copy of a failed output is refused`,
       ).toEqual(gateMessage(failed.definition, copy, states.derivationId));
       const certified = (await liveRound(mirrored)).session;
       expect(
-        runEditTool(certified, toolId, [copy], value).validationMessage ?? "",
+        runEditTool(certified, toolId, [copy], value).toolPresentation?.validation?.[0]?.message ?? "",
         `${toolId} of the copy of a certified output is ordinary`,
       ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
     }
@@ -7135,7 +7135,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
       [states.far[0]!],
       0.2,
     );
-    expect(unrelated.validationMessage).toBeNull();
+    expect(unrelated.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(unrelated.definition).not.toBe(states.failed.definition);
   }, 600_000);
 
@@ -7175,7 +7175,7 @@ describe("T10i edit inputs on non-accepted offset outputs ([TECH] C3, review A8)
         states.derivationId,
       ),
     });
-    expect(applied.validationMessage).toEqual(
+    expect(applied.toolPresentation?.validation?.[0]?.message).toEqual(
       gateMessage(
         seedFailed.definition,
         states.outputs[0]!,
@@ -7400,7 +7400,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       ] as const) {
         const result = runEditTool(state, toolId, selection, value);
         expect(
-          result.validationMessage,
+          result.toolPresentation?.validation?.[0]?.message,
           `${toolId}, ${label}: the gate names the non-first input`,
         ).toEqual(message(state.definition, output, states.derivationId));
         expect(result.definition, `${label}: nothing authored`).toBe(
@@ -7412,12 +7412,12 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         runEditTool(fixtures.certified, toolId, selection, value),
       );
       expect(
-        result.validationMessage ?? "",
+        result.toolPresentation?.validation?.[0]?.message ?? "",
         `${toolId} with a certified ${output} is not refused`,
       ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
       expect(
         result.definition,
-        `${toolId} with a certified output edits the sketch (${result.validationMessage})`,
+        `${toolId} with a certified output edits the sketch (${result.toolPresentation?.validation?.[0]?.message})`,
       ).not.toBe(fixtures.certified.definition);
     },
     600_000,
@@ -7429,7 +7429,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       ["sketchFillet", [states.outputs[0]!, states.outputs[1]!], 0.1],
     ] as const) {
       const selected = selectEditTool(states.pending, toolId, selection, value);
-      expect(selected.validationMessage, `${toolId}: pending`).toEqual(
+      expect(selected.toolPresentation?.validation?.[0]?.message, `${toolId}: pending`).toEqual(
         expect.stringContaining("which is still being checked"),
       );
       expect(selected.toolStagedEntities).toEqual([]);
@@ -7441,7 +7441,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
         settled.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
         "premise: the round certified the offset",
       ).toEqual([states.derivationId]);
-      expect(settled.validationMessage, `${toolId}: cleared`).toBeNull();
+      expect(settled.toolPresentation?.validation?.[0]?.message ?? null, `${toolId}: cleared`).toBeNull();
       expect(
         settled.toolStagedEntities.length,
         `${toolId}: the preview is shown`,
@@ -7482,14 +7482,14 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
           ? [states.free, output]
           : [states.cutter, output];
       const selected = selectEditTool(states.pending, toolId, selection, null);
-      expect(selected.validationMessage).toEqual(
+      expect(selected.toolPresentation?.validation?.[0]?.message).toEqual(
         checkingMessage(selected.definition, output, states.derivationId),
       );
       expect(selected.activeEditTool?.editQuery?.queue).toHaveLength(1);
       const refused = refreshSketchEditToolAfterOffsetRound(
         failedRound(selected),
       );
-      expect(refused.validationMessage).toEqual(
+      expect(refused.toolPresentation?.validation?.[0]?.message).toEqual(
         gateMessage(selected.definition, output, states.derivationId),
       );
       expect(refused.activeEditTool?.editQuery).toEqual({
@@ -7512,7 +7512,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       [states.free, right],
       null,
     );
-    expect(selected.validationMessage, "sketchExtend: pending").toEqual(
+    expect(selected.toolPresentation?.validation?.[0]?.message, "sketchExtend: pending").toEqual(
       expect.stringContaining("which is still being checked"),
     );
     expect(selected.toolStagedEntities).toEqual([]);
@@ -7528,7 +7528,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       settled.liveSolve!.solvedSnapshot.certifiedOffsetDerivationIds,
       "premise: the round certified the offset",
     ).toEqual([states.derivationId]);
-    expect(settled.validationMessage, "sketchExtend: cleared").toBeNull();
+    expect(settled.toolPresentation?.validation?.map((entry) => entry.message), "sketchExtend: gate cleared, query issued").toEqual(["Checking intersections…"]);
     expect(
       settled.definition,
       "sketchExtend: the re-evaluation applies nothing (it issues the query)",
@@ -7577,7 +7577,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       [states.outputs[0]!],
       0.2,
     );
-    expect(selected.validationMessage).toEqual(
+    expect(selected.toolPresentation?.validation?.[0]?.message).toEqual(
       checkingMessage(
         states.pending.definition,
         states.outputs[0]!,
@@ -7587,7 +7587,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     const refused = refreshSketchEditToolAfterOffsetRound(
       failedRound(selected),
     );
-    expect(refused.validationMessage).toEqual(
+    expect(refused.validationMessage, "the refusal is owned only by the tool").not.toEqual(
       gateMessage(
         states.pending.definition,
         states.outputs[0]!,
@@ -7610,7 +7610,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       null,
     );
     const valued = patchSketchEditToolValue(offset, { value: 0.1 });
-    expect(valued.validationMessage).toEqual(
+    expect(valued.toolPresentation?.validation?.[0]?.message).toEqual(
       checkingMessage(
         states.pending.definition,
         states.outputs[0]!,
@@ -7621,7 +7621,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
     const staged = refreshSketchEditToolAfterOffsetRound(
       (await liveRound(valued)).session,
     );
-    expect(staged.validationMessage).toBeNull();
+    expect(staged.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(
       staged.activeEditTool?.offsetPublication,
       "the offset's check is staged (the editor loop emits it); nothing is committed",
@@ -7655,7 +7655,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       rePending.definition,
     );
     expect(applied.activeEditTool?.offsetPublication).toBeUndefined();
-    expect(applied.validationMessage).toEqual(
+    expect(applied.toolPresentation?.validation?.[0]?.message).toEqual(
       checkingMessage(
         states.pending.definition,
         states.outputs[0]!,
@@ -7669,7 +7669,7 @@ describe("T10i review fixes (R-2, R-1, A-1)", () => {
       status: "pending",
       commitRequested: false,
     });
-    expect(restaged.validationMessage).toBeNull();
+    expect(restaged.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
   }, 600_000);
 
   test("A-1: an offset B of A's output alone: with A failed, B fails its publication (derived-offset-seed-not-certified on the seed) and, by the G19 closure, B's outputs are non-accepted and excluded from regions naming A; with A certified, B certifies and is ordinary", async () => {
@@ -8046,7 +8046,7 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
       "the query runs on the publication-current basis",
     ).toEqual([states.derivationId]);
     const applied = await completeSketchEditQueriesForTest(settled);
-    expect(applied.validationMessage).toBeNull();
+    expect(applied.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(applied.definition.entityIds.length).toBe(
       states.pending.definition.entityIds.length + 1,
     );
@@ -8058,7 +8058,7 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
       click(states.failed, states.cutter),
     );
     expect(refused.definition).toBe(states.failed.definition);
-    expect(refused.validationMessage).toEqual(
+    expect(refused.toolPresentation?.validation?.[0]?.message).toEqual(
       expect.stringMatching(
         new RegExp(
           // T17e (B2): by label, never by id.
@@ -8069,13 +8069,13 @@ describe("T10g-1 Trim with offset relationships (review R-1, T-g5)", () => {
     const unrelated = await completeSketchEditQueriesForTest(
       click(states.failed, states.farBottom),
     );
-    expect(unrelated.validationMessage).toBeNull();
+    expect(unrelated.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(unrelated.definition).not.toBe(states.failed.definition);
     // O14: certified output is an ordinary cutter; one crossing permits an end trim.
     const certified = await completeSketchEditQueriesForTest(
       click(states.certified, states.cutter),
     );
-    expect(certified.validationMessage).toBeNull();
+    expect(certified.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(certified.definition).not.toBe(states.certified.definition);
   }, 600_000);
 });
@@ -8322,7 +8322,7 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
         targetOf(settled.session, reopened.cutter),
       ),
     );
-    expect(trimmed.validationMessage).toBeNull();
+    expect(trimmed.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
     expect(trimmed.definition).not.toBe(settled.session.definition);
     const trimmedOutput = await completeSketchEditQueriesForTest(
       selectSketchEditToolTarget(
@@ -8331,7 +8331,7 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
       ),
     );
     expect(
-      trimmedOutput.validationMessage ?? "",
+      trimmedOutput.toolPresentation?.validation?.[0]?.message ?? "",
       "a certified output is an ordinary Trim target",
     ).not.toContain(NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE);
     expect(trimmedOutput.definition).not.toBe(settled.session.definition);
@@ -8783,7 +8783,7 @@ describe("T13b B2: Offset creation seeds from the live accepted solve ([TECH] D2
       ).toBeGreaterThan(delta / 2);
 
       const { committed } = offsetOutline(reopened, distance, side);
-      expect(committed.validationMessage).toBeNull();
+      expect(committed.toolPresentation?.validation?.[0]?.message ?? null).toBeNull();
       const derivationId = offsetIdsOf(committed.definition)[0];
       expect(derivationId, "the Offset is committed").toBeTruthy();
       let current = committed;
@@ -8853,7 +8853,7 @@ describe("T13b B2: Offset creation seeds from the live accepted solve ([TECH] D2
       );
       expect(sourceMove).toBeGreaterThan(0.02);
       expect(offsetIdsOf(committed.definition)).toEqual([]);
-      expect(committed.validationMessage).toContain("now needs an offset arc");
+      expect(committed.toolPresentation?.validation?.[0]?.message).toContain("now needs an offset arc");
     },
     120_000,
   );
@@ -9042,7 +9042,7 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
       sketchId: tool.sketchId!,
       entityId: seeds[0]!,
     } as never);
-    expect(tool.validationMessage).toBe(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
+    expect(tool.toolPresentation?.validation?.[0]?.message).toBe(MIRROR_DATUM_AXIS_ORDER_MESSAGE);
     expect(tool.definition.derivedRelationships ?? []).toEqual([]);
   });
 

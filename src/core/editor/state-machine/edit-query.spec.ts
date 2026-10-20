@@ -382,7 +382,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     const transition = await answer(edited, effect!);
     const result = sketchState(transition);
     expect(result.session.definition).toBe(changed.definition);
-    expect(result.session.validationMessage).toBe(TRIM_STALE_MESSAGE);
+    expect(result.session.toolPresentation?.validation?.[0]?.message).toBe(TRIM_STALE_MESSAGE);
     expect(result.session.activeEditTool?.editQuery).toMatchObject({
       queue: [],
       inFlight: null,
@@ -454,7 +454,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
     const result = await answer(sketchState(second), effect!);
     const applied = sketchState(result);
     expect(applied.session.definition.entities).toHaveLength(4);
-    expect(applied.session.validationMessage).toBe(TRIM_STALE_MESSAGE);
+    expect(applied.session.toolPresentation?.validation?.[0]?.message).toBe(TRIM_STALE_MESSAGE);
     expect(applied.session.activeEditTool?.editQuery?.queue).toEqual([]);
     expect(queryEffects(result.effects)).toEqual([]);
   });
@@ -574,7 +574,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
       }),
     );
     expect(failed.session.definition).toBe(state.session.definition);
-    expect(failed.session.validationMessage).toBe(
+    expect(failed.session.toolPresentation?.validation?.[0]?.message).toBe(
       "Trim failed: worker crashed",
     );
     const superseded = await runEditorEffect(effect!, {
@@ -710,8 +710,8 @@ describe.each([
     );
     const result = sketchState(transition);
     expect(result.session.definition).toBe(changed.definition);
-    expect(result.session.validationMessage).toBe(editQueryStaleMessage(kind));
-    expect(result.session.validationMessage).toMatch(
+    expect(result.session.toolPresentation?.validation?.[0]?.message).toBe(editQueryStaleMessage(kind));
+    expect(result.session.toolPresentation?.validation?.[0]?.message).toMatch(
       kind === "extend" ? /^Extend was not applied/ : /^Split was not applied/,
     );
     expect(queryEffects(transition.effects)).toEqual([]);
@@ -752,7 +752,7 @@ describe.each([
     const result = await answer(sketchState(two), effect!);
     const applied = sketchState(result);
     expect(editedAt(applied, first)).toEqual([x, 0]);
-    expect(applied.session.validationMessage).toBe(editQueryStaleMessage(kind));
+    expect(applied.session.toolPresentation?.validation?.[0]?.message).toBe(editQueryStaleMessage(kind));
     expect(applied.session.activeEditTool?.editQuery?.queue).toEqual([]);
     expect(queryEffects(result.effects)).toEqual([]);
   });
@@ -820,7 +820,7 @@ describe.each([
       }),
     );
     expect(failed.session.definition).toBe(state.session.definition);
-    expect(failed.session.validationMessage).toBe(
+    expect(failed.session.toolPresentation?.validation?.[0]?.message).toBe(
       `${kind === "extend" ? "Extend" : "Split"} failed: worker crashed`,
     );
     expect(failed.session.activeEditTool?.editQuery).toMatchObject({

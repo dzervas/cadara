@@ -304,10 +304,10 @@ test("O6: redundant Make driving refuses without mutation and offers atomic repl
   });
   expect(refused.definition).toBe(session.definition);
   expect(refused.commitRequest).toBe(session.commitRequest);
-  expect(refused.validationMessage).toContain(
+  expect(refused.toolPresentation?.validation?.[0]?.message).toContain(
     session.definition.dimensions[1]!.label,
   );
-  expect(refused.validationMessage).not.toContain(
+  expect(refused.toolPresentation?.validation?.[0]?.message).not.toContain(
     session.definition.dimensions[0]!.label,
   );
   expect(refused.toolPresentation?.floatingInput?.readOnly).toBe(true);

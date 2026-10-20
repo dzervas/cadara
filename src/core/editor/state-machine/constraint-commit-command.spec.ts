@@ -186,7 +186,7 @@ describe("T17h / D2: constraint commands follow their commit lifecycle", () => {
       type: "viewport.selectionRequested",
       target: g,
     });
-    expect(refused.session.validationMessage).toMatch(/^Already constrained/);
+    expect(refused.session.toolPresentation?.validation?.[0]?.message).toMatch(/^Already constrained/);
     expect(refused.session.activeTool).toBe("constraintHorizontal");
     expect(refused.command.toolId).toBe("constraintHorizontal");
   });

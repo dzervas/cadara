@@ -668,7 +668,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
         tool,
         entityRef(tool, pick(setup)),
       );
-      expect(clicked.validationMessage).toBe(
+      expect(clicked.toolPresentation?.validation?.[0]?.message).toBe(
         message("trim", setup.relationship.label),
       );
       expect(clicked.definition).toBe(tool.definition);
@@ -687,7 +687,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
           tool,
           entityRef(tool, pick(setup)),
         );
-        expect(picked.validationMessage).toBe(
+        expect(picked.toolPresentation?.validation?.[0]?.message).toBe(
           message(verb, setup.relationship.label),
         );
         expect(picked.activeEditTool?.toolId, "the tool stays armed").toBe(
@@ -718,7 +718,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
           tool,
           entityRef(tool, pick(setup)),
         );
-        expect(first.validationMessage, "refused at the first pick").toBe(
+        expect(first.toolPresentation?.validation?.[0]?.message, "refused at the first pick").toBe(
           message(verb, setup.relationship.label),
         );
         expect(first.activeEditTool?.toolId).toBe(toolId);
@@ -735,7 +735,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
           axis,
           entityRef(tool, pick(setup)),
         );
-        expect(second.validationMessage, "refused at the second pick").toBe(
+        expect(second.toolPresentation?.validation?.[0]?.message, "refused at the second pick").toBe(
           message(verb, setup.relationship.label),
         );
         expect(
@@ -752,7 +752,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
     let tool = beginSketchTool(setup.session, "sketchMergePoints");
     tool = selectSketchEditToolTarget(tool, pointRef(tool, pid("a")));
     const paired = selectSketchEditToolTarget(tool, pointRef(tool, pid("u")));
-    expect(paired.validationMessage).toBe(mergeMessage("a", "part of", label));
+    expect(paired.toolPresentation?.validation?.[0]?.message).toBe(mergeMessage("a", "part of", label));
     expect(paired.definition).toBe(setup.session.definition);
     const reversed = selectSketchEditToolTarget(
       selectSketchEditToolTarget(
@@ -761,7 +761,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
       ),
       pointRef(tool, pid("a")),
     );
-    expect(reversed.validationMessage, "either order").toBe(
+    expect(reversed.toolPresentation?.validation?.[0]?.message, "either order").toBe(
       mergeMessage("a", "part of", label),
     );
     const copyEnd = setup.outputOf("ab").outputPointIds[0]!;
@@ -772,7 +772,7 @@ describe("T15d T-11: topology edits on either side of a mirror are refused up fr
     const copyLabel = setup.session.definition.points.find(
       (entry) => entry.pointId === copyEnd,
     )!.label;
-    expect(copy.validationMessage).toBe(
+    expect(copy.toolPresentation?.validation?.[0]?.message).toBe(
       mergeMessage(copyLabel, "driven by", label),
     );
     expect(copy.definition).toBe(setup.session.definition);
@@ -1462,11 +1462,11 @@ describe("T16c: a broken relationship's copies are named by label at every non-a
     ];
     const messages = rows.map(([toolId, inputs, value, expected]) => {
       const result = runEditTool(broken, toolId, inputs, value);
-      expect(result.validationMessage, toolId).toBe(expected);
+      expect(result.toolPresentation?.validation?.[0]?.message, toolId).toBe(expected);
       expect(result.definition, `${toolId} authors nothing`).toBe(
         broken.definition,
       );
-      return result.validationMessage;
+      return result.toolPresentation?.validation?.[0]?.message;
     });
     expectNoIds(broken, messages);
   });
@@ -1977,7 +1977,7 @@ describe("T16d: Mirror creation preview, cancel and confirm", () => {
     session: SketchSessionState,
     message: string,
   ) {
-    expect(session.validationMessage).toBe(message);
+    expect(session.toolPresentation?.validation?.[0]?.message).toBe(message);
     expect(session.definition, "nothing authored").toBe(base.definition);
     expect(session.toolStagedEntities, "nothing staged").toEqual([]);
     expect(popup(session), "no confirm popup").toBeNull();
@@ -1987,7 +1987,7 @@ describe("T16d: Mirror creation preview, cancel and confirm", () => {
     expect(confirmed.definition, "Confirm authors nothing").toBe(
       base.definition,
     );
-    expect(confirmed.validationMessage).toBe(message);
+    expect(confirmed.toolPresentation?.validation?.[0]?.message).toBe(message);
   }
 
   test("R-1 [circle, line, axis] (red on base: the line pick committed 'circle about line'): every pick re-stages, nothing is authored before Confirm; Confirm is one mirror of both seeds; the tool stays armed", () => {
@@ -2212,7 +2212,7 @@ describe("T16d: Mirror creation preview, cancel and confirm", () => {
       ],
     ] as const) {
       const refused = selectSketchEditToolTarget(staged, target as never);
-      expect(refused.validationMessage, label).toBe(unsupported);
+      expect(refused.toolPresentation?.validation?.[0]?.message, label).toBe(unsupported);
       expect(refused.definition, `${label}: nothing authored`).toBe(
         base.definition,
       );
@@ -2672,7 +2672,7 @@ describe("T16g B20: Split and Trim of the mirror line itself", () => {
   ] as const)
     test(`${tool} leaving a piece shorter than τ is refused before any write (so -axis-degenerate never comes from it); the mirror stays healthy`, async () => {
       const { session, done } = await editAxis(tool, [...xs]);
-      expect(done.validationMessage).toBe(refusal);
+      expect(done.toolPresentation?.validation?.[0]?.message).toBe(refusal);
       expect(done.definition, "nothing written").toBe(session.definition);
       expect(axisEnds(done)).toEqual([
         [-2, 0],

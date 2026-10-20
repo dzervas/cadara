@@ -335,7 +335,7 @@ describe("T14c annotation selection lifecycle", () => {
     expect(refused.session.activeTool, "the tool stays armed").toBe(
       "constraintParallel",
     );
-    expect(refused.session.validationMessage).toBe(
+    expect(refused.session.toolPresentation?.validation?.[0]?.message).toBe(
       "Already constrained: Parallel",
     );
     expect(

@@ -650,7 +650,11 @@ export function createSemanticSketchPort(input: {
           return { ...terminal, outcome: { kind: "conflicted", actualBasis }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
       if ((geometryMutation || command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" || command.operation === "sketch.style.patch" || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
-        if (finalEditor.session.validationMessage && finalEditor.session.validationMessage !== keptSketchWithheldRegionText(finalEditor.session)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(finalEditor.session.validationMessage))] };
+        // Some semantic commands drive interactive tools; their refusals live
+        // with the tool, while explicit commands return session diagnostics.
+        const refusal = finalEditor.session.toolPresentation?.validation?.[0]?.message
+          ?? finalEditor.session.validationMessage;
+        if (refusal && refusal !== keptSketchWithheldRegionText(finalEditor.session)) return { ...terminal, outcome: { kind: "rejected", reasonCode: "sketch-edit-refused" }, diagnostics: [semanticDiagnostic(new Error(refusal))] };
         return { ...terminal, outcome: priorGeometry.kind === "current" ? { kind: "completed", change: "unchanged" } : { kind: "failed", failures: ["geometry"] }, discovery: initial, completion: { ...terminal.completion, handoff: { kind: "current", state: initial.state }, geometry: priorGeometry } };
       }
       if (command.operation === "sketch.publish" && finalEditor.kind === "editingSketch") {

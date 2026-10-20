@@ -7,7 +7,6 @@
 
 import { Paper } from "@mantine/core";
 import type { ReactNode } from "react";
-import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 
 import {
   VIEWPORT_FLOATING_PANEL_LEFT_PX,
@@ -40,7 +39,6 @@ export function SketchSelectionContextStack({
 export function SketchValidationStatus({
   message,
   displayMessage = message,
-  toolPresentation,
   severity = "error",
   onUndo,
   onHover,
@@ -48,27 +46,12 @@ export function SketchValidationStatus({
 }: {
   message: string;
   displayMessage?: string;
-  toolPresentation?: SketchToolPresentationSchema | null;
   severity?: "warning" | "error";
   onUndo?: () => void;
   onHover?: () => void;
   onClearHover?: () => void;
 }) {
   if (!message) return null;
-  // O16: tool refusals already belong beneath the target prompt. Only
-  // session-wide status should be forwarded to this separate floating panel.
-  const viewportDrawingFeedback =
-    !toolPresentation?.selectionGuide &&
-    toolPresentation?.overlays?.some(
-      (overlay) =>
-        overlay.kind === "measurement" || overlay.kind === "completionCue",
-    );
-  if (
-    !viewportDrawingFeedback &&
-    toolPresentation?.validation?.some((entry) => entry.message === message)
-  ) {
-    return null;
-  }
   return (
     <div
       className="pointer-events-none"

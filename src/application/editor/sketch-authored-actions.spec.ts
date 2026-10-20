@@ -4300,7 +4300,7 @@ describe("T16d: Mirror creation through the authored-action owner", () => {
       f.dispatch({ type: "history.undoRequested" });
       expect(f.session.toolStagedEntities, "nothing staged").toEqual([]);
       expect(popupOf(f), "no popup").toBeNull();
-      expect(f.session.validationMessage).not.toBeNull();
+      expect(f.session.toolPresentation?.validation?.[0]?.message).not.toBeNull();
       expect(
         getEnterEvent({ sketchSession: f.session }),
         "Enter is not consumed",
@@ -4519,7 +4519,7 @@ describe("T16e: mirror replacement through the authored-action owner", () => {
       type: "viewport.selectionRequested",
       target: entityRef(f.session, eid("c")),
     });
-    expect(f.session.validationMessage).toBe(
+    expect(f.session.toolPresentation?.validation?.[0]?.message).toBe(
       "‘c’ is already an original of mirror ‘mirror 1’.",
     );
     expect(getEnterEvent({ sketchSession: f.session })).toBeNull();

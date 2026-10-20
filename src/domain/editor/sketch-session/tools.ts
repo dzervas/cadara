@@ -721,7 +721,6 @@ export function beginSketchTool(
     toolPlacedPoints: activation.state.placedPoints ?? [],
     toolSettings: activation.state.settings ?? {},
     toolStagedEntities: [],
-    validationMessage: activation.state.validationMessage,
     toolPresentation: activation.presentation,
     constraintAuthoring: null,
     activeAnnotationEdit: null,
@@ -978,8 +977,6 @@ export function updateSketchPointer(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage:
-      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: withPlacementPresentation(
       result.presentation,
       session.toolPlacements ?? [],
@@ -1263,7 +1260,6 @@ export function authorSketchReference(
       "Reference geometry must come from model topology or another existing sketch.";
     return {
       ...session,
-      validationMessage: message,
       toolPresentation: buildReferenceTargetPresentation(message),
     };
   }
@@ -1276,7 +1272,6 @@ export function authorSketchReference(
     const message = "That reference is already authored in this sketch.";
     return {
       ...session,
-      validationMessage: message,
       toolPresentation: buildReferenceTargetPresentation(message),
     };
   }
@@ -1287,7 +1282,6 @@ export function authorSketchReference(
   if (reference.kind === "unsupported") {
     return {
       ...session,
-      validationMessage: reference.message,
       toolPresentation: buildReferenceTargetPresentation(reference.message),
     };
   }
@@ -1749,8 +1743,6 @@ export function startSketchDraw(
       result.stagedEntities,
       session.constructionModifierActive,
     ),
-    validationMessage:
-      result.state.validationMessage ?? keptSketchWithheldRegionText(session),
     toolPresentation: withPlacementPresentation(
       result.presentation,
       placements,
@@ -1805,8 +1797,6 @@ export function acceptSketchDraw(
       livePoint: result.state.livePoint,
       toolPlacedPoints: result.state.placedPoints ?? session.toolPlacedPoints,
       toolSettings: result.state.settings ?? session.toolSettings,
-      validationMessage:
-        result.state.validationMessage ?? keptSketchWithheldRegionText(session),
       toolPresentation: withPlacementPresentation(
         result.presentation,
         placements,
@@ -1982,11 +1972,7 @@ export function getToolRuntimeState(
     livePoint: session.livePoint,
     placedPoints: session.toolPlacedPoints,
     settings: session.toolSettings,
-    // T17c6 (review A-3): the withheld-region status line is not the
-    // tool's own validation.
-    validationMessage: keptSketchWithheldRegionText(session)
-      ? null
-      : session.validationMessage,
+    validationMessage: session.toolPresentation?.validation?.[0]?.message ?? null,
   };
 }
 
