@@ -175,6 +175,8 @@ export type PlanReasonCode =
   | "bake-segment-replacement-scope-unresolved"
   | "bake-segment-empty-output-unsupported"
   | "fillet-radius-unreadable"
+  | "fillet-tangent-propagation-disabled-unsupported"
+  | "chamfer-tangent-propagation-disabled-unsupported"
   | "chamfer-method-unsupported"
   | "chamfer-style-unsupported"
   | "chamfer-direction-overrides-unsupported"

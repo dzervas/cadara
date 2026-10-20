@@ -682,6 +682,9 @@ function executableChamferAngle(feature: OnshapeFeatureNode, id: string): number
 export const filletFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["fillet"],
   plan(context) {
+    if (booleanValue(context.feature, "tangentPropagation", true) === false) {
+      return baked(context, "fillet-tangent-propagation-disabled-unsupported");
+    }
     const radius = positiveQuantity(context.feature, "radius");
     if (radius === null) return baked(context, "fillet-radius-unreadable");
     return topologyCandidate(context, {
@@ -696,6 +699,9 @@ export const filletFeatureTranslator: OnshapeFeatureTranslator = {
 export const chamferFeatureTranslator: OnshapeFeatureTranslator = {
   featureTypes: ["chamfer"],
   plan(context) {
+    if (booleanValue(context.feature, "tangentPropagation", true) === false) {
+      return baked(context, "chamfer-tangent-propagation-disabled-unsupported");
+    }
     const method = enumValue(context.feature, "chamferMethod") ?? "FACE_OFFSET";
     const style =
       enumValue(context.feature, "chamferStyle") ??

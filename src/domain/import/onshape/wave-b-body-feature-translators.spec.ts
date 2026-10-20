@@ -903,6 +903,37 @@ describe("Wave B body topology translators", () => {
     });
   });
 
+  for (const [featureType, translator, sizeParameter] of [
+    ["fillet", filletFeatureTranslator, "radius"],
+    ["chamfer", chamferFeatureTranslator, "width"],
+  ] as const) {
+    test.each([false, true, undefined])(
+      `${featureType} respects tangentPropagation=%s when planning`,
+      async (tangentPropagation) => {
+        const result = await plan(translator, featureType, [
+          valueParameter(sizeParameter, 0, "2.5 mm"),
+          queryParameter("entities", ["edge"]),
+          ...(tangentPropagation === undefined
+            ? []
+            : [valueParameter("tangentPropagation", tangentPropagation)]),
+        ]);
+
+        if (tangentPropagation === false) {
+          expect(result).toMatchObject({
+            tier: "baked",
+            reasonCodes: [`${featureType}-tangent-propagation-disabled-unsupported`],
+          });
+          expect(result.plannedBodyTopologyConsumer).toBeUndefined();
+        } else {
+          expect(result).toMatchObject({
+            reasonCodes: ["needs-history-probe"],
+            plannedBodyTopologyConsumer: { featureKind: featureType },
+          });
+        }
+      },
+    );
+  }
+
   test("maps the real equal-offset chamfer envelope to the executor's distance-only contract", () => {
     const fillet = plan(filletFeatureTranslator, "fillet", [valueParameter("radius", 0, "2.5 mm"), queryParameter("entities", ["edge"]) ]);
     expect(fillet).toMatchObject({

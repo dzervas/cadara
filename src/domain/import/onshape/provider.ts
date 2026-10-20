@@ -2605,6 +2605,8 @@ const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
   "bake-segment-replacement-scope-unresolved": "bake segment replacement scope could not be proved",
   "bake-segment-empty-output-unsupported": "deletion-only bake segment cannot be represented",
   "fillet-radius-unreadable": "fillet radius could not be read",
+  "fillet-tangent-propagation-disabled-unsupported": "fillet with tangent propagation disabled is not supported",
+  "chamfer-tangent-propagation-disabled-unsupported": "chamfer with tangent propagation disabled is not supported",
   "chamfer-method-unsupported": "chamfer method is not supported",
   "chamfer-style-unsupported": "chamfer style is not supported",
   "chamfer-direction-overrides-unsupported": "chamfer direction overrides are not supported",
