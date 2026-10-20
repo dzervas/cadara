@@ -242,6 +242,40 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       ),
       sketchId: "sketch_a",
     });
+    // Ownership follows the binding, not origin, constraint colour, or plane.
+    const otherCurve: RenderableEntityRecord = {
+      ...committedSketchCurve,
+      id: "renderable_other_curve",
+      binding: {
+        pickId: "pick_other_curve",
+        pickPriority: 5,
+        topology: null,
+        semanticClass: "sketchCurve",
+        target: { kind: "sketchEntity", sketchId: "sketch_b", entityId: "sketch_entity_b" },
+      },
+    };
+    const otherPoint: RenderableEntityRecord = {
+      ...otherCurve,
+      id: "renderable_other_point",
+      binding: {
+        pickId: "pick_other_point",
+        pickPriority: 5,
+        topology: null,
+        semanticClass: "sketchPoint",
+        target: { kind: "sketchPoint", sketchId: "sketch_b", pointId: "sketch_point_b" },
+      },
+      geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 1 },
+    };
+    const ownershipInput = {
+      snapshotRenderables: [committedEdge, committedSketchCurve, otherCurve, otherPoint],
+      previewRenderables: null,
+      hiddenTargetKeys: {},
+    };
+    const editing = composeViewportRenderables({ ...ownershipInput, sketchSession: activeSession });
+    expect(editing.documentRenderables.map((entry) => entry.isInactiveSketch)).toEqual([false, true, true]);
+    expect(editing.documentRenderables.some(({ renderable }) => renderable.id === committedSketchCurve.id)).toBe(false);
+    const finished = composeViewportRenderables({ ...ownershipInput, sketchSession: null });
+    expect(finished.documentRenderables.map((entry) => entry.isInactiveSketch)).toEqual([false, false, false, false]);
     const activeSketchRegion = createCommittedRegion("sketch_a", "region_a");
     const otherSketchRegion = createCommittedRegion("sketch_b", "region_b");
 

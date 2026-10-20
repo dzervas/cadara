@@ -19,6 +19,7 @@ import {
   createInvisiblePickMaterial,
   createMarkerPickProxy,
   createRenderableLineMaterial,
+  createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
   createProjectedPickCandidate,
   getVisibleMarkerRadius,
@@ -1683,4 +1684,31 @@ test("T17-19 (review A-1): perspective bands use the view depth off the view axi
     [0, 15 * worldPerPxAt(15), -10],
   );
   expect(hitIds(centrePick(near, [receding]))).toEqual(["pick_receding"]);
+});
+
+// Logic seam: material factories consume the same options for every geometry kind.
+test("document material factories preserve tint and honour context alpha", () => {
+  const renderable = {
+    binding: { semanticClass: "sketchCurve" },
+  } as RenderableEntityRecord;
+  for (const factory of [
+    createRenderableMeshMaterial,
+    createRenderableLineMaterial,
+    createRenderableMarkerMaterial,
+  ]) {
+    for (const flat of [false, true]) {
+      const material = factory(renderable, "document", {
+        color: 0x123456,
+        flat,
+        transparent: true,
+        opacity: 0.28,
+      });
+      expect(material.color.getHex()).toBe(0x123456);
+      expect(material.opacity).toBe(0.28);
+      expect(material.transparent).toBe(true);
+      if (factory !== createRenderableMeshMaterial || flat)
+        expect(material.depthWrite).toBe(false);
+      material.dispose();
+    }
+  }
 });

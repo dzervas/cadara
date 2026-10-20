@@ -7,6 +7,8 @@ export interface ViewportRenderableRecord {
   origin: ViewportRenderableOrigin;
   renderable: RenderableEntityRecord;
   sketchConstraintDisplay?: SketchConstraintDisplayTargetState;
+  /** Other-sketch context while editing; never changes picking or persisted state. */
+  isInactiveSketch?: boolean;
   /**
    * A committed sketch curve or point that is not current geometry, drawn
    * with the danger tint when `invalid` (it stays pickable):
