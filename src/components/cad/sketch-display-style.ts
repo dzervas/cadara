@@ -995,9 +995,8 @@ function getDefaultSketchConstraintColor(
     case "constrained":
       return palette.constrained;
     case "overconstrained":
-      return renderable.constraintDisplay.isAffectedOverconstraint
-        ? palette.underconstrained
-        : palette.underconstrained;
+      // Keep base strokes blue; separate thin red diagnostics preserve authored strokes (cadara-dd3.107).
+      return palette.underconstrained;
     case "underconstrained":
     case undefined:
       return palette.underconstrained;
