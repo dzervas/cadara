@@ -1,3 +1,5 @@
+import type { LoadingPhase } from "@/contracts/modeling/loading-status";
+import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
 import { useRef, useState, type ChangeEvent, type ReactElement } from "react";
 import {
   ActionIcon,
@@ -160,6 +162,7 @@ export function DocumentFileMenu({
 }
 
 interface OpenDocumentModalProps {
+  loadingPhase?: LoadingPhase;
   opened: boolean;
   withinPortal?: boolean;
   onClose: () => void;
@@ -168,6 +171,7 @@ interface OpenDocumentModalProps {
 }
 
 export function OpenDocumentModal({
+  loadingPhase = "ready",
   opened,
   withinPortal,
   onClose,
@@ -198,6 +202,7 @@ export function OpenDocumentModal({
       transitionProps={{ duration: 0 }}
     >
       <Stack gap="sm">
+        <InitialLoadingStatus phase={loadingPhase} />
         <DocumentChoiceButton
           label="Open a copy"
           description={OPEN_COPY_DOCUMENT_DESCRIPTION}

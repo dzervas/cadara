@@ -46,6 +46,10 @@ class InstrumentedModelingService implements ModelingService {
     this.telemetry = telemetry;
   }
 
+  get initialLoadingStatus() {
+    return this.inner.initialLoadingStatus;
+  }
+
   get currentDocumentId() {
     return this.inner.currentDocumentId;
   }

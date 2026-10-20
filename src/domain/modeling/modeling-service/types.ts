@@ -1,3 +1,4 @@
+import type { LoadingStatusSource } from "@/contracts/modeling/loading-status";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type {
   DocumentExportRequest,
@@ -42,6 +43,7 @@ import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-top
 import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
 
 export interface ModelingService {
+  readonly initialLoadingStatus: LoadingStatusSource;
   readonly currentDocumentId: DocumentId;
   readonly sketchSolver: SketchSolverService | null;
   /** The kernel's neutral curve queries, for callers that build their own region solver (import verification). */

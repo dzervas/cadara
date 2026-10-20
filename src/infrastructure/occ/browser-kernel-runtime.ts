@@ -1,3 +1,4 @@
+import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
@@ -20,6 +21,8 @@ import type { DocumentId } from "@/contracts/shared/ids";
 
 const browserGeometryAssetResolver =
   getBrowserGeometryAssetComposition().resolver;
+// The initializer is opaque: do not invent separate WASM download/compile progress.
+export const browserOccLoadingStatus = createLoadingStatus("preparing-engine");
 let lastWorkerFailure: Error | null = null;
 const workerFailureListeners = new Set<(error: Error) => void>();
 
@@ -37,6 +40,7 @@ const browserOccWorkerClient =
         assetResolver: browserGeometryAssetResolver,
         onFatalError: (error) => {
           lastWorkerFailure = error;
+          browserOccLoadingStatus.set("failed");
           for (const listener of workerFailureListeners) listener(error);
         },
       });
@@ -130,6 +134,7 @@ export function startBrowserOccWarmup(
     )
       .preload()
       .then(() => {
+        browserOccLoadingStatus.set("ready");
         updateBrowserOccPerf({
           warmupSettledAt: performance.now(),
           warmupStatus: "fulfilled",
@@ -145,6 +150,7 @@ export function startBrowserOccWarmup(
         });
       })
       .catch((error: unknown) => {
+        browserOccLoadingStatus.set("failed");
         updateBrowserOccPerf({
           warmupSettledAt: performance.now(),
           warmupStatus: "rejected",

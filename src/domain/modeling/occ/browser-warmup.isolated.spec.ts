@@ -83,6 +83,7 @@ test("startup returns pending work immediately and repeated observers share it b
   const worker = FakeWorker.instances[0]!;
   expect(worker.posted).toHaveLength(1);
   expect(window.__cadOccPerf?.warmupStatus).toBe("pending");
+  expect(runtime.browserOccLoadingStatus.getSnapshot()).toBe("preparing-engine");
   let settled = false;
   void startup!.then(() => {
     settled = true;
@@ -92,6 +93,10 @@ test("startup returns pending work immediately and repeated observers share it b
   worker.settleInvocations();
   await startup;
   expect(runtime.startBrowserOccWarmup()).toBe(startup);
+  const phases: string[] = [];
+  const stop = runtime.browserOccLoadingStatus.subscribe(() => phases.push(runtime.browserOccLoadingStatus.getSnapshot()));
+  expect(phases).toEqual(["ready"]);
+  stop();
   expect(worker.posted).toHaveLength(0);
   expect(window.__cadOccPerf?.warmupStatus).toBe("fulfilled");
   expect(mainThreadFactory).not.toHaveBeenCalled();
@@ -132,6 +137,7 @@ test("failed startup remains observable but does not poison a later document ada
   FakeWorker.instances[0]!.settleInvocations("warmup failed");
   await rejected;
   expect(window.__cadOccPerf?.warmupStatus).toBe("rejected");
+  expect(runtime.browserOccLoadingStatus.getSnapshot()).toBe("failed");
   // A late-mounted observer still receives the original failure, not a silent retry.
   expect(runtime.startBrowserOccWarmup()).toBe(startup);
   await expect(runtime.startBrowserOccWarmup()).rejects.toThrow(
@@ -167,6 +173,7 @@ test("fatal startup failure is retained for late notification subscribers and a 
   const rejected = expect(startup).rejects.toThrow("OOM");
   FakeWorker.instances[0]!.emit({ kind: "fatal", error: { message: "OOM" } });
   await rejected;
+  expect(runtime.browserOccLoadingStatus.getSnapshot()).toBe("failed");
   const report = vi.fn();
   const unsubscribe = runtime.subscribeBrowserOccWorkerFailure(report);
   expect(report).toHaveBeenCalledTimes(1);
