@@ -5650,11 +5650,10 @@ test.skipIf(!existsSync(LAPTOP_STAND_CAPTURE_FIXTURE))(
 const PART_STUDIO_9841_CAPTURE_FIXTURE =
   "test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json";
 
-// Known importer failure: prepared actions now validate (cadara-nh0), but the
-// Cutter sketch plane is prepared as a live topologyOf selector instead of the
-// action-relative historicalTopologyOf g22 witness at action 9 (cadara-2f6).
-// It runs ~18 minutes of real OCC before failing, so it is a todo until that
-// importer fix lands.
+// Prepared actions validate (cadara-nh0). Cutter correctly prefers a unique
+// live match for its captured Extrude 1 start-cap face (cadara-2f6); historical
+// witnesses are fallback evidence, not required source ownership. Keep this
+// ~18-minute real-OCC acceptance row todo pending a separate full apply run.
 test.todo(
   "9841 applies its reviewed prepared action sequence through real OCC",
   async () => {
@@ -5782,21 +5781,18 @@ test.todo(
     const cutterPlane = actions.commitSketches?.find(
       (request) => request.sketchLabel === "Cutter",
     )?.plane.support;
-    expect(cutterPlane, "Cutter must retain an action-relative g22 selector.").toMatchObject({
-      kind: "historicalTopologyOf",
-      witnessActionIndex: 9,
-    });
-    if (cutterPlane?.kind !== "historicalTopologyOf") {
-      throw new Error("Expected Cutter's historical topology selector.");
-    }
     expect(
-      cutterPlane.successorActionIndexes,
-      "Cutter may hop through action 13's unique Modified successor, or retain g22 exactly through action 13 without a successor hop.",
-    ).toSatisfy(
-      (indexes) =>
-        indexes.length === 0 ||
-        (indexes.length === 1 && indexes[0] === 13),
-    );
+      cutterPlane,
+      "Cutter must rematch its captured Extrude 1 start-cap face at the consumer prefix.",
+    ).toMatchObject({
+      kind: "topologyOf",
+      expectedKind: "face",
+      source: {
+        consumerFeatureId: "FPdEtb3tuGCfOlr_1",
+        parameterId: "sketchPlane",
+        deterministicId: "JQi",
+      },
+    });
     const applied = await applyImportPreparedActions({
       modelingService: service,
       baseRevisionId: before.document.revisionId,
