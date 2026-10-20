@@ -421,11 +421,7 @@ function getPointDimensionReferenceKind(
   );
 }
 
-function getDimensionLabel(
-  referenceKind: SketchToolDimensionReferenceKind,
-  value: number | null,
-  unit: string,
-) {
+function getDimensionLabel(referenceKind: SketchToolDimensionReferenceKind) {
   const prefix = {
     aligned: "Aligned",
     horizontal: "Horizontal",
@@ -437,7 +433,8 @@ function getDimensionLabel(
     pointLineDistance: "Point-line distance",
   }[referenceKind];
 
-  return value === null ? prefix : `${prefix} ${value.toFixed(2)} ${unit}`;
+  // Dimension-line renderers append the formatted value separately.
+  return prefix;
 }
 
 function crossProduct(
@@ -780,6 +777,22 @@ function getLineDimensionPlacement(
   };
 }
 
+export function inferParallelLineDimensionPlacement(
+  line: NonNullable<SketchConstraintTargetRecord["line"]>,
+  point: readonly [number, number] | null,
+): DimensionLineAnnotationPlacement | null {
+  if (!point) return null;
+  const axis = normalize(lineVector(line));
+  // For parallel-line distances, offset is along the first line, not normal
+  // to it. Numeric placements from older documents remain valid positions.
+  return {
+    kind: "dimensionLine",
+    offset:
+      (point[0] - line.start[0]) * axis[0] +
+      (point[1] - line.start[1]) * axis[1],
+  };
+}
+
 type DimensionDistanceIntent =
   | {
       kind: "diameter";
@@ -1106,6 +1119,10 @@ export function inferDimensionAnnotationPlacement(
     };
   }
 
+  if (first?.line && second?.line) {
+    return inferParallelLineDimensionPlacement(first.line, point);
+  }
+
   if (first?.line) {
     return getLineDimensionPlacement(first.line, point) ?? null;
   }
@@ -1321,7 +1338,7 @@ function buildPointDimensionPreview(
   return [
     buildPointDimensionDescriptor({
       id: options.id,
-      label: getDimensionLabel(referenceKind, input.value, options.unit),
+      label: getDimensionLabel(referenceKind),
       first,
       second,
       pointer: input.pointer,
@@ -1423,6 +1440,38 @@ function buildLineAnglePreview(
   ];
 }
 
+/** Parallel-line offsets select a common perpendicular along the first line. */
+export function createPlacedParallelLineDistance(
+  first: NonNullable<SketchConstraintTargetRecord["line"]>,
+  second: NonNullable<SketchConstraintTargetRecord["line"]>,
+  placement: DimensionAnnotationPlacement | null | undefined,
+): { start: readonly [number, number]; end: readonly [number, number] } {
+  const axis = normalize(lineVector(first));
+  const normal = [-axis[1], axis[0]] as const;
+  const center = midpoint(
+    midpoint(first.start, first.end),
+    midpoint(second.start, second.end),
+  );
+  const offset =
+    placement?.kind === "dimensionLine"
+      ? placement.offset
+      : (center[0] - first.start[0]) * axis[0] +
+        (center[1] - first.start[1]) * axis[1];
+  const start = [
+    first.start[0] + axis[0] * offset,
+    first.start[1] + axis[1] * offset,
+  ] as const;
+  const separation = pointLineSignedDistance(
+    second.start,
+    first.start,
+    first.end,
+  );
+  return {
+    start,
+    end: [start[0] + normal[0] * separation, start[1] + normal[1] * separation],
+  };
+}
+
 function buildLineDistancePreview(
   input: SketchConstraintPreviewInput,
 ): readonly SketchToolOverlayDescriptor[] {
@@ -1441,31 +1490,18 @@ function buildLineDistancePreview(
   const placement =
     input.annotationPlacement?.kind === "dimensionLine"
       ? input.annotationPlacement
-      : getLineDimensionPlacement(first.line, input.pointer);
-  const axis = normalize(lineVector(first.line));
-  const normal: readonly [number, number] = [-axis[1], axis[0]];
-  const offset =
-    placement?.offset ??
-    pointLineSignedDistance(second.anchor, first.line.start, first.line.end);
-  // Project onto the common perpendicular through the existing label midpoint.
-  // Keep the normal offset, but remove the anchors' along-line separation.
-  const alongLineOffset =
-    ((second.anchor[0] - first.anchor[0]) * axis[0] +
-      (second.anchor[1] - first.anchor[1]) * axis[1]) / 2;
-  const start: readonly [number, number] = [
-    first.anchor[0] + normal[0] * offset + axis[0] * alongLineOffset,
-    first.anchor[1] + normal[1] * offset + axis[1] * alongLineOffset,
-  ];
-  const end: readonly [number, number] = [
-    second.anchor[0] + normal[0] * offset - axis[0] * alongLineOffset,
-    second.anchor[1] + normal[1] * offset - axis[1] * alongLineOffset,
-  ];
+      : inferDimensionAnnotationPlacement([first, second], input.pointer);
+  const { start, end } = createPlacedParallelLineDistance(
+    first.line,
+    second.line,
+    placement,
+  );
 
   return [
     {
       id: "line-distance-preview",
       kind: "dimensionLine",
-      label: getDimensionLabel("lineDistance", input.value, "mm"),
+      label: getDimensionLabel("lineDistance"),
       referenceKind: "lineDistance",
       start,
       end,
@@ -1529,7 +1565,7 @@ function buildLineLengthPreview(
     {
       id: "line-length-preview",
       kind: "dimensionLine",
-      label: getDimensionLabel("lineLength", input.value, "mm"),
+      label: getDimensionLabel("lineLength"),
       referenceKind: "lineLength",
       start,
       end,
@@ -1609,7 +1645,7 @@ function buildLinePointDistancePreview(
     {
       id: "line-point-distance-preview",
       kind: "dimensionLine",
-      label: getDimensionLabel("pointLineDistance", input.value, "mm"),
+      label: getDimensionLabel("pointLineDistance"),
       referenceKind: "pointLineDistance",
       start,
       end,
@@ -1673,7 +1709,7 @@ function buildRadiusPreview(
     {
       id: "radius-preview",
       kind: "dimensionLine",
-      label: getDimensionLabel("radius", input.value, "mm"),
+      label: getDimensionLabel("radius"),
       referenceKind: "radius",
       start: target.circle.center,
       end,
@@ -1733,7 +1769,7 @@ function buildDiameterPreview(
     {
       id: "diameter-preview",
       kind: "dimensionLine",
-      label: getDimensionLabel("diameter", input.value, "mm"),
+      label: getDimensionLabel("diameter"),
       referenceKind: "diameter",
       start,
       end,

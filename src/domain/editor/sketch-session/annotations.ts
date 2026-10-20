@@ -1,4 +1,8 @@
 import {
+  createPlacedParallelLineDistance,
+  inferParallelLineDimensionPlacement,
+} from "@/core/sketch-constraints/registry";
+import {
   resolveSketchDimensionValues,
   type AuthoredSketchDerivationSettings,
 } from "@/domain/modeling/sketch-dimension-expressions";
@@ -1332,7 +1336,7 @@ export function inferCommittedDimensionAnnotationPlacement(
         session,
         dimension.lines[0],
       );
-      return line ? getLineAnnotationPlacementFromPoint(line, point) : null;
+      return line ? inferParallelLineDimensionPlacement(line, point) : null;
     }
     case "linePointDistance": {
       const line = getReferenceLineGeometry(
@@ -2864,9 +2868,9 @@ export function createDimensionAnnotationAnchor(
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 });
       }
 
-      const line = createPlacedLineDistance(
+      const line = createPlacedParallelLineDistance(
         first,
-        getSketchMidpoint(second.start, second.end),
+        second,
         dimension.annotationPlacement,
       );
       return {
@@ -3162,9 +3166,9 @@ export function buildCommittedDimensionOverlays(
             return [];
           }
 
-          const line = createPlacedLineDistance(
+          const line = createPlacedParallelLineDistance(
             first,
-            getSketchMidpoint(second.start, second.end),
+            second,
             dimension.annotationPlacement,
           );
           return [

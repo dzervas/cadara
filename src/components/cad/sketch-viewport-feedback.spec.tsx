@@ -1,4 +1,7 @@
 import { test, expect } from "vitest";
+import { getSketchConstraintDefinition } from "@/core/sketch-constraints/registry";
+import type { SketchConstraintTargetRecord } from "@/core/sketch-constraints/definition";
+import { FIXTURE_SKETCH_ID } from "@/contracts/sketch/region-extraction.fixtures";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 
@@ -1117,3 +1120,92 @@ test("T17j2: a point-dimension preview shows its kind label before the second pi
     ).toBe(true);
   }
 });
+
+// The registry supplies the label; the viewport supplies the formatted value.
+for (const referenceKind of [
+  "aligned",
+  "horizontal",
+  "vertical",
+  "lineLength",
+  "lineDistance",
+  "pointLineDistance",
+  "radius",
+  "diameter",
+] as const) {
+  test(`dimension preview renders one value for ${referenceKind}`, () => {
+    const point = (
+      anchor: readonly [number, number],
+    ): SketchConstraintTargetRecord => ({
+      target: {
+        kind: "sketchDatumReference",
+        sketchId: FIXTURE_SKETCH_ID,
+        datumId: "origin",
+        geometryKind: "point",
+      },
+      kind: "point",
+      label: "Point",
+      anchor,
+    });
+    const line = {
+      ...point([2, 8.68]),
+      kind: "line" as const,
+      line: { start: [0, 8.68] as const, end: [4, 8.68] as const },
+    };
+    const circle = {
+      ...point([0, 0]),
+      kind: "circle" as const,
+      circle: { center: [0, 0] as const, radius: 8.68 },
+    };
+    const targets =
+      referenceKind === "lineDistance"
+        ? [
+            line,
+            {
+              ...line,
+              anchor: [0, 0] as const,
+              line: { start: [-1, 0] as const, end: [1, 0] as const },
+            },
+          ]
+        : referenceKind === "lineLength"
+          ? [line]
+          : referenceKind === "pointLineDistance"
+            ? [line, point([0, 0])]
+            : referenceKind === "radius" || referenceKind === "diameter"
+              ? [circle]
+              : [point([0, 0]), point([4, 4])];
+    const id =
+      referenceKind === "radius"
+        ? "dimensionRadius"
+        : referenceKind === "horizontal"
+          ? "dimensionHorizontal"
+          : referenceKind === "vertical"
+            ? "dimensionVertical"
+            : "dimensionDistance";
+    const overlays = getSketchConstraintDefinition(id).buildPreview({
+      selectedTargets: targets,
+      hoverTarget: null,
+      pointer: referenceKind === "aligned" ? [2, 2] : [100, 40],
+      value: 8.68,
+    });
+    expect(overlays[0]).toMatchObject({ kind: "dimensionLine", referenceKind });
+    const schema: SketchToolPresentationSchema = {
+      prompts: [],
+      overlays: overlays.map((overlay) =>
+        overlay.kind === "dimensionLine"
+          ? { ...overlay, labelled: true }
+          : overlay,
+      ),
+    };
+    const projections = collectSketchViewportFeedbackAnchors(schema).map(
+      ({ id }) => ({ id, x: 200, y: 200 }),
+    );
+    const markup = renderToStaticMarkup(
+      <SketchViewportFeedbackLayer
+        schema={schema}
+        projections={projections}
+        onPatch={() => undefined}
+      />,
+    );
+    expect(markup.match(/8\.68/g)).toHaveLength(1);
+  });
+}

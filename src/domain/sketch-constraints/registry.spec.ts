@@ -1,4 +1,9 @@
 import { test, expect } from "vitest";
+import {
+  buildCommittedDimensionOverlays,
+  inferCommittedDimensionAnnotationPlacement,
+} from "@/domain/editor/sketch-session/annotations";
+import type { DimensionId } from "@/contracts/shared/ids";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   FIXTURE_SKETCH_ID,
@@ -31,6 +36,7 @@ import {
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { toolIconAssetFileNames } from "@/core/tools/tool-icons";
 import {
+  inferDimensionAnnotationPlacement,
   getSketchConstraintDefinition,
   getRegisteredSketchConstraintDefinitions,
   selectPointToPointDimensionReference,
@@ -2958,21 +2964,33 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
 for (const row of [
   {
     name: "authored lines with offset midpoints",
-    first: [[1, 1], [5, 3]],
-    second: [[7, 6], [11, 8]],
+    first: [
+      [1, 1],
+      [5, 3],
+    ],
+    second: [
+      [7, 6],
+      [11, 8],
+    ],
     datum: null,
     separation: 4 / Math.sqrt(5),
   },
   {
     name: "authored line and X datum axis",
-    first: [[1, 1], [5, 1]],
+    first: [
+      [1, 1],
+      [5, 1],
+    ],
     second: null,
     datum: "xAxis",
     separation: 1,
   },
   {
     name: "authored line and Y datum axis",
-    first: [[2, 1], [2, 5]],
+    first: [
+      [2, 1],
+      [2, 5],
+    ],
     second: null,
     datum: "yAxis",
     separation: 2,
@@ -2980,13 +2998,13 @@ for (const row of [
 ] as const) {
   test(`parallel-line distance preview is perpendicular for ${row.name}`, () => {
     const fixture = makeSketchFixture();
-    fixture.point("a", ...row.first[0]);
-    fixture.point("b", ...row.first[1]);
+    fixture.point("a", row.first[0][0], row.first[0][1]);
+    fixture.point("b", row.first[1][0], row.first[1][1]);
     const firstId = fixture.line("first", "a", "b");
     let secondId = null;
     if (row.second) {
-      fixture.point("c", ...row.second[0]);
-      fixture.point("d", ...row.second[1]);
+      fixture.point("c", row.second[0][0], row.second[0][1]);
+      fixture.point("d", row.second[1][0], row.second[1][1]);
       secondId = fixture.line("second", "c", "d");
     }
     const registry = getSketchConstraintDefinition("dimensionDistance");
@@ -3019,37 +3037,124 @@ for (const row of [
       first.line.end[1] - first.line.start[1],
     ] as const;
     const axisLength = Math.hypot(...axis);
-    const offset = 0.75;
-    const overlay = registry.buildPreview({
-      selectedTargets: [first, second],
-      hoverTarget: null,
-      pointer: null,
-      value: row.separation,
-      annotationPlacement: { kind: "dimensionLine", offset },
-    }).find((entry) => entry.kind === "dimensionLine");
-    if (overlay?.kind !== "dimensionLine") {
-      throw new Error("Parallel lines must produce a dimension-line preview");
+    const pointer = [100, 40] as const;
+    const placement = inferDimensionAnnotationPlacement(
+      [first, second],
+      pointer,
+    );
+    const expectedOffset =
+      ((pointer[0] - first.line.start[0]) * axis[0] +
+        (pointer[1] - first.line.start[1]) * axis[1]) /
+      axisLength;
+    for (const { previewPointer, previewPlacement, along } of [
+      {
+        previewPointer: pointer,
+        previewPlacement: null,
+        along: expectedOffset,
+      },
+      {
+        previewPointer: [-200, -100] as const,
+        previewPlacement: placement,
+        along: expectedOffset,
+      },
+      // Older numeric placements remain readable and put endpoints on the lines.
+      {
+        previewPointer: null,
+        previewPlacement: { kind: "dimensionLine" as const, offset: 0.75 },
+        along: 0.75,
+      },
+    ]) {
+      const overlays = registry.buildPreview({
+        selectedTargets: [first, second],
+        hoverTarget: null,
+        pointer: previewPointer,
+        value: row.separation,
+        annotationPlacement: previewPlacement,
+      });
+      const overlay = overlays.find((entry) => entry.kind === "dimensionLine");
+      if (overlay?.kind !== "dimensionLine") {
+        throw new Error("Parallel lines must produce a dimension-line preview");
+      }
+      expect(overlay.referenceKind).toBe("lineDistance");
+      const dx = overlay.end[0] - overlay.start[0];
+      const dy = overlay.end[1] - overlay.start[1];
+      expect(dx * axis[0] + dy * axis[1]).toBeCloseTo(0, 10);
+      expect(Math.hypot(dx, dy)).toBeCloseTo(row.separation, 10);
+      expect(overlay.start[0]).toBeCloseTo(
+        first.line.start[0] + (axis[0] / axisLength) * along,
+        10,
+      );
+      expect(overlay.start[1]).toBeCloseTo(
+        first.line.start[1] + (axis[1] / axisLength) * along,
+        10,
+      );
+      expect(overlay.label).toBe("Line distance");
+      const session = createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      );
+      const committedPlacement = previewPlacement ?? placement;
+      const committedDefinition = {
+        ...definition,
+        dimensions: [
+          {
+            dimensionId: "dimension_parallel" as DimensionId,
+            kind: "lineDistance" as const,
+            label: "Line distance",
+            lines: [
+              { kind: "localEntity" as const, entityId: firstId },
+              secondId
+                ? { kind: "localEntity" as const, entityId: secondId }
+                : { kind: "sketchDatum" as const, datum: row.datum! },
+            ] as const,
+            value: createLiteralAuthoredValue(row.separation),
+            annotationPlacement:
+              committedPlacement?.kind === "dimensionLine"
+                ? committedPlacement
+                : undefined,
+          },
+        ],
+      };
+      expect(
+        inferCommittedDimensionAnnotationPlacement(
+          session,
+          committedDefinition,
+          committedDefinition.dimensions[0]!,
+          pointer,
+        ),
+      ).toEqual(placement);
+      const committed = buildCommittedDimensionOverlays(
+        session,
+        committedDefinition,
+      )[0];
+      expect(committed).toMatchObject({
+        kind: "dimensionLine",
+        start: overlay.start,
+        end: overlay.end,
+      });
+
+      expect(overlay.labelAnchor).toMatchObject({
+        kind: "sketchPoint",
+        point: [
+          expect.closeTo((overlay.start[0] + overlay.end[0]) / 2, 10),
+          expect.closeTo((overlay.start[1] + overlay.end[1]) / 2, 10),
+        ],
+      });
+      expect(overlay.extensionLines).toHaveLength(2);
+      for (const [index, target] of [first, second].entries()) {
+        const extension = overlay.extensionLines![index]!;
+        expect(extension.start).toEqual(target.anchor);
+        expect(extension.end).toEqual(
+          index === 0 ? overlay.start : overlay.end,
+        );
+        const ex = extension.end[0] - extension.start[0];
+        const ey = extension.end[1] - extension.start[1];
+        expect(ex * axis[1] - ey * axis[0]).toBeCloseTo(0, 10);
+      }
     }
-    expect(overlay.referenceKind).toBe("lineDistance");
-    const dx = overlay.end[0] - overlay.start[0];
-    const dy = overlay.end[1] - overlay.start[1];
-    expect(dx * axis[0] + dy * axis[1]).toBeCloseTo(0, 10);
-    expect(Math.hypot(dx, dy)).toBeCloseTo(row.separation, 10);
-    // Keep the existing offset/value-box placement while correcting direction.
-    const expectedMidpoint = [
-      (first.anchor[0] + second.anchor[0]) / 2 - axis[1] / axisLength * offset,
-      (first.anchor[1] + second.anchor[1]) / 2 + axis[0] / axisLength * offset,
-    ] as const;
-    for (const coordinate of [0, 1] as const) {
-      expect((overlay.start[coordinate] + overlay.end[coordinate]) / 2)
-        .toBeCloseTo(expectedMidpoint[coordinate], 10);
-    }
-    expect(overlay.labelAnchor).toMatchObject({
-      kind: "sketchPoint",
-      point: [
-        expect.closeTo(expectedMidpoint[0], 10),
-        expect.closeTo(expectedMidpoint[1], 10),
-      ],
+    expect(placement).toEqual({
+      kind: "dimensionLine",
+      offset: expect.closeTo(expectedOffset, 10),
     });
   });
 }
