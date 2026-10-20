@@ -2,6 +2,9 @@ import { expect, test } from "vitest";
 import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import { SemanticDocument } from "./sdk";
 
+// Real OCC modeling, probe, and replay take ~5 s alone and ~12 s under
+// `bun run test` load; the static graph transforms before the test, so moving
+// imports cannot remove this execution cost from its budget (cadara-5hk).
 test("native reference extents and multi-body scopes remain portable through SDK probes and replay", async () => {
   const makeDocument = async (): Promise<SemanticDocument> => {
     const workflow = await createSemanticSessionWorkflow("sdk-native-extent");
@@ -42,4 +45,4 @@ test("native reference extents and multi-body scopes remain portable through SDK
     expect(results.every((r) => r.outcome.kind === "completed")).toBe(true);
     expect(copy.inspect(["bounds"])).toEqual(facts);
   } finally { await doc.close(); await copy.close(); }
-});
+}, 60_000);
