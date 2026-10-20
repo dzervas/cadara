@@ -43,7 +43,7 @@ Strategic design context lives in `PRODUCT.md` at the project root — register,
 - Always prefer @react-three packages to interact with three.js (@react-three/drai, @react-three/fiber, etc.)
 - Runtime contract validation uses Typia-generated validators derived from TypeScript contract types; prefer shared validation helpers for transport and persistence boundaries, and keep domain invariants in plain TypeScript when generated structural validation does not make the code smaller or clearer.
 - Stateful editor/runtime orchestration uses the TEA-style `EditorEventLoop`; keep orchestration logic in domain/contracts and application seams, and avoid leaking event-loop concerns into presentational components.
-- Non-E2E tests use `bun:test`; add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
+- Non-E2E tests use Vitest (run through `bun run test`, never `bun test`); add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
 
 ## Testing Policy
 

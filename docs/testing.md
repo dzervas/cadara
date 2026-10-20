@@ -40,7 +40,7 @@ The CLI specs spawn the bundle that `test/helpers/cli-bundle-global-setup.ts` bu
 
 ### Logic
 
-Use `bun:test` for non-UI behavior in:
+Use Vitest (`bun run test`, `*.spec.ts`) for non-UI behavior in:
 
 - `src/contracts/`
 - `src/core/`
@@ -54,7 +54,7 @@ This lane is the main source of non-UI coverage.
 
 ### UI
 
-Use `bun:test` for presentational or UI-local behavior in:
+Use Vitest (`bun run test`, `*.spec.tsx`) for presentational or UI-local behavior in:
 
 - `src/app/`
 - `src/components/`
