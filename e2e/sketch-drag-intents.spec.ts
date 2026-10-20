@@ -603,6 +603,63 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   // Fix the centre point: activate Fix Geometry, then click the centre.
   await page.getByRole("button", { name: "Fix Geometry" }).click();
   await workbench.waitForAnimationFrames(2);
+  const hoverBox = await workbench.viewport().boundingBox();
+  if (!hoverBox) throw new Error("Viewport not visible.");
+  const hotspot = { x: hoverBox.x + 500, y: hoverBox.y + 400 };
+  await page.mouse.move(hotspot.x - 60, hotspot.y - 40, { steps: 8 });
+  await page.mouse.move(hotspot.x, hotspot.y, { steps: 12 });
+  const fixChip = page
+    .locator('[data-sketch-viewport-overlay="constraintPreview"]')
+    .filter({ hasText: "Fix geometry preview" });
+  await expect(fixChip).toHaveCount(1);
+  await expect(fixChip).toContainText("Select geometry to fix");
+  await expect
+    .poll(
+      async () => {
+        const chip = await fixChip.boundingBox();
+        if (!chip) return false;
+        // The picked centre's screen box includes its full 16 px exit radius.
+        return (
+          chip.x >= hotspot.x + 16 ||
+          chip.x + chip.width <= hotspot.x - 16 ||
+          chip.y >= hotspot.y + 16 ||
+          chip.y + chip.height <= hotspot.y - 16
+        );
+      },
+      {
+        message:
+          "The gliding Fix Geometry prompt must not cover the hovered point's pick box",
+      },
+    )
+    .toBe(true);
+  const chip = await fixChip.boundingBox();
+  if (!chip) throw new Error("Fix Geometry chip not visible.");
+  expect(chip.x).toBeGreaterThanOrEqual(hotspot.x + 38);
+  expect(chip.y).toBeGreaterThanOrEqual(hotspot.y + 38);
+  const canvas = await page.locator("main canvas").first().boundingBox();
+  if (!canvas) throw new Error("Canvas not visible.");
+  expect(chip.x + chip.width).toBeLessThanOrEqual(canvas.x + canvas.width);
+  expect(chip.y + chip.height).toBeLessThanOrEqual(canvas.y + canvas.height);
+  const edge = {
+    x: canvas.x + canvas.width - 24,
+    y: canvas.y + canvas.height - 24,
+  };
+  await page.mouse.move(edge.x, edge.y, { steps: 16 });
+  await expect
+    .poll(
+      async () => {
+        const flipped = await fixChip.boundingBox();
+        return Boolean(
+          flipped &&
+          flipped.x >= canvas.x &&
+          flipped.y >= canvas.y &&
+          flipped.x + flipped.width <= edge.x - 38 &&
+          flipped.y + flipped.height <= edge.y - 38,
+        );
+      },
+      { message: "The measured chip flips above-left near the canvas edges" },
+    )
+    .toBe(true);
   // (A gliding press, committed as one "Fix Geometry" action.)
   await waitForCommittedAction(page, "Fix Geometry", () =>
     glideClick(workbench, { x: 500, y: 400 }),

@@ -1,3 +1,5 @@
+import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+
 import type {
   SketchToolAnchorDescriptor,
   SketchToolFloatingInputDescriptor,
@@ -327,13 +329,15 @@ function layoutRectsTooClose(
 /**
  * T14d (A4): the active tool's on-canvas labels (`referenceLabel` such as
  * Merge "Source"/"Destination", measurement, snap and dimension-preview
- * labels) as layout obstacles, at their projections with an estimated extent
- * (`px-2 py-1` border box, 11 px text, at most 180 px wide). The labels
+ * labels) as layout obstacles with an estimated text extent. Pointer labels
+ * use the same hotspot gap and edge flipping as their measured DOM boxes;
+ * geometry labels stay centred on their projections. The labels
  * themselves stay `pointer-events-none`; the layout only avoids them.
  */
 export function getSketchToolLabelObstacles(
   schema: SketchToolPresentationSchema | null,
   projections: readonly SketchViewportFeedbackProjection[],
+  viewport = { width: Infinity, height: Infinity },
 ): SketchAnnotationLayoutRect[] {
   const projectionById = new Map(
     projections.map((projection) => [projection.id, projection]),
@@ -348,19 +352,30 @@ export function getSketchToolLabelObstacles(
       return [];
     }
 
-    const width = Math.min(
-      SKETCH_TOOL_LABEL_MAX_WIDTH_PX,
+    const hotspot = getSketchPointerLabelHotspot(overlay, projection);
+    const maxWidth = hotspot
+      ? Math.min(360, viewport.width - 12)
+      : SKETCH_TOOL_LABEL_MAX_WIDTH_PX;
+    const textWidth =
       SKETCH_TOOL_LABEL_FRAME_PX +
-        parts.reduce(
-          (total, part) =>
-            total + [...part].length * SKETCH_ANNOTATION_CHIP_CHAR_PX,
-          0,
-        ) +
-        (parts.length - 1) * SKETCH_TOOL_LABEL_PART_GAP_PX,
-    );
-
+      parts.reduce(
+        (total, part) =>
+          total + [...part].length * SKETCH_ANNOTATION_CHIP_CHAR_PX,
+        0,
+      ) +
+      (parts.length - 1) * SKETCH_TOOL_LABEL_PART_GAP_PX;
+    const width = Math.min(maxWidth, textWidth);
+    const height =
+      SKETCH_TOOL_LABEL_HEIGHT_PX *
+      (hotspot ? Math.ceil(textWidth / maxWidth) : 1);
     return [
-      layoutRectAt(projection, { width, height: SKETCH_TOOL_LABEL_HEIGHT_PX }),
+      hotspot
+        ? {
+            ...placeSketchPointerLabel(hotspot, { width, height }, viewport),
+            width,
+            height,
+          }
+        : layoutRectAt(projection, { width, height }),
     ];
   });
 }
@@ -417,6 +432,49 @@ export function getSketchToolOverlayLabelParts(
     default:
       return null;
   }
+}
+
+/** A hover may be one exit-radius from the picked point: clear its whole pick box too. */
+export const SKETCH_POINTER_LABEL_GAP_PX =
+  2 * SKETCH_POINT_RADII_PX.exit + SKETCH_ANNOTATION_LAYOUT_GAP_PX;
+
+export function getSketchPointerLabelHotspot(
+  overlay: SketchToolOverlayDescriptor,
+  projection: SketchViewportFeedbackProjection,
+): { x: number; y: number } | null {
+  const anchor = getOverlayAnchor(overlay);
+  if (overlay.kind !== "constraintPreview" && anchor?.kind !== "cursor") {
+    return null;
+  }
+  // Projection includes the descriptor's legacy centre offset. Placement now
+  // works from the hotspot and the measured label box, not its centre.
+  return {
+    x: projection.x - (anchor?.offset?.x ?? 0),
+    y: projection.y - (anchor?.offset?.y ?? 0),
+  };
+}
+
+export function placeSketchPointerLabel(
+  hotspot: { x: number; y: number },
+  extent: { width: number; height: number },
+  viewport: { width: number; height: number },
+): { x: number; y: number } {
+  const inset = SKETCH_ANNOTATION_LAYOUT_GAP_PX;
+  function placeAxis(point: number, size: number, limit: number) {
+    const after = point + SKETCH_POINTER_LABEL_GAP_PX;
+    const before = point - SKETCH_POINTER_LABEL_GAP_PX - size;
+    return Math.max(
+      inset,
+      Math.min(
+        after + size <= limit - inset ? after : before,
+        limit - inset - size,
+      ),
+    );
+  }
+  return {
+    x: placeAxis(hotspot.x, extent.width, viewport.width),
+    y: placeAxis(hotspot.y, extent.height, viewport.height),
+  };
 }
 
 function getOverlayAnchor(
