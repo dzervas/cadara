@@ -24,6 +24,8 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   combineOccCleanupError,
   releaseDiscardedOccAuthoringStateObjects,
+  releaseOccObjects,
+  type OccDisposable,
 } from "@/domain/modeling/occ/memory";
 import {
   assertNativeMeshFaceBindings,
@@ -469,35 +471,51 @@ function indexFacesByNativePayload(
     FaceId,
     InstanceType<OpenCascadeInstance["TopoDS_Face"]>
   >();
-  const faceMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap);
-
-  for (const record of nativePayload.topology) {
-    if (record.kind !== "face" || record.bodyId !== bodyId) {
-      continue;
-    }
-
-    if (record.index > faceMap.Size()) {
-      faceMap.delete();
-      throw new Error(
-        `Native topology payload references missing face index ${record.index}.`,
+  const temporaries: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(value: T) => {
+    temporaries.push(value);
+    return value;
+  };
+  try {
+    const faceMap = own(new oc.TopTools_IndexedMapOfShape_1());
+    oc.TopExp.MapShapes_1(shape, faceShapeType(oc) as never, faceMap);
+    for (const record of nativePayload.topology) {
+      if (record.kind !== "face" || record.bodyId !== bodyId) continue;
+      if (record.index > faceMap.Size()) {
+        throw new Error(
+          `Native topology payload references missing face index ${record.index}.`,
+        );
+      }
+      const faceId = record.id as FaceId;
+      faceIds.push(faceId);
+      facesById.set(
+        faceId,
+        oc.TopoDS.Face_1(own(faceMap.FindKey(record.index))),
       );
     }
-
-    const faceId = record.id as FaceId;
-    faceIds.push(faceId);
-    facesById.set(faceId, oc.TopoDS.Face_1(faceMap.FindKey(record.index)));
+    if (faceIds.length !== faceMap.Size()) {
+      throw new Error(
+        `Native topology payload returned ${faceIds.length} faces for body ${bodyId}; expected ${faceMap.Size()}.`,
+      );
+    }
+  } catch (error) {
+    try {
+      releaseOccObjects([...temporaries, ...facesById.values()]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
-
-  if (faceIds.length !== faceMap.Size()) {
-    const faceCount = faceMap.Size();
-    faceMap.delete();
-    throw new Error(
-      `Native topology payload returned ${faceIds.length} faces for body ${bodyId}; expected ${faceCount}.`,
-    );
+  try {
+    releaseOccObjects(temporaries);
+  } catch (cleanupError) {
+    try {
+      releaseOccObjects(facesById.values());
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
   }
-
-  faceMap.delete();
   return { faceIds, facesById };
 }
 
@@ -512,35 +530,51 @@ function indexEdgesByNativePayload(
     EdgeId,
     InstanceType<OpenCascadeInstance["TopoDS_Edge"]>
   >();
-  const edgeMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, edgeShapeType(oc) as never, edgeMap);
-
-  for (const record of nativePayload.topology) {
-    if (record.kind !== "edge" || record.bodyId !== bodyId) {
-      continue;
-    }
-
-    if (record.index > edgeMap.Size()) {
-      edgeMap.delete();
-      throw new Error(
-        `Native topology payload references missing edge index ${record.index}.`,
+  const temporaries: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(value: T) => {
+    temporaries.push(value);
+    return value;
+  };
+  try {
+    const edgeMap = own(new oc.TopTools_IndexedMapOfShape_1());
+    oc.TopExp.MapShapes_1(shape, edgeShapeType(oc) as never, edgeMap);
+    for (const record of nativePayload.topology) {
+      if (record.kind !== "edge" || record.bodyId !== bodyId) continue;
+      if (record.index > edgeMap.Size()) {
+        throw new Error(
+          `Native topology payload references missing edge index ${record.index}.`,
+        );
+      }
+      const edgeId = record.id as EdgeId;
+      edgeIds.push(edgeId);
+      edgesById.set(
+        edgeId,
+        oc.TopoDS.Edge_1(own(edgeMap.FindKey(record.index))),
       );
     }
-
-    const edgeId = record.id as EdgeId;
-    edgeIds.push(edgeId);
-    edgesById.set(edgeId, oc.TopoDS.Edge_1(edgeMap.FindKey(record.index)));
+    if (edgeIds.length !== edgeMap.Size()) {
+      throw new Error(
+        `Native topology payload returned ${edgeIds.length} edges for body ${bodyId}; expected ${edgeMap.Size()}.`,
+      );
+    }
+  } catch (error) {
+    try {
+      releaseOccObjects([...temporaries, ...edgesById.values()]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
-
-  if (edgeIds.length !== edgeMap.Size()) {
-    const edgeCount = edgeMap.Size();
-    edgeMap.delete();
-    throw new Error(
-      `Native topology payload returned ${edgeIds.length} edges for body ${bodyId}; expected ${edgeCount}.`,
-    );
+  try {
+    releaseOccObjects(temporaries);
+  } catch (cleanupError) {
+    try {
+      releaseOccObjects(edgesById.values());
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
   }
-
-  edgeMap.delete();
   return { edgeIds, edgesById };
 }
 
@@ -555,38 +589,51 @@ function indexVerticesByNativePayload(
     VertexId,
     InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>
   >();
-  const vertexMap = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(shape, vertexShapeType(oc) as never, vertexMap);
-
-  for (const record of nativePayload.topology) {
-    if (record.kind !== "vertex" || record.bodyId !== bodyId) {
-      continue;
-    }
-
-    if (record.index > vertexMap.Size()) {
-      vertexMap.delete();
-      throw new Error(
-        `Native topology payload references missing vertex index ${record.index}.`,
+  const temporaries: OccDisposable[] = [];
+  const own = <T extends OccDisposable>(value: T) => {
+    temporaries.push(value);
+    return value;
+  };
+  try {
+    const vertexMap = own(new oc.TopTools_IndexedMapOfShape_1());
+    oc.TopExp.MapShapes_1(shape, vertexShapeType(oc) as never, vertexMap);
+    for (const record of nativePayload.topology) {
+      if (record.kind !== "vertex" || record.bodyId !== bodyId) continue;
+      if (record.index > vertexMap.Size()) {
+        throw new Error(
+          `Native topology payload references missing vertex index ${record.index}.`,
+        );
+      }
+      const vertexId = record.id as VertexId;
+      vertexIds.push(vertexId);
+      verticesById.set(
+        vertexId,
+        oc.TopoDS.Vertex_1(own(vertexMap.FindKey(record.index))),
       );
     }
-
-    const vertexId = record.id as VertexId;
-    vertexIds.push(vertexId);
-    verticesById.set(
-      vertexId,
-      oc.TopoDS.Vertex_1(vertexMap.FindKey(record.index)),
-    );
+    if (vertexIds.length !== vertexMap.Size()) {
+      throw new Error(
+        `Native topology payload returned ${vertexIds.length} vertices for body ${bodyId}; expected ${vertexMap.Size()}.`,
+      );
+    }
+  } catch (error) {
+    try {
+      releaseOccObjects([...temporaries, ...verticesById.values()]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
   }
-
-  if (vertexIds.length !== vertexMap.Size()) {
-    const vertexCount = vertexMap.Size();
-    vertexMap.delete();
-    throw new Error(
-      `Native topology payload returned ${vertexIds.length} vertices for body ${bodyId}; expected ${vertexCount}.`,
-    );
+  try {
+    releaseOccObjects(temporaries);
+  } catch (cleanupError) {
+    try {
+      releaseOccObjects(verticesById.values());
+    } catch (resultCleanupError) {
+      throw combineOccCleanupError(cleanupError, resultCleanupError);
+    }
+    throw cleanupError;
   }
-
-  vertexMap.delete();
   return { vertexIds, verticesById };
 }
 
@@ -994,29 +1041,9 @@ function buildTrackedBodyFromResolvedShape(
   solid: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
 ): OccTrackedBody {
   const topologyToken = input.topologyToken;
+  // Body-only meshes retain the authoritative shape without enumerating subtopology.
   const bodyOnlyMesh = input.topologyPresentation === "bodyOnlyMesh";
-  // Baked body-only meshes retain their authoritative OCC shape and source mesh,
-  // but deliberately do not enumerate subtopology or invoke the native topology
-  // exporter. No face/edge/vertex ids are promised for this presentation mode.
-  const nativePayload = bodyOnlyMesh
-    ? undefined
-    : buildNativeTopologyPayloadForTrackedBody(oc, {
-        bodyId: input.bodyId,
-        topologyToken,
-        bodyKind,
-        solid,
-      });
-  const faces = nativePayload
-    ? indexFacesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : { faceIds: [], facesById: new Map() };
-  const edges = nativePayload
-    ? indexEdgesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : { edgeIds: [], edgesById: new Map() };
-  const vertices = nativePayload
-    ? indexVerticesByNativePayload(oc, input.bodyId, solid, nativePayload)
-    : { vertexIds: [], verticesById: new Map() };
-
-  const body = {
+  const body: OccTrackedBody = {
     bodyId: input.bodyId,
     label: input.label,
     bodyKind,
@@ -1025,39 +1052,88 @@ function buildTrackedBodyFromResolvedShape(
     shape: solid,
     topologyPresentation: input.topologyPresentation,
     meshExportFallback: input.meshExportFallback,
-    nativeTopologyPayload: nativePayload ?? undefined,
+    nativeTopologyPayload: undefined,
     topology: {
-      faceIds: faces.faceIds,
-      edgeIds: edges.edgeIds,
-      vertexIds: vertices.vertexIds,
+      faceIds: [],
+      edgeIds: [],
+      vertexIds: [],
     },
     contributingFeatureIds: createSeedContributorIds(input.ownerFeatureId),
-    facesById: faces.facesById,
-    faceContributingFeatureIdsById: createContributorMap(
-      faces.faceIds,
-      input.ownerFeatureId,
-    ),
-    edgesById: edges.edgesById,
-    edgeContributingFeatureIdsById: createContributorMap(
-      edges.edgeIds,
-      input.ownerFeatureId,
-    ),
-    verticesById: vertices.verticesById,
-    vertexContributingFeatureIdsById: createContributorMap(
-      vertices.vertexIds,
-      input.ownerFeatureId,
-    ),
+    facesById: new Map(),
+    faceContributingFeatureIdsById: new Map(),
+    edgesById: new Map(),
+    edgeContributingFeatureIdsById: new Map(),
+    verticesById: new Map(),
+    vertexContributingFeatureIdsById: new Map(),
     naming: input.naming,
-  } satisfies OccTrackedBody;
-
-  return {
-    ...body,
-    naming:
+  };
+  // Keep each completed index reachable locally until naming transfers the body.
+  try {
+    const nativePayload = bodyOnlyMesh
+      ? undefined
+      : buildNativeTopologyPayloadForTrackedBody(oc, {
+          bodyId: input.bodyId,
+          topologyToken,
+          bodyKind,
+          solid,
+        });
+    body.nativeTopologyPayload = nativePayload;
+    if (nativePayload) {
+      const faces = indexFacesByNativePayload(
+        oc,
+        input.bodyId,
+        solid,
+        nativePayload,
+      );
+      body.topology.faceIds = faces.faceIds;
+      body.facesById = faces.facesById;
+      body.faceContributingFeatureIdsById = createContributorMap(
+        faces.faceIds,
+        input.ownerFeatureId,
+      );
+      const edges = indexEdgesByNativePayload(
+        oc,
+        input.bodyId,
+        solid,
+        nativePayload,
+      );
+      body.topology.edgeIds = edges.edgeIds;
+      body.edgesById = edges.edgesById;
+      body.edgeContributingFeatureIdsById = createContributorMap(
+        edges.edgeIds,
+        input.ownerFeatureId,
+      );
+      const vertices = indexVerticesByNativePayload(
+        oc,
+        input.bodyId,
+        solid,
+        nativePayload,
+      );
+      body.topology.vertexIds = vertices.vertexIds;
+      body.verticesById = vertices.verticesById;
+      body.vertexContributingFeatureIdsById = createContributorMap(
+        vertices.vertexIds,
+        input.ownerFeatureId,
+      );
+    }
+    body.naming =
       input.naming ??
       (input.seedNaming === false
         ? undefined
-        : seedOccTopologyNaming(oc, body)),
-  };
+        : seedOccTopologyNaming(oc, body));
+    return body;
+  } catch (error) {
+    // Supplied naming is borrowed; only the newly resolved shape and indices are local.
+    try {
+      releaseDiscardedOccAuthoringStateObjects(
+        { bodies: [{ ...body, naming: undefined }] },
+        [],
+      );
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
 }
 
 export function buildNativeTopologyIdAliasesForTrackedBody(
@@ -1635,11 +1711,23 @@ export function reconcileReplacementSolidBody(
     seedNaming: false,
     meshExportFallback: input.meshExportFallback,
   });
-  const reconciliation = reconcileReplacementTopology(oc, {
-    previous: input.previous,
-    replacement,
-    historySources: input.historySources,
-  });
+  let reconciliation: ReturnType<typeof reconcileReplacementTopology>;
+  try {
+    reconciliation = reconcileReplacementTopology(oc, {
+      previous: input.previous,
+      replacement,
+      historySources: input.historySources,
+    });
+  } catch (error) {
+    try {
+      releaseDiscardedOccAuthoringStateObjects({ bodies: [replacement] }, [
+        { bodies: [input.previous] },
+      ]);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
 
   const reconciledBody = {
     ...replacement,
