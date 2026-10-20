@@ -1,6 +1,10 @@
 import { test, expect } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
+  FIXTURE_SKETCH_ID,
+  makeSketchFixture,
+} from "@/contracts/sketch/region-extraction.fixtures";
+import {
   beginSketchAnnotationEdit,
   beginSketchTool,
   createNewSketchSession,
@@ -2950,3 +2954,102 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   testDistancePreviewFollowsPointerUntilPlacementClick();
   testConstraintPreviewStopsMovingAfterPinClick();
 });
+
+for (const row of [
+  {
+    name: "authored lines with offset midpoints",
+    first: [[1, 1], [5, 3]],
+    second: [[7, 6], [11, 8]],
+    datum: null,
+    separation: 4 / Math.sqrt(5),
+  },
+  {
+    name: "authored line and X datum axis",
+    first: [[1, 1], [5, 1]],
+    second: null,
+    datum: "xAxis",
+    separation: 1,
+  },
+  {
+    name: "authored line and Y datum axis",
+    first: [[2, 1], [2, 5]],
+    second: null,
+    datum: "yAxis",
+    separation: 2,
+  },
+] as const) {
+  test(`parallel-line distance preview is perpendicular for ${row.name}`, () => {
+    const fixture = makeSketchFixture();
+    fixture.point("a", ...row.first[0]);
+    fixture.point("b", ...row.first[1]);
+    const firstId = fixture.line("first", "a", "b");
+    let secondId = null;
+    if (row.second) {
+      fixture.point("c", ...row.second[0]);
+      fixture.point("d", ...row.second[1]);
+      secondId = fixture.line("second", "c", "d");
+    }
+    const registry = getSketchConstraintDefinition("dimensionDistance");
+    const definition = fixture.definition();
+    const first = registry.resolveTarget(definition, {
+      kind: "sketchEntity",
+      sketchId: FIXTURE_SKETCH_ID,
+      entityId: firstId,
+    });
+    const second = registry.resolveTarget(
+      definition,
+      secondId
+        ? {
+            kind: "sketchEntity",
+            sketchId: FIXTURE_SKETCH_ID,
+            entityId: secondId,
+          }
+        : {
+            kind: "sketchDatumReference",
+            sketchId: FIXTURE_SKETCH_ID,
+            datumId: row.datum!,
+            geometryKind: "lineSegment",
+          },
+    );
+    if (!first?.line || !second?.line) {
+      throw new Error("Parallel-line fixture must resolve two line targets");
+    }
+    const axis = [
+      first.line.end[0] - first.line.start[0],
+      first.line.end[1] - first.line.start[1],
+    ] as const;
+    const axisLength = Math.hypot(...axis);
+    const offset = 0.75;
+    const overlay = registry.buildPreview({
+      selectedTargets: [first, second],
+      hoverTarget: null,
+      pointer: null,
+      value: row.separation,
+      annotationPlacement: { kind: "dimensionLine", offset },
+    }).find((entry) => entry.kind === "dimensionLine");
+    if (overlay?.kind !== "dimensionLine") {
+      throw new Error("Parallel lines must produce a dimension-line preview");
+    }
+    expect(overlay.referenceKind).toBe("lineDistance");
+    const dx = overlay.end[0] - overlay.start[0];
+    const dy = overlay.end[1] - overlay.start[1];
+    expect(dx * axis[0] + dy * axis[1]).toBeCloseTo(0, 10);
+    expect(Math.hypot(dx, dy)).toBeCloseTo(row.separation, 10);
+    // Keep the existing offset/value-box placement while correcting direction.
+    const expectedMidpoint = [
+      (first.anchor[0] + second.anchor[0]) / 2 - axis[1] / axisLength * offset,
+      (first.anchor[1] + second.anchor[1]) / 2 + axis[0] / axisLength * offset,
+    ] as const;
+    for (const coordinate of [0, 1] as const) {
+      expect((overlay.start[coordinate] + overlay.end[coordinate]) / 2)
+        .toBeCloseTo(expectedMidpoint[coordinate], 10);
+    }
+    expect(overlay.labelAnchor).toMatchObject({
+      kind: "sketchPoint",
+      point: [
+        expect.closeTo(expectedMidpoint[0], 10),
+        expect.closeTo(expectedMidpoint[1], 10),
+      ],
+    });
+  });
+}

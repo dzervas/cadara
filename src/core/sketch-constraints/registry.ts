@@ -1447,13 +1447,18 @@ function buildLineDistancePreview(
   const offset =
     placement?.offset ??
     pointLineSignedDistance(second.anchor, first.line.start, first.line.end);
+  // Project onto the common perpendicular through the existing label midpoint.
+  // Keep the normal offset, but remove the anchors' along-line separation.
+  const alongLineOffset =
+    ((second.anchor[0] - first.anchor[0]) * axis[0] +
+      (second.anchor[1] - first.anchor[1]) * axis[1]) / 2;
   const start: readonly [number, number] = [
-    first.anchor[0] + normal[0] * offset,
-    first.anchor[1] + normal[1] * offset,
+    first.anchor[0] + normal[0] * offset + axis[0] * alongLineOffset,
+    first.anchor[1] + normal[1] * offset + axis[1] * alongLineOffset,
   ];
   const end: readonly [number, number] = [
-    second.anchor[0] + normal[0] * offset,
-    second.anchor[1] + normal[1] * offset,
+    second.anchor[0] + normal[0] * offset - axis[0] * alongLineOffset,
+    second.anchor[1] + normal[1] * offset - axis[1] * alongLineOffset,
   ];
 
   return [
