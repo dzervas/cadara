@@ -453,11 +453,24 @@ function createPrimitiveLabel(
   shape: OccShape,
 ) {
   const label = parent.NewChild();
-  const builder = new oc.TNaming_Builder(label);
-  builder.Generated_1(shape);
-  builder.delete();
-
-  return label;
+  try {
+    const builder = new oc.TNaming_Builder(label);
+    return releaseAfter(
+      () => {
+        builder.Generated_1(shape);
+        return label;
+      },
+      () => [builder],
+    );
+  } catch (error) {
+    // This fresh label has not transferred to a naming map yet.
+    return releaseAfter(
+      () => {
+        throw error;
+      },
+      () => [label],
+    );
+  }
 }
 
 function hasShapeType(shape: OccShape, expected: OccShape) {
@@ -596,8 +609,10 @@ function modifyLabel(
   next: OccShape,
 ) {
   const builder = new oc.TNaming_Builder(label);
-  builder.Modify(previous, next);
-  builder.delete();
+  releaseAfter(
+    () => builder.Modify(previous, next),
+    () => [builder],
+  );
 }
 
 function deleteLabel(
@@ -606,8 +621,10 @@ function deleteLabel(
   previous: OccShape,
 ) {
   const builder = new oc.TNaming_Builder(label);
-  builder.Delete(previous);
-  builder.delete();
+  releaseAfter(
+    () => builder.Delete(previous),
+    () => [builder],
+  );
 }
 
 function createBodyLabel(
@@ -616,13 +633,24 @@ function createBodyLabel(
   shape: OccShape,
 ) {
   const main = document.Main();
-  const label = main.NewChild();
-  main.delete();
-  const builder = new oc.TNaming_Builder(label);
-  builder.Generated_1(shape);
-  builder.delete();
-
-  return label;
+  let label: OccLabel | undefined;
+  try {
+    return releaseAfter(
+      () => {
+        label = createPrimitiveLabel(oc, main, shape);
+        return label;
+      },
+      () => [main],
+    );
+  } catch (error) {
+    // Even a failed Main wrapper release must not orphan a completed label.
+    return releaseAfter(
+      () => {
+        throw error;
+      },
+      () => (label ? [label] : []),
+    );
+  }
 }
 
 function namingLabels(naming: {

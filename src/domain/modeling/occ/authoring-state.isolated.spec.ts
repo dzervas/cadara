@@ -58,6 +58,7 @@ const {
   collectOccCleanupErrors,
   releaseDiscardedOccAuthoringStateObjects,
   releaseOccAuthoringStateObjects,
+  releaseOccObjects,
 } = await import("@/domain/modeling/occ/memory");
 const {
   reconcileReplacementSolidBody,
@@ -70,6 +71,9 @@ const {
 } = await import("@/domain/modeling/occ/topology-stage");
 const { OpenCascadeKernelAdapter } =
   await import("@/domain/modeling/opencascade-kernel-adapter");
+
+const { seedOccTopologyNaming, reconcileReplacementTopology } =
+  await import("@/domain/modeling/occ/topology-naming");
 
 // Lane: logic (docs/testing.md — domain ownership handoff at exported seams).
 // Seams: the real OCC adapter create/update/dispose lifecycle, the exported
@@ -910,4 +914,118 @@ test("a failed NamedShape handle delete still releases its selector and read cop
     ].filter((w) => !w.isDeleted()),
     "The partially seeded naming is fully released once its handle retry succeeds.",
   ).toEqual([]);
+});
+
+
+test("TNaming builders and fresh labels have zero retained growth on success and native operation failures (cadara-94k)", async () => {
+  const { oc, ledger, first } = await createJoinScenario();
+  const body = first.bodies[0]!;
+  const retained = bodyWrappers(body);
+  const prototype = oc.TNaming_Builder.prototype;
+  const generated = prototype.Generated_1;
+  const modify = prototype.Modify;
+  const remove = prototype.Delete;
+  const primary = new Error("injected TNaming operation failure");
+  const beforeLabels = ledger.labels.length;
+  const beforeDocuments = ledger.documents.length;
+
+  // Success must release its builder, and transfer only labels/document.
+  const naming = seedOccTopologyNaming(oc, body);
+  expect(ledger.liveAttributeOwners.size).toBe(0);
+  releaseOccObjects(namingWrappers(naming as unknown as Naming));
+
+  for (const failAt of [1, 2]) {
+    let calls = 0;
+    prototype.Generated_1 = function (...args) {
+      if (++calls === failAt) throw primary;
+      return generated.apply(this, args);
+    };
+    try {
+      expect(() => seedOccTopologyNaming(oc, body)).toThrow(primary);
+    } finally {
+      prototype.Generated_1 = generated;
+    }
+    expect(ledger.liveAttributeOwners.size).toBe(0);
+    expect(liveUnowned(ledger, first as never)).toEqual([]);
+  }
+
+  const builderConstructor = oc.TNaming_Builder;
+  oc.TNaming_Builder = new Proxy(builderConstructor, {
+    construct() { throw primary; },
+  });
+  try {
+    expect(() => seedOccTopologyNaming(oc, body)).toThrow(primary);
+  } finally {
+    oc.TNaming_Builder = builderConstructor;
+  }
+  const newChild = oc.TDF_Label.prototype.NewChild;
+  oc.TDF_Label.prototype.NewChild = function () { throw primary; };
+  try {
+    expect(() => seedOccTopologyNaming(oc, body)).toThrow(primary);
+  } finally {
+    oc.TDF_Label.prototype.NewChild = newChild;
+  }
+  expect(liveUnowned(ledger, first as never)).toEqual([]);
+
+  const deleteBuilder = prototype.delete;
+  const cleanupFailure = new Error("injected builder delete failure");
+  const failedBuilders: Wrapper[] = [];
+  prototype.Generated_1 = function () { throw primary; };
+  prototype.delete = function () {
+    failedBuilders.push(this as unknown as Wrapper);
+    throw cleanupFailure;
+  };
+  let failure: unknown;
+  try {
+    seedOccTopologyNaming(oc, body);
+  } catch (error) {
+    failure = error;
+  } finally {
+    prototype.Generated_1 = generated;
+    prototype.delete = deleteBuilder;
+  }
+  const cleanups = collectOccCleanupErrors(failure);
+  expect((failure as AggregateError).errors[0]).toBeInstanceOf(AggregateError);
+  expect(cleanups.flatMap((c) => [...c.errors])).toContain(cleanupFailure);
+  expect(failedBuilders[0]!.isDeleted()).toBe(false);
+  expect(ledger.documents.at(-1)!.isDeleted()).toBe(false);
+  for (const cleanup of cleanups) cleanup.retry();
+  expect(failedBuilders[0]!.isDeleted()).toBe(true);
+  expect(ledger.documents.at(-1)!.isDeleted()).toBe(true);
+  expect(ledger.liveAttributeOwners.size).toBe(0);
+  expect(liveUnowned(ledger, first as never)).toEqual([]);
+
+  const modified = new oc.TopTools_ListOfShape_1();
+  for (const face of [...body.facesById.values()].slice(0, 2))
+    modified.Append_1(face);
+  try {
+    for (const method of ["Modify", "Delete"] as const) {
+      const original = prototype[method];
+      prototype[method] = function () { throw primary; };
+      try {
+        expect(() => reconcileReplacementTopology(oc, {
+          previous: body,
+          replacement: body,
+          historySources: method === "Modify" ? [] : [{
+            Modified: () => modified,
+            Generated: () => modified,
+          }],
+        })).toThrow(primary);
+      } finally {
+        if (method === "Modify") prototype.Modify = original as typeof modify;
+        else prototype.Delete = original as typeof remove;
+      }
+      expect(ledger.liveAttributeOwners.size).toBe(0);
+      expect(liveUnowned(ledger, first as never)).toEqual([]);
+      for (const wrapper of retained) expect(wrapper.isDeleted()).toBe(false);
+    }
+  } finally {
+    modified.delete();
+    prototype.Modify = modify;
+    prototype.Delete = remove;
+  }
+  expect(ledger.documents.slice(beforeDocuments).every((w) => w.isDeleted())).toBe(true);
+  expect(ledger.labels.slice(beforeLabels).every((w) => w.isDeleted())).toBe(true);
+  expect(ledger.attributeOwnersLiveAtDocumentDelete.every((n) => n === 0)).toBe(true);
+  releaseOccAuthoringStateObjects(first);
 });
