@@ -5854,7 +5854,27 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         historyOrder: previewHistoryOrder,
         cursor: { kind: "feature", featureId: previewFeatureId },
       });
-      const snapshot = buildOccWorkspaceSnapshot(previewState);
+      // Use the display-read builder: it clears inherited OCC triangulations
+      // before meshing at the viewport tier, including tighter angular budgets.
+      const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
+        previewState,
+        this.snapshotLodTierId,
+      );
+      if (
+        nativeTopologyResult.kind !== "nativeTopologyPayload" &&
+        previewState.bodies.some(
+          (body) => body.topologyPresentation !== "bodyOnlyMesh",
+        )
+      ) {
+        throw this.createNativeTopologyUnavailableError(nativeTopologyResult);
+      }
+      const snapshot = buildOccWorkspaceSnapshot(previewState, [], {
+        lodTierId: this.snapshotLodTierId,
+        nativeTopologyPayload:
+          nativeTopologyResult.kind === "nativeTopologyPayload"
+            ? nativeTopologyResult.payload
+            : undefined,
+      });
       const previewDiagnostics = filterPreviewInvalidationDiagnostics(
         runtimeState.authoringState,
         previewState,
@@ -5968,6 +5988,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     } finally {
+      this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState);
       if (previewState) {
         this.releaseDiscardedState(previewState, [runtimeState.authoringState]);
       }
