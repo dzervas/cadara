@@ -52,7 +52,9 @@ interface HighlightMaterialBaseline {
   opacity: number;
 }
 
-interface RenderableMaterialDisplayOptions {
+export interface RenderableMaterialDisplayOptions {
+  transparent?: boolean;
+  opacity?: number;
   color?: number;
   flat?: boolean;
   polygonOffsetFactor?: number;
@@ -1018,12 +1020,16 @@ export function createRenderableMeshMaterial(
   const sharedOptions = {
     color,
     transparent:
-      origin === "preview" ||
-      semanticClass === "region" ||
-      semanticClass === "construction",
-    opacity: getRenderableMeshOpacity(semanticClass, origin, false, false),
+      displayOptions.transparent ??
+      (origin === "preview" ||
+        semanticClass === "region" ||
+        semanticClass === "construction"),
+    opacity:
+      displayOptions.opacity ??
+      getRenderableMeshOpacity(semanticClass, origin, false, false),
     side: THREE.DoubleSide,
     depthWrite:
+      !displayOptions.transparent &&
       !displayOptions.flat &&
       origin !== "preview" &&
       semanticClass !== "construction",
@@ -1076,13 +1082,15 @@ export function createRenderableLineMaterial(
       color:
         displayOptions.color ??
         getRenderableBaseColor(renderable.binding.semanticClass),
-      transparent: true,
-      opacity: getRenderableLineOpacity(
-        renderable.binding.semanticClass,
-        origin,
-        false,
-        false,
-      ),
+      transparent: displayOptions.transparent ?? true,
+      opacity:
+        displayOptions.opacity ??
+        getRenderableLineOpacity(
+          renderable.binding.semanticClass,
+          origin,
+          false,
+          false,
+        ),
     }),
   );
 }
@@ -1097,9 +1105,9 @@ export function createRenderableMarkerMaterial(
       color:
         displayOptions.color ??
         getRenderableBaseColor(renderable.binding.semanticClass),
-      transparent: origin === "preview",
-      opacity: origin === "preview" ? 0.72 : 1,
-      depthWrite: origin === "preview" ? false : true,
+      transparent: displayOptions.transparent ?? origin === "preview",
+      opacity: displayOptions.opacity ?? (origin === "preview" ? 0.72 : 1),
+      depthWrite: !displayOptions.transparent && origin !== "preview",
     });
   }
 
@@ -1107,13 +1115,13 @@ export function createRenderableMarkerMaterial(
     color:
       displayOptions.color ??
       getRenderableBaseColor(renderable.binding.semanticClass),
-    transparent: origin === "preview",
-    opacity: origin === "preview" ? 0.72 : 1,
+    transparent: displayOptions.transparent ?? origin === "preview",
+    opacity: displayOptions.opacity ?? (origin === "preview" ? 0.72 : 1),
     metalness: 0.08,
     roughness: 0.34,
     emissive: origin === "preview" ? 0x244a63 : 0x1c3245,
     emissiveIntensity: origin === "preview" ? 0.16 : 0.12,
-    depthWrite: origin === "preview" ? false : true,
+    depthWrite: !displayOptions.transparent && origin !== "preview",
   });
 }
 

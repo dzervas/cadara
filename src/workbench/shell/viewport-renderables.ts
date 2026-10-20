@@ -115,7 +115,17 @@ export function composeViewportRenderables(
 
   return {
     ...mergedRenderables,
-    documentRenderables: mergedRenderables.documentRenderables,
+    documentRenderables: mergedRenderables.documentRenderables.map((entry) => {
+      const target = entry.renderable.binding.target;
+      return {
+        ...entry,
+        isInactiveSketch: Boolean(
+          input.sketchSession &&
+            "sketchId" in target &&
+            target.sketchId !== input.sketchSession.sketchId,
+        ),
+      };
+    }),
   };
 }
 

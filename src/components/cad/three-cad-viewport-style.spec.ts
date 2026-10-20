@@ -1218,3 +1218,50 @@ test("O1: construction dash-dot wins over an authored dashed stroke", () => {
     true,
   );
 });
+
+// UI-local pure material selection: context alpha must not replace constraint colour.
+test.each(["sketchCurve", "sketchPoint", "region"] as const)(
+  "other-sketch %s keeps its colour at alpha 0.28",
+  (semanticClass) => {
+    const palette = resolveSketchRenderingPalette(() => "");
+    for (const state of [
+      "underconstrained",
+      "constrained",
+      "overconstrained",
+    ] as const) {
+      const entry = {
+        origin: "document" as const,
+        renderable: { binding: { semanticClass } },
+        sketchConstraintDisplay: {
+          state,
+          isAffectedOverconstraint: state === "overconstrained",
+        },
+      } as import("@/core/workspace/viewport-renderables").ViewportRenderableRecord;
+      const normal = getDocumentRenderableMaterialOptions(entry, palette);
+      expect(normal.opacity).toBeUndefined();
+      expect(normal.transparent).toBeUndefined();
+      const inactive = getDocumentRenderableMaterialOptions(
+        { ...entry, isInactiveSketch: true },
+        palette,
+      );
+      expect(inactive).toEqual({ ...normal, opacity: 0.28, transparent: true });
+      const invalid = { ...entry, sketchGeometryValidity: "invalid" as const };
+      expect(
+        getDocumentRenderableMaterialOptions(
+          { ...invalid, isInactiveSketch: true },
+          palette,
+        ),
+      ).toEqual({
+        ...getDocumentRenderableMaterialOptions(invalid, palette),
+        opacity: 0.28,
+        transparent: true,
+      });
+    }
+    const edge = {
+      origin: "document",
+      isInactiveSketch: true,
+      renderable: { binding: { semanticClass: "featureEdge" } },
+    } as import("@/core/workspace/viewport-renderables").ViewportRenderableRecord;
+    expect(getDocumentRenderableMaterialOptions(edge, palette)).toEqual({});
+  },
+);
