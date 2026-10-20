@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -17,6 +18,9 @@ import {
   getOverlayGeometryProjectionId,
   getOverlayProjectionId,
   getSketchToolOverlayLabelParts,
+  getSketchPointerLabelHotspot,
+  placeSketchPointerLabel,
+  SKETCH_POINTER_LABEL_GAP_PX,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 
@@ -134,18 +138,11 @@ export function SketchViewportFeedbackLayer({
           }
 
           return (
-            <div
+            <ToolOverlayLabel
               key={overlay.id}
-              data-sketch-viewport-overlay={overlay.kind}
-              className={getOverlayClassName(overlay)}
-              style={{
-                left: projection.x,
-                top: projection.y,
-                transform: "translate(-50%, -50%)",
-              }}
-            >
-              {getOverlayContent(overlay)}
-            </div>
+              overlay={overlay}
+              projection={projection}
+            />
           );
         })}
       </div>
@@ -166,6 +163,64 @@ export function SketchViewportFeedbackLayer({
         </div>
       ) : null}
     </>
+  );
+}
+
+function ToolOverlayLabel({
+  overlay,
+  projection,
+}: {
+  overlay: SketchToolOverlayDescriptor;
+  projection: SketchViewportFeedbackProjection;
+}) {
+  const labelRef = useRef<HTMLDivElement>(null);
+  const hotspot = getSketchPointerLabelHotspot(overlay, projection);
+  const x = hotspot?.x;
+  const y = hotspot?.y;
+  useLayoutEffect(() => {
+    const label = labelRef.current;
+    const canvas = label?.parentElement;
+    if (!label || !canvas || x === undefined || y === undefined) return;
+    const place = () => {
+      const position = placeSketchPointerLabel(
+        { x, y },
+        label.getBoundingClientRect(),
+        canvas.getBoundingClientRect(),
+      );
+      label.style.left = `${position.x}px`;
+      label.style.top = `${position.y}px`;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(label);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [x, y]);
+
+  return (
+    <div
+      ref={labelRef}
+      data-sketch-viewport-overlay={overlay.kind}
+      className={getOverlayClassName(overlay)}
+      style={
+        hotspot
+          ? {
+              left: hotspot.x + SKETCH_POINTER_LABEL_GAP_PX,
+              top: hotspot.y + SKETCH_POINTER_LABEL_GAP_PX,
+              // Both prompt fragments stay inside one measured chip; long prompts wrap.
+              width: "max-content",
+              maxWidth: "min(360px, calc(100% - 12px))",
+              whiteSpace: "normal",
+            }
+          : {
+              left: projection.x,
+              top: projection.y,
+              transform: "translate(-50%, -50%)",
+            }
+      }
+    >
+      {getOverlayContent(overlay)}
+    </div>
   );
 }
 

@@ -7,6 +7,7 @@ import {
   collectSketchViewportFeedbackAnchors,
   getFloatingInputKeyPatch,
   getSketchToolLabelObstacles,
+  placeSketchPointerLabel,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -48,6 +49,66 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
+
+test.each([
+  { hotspot: { x: 500, y: 400 }, expected: { x: 538, y: 438 } },
+  { hotspot: { x: 1190, y: 790 }, expected: { x: 832, y: 730 } },
+  { hotspot: { x: 10, y: 10 }, expected: { x: 48, y: 48 } },
+  { hotspot: { x: 1190, y: 10 }, expected: { x: 832, y: 48 } },
+  { hotspot: { x: 10, y: 790 }, expected: { x: 48, y: 730 } },
+])(
+  "pointer chip clears the hotspot and pick box, flipping at edges: $hotspot",
+  ({ hotspot, expected }) => {
+    const extent = { width: 320, height: 22 };
+    const position = placeSketchPointerLabel(hotspot, extent, {
+      width: 1200,
+      height: 800,
+    });
+    expect(position).toEqual(expected);
+    expect(position.x).toBeGreaterThanOrEqual(0);
+    expect(position.y).toBeGreaterThanOrEqual(0);
+    expect(position.x + extent.width).toBeLessThanOrEqual(1200);
+    expect(position.y + extent.height).toBeLessThanOrEqual(800);
+    // The hovered point can be 16 px towards the chip from the cursor, and
+    // its pick box extends another 16 px. Neither box may reach the chip.
+    expect(
+      position.x >= hotspot.x + 38 ||
+        position.x + extent.width <= hotspot.x - 38,
+    ).toBe(true);
+    expect(
+      position.y >= hotspot.y + 38 ||
+        position.y + extent.height <= hotspot.y - 38,
+    ).toBe(true);
+  },
+);
+
+test("Fix Geometry renders both prompt fragments in one offset chip, not centred on the pick", () => {
+  const schema: SketchToolPresentationSchema = {
+    prompts: [],
+    overlays: [
+      {
+        id: "fix-preview",
+        kind: "constraintPreview",
+        label: "Fix geometry preview",
+        detail: "Select geometry to fix",
+        anchor: { kind: "sketchPoint", point: [0, 0] },
+      },
+    ],
+  };
+  const markup = renderToStaticMarkup(
+    <SketchViewportFeedbackLayer
+      schema={schema}
+      projections={[{ id: "overlay:fix-preview", x: 500, y: 400 }]}
+      onPatch={() => undefined}
+    />,
+  );
+  expect(markup.match(/data-sketch-viewport-overlay=/g)).toHaveLength(1);
+  expect(markup).toContain("Fix geometry preview");
+  expect(markup).toContain("Select geometry to fix");
+  expect(markup).toContain("left:538px;top:438px");
+  expect(markup).not.toContain("translate(-50%, -50%)");
+  expect(markup).toContain("white-space:normal");
+});
 
 test.each([
   {
@@ -98,7 +159,7 @@ test.each([
     expect(markup).toContain(
       'data-sketch-viewport-overlay="constraintPreview"',
     );
-    expect(markup).toContain("left:318px;top:218px");
+    expect(markup).toContain("left:338px;top:238px");
     expect(markup.match(/Inferred constraint/g)).toHaveLength(1);
     expect(markup.split(detail)).toHaveLength(2);
     expect(markup).not.toContain(
@@ -108,7 +169,7 @@ test.each([
       markup.match(/data-sketch-viewport-geometry="snapIndicator"/g),
     ).toHaveLength(1);
     expect(getSketchToolLabelObstacles(schema, projections)).toEqual([
-      { x: 228, y: 207, width: 180, height: 22 },
+      { x: 338, y: 238, width: 159 + detail.length * 7, height: 22 },
     ]);
 
     const suppressed = transitionEditorState(hovered, {

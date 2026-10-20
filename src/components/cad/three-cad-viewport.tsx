@@ -1784,6 +1784,7 @@ function ThreeCadViewportScene({
       ...getSketchToolLabelObstacles(
         sketchToolPresentation,
         sketchFeedbackProjections,
+        sketchAnnotationDomFrame.viewport,
       ),
       ...sketchAnnotationDomFrame.obstacles,
       // Review R-2: the hint slot, reserved while the sketch is open.
@@ -1796,7 +1797,7 @@ function ThreeCadViewportScene({
     ],
     [
       sketchAnnotationDomFrame.obstacles,
-      sketchAnnotationDomFrame.viewport.topInset,
+      sketchAnnotationDomFrame.viewport,
       sketchFeedbackProjections,
       sketchNearGaps,
       sketchToolPresentation,
