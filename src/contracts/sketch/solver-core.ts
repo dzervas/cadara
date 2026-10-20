@@ -3525,7 +3525,10 @@ function buildSystem(
           ? resolveSketchDatumLine(constraint.projectedCurve.datum)
           : null;
 
-      if (!point || (!projected && !datumLine)) {
+      if (
+        !point || (!projected && !datumLine) || projected?.kind === "point" ||
+        (projected?.kind === "spline" && projected.representation.kind === "sourceSamples")
+      ) {
         continue;
       }
 
@@ -3724,6 +3727,14 @@ function buildSystem(
     }
 
     if (constraint.kind === "collinear") {
+      if (
+        (constraint.target.kind === "localEntity" &&
+          !lineEntityMap.has(constraint.target.entityId)) ||
+        (constraint.target.kind === "localPoint" &&
+          !pointRecords.has(constraint.target.pointId))
+      ) {
+        continue;
+      }
       const referenceLine = lineEntityMap.get(constraint.line.entityId);
       if (!referenceLine) {
         continue;
@@ -3780,6 +3791,14 @@ function buildSystem(
     }
 
     if (constraint.kind === "collinearProjectedLine") {
+      if (
+        (constraint.target.kind === "localEntity" &&
+          !lineEntityMap.has(constraint.target.entityId)) ||
+        (constraint.target.kind === "localPoint" &&
+          !pointRecords.has(constraint.target.pointId))
+      ) {
+        continue;
+      }
       const projectedLine = resolveReadOnlyLineOperand(
         constraint.projectedLine,
         options.projectedReferences ?? [],
@@ -6111,12 +6130,16 @@ function validateDefinition(
         break;
       case "horizontal":
       case "vertical":
-        if (!entityMap.has(constraint.entityId)) {
+        if (entityMap.get(constraint.entityId)?.kind !== "lineSegment") {
           diagnostics.push(
             makeDiagnostic(
-              "missing-constrained-entity",
+              entityMap.has(constraint.entityId)
+                ? "unsupported-constraint-operands"
+                : "missing-constrained-entity",
               "error",
-              `‘${constraint.label}’ references geometry that no longer exists.`,
+              entityMap.has(constraint.entityId)
+                ? `‘${constraint.label}’ has an unsupported operand combination: requires a local line.`
+                : `‘${constraint.label}’ references geometry that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -6212,13 +6235,19 @@ function validateDefinition(
       case "parallel":
       case "perpendicular":
         if (
-          !constraint.entityIds.every((entityId) => entityMap.has(entityId))
+          !constraint.entityIds.every(
+            (entityId) => entityMap.get(entityId)?.kind === "lineSegment",
+          )
         ) {
           diagnostics.push(
             makeDiagnostic(
-              "missing-two-line-entity",
+              constraint.entityIds.every((id) => entityMap.has(id))
+                ? "unsupported-constraint-operands"
+                : "missing-two-line-entity",
               "error",
-              `‘${constraint.label}’ references geometry that no longer exists.`,
+              constraint.entityIds.every((id) => entityMap.has(id))
+                ? `‘${constraint.label}’ has an unsupported operand combination: requires two local lines.`
+                : `‘${constraint.label}’ references geometry that no longer exists.`,
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
@@ -6462,6 +6491,21 @@ function validateDefinition(
             ["axis"],
           );
         }
+        if (constraint.projectedLine.kind === "projectedGeometry") {
+          const projected = findProjectedGeometry(
+            projectedReferences, constraint.projectedLine.reference,
+          );
+          if (
+            projected?.kind === "lineSegment" &&
+            !unitVector(projected.startPosition, projected.endPosition)
+          ) {
+            diagnostics.push(makeDiagnostic(
+              "unsupported-constraint-operands", "error",
+              `‘${constraint.label}’ has an unsupported operand combination: a projected line must have a nonzero direction.`,
+              { kind: "constraint", constraintId: constraint.constraintId },
+            ));
+          }
+        }
         break;
       }
       case "tangentProjectedCurve": {
@@ -6538,6 +6582,14 @@ function validateDefinition(
               { kind: "constraint", constraintId: constraint.constraintId },
             ),
           );
+        }
+        if (entities.every((entity) => entity?.kind === "lineSegment")) {
+          diagnostics.push(makeDiagnostic(
+            "unsupported-constraint-operands",
+            "error",
+            `‘${constraint.label}’ has an unsupported operand combination: Tangent needs a circle or arc.`,
+            { kind: "constraint", constraintId: constraint.constraintId },
+          ));
         }
         break;
       }
@@ -8914,6 +8966,22 @@ function materializeSolveResult(
     const status = offsetRequirementStatus(blocked.get(entry.dimensionId));
     return status ? { ...entry, status } : entry;
   });
+  for (const constraint of definition.constraints) {
+    if (
+      !solved.perConstraint.has(constraint.constraintId) &&
+      !blocked.has(constraint.constraintId) &&
+      !diagnostics.some((entry) =>
+        entry.severity === "error" && entry.target?.kind === "constraint" &&
+        entry.target.constraintId === constraint.constraintId,
+      )
+    ) {
+      diagnostics.push(makeDiagnostic(
+        "unsupported-constraint-operands", "error",
+        `‘${constraint.label}’ has an unsupported operand combination: no solver rows were admitted.`,
+        { kind: "constraint", constraintId: constraint.constraintId },
+      ));
+    }
+  }
   diagnostics.push(...blockedRequirementDiagnostics(definition, blocked));
   diagnostics.push(
     ...undefinedReferenceDimensionDiagnostics(definition, dimensionStatuses),
@@ -8999,7 +9067,12 @@ function materializeSolveResult(
     dimensionStatuses.every((entry) => entry.status !== "unsatisfied");
 
   let status: SolvedSketchStatus;
-  if (!program.validation.isValid || !geometryValid) {
+  if (
+    !program.validation.isValid || !geometryValid ||
+    diagnostics.some((entry) =>
+      entry.code === "unsupported-constraint-operands" && entry.severity === "error",
+    )
+  ) {
     status = {
       solveState:
         program.partialSolvePolicy === "bestEffort"
@@ -12081,7 +12154,12 @@ function buildConstraintStatuses(
 
   return definition.constraints.map((constraint) => {
     let status: ConstraintStatusRecord["status"] = "satisfied";
-    const residual = perConstraint.get(constraint.constraintId) ?? 0;
+    // Missing rows mean unadmitted, never zero error. Derived requirements
+    // have their own status owner and apply their blocked override afterwards.
+    if (!perConstraint.has(constraint.constraintId)) {
+      return { constraintId: constraint.constraintId, status: "conflicting" };
+    }
+    const residual = perConstraint.get(constraint.constraintId)!;
     const residualTolerance =
       constraint.kind === "parallel" ||
       constraint.kind === "perpendicular" ||
