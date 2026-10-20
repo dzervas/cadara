@@ -10,6 +10,8 @@ import type {
 } from "@/core/editor/state-machine";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import {
+  canUndoSketchDraftPoint,
+  undoSketchDraftPoint,
   pruneSketchAnnotationContext,
   restageSketchMergePointsTool,
   restageSketchMirrorTool,
@@ -401,6 +403,20 @@ export class SketchAuthoredActions {
       event.historyDisposition === "fresh-file-open"
     )
       this.reset();
+    // Both toolbar activation and the shortcut reach this owner. Consume
+    // draft clicks before invoking the authored-action history engine.
+    if (
+      before.kind === "editingSketch" &&
+      before.pendingCommitRequestId === null &&
+      (event.type === "history.undoRequested" ||
+        (event.type === "tool.activated" && event.toolId === "undo")) &&
+      canUndoSketchDraftPoint(before.session)
+    ) {
+      return {
+        state: { ...before, session: undoSketchDraftPoint(before.session) },
+        effects: [],
+      };
+    }
     const beforeIdentity: AuthoredActionIdentity | null =
       before.kind === "editingSketch" && before.snapshot
         ? {

@@ -2155,7 +2155,7 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     ).toBe(false);
   });
 
-  test("Undo and Redo during a spline draft keep its placed fit points", async () => {
+  test("Undo pops a spline draft point; Redo does not restore draft points", async () => {
     const f = await fixture();
     f.dispatch({ type: "tool.activated", toolId: "circle" });
     f.dispatch({
@@ -2183,19 +2183,19 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
     f.dispatch({ type: "history.undoRequested" });
     expect(
       f.session.definition.entities.some((entity) => entity.kind === "circle"),
-    ).toBe(false);
+    ).toBe(true);
     expect(f.session.activeTool).toBe("spline");
     expect(f.session.status).toBe("drawing");
-    expect(f.session.toolPlacedPoints).toEqual([
-      [20, 20],
-      [30, 25],
-    ]);
+    expect(f.session.toolPlacedPoints).toEqual([[20, 20]]);
     f.dispatch({ type: "history.redoRequested" });
-    expect(f.session.toolPlacedPoints).toEqual([
-      [20, 20],
-      [30, 25],
-    ]);
+    expect(f.session.toolPlacedPoints).toEqual([[20, 20]]);
 
+    expect(undoLabels(f)).toEqual(["Create Sketch Geometry"]);
+    f.dispatch({
+      type: "sketch.pointerReleased",
+      sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
+      point: [30, 25],
+    });
     f.dispatch({ type: "sketch.confirmRequested" });
     expect(splines(f)).toHaveLength(1);
     expect(undoLabels(f)).toEqual([

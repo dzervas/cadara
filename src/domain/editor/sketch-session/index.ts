@@ -181,6 +181,8 @@ export {
   acceptSketchDraw,
   adoptCompatibleSketchEditToolTargets,
   beginSketchTool,
+  canUndoSketchDraftPoint,
+  undoSketchDraftPoint,
   clearActiveSketchTool,
   confirmSketchDrawing,
   deleteSketchReferenceTarget,
