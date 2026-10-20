@@ -387,6 +387,25 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
     "Fully constrained sketch lines should default to the constrained theme color.",
   ).toBe(palette.constrained);
 
+  for (const isAffectedOverconstraint of [true, false]) {
+    const baseLineConfig = getSketchDisplayPolylineMaterialConfig(
+      {
+        ...styledPolylineRenderable,
+        strokeStyle: undefined,
+        constraintDisplay: {
+          state: "overconstrained",
+          isAffectedOverconstraint,
+        },
+      },
+      true,
+      palette,
+    );
+    expect(
+      baseLineConfig.color,
+      `Overconstrained base curves (affected: ${isAffectedOverconstraint}) should stay blue; only the separate thin diagnostic overlay is red.`,
+    ).toBe(palette.underconstrained);
+  }
+
   const diagnosticLineConfig = getSketchDisplayPolylineMaterialConfig(
     {
       ...styledPolylineRenderable,
