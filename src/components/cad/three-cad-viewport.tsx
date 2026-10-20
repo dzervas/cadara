@@ -1,4 +1,7 @@
 // SLOP: Retained viewport renderer while the workbench/viewport port boundary is introduced and hidden context reads are removed.
+import { useShortcuts } from "@/hooks/use-shortcuts";
+import { attachViewportWheelNavigation } from "@/infrastructure/viewport/viewport-wheel-navigation";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { Button } from "@mantine/core";
 import { ViewportCanvas } from "@/components/cad/viewport-canvas";
 import { WebGlRecoveryPanel } from "@/components/layout/webgl-recovery-panel";
@@ -639,6 +642,7 @@ function ThreeCadViewportScene({
   const viewCubeRef = useRef<HTMLDivElement | null>(null);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRef = useRef<ViewportCamera | null>(null);
+  const { pointingDevice } = useShortcuts();
   const controlsRef = useRef<ViewportCameraControls | null>(null);
   const controlsInitializedRef = useRef(false);
   const pendingProjectionFrameRef = useRef<ViewportCameraFrame | null>(null);
@@ -911,6 +915,23 @@ function ThreeCadViewportScene({
     },
     [closeAnnotationWheel],
   );
+  const handleNavigationStart = useCallback(() => {
+    cameraTransitionControllerRef.current.cancel();
+    closeAnnotationWheel();
+  }, [closeAnnotationWheel]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const canvas = canvasElementRef.current;
+    if (!controls || !canvas) return;
+    return attachViewportWheelNavigation(
+      controls as OrbitControlsImpl,
+      canvas,
+      pointingDevice,
+      handleNavigationStart,
+    );
+  }, [controlsReadyVersion, pointingDevice, handleNavigationStart]);
+
   const handleControlsRef = useCallback((controls: unknown) => {
     const nextControls = controls as ViewportCameraControls | null;
 
@@ -3514,6 +3535,17 @@ function ThreeCadViewportScene({
       return;
     }
 
+    window.__cadReadCamera = () => {
+      const camera = cameraRef.current;
+      const controls = controlsRef.current;
+      return camera && controls
+        ? {
+            position: camera.position.toArray(),
+            target: controls.target.toArray(),
+            zoom: camera.zoom,
+          }
+        : null;
+    };
     window.__cadFlushCameraDamping = () => {
       const camera = cameraRef.current;
       const controls = controlsRef.current;
@@ -3548,6 +3580,7 @@ function ThreeCadViewportScene({
     };
 
     return () => {
+      delete window.__cadReadCamera;
       delete window.__cadFlushCameraDamping;
       delete window.__cadProjectToScreen;
     };
@@ -3769,10 +3802,7 @@ function ThreeCadViewportScene({
         <OrbitControls
           ref={handleControlsRef}
           makeDefault
-          onStart={() => {
-            cameraTransitionControllerRef.current.cancel();
-            closeAnnotationWheel();
-          }}
+          onStart={handleNavigationStart}
           target={[0, 0, 4]}
           enableDamping
           dampingFactor={0.08}

@@ -57,6 +57,8 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <ShortcutContext.Provider
         value={{
+          pointingDevice: "mouse" as const,
+          setPointingDevice: () => undefined,
           activeScopes: ["global"],
           commands,
           effectiveKeymap,

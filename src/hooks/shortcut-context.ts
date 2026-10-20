@@ -14,6 +14,8 @@ import type {
 import type { ShortcutSequence } from "@/core/shortcuts/shortcut-grammar";
 
 export interface ShortcutContextValue {
+  pointingDevice: "mouse" | "touchpad";
+  setPointingDevice: (scheme: "mouse" | "touchpad") => void;
   activeScopes: readonly ShortcutScope[];
   commands: readonly ShortcutCommandDefinition[];
   effectiveKeymap: EffectiveShortcutMap;

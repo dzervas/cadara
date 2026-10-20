@@ -21,6 +21,17 @@ export class SketchWorkbenchHarness {
     this.page = page;
   }
 
+  async settledCamera() {
+    return this.page.evaluate(() => {
+      if (!window.__cadFlushCameraDamping?.()) throw new Error("Camera damping was not ready");
+      const frame = window.__cadReadCamera?.();
+      if (!frame) throw new Error("Camera was not ready");
+      // OrbitControls recomputes spherical coordinates even on an idle update.
+      const stable = (value: number) => Math.round(value * 1e8) / 1e8;
+      return { position: frame.position.map(stable), target: frame.target.map(stable), zoom: stable(frame.zoom) };
+    });
+  }
+
   async seedOperationHistory(payload: ModelingOperationHistoryPayload) {
     const serializedPayload = JSON.stringify(payload);
 

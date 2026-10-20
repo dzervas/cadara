@@ -5,6 +5,8 @@ import type {
 import type { ShortcutProfileOverrides } from "@/core/shortcuts/keymap";
 
 export interface ShortcutProfileRepository {
+  loadPointingDevice?(): Promise<"mouse" | "touchpad">;
+  savePointingDevice?(scheme: "mouse" | "touchpad"): Promise<void>;
   load(): Promise<ShortcutProfileOverrides>;
   save(overrides: ShortcutProfileOverrides): Promise<void>;
 }
@@ -22,6 +24,14 @@ export function createLocalShortcutProfileRepository(
   key = shortcutProfileStorageKey,
 ): ShortcutProfileRepository {
   return {
+    async loadPointingDevice() {
+      return storage.getItem(`${key}.pointingDevice`) === "touchpad"
+        ? "touchpad"
+        : "mouse";
+    },
+    async savePointingDevice(scheme) {
+      storage.setItem(`${key}.pointingDevice`, scheme);
+    },
     async load() {
       const raw = storage.getItem(key);
       if (!raw) {

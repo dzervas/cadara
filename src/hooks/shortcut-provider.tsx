@@ -72,6 +72,7 @@ export function ShortcutProvider({
         : repository,
     [repository],
   );
+  const [pointingDevice, setPointingDevice] = useState<"mouse" | "touchpad">("mouse");
   const [overrides, setOverrides] = useState<ShortcutProfileOverrides>({});
   const effectiveKeymap = useMemo(
     () => createEffectiveKeymap(registry, overrides),
@@ -84,6 +85,10 @@ export function ShortcutProvider({
 
   useEffect(() => {
     let disposed = false;
+
+    void resolvedRepository?.loadPointingDevice?.().then((scheme) => {
+      if (!disposed) setPointingDevice(scheme);
+    });
 
     void resolvedRepository?.load().then((loadedOverrides) => {
       if (disposed) {
@@ -145,6 +150,11 @@ export function ShortcutProvider({
 
   const value = useMemo(
     () => ({
+      pointingDevice,
+      setPointingDevice: (scheme: "mouse" | "touchpad") => {
+        setPointingDevice(scheme);
+        void resolvedRepository?.savePointingDevice?.(scheme);
+      },
       activeScopes,
       commands,
       effectiveKeymap,
@@ -186,6 +196,8 @@ export function ShortcutProvider({
       getConflictsForOverrides,
     }),
     [
+      pointingDevice,
+      resolvedRepository,
       activeScopes,
       commands,
       effectiveKeymap,
