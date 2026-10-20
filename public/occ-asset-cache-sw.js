@@ -2,18 +2,22 @@ const OCC_ASSET_CACHE_VERSION =
   new URL(self.location.href).searchParams.get("v") || "unversioned";
 const OCC_ASSET_CACHE_NAME = `cadara-occ-assets-opencascade-2.0.0-beta.b5ff984-${OCC_ASSET_CACHE_VERSION}`;
 
-// The app's content-hashed worker bundles (`APP_WORKER_ASSET_URLS` in
-// `src/infrastructure/occ/asset-cache.ts`), passed in the registration URL.
-// They are precached at install, so a worker first spawned after the network
-// is gone still loads, and served cache-first. Only same-origin `/assets/`
-// files qualify. The cache is named after the list: a build with other
-// hashes registers a new script URL, and its activation drops the old cache.
-const APP_ASSET_PATHS = (
-  new URL(self.location.href).searchParams.get("precache") || ""
-)
-  .split(",")
-  .filter((path) => /^\/assets\/[^/]+$/.test(path));
-const APP_ASSET_CACHE_NAME = `cadara-app-assets-${APP_ASSET_PATHS.join(",")}`;
+// The production build fills this from its actual output, including HTML,
+// fonts and public icons. Its content digest changes this script and cache
+// identity even when the OCC version and worker bundle URLs stay unchanged.
+const APP_SHELL_PRECACHE = /* APP_SHELL_PRECACHE */ null;
+// Keep accepting the content-hashed worker URLs from the registration URL.
+// Deduplicate them against the generated shell list: cache.addAll rejects
+// duplicate requests. Workers first spawned offline still load cache-first.
+const APP_ASSET_PATHS = [
+  ...new Set([
+    ...(APP_SHELL_PRECACHE?.paths || []),
+    ...(new URL(self.location.href).searchParams.get("precache") || "")
+      .split(",")
+      .filter((path) => /^\/assets\/[^/]+$/.test(path)),
+  ]),
+];
+const APP_ASSET_CACHE_NAME = `cadara-app-assets-${APP_SHELL_PRECACHE?.version || APP_ASSET_PATHS.join(",")}`;
 
 // The kernel runtime as the app requests it (`getVersionedOpenCascadeAssetUrl`
 // in `src/domain/modeling/occ/assets.ts`: the path plus the same `v`). It is
@@ -91,7 +95,10 @@ self.addEventListener("activate", (event) => {
 
 async function cacheFirst(cacheName, request) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
+  // These same-origin build/kernel files have one representation. Preview
+  // hosts may send Vary: Origin: install-time fetches lack the Origin header
+  // that module/worker requests carry, but must still hit the precache.
+  const cached = await cache.match(request, { ignoreVary: true });
   if (cached) {
     return cached;
   }
@@ -103,8 +110,36 @@ async function cacheFirst(cacheName, request) {
   return response;
 }
 
+// Editor URLs are rewritten to app.html by the host. Cache the canonical
+// HTML at install so /app (including a first offline navigation) can boot.
+async function navigationNetworkFirst(request) {
+  try {
+    return await fetch(request);
+  } catch (error) {
+    const pathname = new URL(request.url).pathname;
+    const shellPath = /^\/app\/?$/.test(pathname)
+      ? "/app.html"
+      : pathname === "/"
+        ? "/index.html"
+        : pathname;
+    const cache = await caches.open(APP_ASSET_CACHE_NAME);
+    const cached = await cache.match(shellPath);
+    if (cached) return cached;
+    throw error;
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  if (
+    APP_SHELL_PRECACHE &&
+    event.request.mode === "navigate" &&
+    new URL(event.request.url).origin === self.location.origin
+  ) {
+    event.respondWith(navigationNetworkFirst(event.request));
     return;
   }
 

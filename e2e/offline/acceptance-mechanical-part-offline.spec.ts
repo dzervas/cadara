@@ -2,9 +2,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
+import type { AuthoredModelDocument } from "../../src/contracts/modeling/authored-document";
 
 import { waitForCommittedAction } from "../helpers/acceptance";
-import { saveDocumentCopy } from "../helpers/document-files";
+import { openDocumentCopy, saveDocumentCopy } from "../helpers/document-files";
+import { createRectangleProfileOperationHistory } from "../helpers/modeling-fixtures";
 import { FeatureWorkbenchHarness } from "../helpers/feature-workbench";
 import { runMechanicalPartFlow } from "../helpers/mechanical-part";
 import {
@@ -172,6 +174,77 @@ test("§1 E2E-1 offline (production build, network really cut after load): File 
       ]),
       "the offline edit is saved",
     ).toEqual([["diameter", 4]]);
+  } finally {
+    await stopPreview(server, baseURL);
+  }
+});
+
+// A navigation must be served by the service worker, not merely a warm HTTP
+// cache. Also exercise a new page with the same persistent browser storage.
+test("reload while offline boots and opens the document; a cold page starts offline too", async ({
+  page,
+  context,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const baseURL = testInfo.project.use.baseURL!;
+  const server = startPreview(baseURL, testInfo.outputPath("preview.log"));
+  try {
+    await expect.poll(() => reachable(baseURL), { timeout: 60_000 }).toBe(true);
+    const workbench = new FeatureWorkbenchHarness(page);
+    await workbench.openWithRepositoryAndOperationHistory(
+      createRectangleProfileOperationHistory(),
+    );
+    const saved = await saveDocumentCopy<AuthoredModelDocument>(page);
+    const expectDocumentGeometry = async (target: Page) => {
+      const actual = await saveDocumentCopy<AuthoredModelDocument>(target);
+      expect(actual.sketches).toHaveLength(1);
+      // Repository round-trips can reorder the entity/point records.
+      for (const key of ["entities", "points"] as const) {
+        const expected = saved.sketches[0]!.definition[key];
+        expect(actual.sketches[0]!.definition[key]).toHaveLength(
+          expected.length,
+        );
+        expect(actual.sketches[0]!.definition[key]).toEqual(
+          expect.arrayContaining(expected),
+        );
+      }
+    };
+    expect(saved.sketches).toHaveLength(1);
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+    });
+    await expect
+      .poll(
+        () => page.evaluate(() => navigator.serviceWorker.controller !== null),
+        {
+          timeout: 60_000,
+        },
+      )
+      .toBe(true);
+
+    await stopPreview(server, baseURL);
+    await context.setOffline(true);
+    // Clear Chromium's HTTP cache, not CacheStorage (the app's offline store).
+    const session = await context.newCDPSession(page);
+    await session.send("Network.clearBrowserCache");
+    await session.detach();
+    await page.reload();
+    await workbench.expectMachine("idle", 60_000);
+    await workbench.expectWorkspaceInRepository();
+    await expectDocumentGeometry(page);
+    await openDocumentCopy(page, saved, "offline-reload.cadara");
+    await expectDocumentGeometry(page);
+
+    await page.close();
+    const coldPage = await context.newPage();
+    // The landing entry is part of the shell too, even if never visited online.
+    await coldPage.goto(`${baseURL}/`);
+    await expect(coldPage).toHaveTitle(/CADara/);
+    const coldWorkbench = new FeatureWorkbenchHarness(coldPage);
+    await coldWorkbench.openWithRepository();
+    await coldWorkbench.expectMachine("idle", 60_000);
+    await openDocumentCopy(coldPage, saved, "offline-cold-start.cadara");
+    await expectDocumentGeometry(coldPage);
   } finally {
     await stopPreview(server, baseURL);
   }
