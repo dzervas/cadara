@@ -3128,10 +3128,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       return;
     }
 
-    extractPlanarFaceData(
+    const { plane: extractedPlane } = extractPlanarFaceData(
       state.oc,
       this.requireLiveFace(state, plane.support.bodyId, plane.support.faceId),
     );
+    releaseOccObjects([extractedPlane]);
   }
 
   private validateCommitSketchRequest(

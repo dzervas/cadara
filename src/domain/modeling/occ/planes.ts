@@ -262,11 +262,12 @@ export function buildConstructionPlaneFromPlanarFace(
   faceId: FaceId,
   support: SketchPlaneDefinition["support"],
 ): SketchPlaneDefinition {
-  const { frame } = extractPlanarFaceData(
+  const { frame, plane } = extractPlanarFaceData(
     oc,
     face,
     `Face ${faceId} is not planar.`,
   );
+  releaseOccObjects([plane]);
   return {
     support,
     frame,
