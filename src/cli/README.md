@@ -721,7 +721,7 @@ constraint registry, contribution preparation and solver, not tool gestures.
 | `constraintCollinear` | Local point/line and local, datum or projected line |
 | `constraintParallel`, `constraintPerpendicular` | Two local lines, or a local line and datum/projected line |
 | `constraintTangent` | Local line/circle/arc with circle/arc; supported local curve with projected circle/arc |
-| `constraintEqual` | Two local lines (not equal-radius circles) |
+| `constraintEqual` | Two local lines (equal length) or two local circles (equal radius); no mixed line/circle pairs or arcs |
 | `constraintHorizontal`, `constraintVertical` | One local line |
 | `constraintConcentric` | Two local circles/arcs, or local circle/arc with projected circle/arc |
 | `constraintMidpoint` | Local point and local, datum or projected line |
@@ -732,6 +732,13 @@ constraint registry, contribution preparation and solver, not tool gestures.
 | `dimensionDistance` | One local circle/arc (diameter), one local line (length), two supported lines (parallel distance or nonparallel angle), point/line distance, two local points or local point/sketch origin |
 | `dimensionHorizontal`, `dimensionVertical` | Two local points or local point/sketch origin |
 | `dimensionRadius` | One local circle only; use Distance for an arc diameter |
+
+For equal-radius circles, add `constraintEqual` relationships between pairs and
+size one circle with `dimensionRadius` or `dimensionDistance` (diameter). The
+shared solver resizes every connected equal circle and reports conflicting
+driving sizes as invalid, not fulfilled. These relationships persist in native
+files as `equalLength` constraints (the same contract used by equal-length lines).
+Arc radius equality is deliberately unsupported.
 
 Constraints require `mode: "driving", value: null`. Dimensions require either
 `mode: "driving", value: <positive number>` or

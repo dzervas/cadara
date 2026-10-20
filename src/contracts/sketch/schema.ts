@@ -940,7 +940,7 @@ export type ConstraintDefinition =
       kind: "equalLength";
       /** Human-readable label owned by the producer of the sketch definition. */
       label: string;
-      /** Two line entities whose solved lengths must match. */
+      /** Two local lines with matching solved lengths, or two local circles with matching solved radii. Arcs and mixed kinds are unsupported. */
       entityIds: readonly [SketchEntityId, SketchEntityId];
     }
   | {

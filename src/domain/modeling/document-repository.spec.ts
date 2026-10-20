@@ -1,3 +1,9 @@
+import { makeEqualCircleDefinition } from "@/contracts/sketch/equal-radius.fixtures";
+import {
+  literalAuthoredDefinition,
+  literalResolvedDefinition,
+} from "@/contracts/sketch/region-extraction.fixtures";
+import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
 import { describe, test, expect } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import {
@@ -48,6 +54,56 @@ for (const [name, make] of [
   ["memory", () => createMemoryDocumentRepository()],
   ["Automerge", () => persistent()],
 ] as const) {
+  test(`${name}: equal circle radii persist and solve after repository reopen`, async () => {
+    const seed = await createSeedAuthoredModelDocument();
+    const repository = make();
+    const plane = createStandardPlaneDefinition("xy");
+    const sketch = {
+      sketchId: "sketch_equal_circles" as const,
+      label: "Equal circles",
+      plane,
+      definition: literalAuthoredDefinition(makeEqualCircleDefinition()),
+    };
+    const document = {
+      ...seed,
+      sketches: [...seed.sketches, sketch],
+      historyOrder: [
+        ...seed.historyOrder,
+        { kind: "sketch" as const, sketchId: sketch.sketchId },
+      ],
+    };
+    expect(
+      (await repository.initialize({ documentId: seed.documentId, document })).ok,
+    ).toBe(true);
+    const loaded = await repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    if (!loaded.ok) throw new Error("Repository reopen failed");
+    const restored = loaded.document.sketches.find(
+      (s) => s.sketchId === sketch.sketchId,
+    )!;
+    expect(restored.definition.constraints).toEqual(
+      sketch.definition.constraints,
+    );
+    expect(restored.definition.dimensions).toEqual(sketch.definition.dimensions);
+    const solved = solveSketchDefinitionCore({
+      definition: literalResolvedDefinition(restored.definition),
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-6,
+      partialSolvePolicy: "bestEffort",
+    }).solvedSnapshot;
+    expect(solved.status.solveState).toBe("solved");
+    expect(solved.solvedEntities).toHaveLength(3);
+    for (const entity of solved.solvedEntities) {
+      expect(entity.kind).toBe("circle");
+      if (entity.kind === "circle") expect(entity.solvedRadius).toBeCloseTo(8, 5);
+    }
+  });
   test(`${name}: conditional writes, compensation, fresh initialization and actor identity`, async () => {
     const seed = await createSeedAuthoredModelDocument();
     const repository: DocumentRepository = make();

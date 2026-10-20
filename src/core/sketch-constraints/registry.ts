@@ -2305,25 +2305,43 @@ const sketchConstraintDefinitions = [
     metadata: {
       id: "constraintEqual",
       name: "Equal",
-      tooltip: "Constrain two lines to equal length.",
+      tooltip:
+        "Constrain two lines to equal length or two circles to equal radius.",
       icon: "constraintEqual",
       group: "constraints",
       modes: ["sketch"],
     },
     steps: [
-      { id: "equal-a", label: "Select first line", acceptedKinds: ["line"] },
-      { id: "equal-b", label: "Select second line", acceptedKinds: ["line"] },
+      {
+        id: "equal-a",
+        label: "Select first line or circle",
+        acceptedKinds: ["line", "circle"],
+      },
+      {
+        id: "equal-b",
+        label: "Select second line or circle",
+        acceptedKinds: ["line", "circle"],
+      },
     ],
     resolveTarget(definition, target) {
-      return resolveLineTarget(definition, target);
+      const resolved = createCompositeResolver([
+        resolveLocalLineTarget,
+        resolveCircleTarget,
+      ])(definition, target);
+      // Equality is local line↔line or circle↔circle only; arcs are excluded
+      // because their radius is coupled to endpoints, unlike a circle scalar.
+      return resolved?.entity?.kind === "lineSegment" ||
+        resolved?.entity?.kind === "circle"
+        ? resolved
+        : null;
     },
     buildPreview(input) {
       return buildSinglePreview(
         "equal-preview",
-        "Equal-length preview",
+        "Equal preview",
         input.selectedTargets.length >= 2
           ? formatSelectedLabels(input.selectedTargets)
-          : "Select two lines",
+          : "Select two lines or two circles",
         input,
       );
     },
@@ -2332,6 +2350,12 @@ const sketchConstraintDefinitions = [
 
       if (!first?.entity || !second?.entity) {
         return {};
+      }
+
+      if (first.entity.kind !== second.entity.kind) {
+        return {
+          refusal: "Equal requires two local lines or two local circles.",
+        };
       }
 
       return {

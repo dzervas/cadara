@@ -48,6 +48,7 @@ export type SemanticRequirementTarget = SemanticSketchGeometryTarget
   | import("@/contracts/shared/references").SketchDatumReferenceRef
   | import("@/contracts/shared/references").ProjectedReferenceGeometryRef;
 export interface SemanticRequirementInput {
+  /** constraintEqual accepts two local lines (length) or two local circles (radius), never mixed kinds or arcs. */
   tool: "dimensionDistance" | "dimensionHorizontal" | "dimensionVertical" | "dimensionRadius" | "constraintCoincident" | "constraintCollinear"
     | "constraintParallel" | "constraintPerpendicular" | "constraintTangent"
     | "constraintEqual" | "constraintHorizontal" | "constraintVertical"
