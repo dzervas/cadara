@@ -735,6 +735,60 @@ export function beginSketchTool(
   };
 }
 
+/** Fit-point clicks are draft state, not authored actions. */
+export function canUndoSketchDraftPoint(session: SketchSessionState): boolean {
+  if (!isDrawingSketchTool(session.activeTool)) return false;
+  const { lifecycle } = getSketchToolDefinition(session.activeTool);
+  return (
+    typeof lifecycle === "object" &&
+    lifecycle.kind === "fitPoints" &&
+    session.toolPlacedPoints.length > 0
+  );
+}
+
+export function undoSketchDraftPoint(
+  session: SketchSessionState,
+): SketchSessionState {
+  if (
+    !canUndoSketchDraftPoint(session) ||
+    !isDrawingSketchTool(session.activeTool)
+  ) {
+    return session;
+  }
+
+  const tool = getSketchToolDefinition(session.activeTool);
+  const placedPoints = session.toolPlacedPoints.slice(0, -1);
+  const placements = (session.toolPlacements ?? []).slice(0, -1);
+  const runtimeState: SketchToolRuntimeState = {
+    ...getToolRuntimeState(session),
+    status: placedPoints.length ? "drawing" : "idle",
+    pointerDownPoint: placedPoints[0] ?? null,
+    livePoint: null,
+    placedPoints,
+    validationMessage: null,
+  };
+  return {
+    ...session,
+    status: runtimeState.status,
+    pointerDownPoint: runtimeState.pointerDownPoint,
+    livePoint: null,
+    toolPlacedPoints: placedPoints,
+    toolPlacements: placements,
+    toolStartPointId: placedPoints.length ? session.toolStartPointId : null,
+    activeInference: null,
+    validationMessage: null,
+    toolStagedEntities: withConstructionFlag(
+      tool.getStagedEntities(runtimeState),
+      session.constructionModifierActive,
+    ),
+    toolPresentation: withPlacementPresentation(
+      tool.getPresentation(runtimeState),
+      placements,
+      null,
+    ),
+  };
+}
+
 /** What one Escape does to an armed drawing tool (T11-D10). */
 export type SketchDrawingEscapeStep =
   | "endChain"

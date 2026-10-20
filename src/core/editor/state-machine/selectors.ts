@@ -1,3 +1,4 @@
+import { canUndoSketchDraftPoint } from "@/domain/editor/sketch-session";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getNextDocumentHistoryCursor,
@@ -20,9 +21,14 @@ export function getEditorHistoryAvailability(
       return { canUndo: false, canRedo: false };
     }
 
-    return (
-      state.session.actionAvailability ?? { canUndo: false, canRedo: false }
-    );
+    const availability = state.session.actionAvailability ?? {
+      canUndo: false,
+      canRedo: false,
+    };
+    return {
+      ...availability,
+      canUndo: canUndoSketchDraftPoint(state.session) || availability.canUndo,
+    };
   }
 
   if (state.kind !== "idle") {

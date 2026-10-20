@@ -17,7 +17,7 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession, enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -377,6 +377,21 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     constructionToolbarMarkup.includes('aria-label="Construction"') &&
       constructionToolbarMarkup.includes('aria-pressed="true"'),
     "Construction should render selected while acting as a sketch modifier.",
+  ).toBeTruthy();
+
+  const splineDraft = startSketchDraw(
+    beginSketchTool(constructionSession, "spline"),
+    [30, 30],
+  );
+  const draftToolbarMarkup = renderToolbar({
+    state: getEditorViewState(enterSketchSessionState(splineDraft)),
+  });
+  expect(
+    getToolMarkup(draftToolbarMarkup, "undo").includes('data-disabled="true"'),
+    "A spline draft alone enables the toolbar Undo button without an authored history entry.",
+  ).toBeFalsy();
+  expect(
+    getToolMarkup(draftToolbarMarkup, "redo").includes('data-disabled="true"'),
   ).toBeTruthy();
 
   const historyToolbarMarkup = renderToolbar({
