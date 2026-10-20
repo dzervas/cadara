@@ -3,6 +3,7 @@
 // and disposal use real OCC wrappers; runtime binding patches inject cleanup failures.
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
+import { makeOccWrapperTracker } from "../../../test/helpers/occ-wrapper-tracker";
 import { readFile } from "node:fs/promises";
 
 import type { FaceId, RevisionId } from "@/contracts/shared/ids";
@@ -14,15 +15,12 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
+import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from "@/domain/modeling/occ/sketch-profile";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 
 type OC = OpenCascadeInstance;
-type W = { delete(): void; isDeleted?(): boolean };
-type AnyFn = (...args: unknown[]) => unknown;
-type Patchable = Record<string, unknown>;
-
 async function loadOc(): Promise<OC> {
   const mod = (await import("../../../public/cadara-occ.js")) as unknown as {
     default: new (m: Record<string, unknown>) => Promise<OC>;
@@ -31,152 +29,6 @@ async function loadOc(): Promise<OC> {
     await readFile(new URL("../../../public/cadara-occ.wasm", import.meta.url)),
   );
   return new mod.default({ wasmBinary });
-}
-
-/** Minimal independent tracker: records wrappers by kind, counts deletes, arms first-delete failures. */
-function makeTracker(oc: OC) {
-  const module = oc as unknown as Patchable;
-  const created = new Map<string, W[]>();
-  const attempts = new Map<W, number>();
-  const stacks = new Map<W, string>();
-  // An armed failure, optionally only for a wrapper created at a call site
-  // whose stack `where` accepts (T10c review R-3: pick one of several sites).
-  const armed = new Map<
-    string,
-    { error: Error; where?: (stack: string) => boolean }[]
-  >();
-  const failing = new Map<W, Error>();
-  const restorers: Array<() => void> = [];
-  let on = false;
-  const record = (kind: string, v: unknown) => {
-    if (!on || typeof v !== "object" || v === null) return v;
-    const w = v as W;
-    (created.get(kind) ?? created.set(kind, []).get(kind)!).push(w);
-    const stack = new Error().stack ?? "";
-    stacks.set(w, stack);
-    const queue = armed.get(kind) ?? [];
-    const index = queue.findIndex(
-      (entry) => !entry.where || entry.where(stack),
-    );
-    if (index >= 0) failing.set(w, queue.splice(index, 1)[0]!.error);
-    const native = w.delete.bind(w);
-    attempts.set(w, 0);
-    w.delete = () => {
-      const n = (attempts.get(w) ?? 0) + 1;
-      attempts.set(w, n);
-      const f = failing.get(w);
-      if (f && n === 1) throw f;
-      native();
-    };
-    return w;
-  };
-  const patch = (owner: Patchable, name: string, wrap: (o: AnyFn) => AnyFn) => {
-    const original = owner[name] as AnyFn;
-    if (typeof original !== "function") throw new Error(`missing ${name}`);
-    owner[name] = wrap(original);
-    restorers.push(() => (owner[name] = original));
-  };
-  const proto = (c: string) =>
-    (module[c] as { prototype: Patchable }).prototype;
-  const result = (owner: Patchable, name: string, kind: string) =>
-    patch(
-      owner,
-      name,
-      (o) =>
-        function (this: unknown, ...a: unknown[]) {
-          return record(kind, o.apply(this, a));
-        },
-    );
-  const ctor = (name: string, kind: string) => {
-    const original = module[name] as new (...a: unknown[]) => object;
-    module[name] = new Proxy(original, {
-      construct: (t, a) => record(kind, Reflect.construct(t, a)) as object,
-    });
-    restorers.push(() => (module[name] = original));
-  };
-  ctor("TopLoc_Location_1", "TopLoc_Location");
-  ctor("BRepAdaptor_Surface_2", "BRepAdaptor_Surface");
-  ctor("BRepAdaptor_Curve_2", "BRepAdaptor_Curve");
-  ctor("TopTools_IndexedMapOfShape_1", "TopTools_IndexedMapOfShape");
-  const bt = module.BRep_Tool as Patchable;
-  result(bt, "Triangulation", "Handle_Poly_Triangulation");
-  result(bt, "PolygonOnTriangulation_1", "Handle_Poly_PolygonOnTriangulation");
-  result(bt, "Polygon3D", "Handle_Poly_Polygon3D");
-  result(bt, "Pnt", "gp_Pnt(vertex)");
-  result(module.TopoDS as Patchable, "Face_1", "TopoDS_Face(Face_1)");
-  result(
-    proto("TopTools_IndexedMapOfShape"),
-    "FindKey",
-    "TopoDS_Shape(FindKey)",
-  );
-  result(proto("TopLoc_Location"), "Transformation", "gp_Trsf");
-  result(proto("Poly_Triangulation"), "Node", "gp_Pnt(node)");
-  result(proto("Poly_Triangulation"), "Normal_1", "gp_Dir(normal)");
-  result(proto("Poly_Triangulation"), "Triangle", "Poly_Triangle");
-  result(proto("gp_Pnt"), "Transformed", "gp_Pnt(transformed)");
-  result(proto("gp_Dir"), "Transformed", "gp_Dir(transformed)");
-  result(proto("BRepAdaptor_Surface"), "Plane", "gp_Pln");
-  result(proto("gp_Pln"), "Position", "gp_Ax3");
-  for (const n of ["Location", "XDirection", "YDirection", "Direction"])
-    result(proto("gp_Ax3"), n, "gp_Ax3 component");
-  result(proto("BRepAdaptor_Curve"), "Value", "gp_Pnt(curve)");
-  result(proto("Poly_Polygon3D"), "Nodes", "TColgp_Array1OfPnt");
-  result(proto("TColgp_Array1OfPnt"), "Value", "gp_Pnt(polygon)");
-  const live = (w: W) => !w.isDeleted?.();
-  return {
-    patch,
-    proto,
-    async record<T>(f: () => T | Promise<T>) {
-      on = true;
-      try {
-        return await f();
-      } finally {
-        on = false;
-      }
-    },
-    arm(kind: string, e: Error, where?: (stack: string) => boolean) {
-      (armed.get(kind) ?? armed.set(kind, []).get(kind)!).push({
-        error: e,
-        where,
-      });
-    },
-    of: (k: string) => created.get(k) ?? [],
-    attempts: (w: W) => attempts.get(w) ?? 0,
-    stack: (w: W) => stacks.get(w) ?? "",
-    failing: () => [...failing.keys()],
-    liveByKind() {
-      return Object.fromEntries(
-        [...created]
-          .map(([k, ws]) => [k, ws.filter(live).length])
-          .filter(([, n]) => (n as number) > 0),
-      );
-    },
-    created() {
-      return Object.fromEntries([...created].map(([k, ws]) => [k, ws.length]));
-    },
-    siblingsNotOnce() {
-      const f = new Set(failing.keys());
-      return [...created.values()]
-        .flat()
-        .filter((w) => !f.has(w) && (attempts.get(w) !== 1 || live(w))).length;
-    },
-    clear() {
-      created.clear();
-      attempts.clear();
-      armed.clear();
-      failing.clear();
-      stacks.clear();
-    },
-    leftovers() {
-      failing.clear();
-      for (const ws of created.values())
-        for (const w of ws) if (live(w)) w.delete();
-    },
-    restore() {
-      for (const r of restorers.reverse()) r();
-      restorers.length = 0;
-    },
-  };
 }
 
 const req = {
@@ -323,7 +175,7 @@ test("F1: commitSketch face-support planar-extraction cleanup failure routing", 
     ]),
   );
 
-  const tracker = makeTracker(oc);
+  const tracker = makeOccWrapperTracker(oc);
   const service = createModelingService(adapter, {
     currentDocumentId: "doc_workspace",
   });
@@ -405,7 +257,7 @@ test("F1: non-planar face and cleanup failure retain both errors and retry", asy
   }
   if (!curvedFaceId) throw new Error("Cylinder requires a curved face.");
   const current = await adapter.getDocumentSnapshot(req);
-  const tracker = makeTracker(oc);
+  const tracker = makeOccWrapperTracker(oc);
   const service = createModelingService(adapter, {
     currentDocumentId: "doc_workspace",
   });
@@ -473,7 +325,7 @@ test("F1: non-planar face and cleanup failure retain both errors and retry", asy
   }
 });
 
-test("F1 control: same commit without injection is accepted and leaves no live adaptor", async () => {
+test("cadara-o5k: planar consumers retain no plane handles on success or cleanup failure", async () => {
   const oc = await loadOc();
   const { adapter, src } = await adapterWithExtrudedBody(oc);
   const state = (
@@ -488,7 +340,7 @@ test("F1 control: same commit without injection is accepted and leaves no live a
   const x = extractPlanarFaceData(oc, face);
   x.plane.delete();
   const current = await adapter.getDocumentSnapshot(req);
-  const tracker = makeTracker(oc);
+  const tracker = makeOccWrapperTracker(oc);
   try {
     const res = await tracker.record(() =>
       adapter.commitSketch({
@@ -516,6 +368,32 @@ test("F1 control: same commit without injection is accepted and leaves no live a
       } as never),
     );
     expect(res.revisionState.kind).toBe("accepted");
+    await tracker.record(() => {
+      expect(getExtrusionNormalForPlanarFace(oc, face, "positive")).toEqual(x.frame.normal);
+      expect(buildConstructionPlaneFromPlanarFace(oc, face, faceId, {
+        kind: "face", bodyId: body.bodyId, faceId,
+      }).frame).toEqual(x.frame);
+    });
+    expect(tracker.of("gp_Pln").length).toBeGreaterThan(2);
+    expect(tracker.of("gp_Pln").filter((plane) => !plane.isDeleted?.())).toHaveLength(0);
+
+    const cleanupError = new Error("injected plane release failure");
+    tracker.arm("gp_Pln", cleanupError);
+    let releaseFailure: unknown;
+    try {
+      await tracker.record(() => getExtrusionNormalForPlanarFace(oc, face, "negative"));
+    } catch (error) {
+      releaseFailure = error;
+    }
+    const [cleanup] = collectOccCleanupErrors(releaseFailure);
+    expect(cleanup?.errors).toContain(cleanupError);
+    const [failed] = tracker.failing();
+    expect(tracker.attempts(failed!)).toBe(1);
+    // The cleanup error retains the only failed owner for an explicit retry.
+    const failedPlane = tracker.of("gp_Pln").filter((plane) => !plane.isDeleted?.());
+    expect(failedPlane).toHaveLength(1);
+    cleanup!.retry();
+    expect(tracker.of("gp_Pln").filter((plane) => !plane.isDeleted?.())).toHaveLength(0);
   } finally {
     adapter.dispose();
     tracker.leftovers();
@@ -537,7 +415,7 @@ async function expectProjectionSnapshotVertexPointRetention(site: string) {
   const service = createModelingService(adapter, {
     currentDocumentId: "doc_workspace",
   });
-  const tracker = makeTracker(oc);
+  const tracker = makeOccWrapperTracker(oc);
   let disposed = false;
   try {
     // F3 variant (WARM=0): arm before service initialization's own snapshot read.

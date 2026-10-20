@@ -1621,11 +1621,12 @@ export function getExtrusionNormalForPlanarFace(
   face: InstanceType<OpenCascadeInstance["TopoDS_Face"]>,
   direction: "positive" | "negative",
 ) {
-  const { frame } = extractPlanarFaceData(
+  const { frame, plane } = extractPlanarFaceData(
     oc,
     face,
     "Face-backed profile requires a planar face.",
   );
+  releaseOccObjects([plane]);
   const normal = frame.normal as Vec3;
   return direction === "positive" ? normal : negate(normal);
 }
