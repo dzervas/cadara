@@ -67,6 +67,11 @@ export function getBrowserOccWorkerClient() {
   return browserOccWorkerClient;
 }
 
+/** Explicit tab close, not facade replacement, releases the worker's native owner. */
+export async function releaseBrowserOccDocument(documentId: DocumentId): Promise<void> {
+  await browserOccWorkerClient?.releaseDocument(documentId);
+}
+
 export function createBrowserOccKernelAdapter(
   documentId: DocumentId = OCC_KERNEL_DOCUMENT_ID,
   performanceTelemetry: PerformanceTelemetry = noopPerformanceTelemetry,

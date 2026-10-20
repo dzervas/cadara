@@ -5,6 +5,7 @@ import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/
 import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {
   createBrowserOccKernelAdapter,
+  releaseBrowserOccDocument,
   startBrowserOccWarmup,
 } from "@/infrastructure/occ/browser-kernel-runtime";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
@@ -72,6 +73,7 @@ function App() {
         <OccAssetCacheEffect />
         <WorkbenchApp
           createKernelAdapter={createBrowserOccKernelAdapter}
+          releaseDocumentResources={releaseBrowserOccDocument}
           documentSyncWorkerClient={
             shouldDisableDevRepository() ? null : documentSyncWorkerClient
           }
