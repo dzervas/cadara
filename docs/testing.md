@@ -23,6 +23,7 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:e2e:real-captures` explicitly runs the complete Onshape/OCC acceptance lane against the tracked fixtures in `test/fixtures/onshape-captures` with one worker.
 - `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
 - `bun run test:e2e:all` runs the fast and real-capture Playwright lanes sequentially.
+- `bun run test:kernel-limitations` runs the expected-to-fail kernel-limitation specs (see "Kernel limitations"); it is outside every other command, including `test:all`.
 - `bun run test:all:acceptance` runs every validation lane, including real captures; `bun run test:all` is the final pass: lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
 
 ## Tiers
@@ -86,6 +87,14 @@ Examples:
 - empty-catch guards
 
 These are valuable, but they are not behavioral coverage and should be treated as a separate lane conceptually.
+
+### Kernel limitations
+
+`test/kernel-limitations/<kernel>/*.kernel-limitation.spec.ts` (only `occ/` exists) holds minimal raw-kernel reproductions of geometry our production kernel build cannot handle. Each spec asserts what a correct kernel would do, so it is expected to fail. Its top comment records how the case was found, the cause, the kernel pin and any upstream issues. Controls in the same file that show the boundary are expected to pass.
+
+The top-level `test.exclude` in `vite.config.ts` keeps these specs out of every project, so `test`, `test:fast`, `test:isolated`, `test:heavy`, `test:logic`, `test:ui`, `test:static`, `test:all` and a bare `vitest run` never run them. Only `bun run test:kernel-limitations` (`vitest.kernel-limitations.config.ts`) runs them; `typecheck:specs` still typechecks them through `tsconfig.test.json`'s `test` include.
+
+Production refusal messages may link to these files on GitHub. When a spec starts passing, for example after a kernel upgrade, the limitation is lifted: revisit the production message that links to it, then move the reproduction into a normal lane as a regression or delete it.
 
 ## Seam Rules
 

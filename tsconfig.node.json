@@ -27,6 +27,7 @@
     "vite.config.ts",
     "vite.single.config.ts",
     "vite.offline-test.config.ts",
+    "vitest.kernel-limitations.config.ts",
     "playwright.cloudflare.config.ts"
   ]
 }

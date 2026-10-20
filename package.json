@@ -32,6 +32,7 @@
     "test:isolated": "vitest run --project isolated",
     "test": "bun run --parallel test:fast test:isolated",
     "test:heavy": "vitest run --project heavy",
+    "test:kernel-limitations": "vitest run --config vitest.kernel-limitations.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:cloudflare": "playwright test --config playwright.cloudflare.config.ts",
     "test:e2e:offline": "SENTRY_AUTH_TOKEN= vite build --config vite.offline-test.config.ts && playwright test --config playwright.offline.config.ts",

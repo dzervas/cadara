@@ -680,3 +680,145 @@ test("executeChamferFeature claims producer identity through native generated hi
     "An unsupported adjacency key must invalidate its entity honestly.",
   ).toBe(1);
 });
+
+// cadara-ybk: the minimal frame from
+// test/kernel-limitations/occ/chamfer-mitre-into-non-adjacent-fillet.kernel-limitation.spec.ts.
+// A 1.5 mm chamfer on both top-inner edges at the corner next to an r6 outer
+// fillet must trim the fillet face, which OCC ChFi3d refuses. The refusal keeps
+// its pinned prefix and names the limitation with its reproduction link.
+test("executeChamferFeature names the OCC corner-mitre limitation when the chamfer builder refuses", async () => {
+  const oc = await loadCustomOpenCascadeForTest();
+  const box = (
+    origin: [number, number, number],
+    size: [number, number, number],
+  ) => {
+    const maker = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, origin), ...size);
+    maker.Build(new oc.Message_ProgressRange_1());
+    return maker.Shape();
+  };
+  const frame = new oc.BRepAlgoAPI_Cut_3(
+    box([0, 0, 0], [30, 30, 10]),
+    box([3, 3, -1], [24, 24, 12]),
+    new oc.Message_ProgressRange_1(),
+  );
+  frame.Build(new oc.Message_ProgressRange_1());
+  expect(frame.IsDone(), "Expected the 3 mm wall frame to build.").toBe(true);
+  const findEdgeId = (
+    body: {
+      edgesById: ReadonlyMap<
+        `edge_${string}`,
+        InstanceType<OpenCascadeInstance["TopoDS_Edge"]>
+      >;
+    },
+    a: [number, number, number],
+    b: [number, number, number],
+  ) => {
+    const near = (
+      point: InstanceType<OpenCascadeInstance["gp_Pnt"]>,
+      q: number[],
+    ) =>
+      Math.hypot(point.X() - q[0]!, point.Y() - q[1]!, point.Z() - q[2]!) <
+      1e-6;
+    for (const [edgeId, edge] of body.edgesById) {
+      const curve = new oc.BRepAdaptor_Curve_2(edge);
+      const first = curve.Value(curve.FirstParameter());
+      const last = curve.Value(curve.LastParameter());
+      if (
+        (near(first, a) && near(last, b)) ||
+        (near(first, b) && near(last, a))
+      ) {
+        return edgeId;
+      }
+    }
+    throw new Error(
+      `Expected an edge from (${a.join(", ")}) to (${b.join(", ")}).`,
+    );
+  };
+  const frameBody = trackNewSolidBody(oc, {
+    bodyId: "body_corner_mitre_frame" as BodyId,
+    label: "body_corner_mitre_frame",
+    ownerFeatureId: "feature_corner_mitre_frame" as FeatureId,
+    shape: frame.Shape(),
+  });
+  const filleted = executeFilletFeature(
+    createOccAuthoringState(oc, { bodies: [frameBody] }),
+    "feature_corner_mitre_fillet" as FeatureId,
+    {
+      radius: createLiteralAuthoredValue(6),
+      edgeTargets: [
+        {
+          kind: "edge",
+          bodyId: frameBody.bodyId,
+          edgeId: findEdgeId(frameBody, [0, 0, 0], [0, 0, 10]),
+        },
+      ],
+    },
+  );
+  const filletedBody = filleted.bodies.find(
+    (candidate) => candidate.bodyId === frameBody.bodyId,
+  )!;
+  const chamferAt = (distance: number) => () =>
+    executeChamferFeature(
+      createOccAuthoringState(oc, { bodies: filleted.bodies }),
+      "feature_corner_mitre_chamfer" as FeatureId,
+      {
+        kind: "chamfer",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "edge",
+              targets: [
+                {
+                  kind: "edge",
+                  bodyId: filletedBody.bodyId,
+                  edgeId: findEdgeId(filletedBody, [3, 3, 10], [27, 3, 10]),
+                },
+                {
+                  kind: "edge",
+                  bodyId: filletedBody.bodyId,
+                  edgeId: findEdgeId(filletedBody, [3, 3, 10], [3, 27, 10]),
+                },
+              ],
+            },
+          ],
+          options: { distance },
+        },
+      } satisfies AdvancedSolidFeatureDefinition & { kind: "chamfer" },
+    );
+
+  expect(
+    chamferAt(1.2),
+    "Below the mitre breakthrough (6/√2 − 3 mm) the corner chamfer must build.",
+  ).not.toThrow();
+  let refusal = "";
+  try {
+    chamferAt(1.5)();
+  } catch (error) {
+    refusal = error instanceof Error ? error.message : String(error);
+  }
+  expect(
+    refusal,
+    "The refusal must keep the prefix the import review and real-capture E2E pin.",
+  ).toMatch(
+    /^advanced-feature-unsupported-kernel-case: OCC chamfer build failed for body body_corner_mitre_frame\. /,
+  );
+  expect(
+    refusal,
+    "The refusal must name the known OpenCascade corner-mitre limitation.",
+  ).toContain(
+    "known OpenCascade kernel limitation when a chamfer corner's mitre must trim a face that is not adjacent to the chamfered edges",
+  );
+  expect(
+    refusal,
+    "The refusal must link the expected-to-fail kernel-limitation reproduction.",
+  ).toContain(
+    "https://github.com/dzervas/cadara/blob/main/test/kernel-limitations/occ/chamfer-mitre-into-non-adjacent-fillet.kernel-limitation.spec.ts",
+  );
+  expect(refusal).toContain(
+    "https://github.com/Open-Cascade-SAS/OCCT/issues/1177",
+  );
+  expect(refusal).toContain(
+    "https://github.com/Open-Cascade-SAS/OCCT/pull/1449",
+  );
+});

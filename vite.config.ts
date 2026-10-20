@@ -93,10 +93,15 @@ export default defineConfig({
   base: "/",
   define: createBuildMetadataDefines(buildMetadata),
   test: {
-    exclude:
-      process.env.CADARA_VITEST_INCLUDE_SCRATCH === "1"
-        ? configDefaults.exclude
-        : [...configDefaults.exclude, "**/.scratch/**"],
+    // Kernel-limitation specs are expected to fail (docs/testing.md "Kernel
+    // limitations"); only vitest.kernel-limitations.config.ts runs them.
+    exclude: [
+      ...configDefaults.exclude,
+      "**/test/kernel-limitations/**",
+      ...(process.env.CADARA_VITEST_INCLUDE_SCRATCH === "1"
+        ? []
+        : ["**/.scratch/**"]),
+    ],
     testTimeout: 15_000,
     // Tiers (docs/testing.md "Tiers"): `fast` is the everyday loop and shares
     // one module registry per worker (`isolate: false`); specs whose `vi.mock`

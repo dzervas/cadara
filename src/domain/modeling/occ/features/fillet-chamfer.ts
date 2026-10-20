@@ -939,6 +939,15 @@ function addChamferWidth(
   chamfer.Add_2(width.distance, edge);
 }
 
+// cadara-ybk: ChFi3d only trims a chamfer corner against the faces adjacent to
+// the chamfered edges. The native transaction returns null on !IsDone(), so
+// this JS builder refusal is the one place the hint surfaces. The linked spec
+// fails while the limitation holds; revisit this hint when it starts passing.
+const OCC_CHAMFER_CORNER_LIMITATION_HINT =
+  "This is a known OpenCascade kernel limitation when a chamfer corner's mitre must trim a face that is not adjacent to the chamfered edges, for example a chamfer reaching into a neighbouring fillet. " +
+  "Reproduction: https://github.com/dzervas/cadara/blob/main/test/kernel-limitations/occ/chamfer-mitre-into-non-adjacent-fillet.kernel-limitation.spec.ts " +
+  "(upstream: https://github.com/Open-Cascade-SAS/OCCT/issues/1177, https://github.com/Open-Cascade-SAS/OCCT/pull/1449).";
+
 export function executeChamferFeature(
   context: OccFeatureExecutionContext,
   ownerFeatureId: FeatureId,
@@ -1007,7 +1016,7 @@ export function executeChamferFeature(
 
         if (!chamfer.IsDone()) {
           throw new Error(
-            `advanced-feature-unsupported-kernel-case: OCC chamfer build failed for body ${bodyId}.`,
+            `advanced-feature-unsupported-kernel-case: OCC chamfer build failed for body ${bodyId}. ${OCC_CHAMFER_CORNER_LIMITATION_HINT}`,
           );
         }
 
