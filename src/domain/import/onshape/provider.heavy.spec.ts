@@ -63,6 +63,7 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
+import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
 import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
 
 test("classifies external sketch IDs by authoritative provenance before body witnesses", () => {
@@ -1825,6 +1826,49 @@ test("src/domain/import/onshape/provider.spec.ts promotes a synthetic closed hol
     reasonCodes: [],
   });
 
+});
+
+// Lane: logic, heavy tier to reuse the existing injected-history harness.
+// Seam: review/prepare prefers a unique live sketch-plane match over historical
+// evidence and preserves its captured provenance in validated actions.
+test("src/domain/import/onshape/provider.spec.ts prepares a unique live sketch-plane match without historical fallback", async () => {
+  const bundle = makeFaceSketchExtrudeBundle();
+  const captured = bundle.partStudios[0]!.resolvedReferences.find(
+    (reference) => reference.deterministicId === "face_ref" &&
+      reference.evaluatedAt === "historyPoint" &&
+      reference.consumingFeatureId === "S_FACE",
+  );
+  if (!captured || !("signature" in captured)) {
+    throw new Error("Expected the face sketch's captured history-point signature.");
+  }
+  const probeCapabilities = capabilitiesWithProbe([probeSignature("face_match")]);
+  const source = sourceFromBundle(bundle);
+  const review = await onshapeImportProvider.review({ source, capabilities: probeCapabilities });
+  const expectedSelector = {
+    kind: "topologyOf",
+    expectedKind: "face",
+    capturedSignature: normalizeOnshapeTopologySignature(captured.signature),
+    source: {
+      consumerFeatureId: "S_FACE",
+      parameterId: "sketchPlane",
+      deterministicId: "face_ref",
+    },
+  };
+  const faceSketch = review.providerReview.studios[0]!.featurePlans
+    .find((plan) => plan.onshapeFeatureId === "S_FACE");
+  expect(faceSketch).toMatchObject({
+    tier: "parametric",
+    target: { probedFaceSelector: expectedSelector },
+  });
+  const actions = await onshapeImportProvider.prepare({
+    source,
+    review,
+    selections: onshapeImportProvider.createDefaultSelections(review),
+    capabilities: probeCapabilities,
+  });
+  expect(actions.commitSketches?.find((sketch) => sketch.sketchLabel === "Face sketch")?.plane.support)
+    .toMatchObject(expectedSelector);
+  expect(validateImportPreparedActions(actions).success).toBe(true);
 });
 
 // Lane: logic (per docs/testing.md — exercises the exported importer
