@@ -1,3 +1,4 @@
+import { enrichRegionProfile } from "@/domain/modeling/region-profile-selection";
 import type {
   ImportCapabilities,
   ImportHistoryProbeCapabilities,
@@ -1249,11 +1250,12 @@ export class ImportDeferredMaterializer {
             `Unable to resolve deferred regionOf for ${consumer.kind}:${consumer.index}; reference action ${value.actionIndex}, sketch ${output.sketchId}, selector ${JSON.stringify(value.selector)}, live regions ${JSON.stringify(liveRegionIds)}.`,
           );
         }
-        return {
+        const ref = {
           kind: "region" as const,
           sketchId: output.sketchId,
           regionId: region.regionId,
         };
+        return sketch ? enrichRegionProfile(ref, "sketch" in sketch ? sketch.sketch : sketch) : ref;
       }
     }
   }

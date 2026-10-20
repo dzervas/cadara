@@ -1,3 +1,4 @@
+import { enrichExtrudeRegionProfiles } from "@/domain/modeling/region-profile-selection";
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import type {
   AuthoredDocumentRestoreOptions,
@@ -2048,6 +2049,16 @@ export function createModelingService(
         action: async () => {
           const request = normalizeCreateFeatureInput(input, currentDocumentId);
           const expected = await getMutationPredecessor();
+          if (request.definition.kind === "extrude") {
+            const selectionSnapshot = validateSnapshotResponse(
+              await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+              currentDocumentId,
+            );
+            request.definition = enrichExtrudeRegionProfiles(
+              request.definition,
+              selectionSnapshot.document.sketches,
+            );
+          }
           const response = await adapter.createFeature(request);
           return finalizeMutationResult(
             expected,
@@ -2073,6 +2084,16 @@ export function createModelingService(
         action: async () => {
           const request = normalizeUpdateFeatureInput(input, currentDocumentId);
           const expected = await getMutationPredecessor();
+          if (request.definition.kind === "extrude") {
+            const selectionSnapshot = validateSnapshotResponse(
+              await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+              currentDocumentId,
+            );
+            request.definition = enrichExtrudeRegionProfiles(
+              request.definition,
+              selectionSnapshot.document.sketches,
+            );
+          }
           const response = await adapter.updateFeature(request);
           return finalizeMutationResult(
             expected,

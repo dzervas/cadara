@@ -62,7 +62,7 @@ function buildSweepProfileShape(
 ) {
   if (profile.kind === "region") {
     const sketch = requireSketchSnapshot(context, profile.sketchId);
-    const region = requireRegion(sketch, profile.regionId);
+    const region = requireRegion(sketch, profile.regionId, profile.selector);
     return buildRegionProfileFace(
       context.oc,
       {

@@ -1,3 +1,4 @@
+import { resolveRegionProfile } from "@/contracts/sketch/region-selector";
 import type {
   SketchDefinition,
   SketchRecord,
@@ -1167,9 +1168,7 @@ function hasRegionTarget(
     snapshot.document.sketches.some(
       (sketch) =>
         sketch.sketchId === target.sketchId &&
-        sketch.sketch.regions.some(
-          (region) => region.regionId === target.regionId,
-        ),
+        resolveRegionProfile(sketch.sketch, target).ok,
     )
   );
 }
@@ -1825,17 +1824,39 @@ function validateFeatureDefinitionAgainstSnapshot(
       ),
     );
   }
-  const missingRegion = getFeatureDefinitionChangedTargets(definition).find(
-    (target): target is Extract<typeof target, { kind: "region" }> =>
-      target.kind === "region" && !hasRegionTarget(snapshot, target),
-  );
-  if (missingRegion) {
-    return createProfileRegionRejection(
-      PROFILE_REGION_RESELECT_CODE,
-      missingRegion,
-      `Sketch region ${missingRegion.regionId} is not among the current regions of its sketch.`,
-      `Edit the ${definition.kind} and choose a valid profile selection.`,
+  for (const target of getFeatureDefinitionChangedTargets(definition)) {
+    if (target.kind !== "region") continue;
+    const sketch = snapshot.document.sketches.find(
+      s => s.sketchId === target.sketchId,
     );
+    const result = sketch ? resolveRegionProfile(sketch.sketch, target) : null;
+    if (!result || !result.ok) {
+      const rejection = createProfileRegionRejection(
+        PROFILE_REGION_RESELECT_CODE,
+        target,
+        `Sketch region ${target.regionId} is not among the current regions of its sketch.`,
+        `Edit the ${definition.kind} and choose a valid profile selection.`,
+      );
+      return {
+        ...rejection,
+        diagnostics: rejection.diagnostics.map(d => ({
+          ...d,
+          detail: {
+            kind: "rebuildFailure" as const,
+            affectedFeatureIds: [],
+            affectedTargets: [target],
+            ...(result && !result.ok ? {
+              regionSelection: {
+                ...result.failure,
+                profileIndex: "profiles" in definition.parameters
+                  ? definition.parameters.profiles.findIndex(p => p === target)
+                  : null,
+              },
+            } : {}),
+          },
+        })),
+      };
+    }
   }
   if (nonCurrentSketchInput) {
     return {

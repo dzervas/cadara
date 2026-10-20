@@ -225,6 +225,7 @@ export function assertPrimitiveRef(value: unknown): PrimitiveRef {
           kind: "region",
           sketchId: value.sketchId as SketchId,
           regionId: value.regionId as RegionId,
+          ...(value.selector === undefined ? {} : { selector: value.selector as import("@/contracts/sketch/region-selector").RegionSelector }),
         };
       }
       break;

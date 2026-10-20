@@ -8,7 +8,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { RegionRecord } from "@/contracts/sketch/schema";
-import { getConsumableSketchRegions } from "@/contracts/sketch/derived-validity";
+import { resolveRegionProfile, type RegionSelector, type RegionSelectionFailure } from "@/contracts/sketch/region-selector";
 import type {
   BodyId,
   ConstructionId,
@@ -26,7 +26,6 @@ import type {
   GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
 import {
-  PROFILE_REGION_RESELECT_CODE,
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
   profileRegionSketchNotCurrentGuidance,
 } from "@/domain/modeling/feature-diagnostic-mapping";
@@ -166,35 +165,30 @@ export function describeOccEnumValue(
   return String(numericValue);
 }
 
-/**
- * The consumable region `regionId` of `sketch`, or a coded failure (T10 plan
- * §2.9): `profile-region-sketch-not-current` while the sketch is stale or
- * invalid (the selection is kept and reconnects by identity), otherwise
- * `profile-region-reselect` (the id is not among the current regions).
- */
+/** Carries native reselection proof failure through OCC's diagnostic mapping. */
+export class ProfileRegionSelectionError extends Error {
+  readonly code: string;
+  readonly regionSelection: RegionSelectionFailure;
+  constructor(code: string, regionSelection: RegionSelectionFailure, message: string) {
+    super(`${code}: ${message}`);
+    this.code = code;
+    this.regionSelection = regionSelection;
+  }
+}
+
+/** Validity first; enriched refs require unique provenance, legacy refs an exact ID. */
 export function requireRegion(
   sketch: SketchSnapshotRecord,
   regionId: RegionRecord["regionId"],
+  selector?: RegionSelector,
 ) {
+  const result = resolveRegionProfile(sketch.sketch, { sketchId: sketch.sketchId, regionId, ...(selector ? { selector } : {}) });
+  if (result.ok) return result.region;
   const validity = sketch.sketch.derivedValidity;
-  if (validity.state !== "current") {
-    const errorCount = validity.diagnostics.filter(
-      (diagnostic) => diagnostic.severity === "error",
-    ).length;
-    throw new Error(
-      `${PROFILE_REGION_SKETCH_NOT_CURRENT_CODE}: Sketch region ${regionId} waits for ${sketch.label}, whose derived output is ${validity.state}. ${profileRegionSketchNotCurrentGuidance(sketch.label, errorCount)}`,
-    );
-  }
-  const region = getConsumableSketchRegions(sketch.sketch).find(
-    (entry) => entry.regionId === regionId,
-  );
-  if (region) {
-    return region;
-  }
-
-  throw new Error(
-    `${PROFILE_REGION_RESELECT_CODE}: Sketch region ${regionId} is not among the current regions of ${sketch.label}; choose a valid profile selection.`,
-  );
+  const message = result.code === PROFILE_REGION_SKETCH_NOT_CURRENT_CODE
+    ? `Sketch region ${regionId} waits for ${sketch.label}, whose derived output is ${validity.state}. ${profileRegionSketchNotCurrentGuidance(sketch.label, validity.diagnostics.filter(d => d.severity === "error").length)}`
+    : `Sketch region ${regionId} is not among the current regions of ${sketch.label}; choose a valid profile selection.`;
+  throw new ProfileRegionSelectionError(result.code, result.failure, message);
 }
 
 export function requireBody(
