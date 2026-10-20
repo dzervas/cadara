@@ -58,6 +58,7 @@
     "@typia/unplugin": "^12.1.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "earcut": "^3.2.4",
     "fflate": "^0.8.2",
     "mathjs": "^15.2.0",
     "neverthrow": "^8.2.0",

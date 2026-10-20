@@ -1,3 +1,5 @@
+import earcut, { flatten } from "earcut";
+
 import type {
   WorkspaceSnapshot,
   SketchSnapshotRecord,
@@ -569,7 +571,11 @@ function resolveRegionTarget(
       measured.area > DISTANCE_EPSILON
         ? {
             kind: "mesh",
-            triangles: triangulateLoopFan(witnesses[0]?.points ?? []),
+            triangles: triangulateRegionLoops(
+              measured.loops.map((loop) => loop.polygon),
+              region.loops.findIndex((loop) => loop.role === "outer"),
+              sketch.plane,
+            ),
             approximate: true,
           }
         : null,
@@ -1845,17 +1851,31 @@ export function measureSketchRegion(
   };
 }
 
-function triangulateLoopFan(points: readonly WorkspaceVec3[]) {
-  if (points.length < 3) {
-    return [];
-  }
-
+function triangulateRegionLoops(
+  loops: readonly (readonly SketchPoint2D[])[],
+  outerIndex: number,
+  plane: SketchPlaneDefinition,
+): Triangle[] {
+  const outer = loops[outerIndex];
+  if (!outer) return [];
+  const orderedLoops = [
+    outer,
+    ...loops.filter((_, index) => index !== outerIndex),
+  ];
+  // ISC-licensed Earcut is also the viewport ShapeUtils fill's algorithm. Use
+  // the standalone package because measurement is shared with the Three-free SDK.
+  const points = orderedLoops.flat();
+  const { vertices, holes } = flatten(orderedLoops);
+  const indices = earcut(vertices, holes, 2);
+  const worldPoints = points.map((point) =>
+    mapSketchPointToWorkspaceWorld(plane, point),
+  );
   const triangles: Triangle[] = [];
-  for (let index = 1; index < points.length - 1; index += 1) {
+  for (let index = 0; index < indices.length; index += 3) {
     triangles.push({
-      first: points[0]!,
-      second: points[index]!,
-      third: points[index + 1]!,
+      first: worldPoints[indices[index]!]!,
+      second: worldPoints[indices[index + 1]!]!,
+      third: worldPoints[indices[index + 2]!]!,
     });
   }
   return triangles;
