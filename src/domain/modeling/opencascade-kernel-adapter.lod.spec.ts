@@ -10,6 +10,7 @@ import {
 import {
   CONTRACT_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
+  FILLET_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import type { RenderPoint3D } from "@/contracts/render/schema";
@@ -64,7 +65,9 @@ function rimMetrics(
 }
 
 for (const profile of ["circle", "split diameter"] as const) {
-  for (const mode of ["committed", "snapshot"] as const) {
+  for (const mode of ["committed", "snapshot", "fillet preview"] as const) {
+    // The split profile exercises fillet preview without the full torus's meshing cost.
+    if (profile === "circle" && mode === "fillet preview") continue;
     test(`${mode} LOD refines the same tracked ${profile} body without changing topology`, async () => {
       const module =
         (await import("../../../public/cadara-occ.js")) as unknown as {
@@ -157,6 +160,16 @@ for (const profile of ["circle", "split diameter"] as const) {
           },
         });
         expect(created.revisionState.kind).toBe("accepted");
+        const baseDocument = (await adapter.getDocumentSnapshot(request))
+          .snapshot.document;
+        const rimEdge = baseDocument.render.records.find(
+          (record) => record.binding.target.kind === "edge" &&
+            record.geometry.kind === "polyline" &&
+            record.geometry.points.length > 3 &&
+            record.geometry.points.every((point) => Math.abs(point[2] - 5) < 1e-8),
+        )?.binding.target;
+        if (!rimEdge || rimEdge.kind !== "edge")
+          throw new Error("The cylinder fixture must expose its top circular edge.");
         const authoredBefore = await adapter.exportAuthoredModelDocument(
           request.documentId,
         );
@@ -190,7 +203,22 @@ for (const profile of ["circle", "split diameter"] as const) {
           }
           const snapshot = (await adapter.getDocumentSnapshot(request)).snapshot
             .document;
-          const records = snapshot.render.records.filter(
+          const render = mode === "fillet preview"
+            ? (await adapter.evaluatePreview({
+                ...request,
+                baseRevisionId: snapshot.revisionId,
+                previewId: "preview_fillet_lod",
+                definition: {
+                  kind: "fillet",
+                  featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+                  parameters: {
+                    edgeTargets: [rimEdge],
+                    radius: { source: "literal", value: 1 },
+                  },
+                },
+              })).render
+            : snapshot.render;
+          const records = render.records.filter(
             (record) => record.ownerBodyId && record.geometry.kind === "mesh",
           );
           const rims = records.map((record) =>
@@ -217,7 +245,7 @@ for (const profile of ["circle", "split diameter"] as const) {
         const startup = await read("startup");
         const normal = await read("normal");
         const fine = await read("fine");
-        if (profile === "circle") {
+        if (profile === "circle" && mode !== "fillet preview") {
           expect([
             startup.rimSegments,
             normal.rimSegments,
@@ -229,9 +257,11 @@ for (const profile of ["circle", "split diameter"] as const) {
           startup.triangles.length,
         );
         expect(fine.triangles.length).toBeGreaterThan(normal.triangles.length);
-        expect(fine.chordError).toBeGreaterThan(0);
-        expect(normal.chordError).toBeLessThan(startup.chordError);
-        expect(fine.chordError).toBeLessThan(normal.chordError);
+        if (mode !== "fillet preview") {
+          expect(fine.chordError).toBeGreaterThan(0);
+          expect(normal.chordError).toBeLessThan(startup.chordError);
+          expect(fine.chordError).toBeLessThan(normal.chordError);
+        }
         for (const result of [normal, fine]) {
           expect(result.topology).toEqual(startup.topology);
           expect(result.identity).toEqual(startup.identity);
