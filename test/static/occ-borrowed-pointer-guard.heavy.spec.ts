@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import ts from "typescript";
-import { expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
 
 // Policy guard: embind returns T* bindings as BORROWED aliases of a native owner
 // (a Handle or a map). Deleting such an alias frees memory the owner still uses.
@@ -906,6 +906,33 @@ function createProgram() {
   return { program, fixtures };
 }
 
+// A single production scan measured ~40 s solo (up to 90 s under load).
+// Share the checker, but stripe sorted paths across 32 rows to spread the cost
+// across separate 120 s tests. This changes scheduling, not coverage.
+const PRODUCTION_GROUP_COUNT = 32;
+let program: ts.Program;
+let fixtures: Map<string, string>;
+let production: ts.SourceFile[];
+let productionGroups: ts.SourceFile[][];
+const productionResults = new Map<number, ReturnType<typeof analyze>>();
+
+beforeAll(() => {
+  ({ program, fixtures } = createProgram());
+  production = program.getSourceFiles().filter(
+    (file) =>
+      !file.isDeclarationFile &&
+      !fixtures.has(file.fileName) &&
+      dirname(relative(REPOSITORY, file.fileName)).split(/[\\/]/)[0] ===
+        "src",
+  );
+  productionGroups = Array.from({ length: PRODUCTION_GROUP_COUNT }, () => []);
+  [...production]
+    .sort((a, b) => a.fileName.localeCompare(b.fileName))
+    .forEach((file, index) => {
+      productionGroups[index % PRODUCTION_GROUP_COUNT].push(file);
+    });
+}, 120_000);
+
 test("test/static/occ-borrowed-pointer-guard.spec.ts", () => {
   // The guard's declaration predicate must cover exactly the audited runtime
   // inventory in the shipped declarations, and not owned by-value/ref copies.
@@ -940,7 +967,6 @@ test("test/static/occ-borrowed-pointer-guard.spec.ts", () => {
     ).toBe(false);
   }
 
-  const { program, fixtures } = createProgram();
   const fixtureFiles = (name: string) => [
     program.getSourceFile(fixtureFile(name))!,
   ];
@@ -971,17 +997,30 @@ test("test/static/occ-borrowed-pointer-guard.spec.ts", () => {
         `Review fixture ${name} is a documented static-guard limit, not a blocked flow`,
       ).toEqual([]);
   }
+}, 120_000);
 
-  const production = program
-    .getSourceFiles()
-    .filter(
-      (file) =>
-        !file.isDeclarationFile &&
-        !fixtures.has(file.fileName) &&
-        dirname(relative(REPOSITORY, file.fileName)).split(/[\\/]/)[0] ===
-          "src",
-    );
-  const { violations, roots } = analyze(program, production);
+test.each(
+  Array.from({ length: PRODUCTION_GROUP_COUNT }, (_, index) => index),
+)("production borrowed-pointer policy group %i", (index) => {
+  const result = analyze(program, productionGroups[index]);
+  productionResults.set(index, result);
+  expect(
+    result.violations,
+    "Borrowed native aliases must never reach delete/Nullify/release helpers or escape the audited consumer set",
+  ).toEqual([]);
+}, 120_000);
+
+test("production groups preserve the complete borrowed-pointer inventory", () => {
+  expect(productionResults.size, "Every production group must be analyzed").toBe(
+    PRODUCTION_GROUP_COUNT,
+  );
+  expect(
+    productionGroups.flat().map((file) => file.fileName).sort(),
+    "Groups must partition all loaded production sources without omissions or duplicates",
+  ).toEqual(production.map((file) => file.fileName).sort());
+  const results = [...productionResults.values()];
+  const roots = results.flatMap((result) => result.roots).sort();
+  const violations = results.flatMap((result) => result.violations);
   expect(
     roots,
     "Production borrowed T* roots changed; audit ownership before updating this inventory",
@@ -990,4 +1029,4 @@ test("test/static/occ-borrowed-pointer-guard.spec.ts", () => {
     violations,
     "Borrowed native aliases must never reach delete/Nullify/release helpers or escape the audited consumer set",
   ).toEqual([]);
-}, 120_000);
+});
