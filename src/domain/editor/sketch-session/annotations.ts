@@ -4050,7 +4050,7 @@ export function describeConstraint(constraint: ConstraintDefinition) {
     case "equalOffset":
       return "Equal line offsets";
     case "equalLength":
-      return "Equal-length lines";
+      return "Equal length or radius";
     case "horizontal":
       return "Horizontal line";
     case "vertical":

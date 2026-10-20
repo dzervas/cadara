@@ -3320,6 +3320,29 @@ function buildSystem(
       continue;
     }
 
+    if (constraint.kind === "equalLength") {
+      const a = entityStates.get(constraint.entityIds[0]);
+      const b = entityStates.get(constraint.entityIds[1]);
+      if (a?.kind === "circle" && b?.kind === "circle") {
+        scalarConstraints.push({
+          id: constraint.constraintId,
+          targetKind: "constraint",
+          evaluateComponents(values) {
+            return [getCircleRadius(values, a) - getCircleRadius(values, b)];
+          },
+          evaluate(values) {
+            const gradient = zeroVector(parameterCount);
+            const difference =
+              getCircleRadius(values, a) - getCircleRadius(values, b);
+            gradient[a.baseIndex] += difference;
+            gradient[b.baseIndex] -= difference;
+            return { residual: 0.5 * difference * difference, gradient };
+          },
+        });
+        continue;
+      }
+    }
+
     if (
       constraint.kind === "parallel" ||
       constraint.kind === "perpendicular" ||
@@ -6167,9 +6190,27 @@ function validateDefinition(
         }
         break;
       }
+      case "equalLength": {
+        const [a, b] = constraint.entityIds.map((id) => entityMap.get(id));
+        // Circle↔circle only: arc radius also depends on endpoints and is not
+        // part of the scalar-circle equality contract. Never silently skip it.
+        if (
+          !a || !b || a.kind !== b.kind ||
+          (a.kind !== "lineSegment" && a.kind !== "circle")
+        ) {
+          diagnostics.push(
+            makeDiagnostic(
+              "unsupported-equal-operands",
+              "error",
+              `‘${constraint.label}’ requires two local lines or two local circles (not arcs).`,
+              { kind: "constraint", constraintId: constraint.constraintId },
+            ),
+          );
+        }
+        break;
+      }
       case "parallel":
       case "perpendicular":
-      case "equalLength":
         if (
           !constraint.entityIds.every((entityId) => entityMap.has(entityId))
         ) {

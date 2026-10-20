@@ -121,7 +121,7 @@ test("T14c: select a line, one of its constraints, blank, a sibling constraint, 
   );
   await constrainLines(
     workbench,
-    "Constrain two lines to equal length.",
+    "Constrain two lines to equal length or two circles to equal radius.",
     { x: 500, y: 325 },
     { x: 500, y: 628 },
   );

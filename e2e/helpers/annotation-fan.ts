@@ -31,15 +31,15 @@ const showAllSwitch = (page: Page) =>
 export async function buildDenseFan(workbench: SketchWorkbenchHarness) {
   await buildFan(workbench, ANGLES, [
     ["Constrain two lines to remain parallel.", 0, 4],
-    ["Constrain two lines to equal length.", 0, 4],
+    ["Constrain two lines to equal length or two circles to equal radius.", 0, 4],
     ["Constrain two lines to remain parallel.", 1, 5],
-    ["Constrain two lines to equal length.", 1, 5],
+    ["Constrain two lines to equal length or two circles to equal radius.", 1, 5],
     ["Constrain two lines to remain parallel.", 2, 6],
-    ["Constrain two lines to equal length.", 2, 6],
+    ["Constrain two lines to equal length or two circles to equal radius.", 2, 6],
     ["Constrain two lines to remain parallel.", 3, 7],
-    ["Constrain two lines to equal length.", 3, 7],
+    ["Constrain two lines to equal length or two circles to equal radius.", 3, 7],
     ["Constrain two lines to remain perpendicular.", 0, 2],
-    ["Constrain two lines to equal length.", 0, 2],
+    ["Constrain two lines to equal length or two circles to equal radius.", 0, 2],
   ]);
 }
 
@@ -58,9 +58,9 @@ export async function buildWideFan(workbench: SketchWorkbenchHarness) {
   await buildFan(workbench, WIDE_ANGLES, [
     ...Array.from({ length: 7 }, (_, index) => [
       ["Constrain two lines to remain parallel.", index, index + 7] as const,
-      ["Constrain two lines to equal length.", index, index + 7] as const,
+      ["Constrain two lines to equal length or two circles to equal radius.", index, index + 7] as const,
     ]).flat(),
-    ["Constrain two lines to equal length.", 0, 2],
+    ["Constrain two lines to equal length or two circles to equal radius.", 0, 2],
   ]);
 }
 
