@@ -53,8 +53,37 @@ export class EditorEventLoop {
   ) => Promise<EditorEvent>;
   private state: EditorState = initialEditorState;
   private readonly sketchActions: SketchAuthoredActions;
+  private cursorRecovery: { requestId: string; state: EditorState } | null = null;
+  private readonly interactionQueries = new Map<EditorEffect, AbortController>();
 
   private transition(event: EditorEvent) {
+    if (
+      (event.type === "effect.documentCursorMoveFailed" ||
+        event.type === "effect.documentCursorMoved") &&
+      this.cursorRecovery?.requestId === event.requestId &&
+      this.state.pendingHistoryCursorRequestId === event.requestId &&
+      this.state.document.documentId === event.documentId &&
+      this.state.document.revisionId === event.baseRevisionId
+    ) {
+      const previous = this.cursorRecovery.state;
+      this.cursorRecovery = null;
+      if (event.type === "effect.documentCursorMoveFailed" || !event.accepted) {
+        // A refused transient rollback/restore must not strand the editor in
+        // its intermediate phase. Keep the allocated IDs monotonic and let
+        // the normal failure transition surface the error (or refresh a conflict).
+        this.state = {
+          ...previous,
+          nextCommandSequence: this.state.nextCommandSequence,
+          nextRequestSequence: this.state.nextRequestSequence,
+          pendingHistoryCursorRequestId: event.requestId,
+          // Leaving the sketch released these waits. Recovery must reissue
+          // them rather than resurrect records for cancelled requests.
+          ...(previous.kind === "editingSketch"
+            ? { pendingEditQueryRequest: null, pendingSnapQueryRequest: null }
+            : {}),
+        };
+      }
+    }
     // Authored-action restores (undo/redo, gesture exits) happen after the
     // reducer, so the live region hook runs again on the final result.
     return emitPendingSketchSnapQuery(
@@ -225,18 +254,52 @@ export class EditorEventLoop {
     this.notifyDrained();
     // The run token drops in-flight derivation results; release the request so
     // the post-transition hook re-derives after a restart.
-    if (
-      this.state.kind === "editingSketch" &&
-      this.state.pendingRegionRequest !== null
-    ) {
-      this.state = { ...this.state, pendingRegionRequest: null };
+    this.cursorRecovery = null;
+    if (this.state.kind === "editingSketch") {
+      this.state = {
+        ...this.state,
+        pendingRegionRequest: null,
+        pendingEditQueryRequest: null,
+        pendingSnapQueryRequest: null,
+      };
     }
   }
 
   private applyTransitionResult(
     result: ReturnType<typeof transitionEditorState>,
   ) {
+    for (const effect of result.effects) {
+      if (effect.type === "document.moveHistoryCursor" && effect.transient) {
+        this.cursorRecovery = {
+          requestId: effect.requestId,
+          state: {
+            ...this.state,
+            document: result.state.document,
+            snapshot: result.state.snapshot,
+            selectionCatalog: result.state.selectionCatalog,
+          },
+        };
+      }
+    }
     this.state = result.state;
+    if (
+      this.cursorRecovery?.requestId !== this.state.pendingHistoryCursorRequestId
+    ) {
+      this.cursorRecovery = null;
+    }
+    for (const [effect, controller] of this.interactionQueries) {
+      const pending =
+        this.state.kind === "editingSketch"
+          ? effect.type === "sketch.queryEditIntersections"
+            ? this.state.pendingEditQueryRequest
+            : this.state.pendingSnapQueryRequest
+          : null;
+      if (pending?.requestId !== effect.requestId) {
+        controller.abort(
+          new Error("Sketch interaction query is no longer owned."),
+        );
+      }
+    }
     for (const effect of result.effects) {
       if (this.currentCorrelation) {
         this.effectCorrelations.set(effect, this.currentCorrelation);
@@ -318,7 +381,16 @@ export class EditorEventLoop {
   /** Runs one effect and applies its completion; false once the run is stopped. */
   private async runEffect(effect: EditorEffect, runToken: number) {
     this.activeEffects += 1;
-    const runSignal = this.runAbort.signal;
+    const queryAbort =
+      effect.type === "sketch.queryEditIntersections" ||
+      effect.type === "sketch.querySnapIntersections"
+        ? new AbortController()
+        : null;
+    if (queryAbort) this.interactionQueries.set(effect, queryAbort);
+    const runSignal = queryAbort
+      ? AbortSignal.any([this.runAbort.signal, queryAbort.signal])
+      : this.runAbort.signal;
+    let removeAbortListener = () => {};
     const correlation = this.effectCorrelations.get(effect);
     this.emitTrace(
       createEffectStartedTraceEntry({
@@ -329,11 +401,25 @@ export class EditorEventLoop {
     );
 
     try {
-      const effectEvent = await this.executeEffect(
+      const completion = this.executeEffect(
         effect,
         this.runtime,
         runSignal,
       );
+      // The worker pool has no per-request abort API. Release this owner's
+      // wait immediately, while the race observes/discards any late outcome.
+      const effectEvent = await (queryAbort
+        ? Promise.race([
+            completion,
+            new Promise<never>((_, reject) => {
+              const abort = () => reject(runSignal.reason);
+              removeAbortListener = () =>
+                runSignal.removeEventListener("abort", abort);
+              runSignal.addEventListener("abort", abort, { once: true });
+              if (runSignal.aborted) abort();
+            }),
+          ])
+        : completion);
       if (correlation) this.settlements.get(correlation)?.events.push(effectEvent);
 
       if (!this.running || runToken !== this.runToken) {
@@ -397,6 +483,8 @@ export class EditorEventLoop {
         }),
       );
     } finally {
+      removeAbortListener();
+      this.interactionQueries.delete(effect);
       this.activeEffects -= 1;
       if (correlation) {
         const settlement = this.settlements.get(correlation);
