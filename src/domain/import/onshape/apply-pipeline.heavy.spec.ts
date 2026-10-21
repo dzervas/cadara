@@ -5655,7 +5655,10 @@ const PART_STUDIO_9841_CAPTURE_FIXTURE =
 // witnesses are fallback evidence, not required source ownership. This full
 // real-OCC acceptance also checks retained shell support through walls edits
 // and authored-document restore; allow an hour for review/apply plus rebuilds.
-test(
+// ~18 minutes alone, so it is opt-in: `bun run test:heavy:acceptance` (sets
+// CADARA_FULL_IMPORT_ACCEPTANCE=1) and `test:all:acceptance` run it; the
+// routine `test:heavy` / `test:all` skip it (cadara-4t8).
+test.skipIf(process.env.CADARA_FULL_IMPORT_ACCEPTANCE !== "1")(
   "9841 applies its reviewed prepared action sequence through real OCC",
   async () => {
     const bundle = JSON.parse(
