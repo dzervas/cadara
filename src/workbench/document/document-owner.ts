@@ -6,6 +6,7 @@ import type {
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
 import type { FeatureId, RequestId } from "@/contracts/shared/ids";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import {
   describeUnknownError,
   ok,
@@ -272,6 +273,24 @@ export function createWorkbenchDocumentOwner({
     }
   }
 
+  async function setBodyAppearance(
+    target: PrimitiveRef,
+    appearance: BodyAppearance,
+    options: AcceptedMutationOptions,
+  ) {
+    if (target.kind !== "body") {
+      throw new Error("Only bodies can change color.");
+    }
+
+    const currentSnapshot = requireSnapshot();
+    const result = await modelingService.setBodyAppearance({
+      baseRevisionId: currentSnapshot.document.revisionId,
+      bodyId: target.bodyId,
+      appearance,
+    });
+    return acceptMutation(result, options);
+  }
+
   async function commitPartImport(
     activeImportSession: ImportSessionState,
     options?: {
@@ -385,6 +404,7 @@ export function createWorkbenchDocumentOwner({
     reorderDocumentHistory,
     renameTarget,
     replaceActiveDocumentBasis,
+    setBodyAppearance,
     setFeatureSuppression,
     updateDocumentVariable,
   };

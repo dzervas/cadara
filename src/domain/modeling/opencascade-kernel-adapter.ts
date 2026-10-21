@@ -53,6 +53,8 @@ import type {
   ModelingDiagnosticDetail,
   RenameBodyRequest,
   RenameBodyResponse,
+  SetBodyAppearanceRequest,
+  SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
   ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
@@ -71,6 +73,10 @@ import type {
 } from "@/contracts/modeling/schema";
 import { type AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
+import {
+  isBodyAppearance,
+  withAutoBodyAppearances,
+} from "@/contracts/modeling/body-appearance";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type {
   BakedGeometryAssetReference,
@@ -261,6 +267,7 @@ const OCC_REVISION_CONFLICT_CODE = "occ-revision-conflict";
 const OCC_VALIDATION_ERROR_CODE = "occ-validation-error";
 const OCC_MISSING_FEATURE_CODE = "occ-missing-feature";
 const OCC_MISSING_BODY_CODE = "occ-missing-body";
+const OCC_INVALID_BODY_APPEARANCE_CODE = "occ-invalid-body-appearance";
 const OCC_MISSING_REORDER_ANCHOR_CODE = "occ-missing-reorder-anchor";
 const OCC_REBUILD_FAILURE_CODE = "occ-rebuild-failure";
 const OCC_STALE_PREVIEW_CODE = "occ-stale-preview";
@@ -345,10 +352,34 @@ function createAuthoredModelDocumentFromAuthoringState(
       ...state.bodyLabels,
       ...state.bodies.map((body) => [body.bodyId, body.label] as const),
     ])].map(([bodyId, label]) => ({ bodyId, label })),
+    bodyAppearances: [...state.bodyAppearances].map(([bodyId, appearance]) => ({
+      bodyId,
+      appearance: structuredClone(appearance),
+    })),
     assets: structuredClone(state.assets),
     embeddedBinaryAssets: [...structuredClone(state.embeddedBinaryAssets)],
     topologyLineage: serializeCurrentOccTopologyLineage(state),
   };
+}
+
+/**
+ * Documents saved before body colours carry no `bodyAppearances`: their bodies
+ * get deterministic auto slots here, in document body (`bodyLabels`) order.
+ * This is kernel state only. Opening never writes the repository or records
+ * an undo entry (the service keeps the stored document as the mutation
+ * basis), so the records reach the stored document with the next real
+ * authored action, whose diff against that basis includes them.
+ */
+function restoreBodyAppearances(document: AuthoredModelDocument) {
+  return withAutoBodyAppearances(
+    new Map(
+      (document.bodyAppearances ?? []).map((record) => [
+        record.bodyId,
+        record.appearance,
+      ]),
+    ),
+    document.bodyLabels.map((label) => label.bodyId),
+  );
 }
 
 function getVariableMutationChangedTargetsFromOccState(
@@ -2215,6 +2246,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
   }
 
+  setBodyAppearance(request: SetBodyAppearanceRequest) {
+    return this.runSerializedOperation(() =>
+      this.setBodyAppearanceSerialized(request),
+    );
+  }
+
   reorderFeature(request: ReorderFeatureRequest) {
     return this.runSerializedOperation(() =>
       this.reorderFeatureSerialized(request),
@@ -2728,6 +2765,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyLabels: new Map(
         document.bodyLabels.map((label) => [label.bodyId, label.label]),
       ),
+      bodyAppearances: restoreBodyAppearances(document),
       assets: document.assets,
       assetBlobs,
       embeddedBinaryAssets: document.embeddedBinaryAssets,
@@ -2820,6 +2858,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         bodyLabels: new Map(
           document.bodyLabels.map((label) => [label.bodyId, label.label]),
         ),
+        bodyAppearances: restoreBodyAppearances(document),
         assets: document.assets,
         assetBlobs,
         embeddedBinaryAssets: document.embeddedBinaryAssets,
@@ -3023,6 +3062,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
+      bodyAppearances: runtimeState.authoringState.bodyAppearances,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
       resolvedGeometryAssets:
@@ -3301,6 +3341,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
       bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
+      bodyAppearances: runtimeState.authoringState.bodyAppearances,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
       resolvedGeometryAssets:
@@ -5240,6 +5281,84 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyId: request.bodyId,
       changedTargets: [bodyTarget],
       ...accepted,
+    });
+  }
+
+  private async setBodyAppearanceSerialized(
+    request: SetBodyAppearanceRequest,
+  ): Promise<SetBodyAppearanceResponse> {
+    assertSupportedModelingRequest(request, this.documentId);
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.setBodyAppearance(request);
+    }
+
+    const runtimeState = await this.getRuntimeState();
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState);
+
+    if (request.baseRevisionId !== currentRevisionId) {
+      const conflict = this.buildConflictResult(
+        request.baseRevisionId,
+        currentRevisionId,
+      );
+      return this.withOperationEnvelope({
+        bodyId: request.bodyId,
+        changedTargets: [],
+        ...conflict,
+      });
+    }
+
+    const bodyTarget = { kind: "body" as const, bodyId: request.bodyId };
+    const refusal = !isBodyAppearance(request.appearance)
+      ? createDiagnostic(
+          OCC_INVALID_BODY_APPEARANCE_CODE,
+          "error",
+          "Body colour must be a palette slot 0-5 or a lowercase #rrggbb colour.",
+          bodyTarget,
+        )
+      : !runtimeState.authoringState.bodies.some(
+            (body) => body.bodyId === request.bodyId,
+          )
+        ? createMissingBodyDiagnostic(request.bodyId)
+        : null;
+    if (refusal) {
+      return this.withOperationEnvelope({
+        bodyId: request.bodyId,
+        changedTargets: [],
+        ...this.buildRejectedResult(
+          request.baseRevisionId,
+          [refusal],
+          refusal.code,
+        ),
+      });
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1;
+    // Colour is display data: no feature is re-run, so topology, lineage and
+    // reference state are reused unchanged (unlike a body rename's rebuild).
+    const nextBodyAppearances = new Map(
+      runtimeState.authoringState.bodyAppearances,
+    );
+    nextBodyAppearances.set(request.bodyId, structuredClone(request.appearance));
+    const nextAuthoringState: OccAuthoringState = {
+      ...runtimeState.authoringState,
+      revisionId: createRevisionId(nextSequence),
+      bodyAppearances: nextBodyAppearances,
+    };
+
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState,
+      revisionSequence: nextSequence,
+    });
+
+    return this.withOperationEnvelope({
+      bodyId: request.bodyId,
+      changedTargets: [bodyTarget],
+      ...this.buildAcceptedResult(
+        runtimeState.authoringState,
+        nextAuthoringState,
+        [],
+      ),
     });
   }
 

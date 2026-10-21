@@ -18,6 +18,7 @@ import type {
   ModelingFeatureMutationResult,
   ModelingImportDocumentInput,
   ModelingRenameBodyInput,
+  ModelingSetBodyAppearanceInput,
   ModelingReorderDocumentHistoryInput,
   ModelingReorderFeatureInput,
   ModelingService,
@@ -257,6 +258,14 @@ class InstrumentedModelingService implements ModelingService {
     return this.measureAppResult(
       "renameBody",
       () => this.inner.renameBody(input),
+      mutationAttributes,
+    );
+  }
+
+  setBodyAppearance(input: ModelingSetBodyAppearanceInput) {
+    return this.measureAppResult(
+      "setBodyAppearance",
+      () => this.inner.setBodyAppearance(input),
       mutationAttributes,
     );
   }

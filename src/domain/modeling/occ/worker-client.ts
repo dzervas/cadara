@@ -17,6 +17,8 @@ import type {
   ModelingDiagnostic,
   RenameBodyRequest,
   RenameBodyResponse,
+  SetBodyAppearanceRequest,
+  SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
   ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
@@ -162,6 +164,9 @@ export interface OccWorkerSnapshotClient {
     request: DeleteDocumentTargetRequest,
   ): Promise<DeleteDocumentTargetResponse>;
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>;
+  setBodyAppearance(
+    request: SetBodyAppearanceRequest,
+  ): Promise<SetBodyAppearanceResponse>;
   reorderFeature(
     request: ReorderFeatureRequest,
   ): Promise<ReorderFeatureResponse>;
@@ -408,6 +413,13 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   renameBody(request: RenameBodyRequest) {
     return this.invoke<RenameBodyResponse>({ kind: "renameBody", request });
+  }
+
+  setBodyAppearance(request: SetBodyAppearanceRequest) {
+    return this.invoke<SetBodyAppearanceResponse>({
+      kind: "setBodyAppearance",
+      request,
+    });
   }
 
   reorderFeature(request: ReorderFeatureRequest) {

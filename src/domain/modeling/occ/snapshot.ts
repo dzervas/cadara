@@ -2697,7 +2697,15 @@ export function buildOccKernelDocumentSnapshot(
     features,
     cursor: state.cursor,
     sketches: [...state.sketches],
-    bodies: [...state.referenceState.bodySnapshots] as BodySnapshotRecord[],
+    bodies: state.referenceState.bodySnapshots.map(
+      (body): BodySnapshotRecord => {
+        const appearance = state.bodyAppearances.get(body.bodyId);
+        if (!appearance) {
+          throw new Error(`Body ${body.bodyId} has no appearance record.`);
+        }
+        return { ...body, appearance: structuredClone(appearance) };
+      },
+    ),
     constructions: [...state.constructions],
     variables: [...state.variables],
     entities,

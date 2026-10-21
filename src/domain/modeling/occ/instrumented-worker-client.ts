@@ -30,6 +30,7 @@ import type {
   GetDocumentSnapshotRequest,
   RenameBodyRequest,
   ReorderDocumentHistoryRequest,
+  SetBodyAppearanceRequest,
   ReorderFeatureRequest,
   ResolveReferenceRequest,
   SetFeatureCursorRequest,
@@ -202,6 +203,14 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     return this.measure(
       "renameBody",
       () => this.inner.renameBody(request),
+      diagnosticResultAttributes,
+    );
+  }
+
+  setBodyAppearance(request: SetBodyAppearanceRequest) {
+    return this.measure(
+      "setBodyAppearance",
+      () => this.inner.setBodyAppearance(request),
       diagnosticResultAttributes,
     );
   }

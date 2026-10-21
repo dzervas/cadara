@@ -31,6 +31,7 @@ const documentCollections = {
   sketches: "sketchId",
   features: "featureId",
   bodyLabels: "bodyId",
+  bodyAppearances: "bodyId",
   embeddedBinaryAssets: "assetId",
 };
 const canonicalIds = {

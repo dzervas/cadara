@@ -20,6 +20,8 @@ import type {
   ModelingDiagnostic,
   RenameBodyRequest,
   RenameBodyResponse,
+  SetBodyAppearanceRequest,
+  SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
   ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
@@ -207,6 +209,10 @@ export type OccWorkerOperation =
       request: RenameBodyRequest;
     }
   | {
+      kind: "setBodyAppearance";
+      request: SetBodyAppearanceRequest;
+    }
+  | {
       kind: "reorderFeature";
       request: ReorderFeatureRequest;
     }
@@ -285,6 +291,7 @@ export type OccWorkerOperationResult =
   | DeleteFeatureResponse
   | DeleteDocumentTargetResponse
   | RenameBodyResponse
+  | SetBodyAppearanceResponse
   | ReorderFeatureResponse
   | ReorderDocumentHistoryResponse
   | SetFeatureCursorResponse

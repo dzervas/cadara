@@ -43,6 +43,7 @@ import {
   createDeleteTargetHistoryEntry,
   createEmptyOperationHistory,
   createRenameBodyHistoryEntry,
+  createSetBodyAppearanceHistoryEntry,
   createReorderDocumentHistoryEntry,
   createReorderFeatureHistoryEntry,
   createSetFeatureCursorHistoryEntry,
@@ -84,6 +85,7 @@ import {
   normalizeDeleteFeatureInput,
   normalizeDeleteTargetInput,
   normalizeRenameBodyInput,
+  normalizeSetBodyAppearanceInput,
   normalizeReorderFeatureInput,
   normalizeReorderDocumentHistoryInput,
   normalizeSetFeatureCursorInput,
@@ -112,6 +114,7 @@ import {
   mapDeleteFeatureResponse,
   mapDeleteTargetResponse,
   mapRenameBodyResponse,
+  mapSetBodyAppearanceResponse,
   mapReorderFeatureResponse,
   mapReorderDocumentHistoryResponse,
   mapSetFeatureCursorResponse,
@@ -757,7 +760,14 @@ export function createModelingService(
         // Restore regenerates runtime topology witnesses. Persist that actual
         // restored basis, not file-era tokens that the next write would
         // legitimately reject as different from its own runtime predecessor.
-        activeDocument = await exportAuthoredDocumentForRepository();
+        const restored = await exportAuthoredDocumentForRepository();
+        // A document saved before body colours keeps having none: opening it
+        // must not write the kernel's auto slots (see `bodyAppearances`); the
+        // next real authored action persists them against this basis.
+        if (normalized.document.bodyAppearances === undefined) {
+          delete restored.bodyAppearances;
+        }
+        activeDocument = restored;
         activeRuntimeRevisionId = activeDocument.revisionId;
       } catch (error: unknown) {
         return {
@@ -2256,6 +2266,32 @@ export function createModelingService(
             input,
             () => createRenameBodyHistoryEntry(request),
             "Rename Body",
+          );
+        },
+      });
+    },
+    setBodyAppearance(input) {
+      return runLocalMutation({
+        operation: "Change body color",
+        fallbackMessage: "Change body color failed.",
+        context: [
+          { key: "baseRevisionId", value: input.baseRevisionId },
+          { key: "bodyId", value: input.bodyId },
+        ],
+        action: async () => {
+          const request = normalizeSetBodyAppearanceInput(
+            input,
+            currentDocumentId,
+          );
+          const expected = await getMutationPredecessor();
+          const response = await adapter.setBodyAppearance(request);
+          return finalizeMutationResult(
+            expected,
+            response,
+            mapSetBodyAppearanceResponse(response, currentDocumentId),
+            input,
+            () => createSetBodyAppearanceHistoryEntry(request),
+            "Change Body Color",
           );
         },
       });

@@ -654,8 +654,42 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     await promise;
   }
 
+  // cadara-01k.1. Seam: a body colour change is one worker operation whose
+  // envelope (palette or custom appearance) the worker validation accepts.
+  async function testSetBodyAppearanceRoundTripsThroughTheWorker() {
+    const document = await createSeedAuthoredModelDocument();
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const request = {
+      contractVersion: CONTRACT_VERSION,
+      documentId: document.documentId,
+      baseRevisionId: document.revisionId,
+      bodyId: document.bodyLabels[0]!.bodyId,
+      appearance: { kind: "custom", hex: "#336699" },
+    } as const;
+    const promise = client.setBodyAppearance(request);
+    const posted = worker.posted[0]!;
+    expect(posted.kind === "invoke" && posted.operation).toEqual({
+      kind: "setBodyAppearance",
+      request,
+    });
+    const validation = validateOccWorkerRequestEnvelope(
+      structuredClone(posted),
+    );
+    expect(validation.success ? [] : validation.errors).toEqual([]);
+    const response = { revisionState: { kind: "accepted" } };
+    worker.emit({
+      kind: "invoked",
+      requestId: posted.requestId,
+      operation: "setBodyAppearance",
+      payload: response,
+    } as never);
+    expect(await promise).toEqual(response);
+  }
+
   await testWarmupInvokesWorkerOperation();
   await testRestoreCarriesTheNewRevisionOption();
+  await testSetBodyAppearanceRoundTripsThroughTheWorker();
   await testNeutralCurveQueriesRoundTripThroughTheWorker();
   await testDeriveSketchRegionsRoundTripsThroughTheWorker();
   await testSnapshotResponsesAreUnpacked();

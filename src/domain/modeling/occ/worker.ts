@@ -330,6 +330,10 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(operation.request.documentId).renameBody(
         operation.request,
       );
+    case "setBodyAppearance":
+      return getWorkerAdapter(operation.request.documentId).setBodyAppearance(
+        operation.request,
+      );
     case "reorderFeature":
       return getWorkerAdapter(operation.request.documentId).reorderFeature(
         operation.request,

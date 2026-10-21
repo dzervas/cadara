@@ -207,6 +207,19 @@ export async function replayHistoryEntry(input: {
         cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
       };
     }
+    case "setBodyAppearance": {
+      const response = await input.adapter.setBodyAppearance({
+        ...entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      });
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      };
+    }
     case "reorderFeature": {
       const response = await input.adapter.reorderFeature({
         ...entry.payload,

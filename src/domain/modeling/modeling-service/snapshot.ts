@@ -10,6 +10,7 @@ import type {
   GetDocumentSnapshotRequest,
   AddDocumentVariableResponse,
   RenameBodyResponse,
+  SetBodyAppearanceResponse,
   ResolveReferenceResponse,
   ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
@@ -27,6 +28,7 @@ import {
   requireEvaluatePreviewResponse,
   requireGetDocumentSnapshotResponse,
   requireRenameBodyResponse,
+  requireSetBodyAppearanceResponse,
   requireReorderDocumentHistoryResponse,
   requireReorderFeatureResponse,
   requireResolveReferenceResponse,
@@ -44,6 +46,7 @@ import type {
   ModelingDeleteFeatureResult,
   ModelingDeleteTargetResult,
   ModelingRenameBodyResult,
+  ModelingSetBodyAppearanceResult,
   ModelingReorderFeatureResult,
   ModelingReorderDocumentHistoryResult,
   ModelingSetFeatureCursorResult,
@@ -260,6 +263,27 @@ export function mapRenameBodyResponse(
     parsed.documentId,
     expectedDocumentId,
     "Rename body",
+  );
+  return {
+    revisionId: parsed.revisionId,
+    bodyId: parsed.bodyId,
+    revisionState: parsed.revisionState,
+    rebuildResult: parsed.rebuildResult,
+    changedTargets: parsed.changedTargets,
+    diagnostics: parsed.diagnostics,
+  };
+}
+
+export function mapSetBodyAppearanceResponse(
+  response: SetBodyAppearanceResponse,
+  expectedDocumentId: DocumentId,
+): ModelingSetBodyAppearanceResult {
+  const parsed = requireSetBodyAppearanceResponse(response);
+  assertKernelContractVersion(parsed.contractVersion);
+  assertKernelDocumentIdMatches(
+    parsed.documentId,
+    expectedDocumentId,
+    "Set body appearance",
   );
   return {
     revisionId: parsed.revisionId,
