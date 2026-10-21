@@ -333,6 +333,11 @@ export type NeutralCurveJoinResult =
       readonly kind: "unsupported" | "uncertain";
       readonly code: string;
       readonly message: string;
+      /** Diagnostic context only; never a contact or acceptance certificate. */
+      readonly culprit?: {
+        readonly side: "first" | "second";
+        readonly location: NeutralCurveJoinLocation;
+      };
     };
 
 /** The kernel-free dispatcher plus its declared-join operation. */

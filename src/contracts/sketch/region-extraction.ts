@@ -350,6 +350,11 @@ export interface Branch {
   entityId: SketchEntityId | null;
   description: string;
   box: Box;
+  /** Authored occurrence provenance for join-failure diagnostics only. */
+  splineEnds?: {
+    start: { occurrenceId: string; pointId: SketchPointId };
+    end: { occurrenceId: string; pointId: SketchPointId };
+  };
   /**
    * A derived shell sub-span (T08b-g3): its index in its output span and,
    * at each trimmed terminal end, the driven terminal point whose class is
@@ -839,6 +844,16 @@ export function collectArrangementBranches(
               end: span.source.endPointId as SketchPointId,
             },
           );
+          draft.splineEnds = {
+            start: {
+              occurrenceId: span.source.startOccurrenceId,
+              pointId: span.source.startPointId as SketchPointId,
+            },
+            end: {
+              occurrenceId: span.source.endOccurrenceId,
+              pointId: span.source.endPointId as SketchPointId,
+            },
+          };
           drafts.push(draft);
           spanNames.set(draft, `span ${index + 1}`);
         });
@@ -1607,6 +1622,7 @@ export type PairOutcome =
       result: "uncertain" | "unsupported";
       code: string;
       message: string;
+      joinCulprit?: Exclude<NeutralCurveJoinResult, { kind: "verified" }>["culprit"];
     };
 
 /**
@@ -1667,6 +1683,7 @@ export async function queryArrangement(
                 result: result.kind,
                 code: result.code,
                 message: result.message,
+                ...(result.culprit ? { joinCulprit: result.culprit } : {}),
               },
         );
         continue;
@@ -3791,18 +3808,21 @@ async function deriveArrangement(
     code: string,
     reason: string,
     indices: readonly number[],
+    joinCause?: SketchSolveDiagnostic["joinCause"],
+    culpritDescription?: string,
   ) => {
     for (const index of [...new Set(indices)].sort((l, r) => l - r)) {
       const branch = branches[index]!;
-      emit(
-        makeDiagnostic(
+      emit({
+        ...makeDiagnostic(
           code,
-          `${reason} Affects ${branch.description}.`,
+          `${reason} Affects ${culpritDescription ?? branch.description}.`,
           branch.entityId
             ? { kind: "entity", entityId: branch.entityId }
             : null,
         ),
-      );
+        ...(joinCause ? { joinCause } : {}),
+      });
     }
   };
   const declarations = collectDeclarations(
@@ -3855,10 +3875,56 @@ async function deriveArrangement(
       : pair.result === "unsupported"
         ? "region-query-unsupported"
         : "region-query-uncertain";
+    const joinCause: SketchSolveDiagnostic["joinCause"] = pair.join
+      ? { code: pair.code }
+      : undefined;
+    let culpritDescription: string | undefined;
+    if (joinCause && pair.code === "join-zero-end-tangent" && pair.joinCulprit) {
+      const branch = branches[pair[pair.joinCulprit.side]]!;
+      const location = pair.joinCulprit.location;
+      const end =
+        typeof location === "string" ? branch.splineEnds?.[location] : undefined;
+      const entity = input.definition.entities.find(
+        (candidate) => candidate.entityId === branch.entityId,
+      );
+      const occurrence =
+        entity?.kind === "spline" && end
+          ? entity.pointOccurrences.find(
+              (candidate) =>
+                candidate.occurrenceId === end.occurrenceId &&
+                candidate.pointId === end.pointId,
+            )
+          : undefined;
+      // Only the certified owner's side/location plus authored occurrence
+      // provenance can justify handle recovery. Never infer it from pair order,
+      // diagnostic prose, or a zero rounded pole on an automatic tangent.
+      if (
+        entity?.kind === "spline" &&
+        occurrence?.tangent.kind === "authored" &&
+        occurrence.tangent.vector.every((value) => value === 0)
+      ) {
+        joinCause.culprit = {
+          kind: "splineTangentHandle",
+          entityId: entity.entityId,
+          occurrenceId: occurrence.occurrenceId,
+          pointId: occurrence.pointId,
+        };
+        const index = entity.pointOccurrenceIds.indexOf(occurrence.occurrenceId);
+        const handle =
+          index === 0
+            ? "start handle"
+            : index === entity.pointOccurrenceIds.length - 1
+              ? "end handle"
+              : `handle at fit point ${index + 1}`;
+        culpritDescription = `‘${entity.label}’ ${handle}`;
+      }
+    }
     emitForBranches(
       code,
       `The ${pair.join ? "declared-join" : "pair"} query of ${branches[pair.first]!.description} and ${branches[pair.second]!.description} is ${pair.result} (${pair.code}): ${pair.message}`,
       [pair.first, pair.second],
+      joinCause,
+      culpritDescription,
     );
   }
   for (const { branch, result } of selves) {

@@ -145,21 +145,24 @@ class JoinUncertain extends Error {
   readonly code: string;
   readonly detail: string;
   readonly kind: Failure["kind"];
+  readonly culprit?: Failure["culprit"];
 
   constructor(
     code: string,
     detail: string,
     kind: Failure["kind"] = "uncertain",
+    culprit?: Failure["culprit"],
   ) {
     super(detail);
     this.code = code;
     this.detail = detail;
     this.kind = kind;
+    this.culprit = culprit;
   }
 }
 
-function fail(code: string, message: string): never {
-  throw new JoinUncertain(code, message);
+function fail(code: string, message: string, culprit?: Failure["culprit"]): never {
+  throw new JoinUncertain(code, message, "uncertain", culprit);
 }
 
 function point(value: number): Interval {
@@ -1187,6 +1190,10 @@ class JoinCertifier {
           fail(
             "join-zero-end-tangent",
             "A cubic has a zero tangent at a declared join location.",
+            {
+              side: side === 0 ? "first" : "second",
+              location: side === 0 ? join.first : join.second,
+            },
           );
       }
       const positions = [
@@ -1742,6 +1749,7 @@ export function certifyNeutralCurveJoin(
         kind: error.kind,
         code: error.code,
         message: error.detail,
+        ...(error.culprit ? { culprit: error.culprit } : {}),
       };
       return failure;
     }

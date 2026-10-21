@@ -1596,6 +1596,17 @@ export interface SketchSolveDiagnostic {
   severity: "info" | "warning" | "error";
   /** Human-readable diagnostic summary. */
   message: string;
+  /** Declared-join owner's cause, retained independently of diagnostic prose. */
+  joinCause?: {
+    code: string;
+    /** Present only when the owner identifies a specific authored zero handle. */
+    culprit?: {
+      kind: "splineTangentHandle";
+      entityId: SketchEntityId;
+      occurrenceId: string;
+      pointId: SketchPointId;
+    };
+  };
   /** Precise authored or derived target implicated by the diagnostic, when known. */
   target:
     | { kind: "entity"; entityId: SketchEntityId }

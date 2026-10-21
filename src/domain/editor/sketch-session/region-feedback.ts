@@ -27,9 +27,16 @@ const REGION_WITHHOLDING_CODES = new Set([
 ]);
 
 const RECOVERY = "No region is formed there. Undo, or edit that geometry.";
+const ZERO_HANDLE_RECOVERY =
+  "No region is formed there. Undo, drag the handle out of zero, or Reset to automatic.";
 
 const withheldText = (warning: SketchSolveDiagnostic) =>
-  `${warning.message} ${RECOVERY}`;
+  `${warning.message} ${
+    warning.joinCause?.code === "join-zero-end-tangent" &&
+    warning.joinCause.culprit?.kind === "splineTangentHandle"
+      ? ZERO_HANDLE_RECOVERY
+      : RECOVERY
+  }`;
 
 /**
  * Whether `message` is a status line this owner composed from one of
