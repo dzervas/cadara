@@ -87,6 +87,50 @@ test("a body colour change is persisted, undone to the previous colour and redon
   }
 });
 
+// cadara-qj6. Seam: `exportCurrentDocument`, which the workbench's Download a
+// copy / Save linked file (no receipt) and the semantic native save (with a
+// receipt) call, issued while a colour change it follows is still in flight
+// under the workbench's background persistence.
+test.each([
+  ["a download copy", false],
+  ["a native save", true],
+])("%s requested right after a colour change includes it", async (_, native) => {
+  const repository = createMemoryDocumentRepository();
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: documentId,
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  const custom: BodyAppearance = { kind: "custom", hex: "#336699" };
+  try {
+    const initial = await service.getCurrentDocumentSnapshot();
+    const set = service.setBodyAppearance({
+      baseRevisionId: initial.document.revisionId,
+      bodyId,
+      appearance: custom,
+    });
+    let receiptOk: boolean | null = null;
+    const saved = await service.exportCurrentDocument(
+      native ? { observe: (receipt) => (receiptOk = receipt.ok) } : undefined,
+    );
+    expect((await set).isOk()).toBe(true);
+    expect(
+      storedAppearance(JSON.parse(saved.payload as string)),
+      "the saved file holds the colour change requested before the save",
+    ).toEqual(custom);
+    if (native) expect(receiptOk).toBe(true);
+    await service.waitForPersistence();
+    expect(
+      (await repository.getDurableHistoryAvailability(documentId)).undoEntries?.map(
+        (entry) => entry.label,
+      ),
+    ).toEqual(["Change Body Color"]);
+    expect((await service.getHistoryRestoreState()).kind).not.toBe("failed");
+  } finally {
+    service.dispose();
+  }
+});
+
 // cadara-01k.1 follow-up. Seam: the workbench "Open a copy" entry point
 // (`openDocumentCopyAsTab`: `repository.initialize` with the parsed file, then
 // the tab's service restores it) for a document saved before body colours.
