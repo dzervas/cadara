@@ -1600,6 +1600,12 @@ export function CadWorkbench({
                   {sketchOffsetActionState ? (
                     <SketchOffsetActions
                       entries={sketchOffsetActionState.entries}
+                      onEditDistance={(derivationId) =>
+                        dispatch({
+                          type: "sketch.toolPatched",
+                          patch: { intent: "editOffsetDistance", derivationId },
+                        })
+                      }
                       onRemove={(derivationId) =>
                         dispatch({
                           type: "sketch.toolPatched",

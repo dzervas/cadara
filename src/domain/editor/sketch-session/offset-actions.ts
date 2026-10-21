@@ -20,6 +20,8 @@ import {
   type SketchDerivationDefinition,
 } from "@/contracts/sketch/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import type { AuthoredValue } from "@/contracts/modeling/authored-values";
+import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
 import { removeDerivedRelationship } from "@/domain/sketch-editing/derived-removal";
 import type { SketchSessionState } from "./types";
@@ -170,6 +172,38 @@ export function applySketchOffsetRemoval(
   return removal
     ? rebuildSessionForDefinition(session, { definition: removal.definition })
     : session;
+}
+
+/** Edit the relationship, not its copies: preserve identities and authored text. */
+export function applySketchOffsetDistanceUpdate(
+  session: SketchSessionState,
+  derivationId: string,
+  distance: AuthoredValue<number>,
+): SketchSessionState {
+  if (
+    !session.definition.derivedRelationships?.some(
+      (relationship) =>
+        relationship.kind === "offset" &&
+        relationship.derivationId === derivationId,
+    )
+  ) return session;
+  const definition = {
+    ...session.definition,
+    derivedRelationships: session.definition.derivedRelationships.map(
+      (relationship) =>
+        relationship.kind === "offset" && relationship.derivationId === derivationId
+          ? { ...relationship, distance }
+          : relationship,
+    ),
+  };
+  // The evaluator owns unresolved/degenerate-distance diagnostics and last-good
+  // geometry retention, just as it does for edits to an offset's originals.
+  return rebuildSessionForDefinition(session, {
+    definition: evaluateAuthoredSketchDerivations({
+      definition,
+      ...getSketchSessionDerivationSettings(session),
+    }).definition,
+  });
 }
 
 /**

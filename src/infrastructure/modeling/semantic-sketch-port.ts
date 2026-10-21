@@ -423,7 +423,9 @@ export function createSemanticSketchPort(input: {
       }
     }
     const geometryMutation = command.operation === "sketch.derivation.create" || command.operation === "sketch.mirror.remove" || command.operation === "sketch.mirror.repair" || command.operation === "sketch.mirror.create" || command.operation === "sketch.offset.create" || command.operation === "sketch.offset.remove" || command.operation === "sketch.geometry.build" || command.operation === "sketch.requirement.remove" || command.operation === "sketch.construction.set" || command.operation === "sketch.geometry.update" || command.operation === "sketch.geometry.delete" || command.operation === "sketch.label.set";
-    if (command.operation === "sketch.offset.remove" && (editor.kind !== "editingSketch" || !editor.session.definition.derivedRelationships?.some(r => r.kind === "offset" && r.derivationId === command.derivationId))) return { ...terminal, outcome: { kind: "rejected", reasonCode: "offset-unavailable" } };
+    if ((command.operation === "sketch.offset.remove" || command.operation === "sketch.offset.update") && (editor.kind !== "editingSketch" || !editor.session.definition.derivedRelationships?.some(r => r.kind === "offset" && r.derivationId === command.derivationId))) return { ...terminal, outcome: { kind: "rejected", reasonCode: "offset-unavailable" } };
+    if (command.operation === "sketch.offset.update" && (typeof command.value === "number" ? !Number.isFinite(command.value) : !command.value.trim()))
+      return { ...terminal, outcome: { kind: "rejected", reasonCode: "invalid-offset-distance" } };
     if (geometryMutation && command.operation !== "sketch.offset.remove" && command.operation !== "sketch.mirror.remove" && command.operation !== "sketch.mirror.repair") {
       if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
       const s = editor.session;
@@ -560,6 +562,15 @@ export function createSemanticSketchPort(input: {
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.mirrorCreated", targets: command.targets.map(editorTarget), axis: editorTarget(command.axis) });
       if (command.operation === "sketch.offset.remove")
         events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.offsetRemoved", derivationId: command.derivationId });
+      if (command.operation === "sketch.offset.update") {
+        // Use the workbench's annotation editor, including its authored-value
+        // parsing, single Save action and offset diagnostics/publication owner.
+        for (const patch of [
+          { intent: "editOffsetDistance", derivationId: command.derivationId },
+          { value: command.value },
+          { intent: "commitAnnotationValue" },
+        ]) events = await input.loop.dispatchAndSettle(command.commandId, { type: "sketch.toolPatched", patch });
+      }
       if (command.operation === "sketch.offset.create") {
         if (editor.kind !== "editingSketch") throw new Error("Missing private sketch owner.");
         const seeds = command.targets.map(t => t.entityId);
@@ -649,7 +660,7 @@ export function createSemanticSketchPort(input: {
         if (blocked?.blockedReason)
           return { ...terminal, outcome: { kind: "conflicted", actualBasis }, diagnostics: [...terminal.diagnostics, semanticDiagnostic(new Error(blocked.blockedReason))] };
       }
-      if ((geometryMutation || command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" || command.operation === "sketch.style.patch" || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
+      if ((geometryMutation || command.operation === "sketch.image.update" || command.operation === "sketch.image.replace" || command.operation === "sketch.image.remove" || command.operation === "sketch.style.patch" || command.operation === "sketch.reference.add" || command.operation === "sketch.requirement.add" || command.operation === "sketch.dimension.update" || command.operation === "sketch.dimension.reference" || command.operation === "sketch.offset.update") && editor.kind === "editingSketch" && finalEditor.kind === "editingSketch" && finalEditor.session.definition === editor.session.definition && finalEditor.session.sketchLabel === editor.session.sketchLabel) {
         // Some semantic commands drive interactive tools; their refusals live
         // with the tool, while explicit commands return session diagnostics.
         const refusal = finalEditor.session.toolPresentation?.validation?.[0]?.message

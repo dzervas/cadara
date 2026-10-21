@@ -863,7 +863,11 @@ export function getAnnotationHighlightTargets(
       return true;
     }
 
-    if (editTarget && primitiveRefEquals(annotation.target, editTarget)) {
+    if (
+      editTarget &&
+      editTarget.kind !== "offsetDistance" &&
+      primitiveRefEquals(annotation.target, editTarget)
+    ) {
       return true;
     }
 

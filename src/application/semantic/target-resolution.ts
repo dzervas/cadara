@@ -210,7 +210,7 @@ export function resolveSemanticCommand(
     );
   }
   if (
-    command.operation === "sketch.offset.remove" &&
+    (command.operation === "sketch.offset.remove" || command.operation === "sketch.offset.update") &&
     isTargetSelector(command.derivationId)
   ) {
     const target = command.derivationId;

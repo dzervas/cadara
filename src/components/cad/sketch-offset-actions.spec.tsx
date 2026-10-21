@@ -39,7 +39,7 @@ const text = (markup: string) => markup.replace(/<[^>]*>/g, "|");
 
 test("T17c: each offset row shows its label, Remove offset and the consequence line", () => {
   const markup = render(
-    <SketchOffsetActions entries={[sized, chained]} onRemove={() => {}} />,
+    <SketchOffsetActions entries={[sized, chained]} onRemove={() => {}} onEditDistance={() => {}} />,
   );
   const visible = text(markup);
   for (const expected of [
@@ -77,6 +77,7 @@ test("T17c: the consequence line: no requirements, singular sizing", () => {
           { ...sized, derivationId: "b", sizingRequirementCount: 1 },
         ]}
         onRemove={() => {}}
+        onEditDistance={() => {}}
       />,
     ),
   );
@@ -106,6 +107,7 @@ test("T17c review R-1: the health line: Healthy, Checking…, or Broken with its
         },
       ]}
       onRemove={() => {}}
+      onEditDistance={() => {}}
     />,
   );
   const visible = text(markup);
@@ -135,6 +137,7 @@ test("T17c: Remove offset calls onRemove with that row's offset id", () => {
   const tree = SketchOffsetActions({
     entries: [sized, chained],
     onRemove: (derivationId) => removed.push(derivationId),
+    onEditDistance: () => {},
   });
   const buttons = elements(tree).filter(
     (element) =>
@@ -166,7 +169,7 @@ test("T17c: the Offset panel flows in the selection-context column after Mirror;
         onRemove={() => {}}
         onReplace={() => {}}
       />
-      <SketchOffsetActions entries={[sized]} onRemove={() => {}} />
+      <SketchOffsetActions entries={[sized]} onRemove={() => {}} onEditDistance={() => {}} />
     </SketchSelectionContextStack>,
   );
   const positioned = (markup.match(/<[a-z]+ [^>]*>/g) ?? []).filter((tag) =>
@@ -179,4 +182,20 @@ test("T17c: the Offset panel flows in the selection-context column after Mirror;
   expect(markup.indexOf('data-testid="sketch-offset-actions"')).toBeGreaterThan(
     markup.indexOf('data-testid="sketch-mirror-actions"'),
   );
+});
+
+test("Edit distance invokes the row's relationship edit action", () => {
+  const edited: string[] = [];
+  const tree = SketchOffsetActions({
+    entries: [sized, chained],
+    onRemove: () => {},
+    onEditDistance: id => edited.push(id),
+  });
+  const buttons = elements(tree).filter(element =>
+    (element.props as Record<string, unknown>)["data-testid"] === "offset-edit-distance",
+  );
+  expect(buttons).toHaveLength(2);
+  (buttons[1]!.props as { onClick: () => void }).onClick();
+  expect(edited).toEqual([chained.derivationId]);
+  expect(text(render(tree))).toContain("Edit distance");
 });

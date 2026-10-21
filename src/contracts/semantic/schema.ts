@@ -144,6 +144,14 @@ export type SemanticSketchCommand = CommandIdentity & {
     | { operation: "sketch.mirror.repair"; draft: SemanticDraftBasis; derivationId: string; repair: { kind: "axis"; target: Extract<DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef } | { kind: "original"; output: Extract<DurableRef, { kind: "sketchEntity" }>; target: Extract<DurableRef, { kind: "sketchEntity" }> }; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.mirror.create"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[]; axis: Extract<DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.offset.create"; draft: SemanticDraftBasis; targets: readonly Extract<DurableRef, { kind: "sketchEntity" }>[]; distance: number; side: "left" | "right"; intent: "fulfill" | "author-invalid" }
+    | {
+        operation: "sketch.offset.update";
+        draft: SemanticDraftBasis;
+        derivationId: string;
+        /** Signed offset distance in document length units, or an authored expression. */
+        value: number | string;
+        intent: "fulfill" | "author-invalid";
+      }
     | { operation: "sketch.offset.remove"; draft: SemanticDraftBasis; derivationId: string; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.geometry.delete"; draft: SemanticDraftBasis; targets: readonly SemanticSketchGeometryTarget[]; intent: "fulfill" | "author-invalid" }
     | { operation: "sketch.label.set"; draft: SemanticDraftBasis; target: SemanticSketchLabelTarget; label: string; intent: "fulfill" | "author-invalid" }

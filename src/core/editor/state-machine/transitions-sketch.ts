@@ -318,6 +318,17 @@ export function handleSketchToolPatched(
     });
   }
 
+  if (
+    event.patch.intent === "editOffsetDistance" &&
+    typeof event.patch.derivationId === "string"
+  ) {
+    const session = beginSketchAnnotationEdit(state.session, {
+      kind: "offsetDistance",
+      derivationId: event.patch.derivationId,
+    });
+    return { state: { ...state, session }, effects: [] };
+  }
+
   if (event.patch.intent === "setDimensionAnnotationPlacement") {
     const session = patchSketchDimensionAnnotationPlacement(
       state.session,

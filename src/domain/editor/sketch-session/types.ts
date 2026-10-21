@@ -102,12 +102,17 @@ export interface SketchConstraintAuthoringState {
   authorsReference?: boolean;
 }
 
+export type SketchAnnotationEditTarget =
+  | SketchConstraintRef
+  | SketchDimensionRef
+  | { kind: "offsetDistance"; derivationId: string };
+
 export interface SketchAnnotationEditState {
   /** Staged conversion; the authored reference stays untouched until Save. */
   driving?: true;
   /** O6: explicit confirmation is required before replacing these drivers. */
   drivingConflicts?: readonly DimensionId[];
-  target: SketchConstraintRef | SketchDimensionRef;
+  target: SketchAnnotationEditTarget;
   pendingValue: AuthoredValue<number> | null;
   /**
    * T16f ([TECH] T16-12): the Dimension tool's picks correspond, through a

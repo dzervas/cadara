@@ -72,6 +72,7 @@ import type {
   SketchAnnotationContext,
   SketchAnnotationDescriptor,
   SketchAnnotationEditState,
+  SketchAnnotationEditTarget,
   SketchAnnotationGlyphKind,
   SketchAnnotationProblem,
   SketchDimensionAnnotationDragHandle,
@@ -108,6 +109,7 @@ import {
 // T16f review R-3: re-arming a routed Dimension tool (an import cycle with
 // `constraints.ts`, used only at call time, as `tools.ts` ↔ `constraints.ts`).
 import { rearmSharedDimensionTool } from "./constraints";
+import { applySketchOffsetDistanceUpdate } from "./offset-actions";
 import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
@@ -115,7 +117,7 @@ import {
 
 export function beginSketchAnnotationEdit(
   session: SketchSessionState,
-  target: SketchConstraintRef | SketchDimensionRef,
+  target: SketchAnnotationEditTarget,
   options: {
     /** T16f: a Dimension tool routed to this driver (re-armed afterwards). */
     shared?: SketchSharedDimensionEdit;
@@ -649,6 +651,7 @@ export function makeSketchAnnotationReference(
   session: SketchSessionState,
   edit: SketchAnnotationEditState,
 ): SketchSessionState {
+  if (edit.target.kind === "offsetDistance") return session;
   const definition = makeReferenceDimensionInDefinition(session.definition, edit.target);
   const target = edit.target;
   const alreadyReference = target.kind === "dimension" && session.definition.dimensions.some(d => d.dimensionId === target.dimensionId && isReferenceDimension(d));
@@ -777,6 +780,13 @@ export function commitSketchAnnotationEditValue(
   },
 ): SketchSessionState {
   const target = edit.target;
+  if (target.kind === "offsetDistance") {
+    return applySketchOffsetDistanceUpdate(
+      clearSketchAnnotationEdit(session),
+      target.derivationId,
+      edit.pendingValue,
+    );
+  }
   const madeDriving =
     target.kind === "dimension"
       ? session.definition.dimensions.find(
@@ -820,7 +830,7 @@ export function commitSketchAnnotationEditValue(
     orientSignedPointPairDimension(
       updateAnnotationValueInDefinition(
         session.definition,
-        edit.target,
+        target,
         edit.pendingValue,
       ),
       target,
@@ -989,9 +999,11 @@ function commitEditedAnnotationDefinition(
         : getSketchSessionInvalidFeedback(
             committed,
             [
-              edit.target.kind === "constraint"
-                ? edit.target.constraintId
-                : edit.target.dimensionId,
+              edit.target.kind === "offsetDistance"
+                ? edit.target.derivationId
+                : edit.target.kind === "constraint"
+                  ? edit.target.constraintId
+                  : edit.target.dimensionId,
             ],
             // T13e2 (review R-1): the edit caused the invalidity only if the
             // sketch was accepted before it.
@@ -1435,7 +1447,7 @@ export function buildAnnotationEditPresentation(
         },
       ],
       floatingInput: {
-        id: `annotation-edit-${getTargetKey(edit.target)}`,
+        id: `annotation-edit-${annotationEditTargetKey(edit.target)}`,
         label: `${shared.referenceLabel} (reference)`,
         value:
           measured === null
@@ -1470,7 +1482,7 @@ export function buildAnnotationEditPresentation(
       },
     ],
     floatingInput: {
-      id: `annotation-edit-${getTargetKey(edit.target)}`,
+      id: `annotation-edit-${annotationEditTargetKey(edit.target)}`,
       label: reference ? `${label} (reference)` : label,
       value:
         edit.pendingValue === null
@@ -1575,9 +1587,15 @@ function formatMeasuredEditText(value: number) {
   return String(Number(value.toFixed(6)));
 }
 
+function annotationEditTargetKey(target: SketchAnnotationEditTarget) {
+  return target.kind === "offsetDistance"
+    ? target.derivationId
+    : getTargetKey(target);
+}
+
 export function getEditableAnnotationValue(
   session: SketchSessionState,
-  target: SketchConstraintRef | SketchDimensionRef,
+  target: SketchAnnotationEditTarget,
 ): {
   label: string;
   /** The edit's initial value; a reference dimension's is its measured value. */
@@ -1590,6 +1608,26 @@ export function getEditableAnnotationValue(
   /** T13d: a reference dimension and its measured value (display units). */
   reference?: { measuredValue: number | null };
 } | null {
+  if (target.kind === "offsetDistance") {
+    const relationship = session.definition.derivedRelationships?.find(
+      (entry) =>
+        entry.kind === "offset" && entry.derivationId === target.derivationId,
+    );
+    if (relationship?.kind !== "offset") return null;
+    const entityId =
+      relationship.outputs[0]?.outputEntityId ?? relationship.seedEntityIds[0];
+    const point = entityId ? getEntityAnchor(session.definition, entityId) : null;
+    return {
+      label: "Offset distance",
+      value: relationship.distance,
+      unit: "mm",
+      anchor: {
+        kind: "sketchPoint",
+        point: point ?? [0, 0],
+        offset: { x: 18, y: -18 },
+      },
+    };
+  }
   const { descriptors, solvedSnapshot } =
     buildSketchAnnotationDescriptors(session);
   const annotation = descriptors.find(
