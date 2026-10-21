@@ -3,8 +3,11 @@ import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import {
   composeViewportRenderables,
+  getBodyDisplayColors,
   isTargetHidden,
 } from "@/workbench/shell/viewport-renderables";
+import { getDocumentRenderableMaterialOptions } from "@/components/cad/sketch-display-style";
+import { resolveSketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -679,4 +682,100 @@ test("T17d2 (T17d review R-1): every committed curve and point of a sketch that 
     ["sketch_current sketchEntity", undefined],
     ["sketch_current sketchPoint", undefined],
   ]);
+});
+
+test("cadara-01k: body faces carry their body's display colour (a picker preview wins for its body); edges, previews and other bodies' faces keep theirs", () => {
+  const mesh = {
+    kind: "mesh" as const,
+    vertexPositions: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 1, 0],
+    ] as [number, number, number][],
+    triangleIndices: [[0, 1, 2]] as [number, number, number][],
+  };
+  const face = (bodyId: "body_a" | "body_b"): RenderableEntityRecord => ({
+    id: `face_${bodyId}`,
+    label: `Face ${bodyId}`,
+    ownerBodyId: bodyId,
+    ownerFeatureId: "feature_a",
+    binding: {
+      pickId: `pick_face_${bodyId}`,
+      pickPriority: 10,
+      target: { kind: "face", bodyId, faceId: `face_${bodyId}` },
+      topology: "face",
+      semanticClass: "bodyFace",
+    },
+    geometry: mesh,
+  });
+  const edge: RenderableEntityRecord = {
+    id: "edge_a",
+    label: "Edge a",
+    ownerBodyId: "body_a",
+    ownerFeatureId: "feature_a",
+    binding: {
+      pickId: "pick_edge_a",
+      pickPriority: 5,
+      target: { kind: "edge", bodyId: "body_a", edgeId: "edge_a" },
+      topology: "edge",
+      semanticClass: "featureEdge",
+    },
+    geometry: {
+      kind: "polyline",
+      points: [
+        [0, 0, 0],
+        [1, 0, 0],
+      ],
+      isClosed: false,
+    },
+  };
+
+  const bodyColors = getBodyDisplayColors(
+    [
+      { bodyId: "body_a", appearance: { kind: "palette", slot: 1 } },
+      { bodyId: "body_b", appearance: { kind: "custom", hex: "#2f6f8f" } },
+    ],
+    { bodyId: "body_b", hex: "#ff0000" },
+  );
+  expect([...bodyColors]).toEqual([
+    ["body_a", 0xc97ba6],
+    ["body_b", 0xff0000],
+  ]);
+  expect(
+    getBodyDisplayColors(
+      [{ bodyId: "body_b", appearance: { kind: "custom", hex: "#2f6f8f" } }],
+      null,
+    ).get("body_b"),
+  ).toBe(0x2f6f8f);
+
+  const composed = composeViewportRenderables({
+    snapshotRenderables: [face("body_a"), face("body_b"), edge],
+    previewRenderables: [{ ...face("body_a"), id: "preview_face_a" }],
+    sketchSession: null,
+    hiddenTargetKeys: {},
+    bodyColors,
+  });
+  const colorById = Object.fromEntries(
+    composed.documentRenderables.map((entry) => [
+      `${entry.origin}:${entry.renderable.id}`,
+      entry.bodyColor,
+    ]),
+  );
+  expect(colorById).toEqual({
+    "document:face_body_a": 0xc97ba6,
+    "document:face_body_b": 0xff0000,
+    "document:edge_a": undefined,
+    "preview:preview_face_a": undefined,
+  });
+
+  const palette = resolveSketchRenderingPalette(() => "");
+  const byId = new Map(
+    composed.documentRenderables.map((entry) => [entry.renderable.id, entry]),
+  );
+  expect(
+    getDocumentRenderableMaterialOptions(byId.get("face_body_a")!, palette),
+  ).toEqual({ color: 0xc97ba6 });
+  expect(getDocumentRenderableMaterialOptions(byId.get("edge_a")!, palette)).toEqual(
+    {},
+  );
 });

@@ -1,7 +1,15 @@
 import type { PrimitiveRef } from "@/core/editor/schema";
 
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
-import type { WorkbenchContextMenuEntry } from "@/components/layout/workbench-context-menu";
+import type {
+  MenuAnchor,
+  WorkbenchContextMenuEntry,
+} from "@/components/layout/workbench-context-menu";
+import { BodyColorMenuSection } from "@/components/layout/body-color-menu-section";
+import type {
+  BodyAppearance,
+  BodyPaletteSlot,
+} from "@/contracts/modeling/body-appearance";
 
 export function getPartsObjectMenuEntries(input: {
   canChangeSketchPlane: boolean;
@@ -13,8 +21,14 @@ export function getPartsObjectMenuEntries(input: {
   onObjectExport: (target: PrimitiveRef, label: string) => void;
   onRenameTarget: (target: PrimitiveRef, label: string) => void;
   target: PrimitiveRef;
+  bodyColor?: {
+    appearance: BodyAppearance;
+    onChoosePaletteSlot: (slot: BodyPaletteSlot) => void;
+    onOpenCustomColor: (anchor: MenuAnchor) => void;
+  };
 }): WorkbenchContextMenuEntry[] {
   const {
+    bodyColor,
     canChangeSketchPlane,
     label,
     onChangeSketchPlaneTarget,
@@ -25,6 +39,23 @@ export function getPartsObjectMenuEntries(input: {
   } = input;
 
   return [
+    ...(bodyColor
+      ? [
+          {
+            kind: "content" as const,
+            id: "body-color",
+            render: ({ anchor, close }: { anchor: MenuAnchor; close: () => void }) => (
+              <BodyColorMenuSection
+                appearance={bodyColor.appearance}
+                close={close}
+                onChoosePaletteSlot={bodyColor.onChoosePaletteSlot}
+                onOpenCustomColor={() => bodyColor.onOpenCustomColor(anchor)}
+              />
+            ),
+          },
+          { kind: "divider" as const, id: "body-color-divider" },
+        ]
+      : []),
     {
       kind: "item",
       id: "rename",

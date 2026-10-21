@@ -1023,7 +1023,12 @@ export function getDocumentRenderableMaterialOptions(
   }
 
   if (semanticClass !== "sketchCurve" && semanticClass !== "sketchPoint") {
-    return {};
+    return entry.bodyColor !== undefined &&
+      (semanticClass === "body" ||
+        semanticClass === "bodyFace" ||
+        semanticClass === "planarFace")
+      ? { color: entry.bodyColor }
+      : {};
   }
 
   // A non-accepted offset output ([TECH] G19), or the held geometry of an

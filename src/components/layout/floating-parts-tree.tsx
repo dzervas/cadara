@@ -9,8 +9,15 @@ import { ActionIcon, ScrollArea } from "@mantine/core";
 
 import {
   WorkbenchContextMenu,
+  type MenuAnchor,
   type WorkbenchContextMenuEntry,
 } from "@/components/layout/workbench-context-menu";
+import { BodyColorPicker } from "@/components/layout/body-color-picker";
+import {
+  resolveBodyAppearanceHex,
+  type BodyAppearance,
+} from "@/contracts/modeling/body-appearance";
+import type { BodyId } from "@/contracts/shared/ids";
 import { getPartsObjectMenuEntries } from "@/components/layout/parts-object-menu.helpers";
 import {
   FLOATING_PARTS_TREE_WIDTH_PX,
@@ -44,6 +51,23 @@ interface FloatingPartsTreeProps {
     target: Extract<PrimitiveRef, { kind: "sketch" }>,
   ) => void;
   onToggleTargetVisibility: (target: PrimitiveRef) => void;
+  /** Persists a body's colour; omit to leave the colour section out. */
+  onBodyAppearanceChange?: (
+    target: BodyTarget,
+    label: string,
+    appearance: BodyAppearance,
+  ) => void;
+  /** Live viewport preview of an uncommitted custom colour; null ends it. */
+  onBodyColorPreview?: (bodyId: BodyId, hex: string | null) => void;
+}
+
+type BodyTarget = Extract<PrimitiveRef, { kind: "body" }>;
+
+interface CustomColorSession {
+  target: BodyTarget;
+  label: string;
+  anchor: MenuAnchor;
+  originalHex: string;
 }
 
 /**
@@ -67,11 +91,29 @@ export function FloatingPartsTree({
   onRenameTarget,
   onChangeSketchPlaneTarget,
   onToggleTargetVisibility,
+  onBodyAppearanceChange,
+  onBodyColorPreview,
 }: FloatingPartsTreeProps) {
   const {
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState();
   const objects = snapshot?.presentation.objects ?? [];
+  const [customColor, setCustomColor] = useState<CustomColorSession | null>(
+    null,
+  );
+  const endCustomColor = (hex: string | null) => {
+    if (!customColor) return;
+    setCustomColor(null);
+    if (hex && hex !== customColor.originalHex) {
+      // The preview stays up until the commit settles (the handler clears it).
+      onBodyAppearanceChange?.(customColor.target, customColor.label, {
+        kind: "custom",
+        hex,
+      });
+    } else {
+      onBodyColorPreview?.(customColor.target.bodyId, null);
+    }
+  };
 
   return (
     <aside
@@ -118,9 +160,34 @@ export function FloatingPartsTree({
               ? getSketchErrorSummary(snapshot, target.sketchId)
               : null;
 
+          const bodyTarget: BodyTarget | null =
+            item.kind === "body" && target.kind === "body" ? target : null;
+          const bodyAppearance = bodyTarget
+            ? snapshot?.document.bodies.find(
+                (body) => body.bodyId === bodyTarget.bodyId,
+              )?.appearance
+            : undefined;
           const menuItems: WorkbenchContextMenuEntry[] =
             getPartsObjectMenuEntries({
               target,
+              bodyColor:
+                bodyTarget && bodyAppearance && onBodyAppearanceChange
+                  ? {
+                      appearance: bodyAppearance,
+                      onChoosePaletteSlot: (slot) =>
+                        onBodyAppearanceChange(bodyTarget, itemLabel, {
+                          kind: "palette",
+                          slot,
+                        }),
+                      onOpenCustomColor: (anchor) =>
+                        setCustomColor({
+                          target: bodyTarget,
+                          label: itemLabel,
+                          anchor,
+                          originalHex: resolveBodyAppearanceHex(bodyAppearance),
+                        }),
+                    }
+                  : undefined,
               label: itemLabel,
               canChangeSketchPlane:
                 target.kind === "sketch" &&
@@ -172,6 +239,19 @@ export function FloatingPartsTree({
           );
         })}
       </ScrollArea.Autosize>
+      {customColor ? (
+        <BodyColorPicker
+          key={customColor.target.bodyId}
+          anchor={customColor.anchor}
+          label={customColor.label}
+          originalHex={customColor.originalHex}
+          onPreview={(hex) =>
+            onBodyColorPreview?.(customColor.target.bodyId, hex)
+          }
+          onCommit={endCustomColor}
+          onCancel={() => endCustomColor(null)}
+        />
+      ) : null}
     </aside>
   );
 }
