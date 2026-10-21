@@ -1,5 +1,6 @@
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 import type { ExportResult } from "@/contracts/export/result";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import type { DurableRef } from "@/contracts/shared/references";
 
 export type ExportProviderResult = ExportResult | Promise<ExportResult>;
@@ -8,6 +9,8 @@ export type ExportTargetKind = DurableRef["kind"];
 export interface ExportProviderInput<TOptions> {
   target: DurableRef;
   targetLabel: string;
+  /** Display colour of a body target at the exported revision; `null` for other targets. */
+  targetAppearance: BodyAppearance | null;
   options: TOptions;
   capabilities: ExportCapabilities;
 }

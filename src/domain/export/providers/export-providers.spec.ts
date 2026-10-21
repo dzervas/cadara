@@ -1,3 +1,4 @@
+import { strFromU8, unzipSync } from "fflate";
 import { test, expect } from "vitest";
 
 import type {
@@ -7,6 +8,7 @@ import type {
   StepWriterOptions,
 } from "@/contracts/export/capabilities";
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
 import { dxfSketchExportProvider } from "@/domain/export/providers/dxf-sketch-export-provider";
@@ -139,6 +141,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: "Test Body",
+      targetAppearance: null,
       options: stlExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -161,6 +164,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: "Test Body",
+      targetAppearance: null,
       options,
       capabilities,
     });
@@ -186,6 +190,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await stlExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: "Test Body",
+      targetAppearance: null,
       options: stlExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -245,6 +250,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await stepExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: "Test Body",
+      targetAppearance: null,
       options: stepExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -313,6 +319,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await threeMfExportProvider.export({
       target: MOCK_BODY_TARGET,
       targetLabel: "Test Body",
+      targetAppearance: null,
       options: threeMfExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -331,6 +338,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await svgSketchExportProvider.export({
       target: { kind: "sketch", sketchId: "sketch_export" },
       targetLabel: "Styled Sketch",
+      targetAppearance: null,
       options: svgSketchExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -380,6 +388,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await svgSketchExportProvider.export({
       target: { kind: "sketch", sketchId: "sketch_export" },
       targetLabel: "Unstyled Sketch",
+      targetAppearance: null,
       options: svgSketchExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -415,6 +424,7 @@ test("src/domain/export/providers/export-providers.spec.ts", async () => {
     const result = await dxfSketchExportProvider.export({
       target: { kind: "sketch", sketchId: "sketch_export" },
       targetLabel: "Styled Sketch",
+      targetAppearance: null,
       options: dxfSketchExportProvider.getDefaultOptions(),
       capabilities,
     });
@@ -583,3 +593,79 @@ function createOffsetUnstyledSketchModel(): SketchVectorExportModel {
     diagnostics: [],
   };
 }
+
+/**
+ * Minimal well-formedness check for the generated model part (no XML parser is
+ * a dependency): every tag closes in order and every prefixed name uses a
+ * namespace declared on the root.
+ */
+function expectWellFormedXml(xml: string) {
+  const body = xml.replace(/^<\?xml [^?]*\?>/, "");
+  const declaredPrefixes = new Set(
+    [...body.matchAll(/xmlns:([\w-]+)="[^"]+"/g)].map((match) => match[1]),
+  );
+  const open: string[] = [];
+  const outside: string[] = [];
+  let cursor = 0;
+  for (const match of body.matchAll(
+    /<(\/?)([\w:-]+)((?:\s+[\w:-]+="[^"<>]*")*)\s*(\/?)>/g,
+  )) {
+    outside.push(body.slice(cursor, match.index));
+    cursor = match.index + match[0].length;
+    const [, closing, name, , selfClosing] = match;
+    const prefix = name!.includes(":") ? name!.split(":")[0] : null;
+    if (prefix !== null) expect(declaredPrefixes, name).toContain(prefix);
+    if (closing) expect(open.pop(), `closing </${name}>`).toBe(name);
+    else if (!selfClosing) open.push(name!);
+  }
+  outside.push(body.slice(cursor));
+  expect(open, "every element is closed").toEqual([]);
+  expect(
+    outside.join("").includes("<") || outside.join("").includes(">"),
+    "no stray markup outside recognised tags",
+  ).toBe(false);
+}
+
+async function exportThreeMfModelXml(targetAppearance: BodyAppearance | null) {
+  const result = await threeMfExportProvider.export({
+    target: MOCK_BODY_TARGET,
+    targetLabel: "Test Body",
+    targetAppearance,
+    options: threeMfExportProvider.getDefaultOptions(),
+    capabilities: createMockCapabilities(),
+  });
+  if (!result.ok || !(result.payload instanceof Uint8Array))
+    throw new Error("3MF export should succeed with a binary package.");
+  const model = unzipSync(result.payload)["3D/3dmodel.model"];
+  if (!model) throw new Error("3MF package should contain 3D/3dmodel.model.");
+  return strFromU8(model);
+}
+
+test("3MF export writes the body's display colour as a colour group the object references", async () => {
+  for (const [appearance, expected] of [
+    [{ kind: "palette", slot: 3 }, "#A68DD0"],
+    [{ kind: "custom", hex: "#336699" }, "#336699"],
+  ] as const) {
+    const xml = await exportThreeMfModelXml(appearance);
+    expectWellFormedXml(xml);
+    expect(xml).toContain(
+      'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"',
+    );
+    expect(xml, "materials stay optional for consumers").not.toContain(
+      "requiredextensions",
+    );
+    const resources = /<resources>(.*)<\/resources>/.exec(xml)?.[1] ?? "";
+    expect(
+      resources.startsWith(
+        `<m:colorgroup id="2"><m:color color="${expected}"/></m:colorgroup><object id="1" type="model" pid="2" pindex="0">`,
+      ),
+      `${JSON.stringify(appearance)}: the colour group precedes the object that references it\n${resources.slice(0, 200)}`,
+    ).toBe(true);
+    expect([...xml.matchAll(/<m:color /g)]).toHaveLength(1);
+  }
+
+  const uncoloured = await exportThreeMfModelXml(null);
+  expectWellFormedXml(uncoloured);
+  expect(uncoloured).not.toContain("colorgroup");
+  expect(uncoloured).toContain('<object id="1" type="model">');
+});
