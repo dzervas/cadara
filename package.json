@@ -32,6 +32,7 @@
     "test:isolated": "vitest run --project isolated",
     "test": "bun run --parallel test:fast test:isolated",
     "test:heavy": "vitest run --project heavy",
+    "test:heavy:acceptance": "CADARA_FULL_IMPORT_ACCEPTANCE=1 vitest run --project heavy",
     "test:kernel-limitations": "vitest run --config vitest.kernel-limitations.config.ts",
     "test:e2e": "playwright test",
     "test:e2e:cloudflare": "playwright test --config playwright.cloudflare.config.ts",
@@ -41,7 +42,7 @@
     "test:e2e:real-captures:diagnostic": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 PLAYWRIGHT_DIAGNOSTICS=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",
     "test:e2e:all": "bun run test:e2e && bun run test:e2e:real-captures",
     "test:all": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy && bun run test:e2e",
-    "test:all:acceptance": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy && bun run test:e2e:all"
+    "test:all:acceptance": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy:acceptance && bun run test:e2e:all"
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.5",

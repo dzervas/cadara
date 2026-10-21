@@ -17,6 +17,7 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:ui` runs UI-local and browser-adjacent Bun specs.
 - `bun run test:static` runs repository policy guards under `test/static/`.
 - `bun run test:heavy` runs the heavy tier: `*.heavy.spec.ts` and the CLI subprocess specs under `src/cli/`, against a CLI bundle built once per run. Minutes, not seconds; final pass only.
+- `bun run test:heavy:acceptance` is the heavy tier plus the opt-in full-import acceptance rows gated on `CADARA_FULL_IMPORT_ACCEPTANCE=1` (today: the ~18-minute 9841 real-OCC apply row); routine `test:heavy` / `test:all` skip them.
 - `bun run test:e2e` runs the fast Playwright browser lane with four workers; real-capture acceptance specs are excluded.
 - `bun run test:e2e:offline` builds the app with the debug platform on (`vite.offline-test.config.ts`, into `.tmp-offline-dist/`) and runs `e2e/offline/` against `vite preview` of that build, cutting the network after load; it is outside `test:all`.
 - `bun run test:e2e:diagnostic` reruns the fast lane serially with retained failure traces and video.
@@ -24,7 +25,7 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
 - `bun run test:e2e:all` runs the fast and real-capture Playwright lanes sequentially.
 - `bun run test:kernel-limitations` runs the expected-to-fail kernel-limitation specs (see "Kernel limitations"); it is outside every other command, including `test:all`.
-- `bun run test:all:acceptance` runs every validation lane, including real captures; `bun run test:all` is the final pass: lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
+- `bun run test:all:acceptance` runs every validation lane, including real captures and the gated full-import acceptance rows; `bun run test:all` is the final pass: lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
 
 ## Tiers
 
