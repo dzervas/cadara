@@ -311,7 +311,8 @@ export function prepareLoftFeatureDefinition(
   const paths = parameters.participants.find(p => p.role === "path")?.targets ?? [];
   if (!profiles || (paths.length > 0 && profiles.length !== 2)) return null;
   if (getAuthoredLiteralValue(parameters.operationIntent ?? "create") !== "create") return null;
-  // Advanced native controls remain unsupported, not silently normalized.
+  // Canonical admission still excludes advanced controls. The native bounded
+  // stored-vertex matcher is not yet part of LoftFeatureParameters.
   // Refuse even explicit neutral advanced controls: only the browser builder
   // may add its neutral defaults. Inactive path settings must not be stripped.
   if (parameters.options && Object.keys(parameters.options).some(k => k !== "path")) return null;
@@ -870,7 +871,7 @@ export const loftAuthoringDefinition = {
               label: "Match connections",
               value: `${session.draft.options.matchConnections?.length ?? 0}`,
               helper:
-                "Match connections are unavailable in the current loft builder. Non-empty edge or vertex pairs are rejected, not silently ignored.",
+                "Stored matching supports one durable vertex pair on two parallel, separated, straight-edged planar faces with non-collapsing convex correspondence. Other pairs are rejected. A connection editor and canonical matching commands are not available yet.",
             },
           ],
         },

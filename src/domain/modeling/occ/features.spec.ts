@@ -5032,7 +5032,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       const body = result.bodies.find(body => body.ownerFeatureId === "feature_loft_control")!;
       produced.push(body);
       expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
-      expect(result.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe(0);
+      expect(result.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe((value.parameters.options?.matchConnections as unknown[] | undefined)?.length ? 26 : 0);
       return body;
     };
     const edgeMidpoints = (body: ReturnType<typeof build>) => [...body.edgesById.values()].map(edge =>
@@ -5121,7 +5121,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     } } }))).toEqual(edgeMidpoints(plain));
   });
 
-  test("loft connection: refuse rather than silently retain nearest-vertex pairing", async () => {
+  test("loft connection: honor one vertex pair on opposite box faces, refusing edge pairing", async () => {
     const { oc, lower, upper, context, definition, build, edgeMidpoints } = await createLoftControlFixture();
     const vertexAt = (body: typeof lower, coordinates: number[]) => [...body.verticesById].find(([, vertex]) => withOccTemporaries(own => {
       const p = own(oc.BRep_Tool.Pnt(vertex));
@@ -5135,9 +5135,10 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         to: { kind: "vertex", bodyId: upper.bodyId, vertexId: vertexAt(upper, [2, 0, 10]) },
       }],
     } } };
-    // Honoring this pair must create the side midpoint [1,0,5]. Before the
-    // refusal it returned exactly plain geometry, which has no such edge.
-    expect(() => build(matchedDefinition)).toThrow("advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported");
+    // This must change nearest-vertex correspondence, even when the two
+    // selected box faces have opposite outward orientation.
+    const matched = build(matchedDefinition);
+    expect(edgeMidpoints(matched).some(p => Math.abs(p[0]! - 1) < 1e-5 && Math.abs(p[1]!) < 1e-5 && Math.abs(p[2]! - 5) < 1e-5)).toBe(true);
     expect(() => build({ ...definition, parameters: { ...definition.parameters, options: {
       matchConnections: [{
         from: { kind: "edge", bodyId: lower.bodyId, edgeId: lower.topology.edgeIds[0]! },

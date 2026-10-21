@@ -15,7 +15,23 @@ import {
   buildRegionProfileFace,
   getExtrusionNormalForPlanarFace,
 } from "@/domain/modeling/occ/sketch-profile";
-import { scale, toGpVec } from "@/domain/modeling/occ/geometry";
+import {
+  add,
+  cross,
+  dot,
+  magnitude,
+  scale,
+  subtract,
+  toGpVec,
+  toVec3FromGpPoint,
+} from "@/domain/modeling/occ/geometry";
+import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+import { withOccTemporaries } from "@/domain/modeling/occ/exact-edges";
+import {
+  combineOccCleanupError,
+  releaseDiscardedOccAuthoringStateObjects,
+  type OccDisposable,
+} from "@/domain/modeling/occ/memory";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   requireSketchSnapshot,
@@ -29,7 +45,12 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
 import { getSweepLinearPathData } from "@/domain/modeling/occ/features/sweep";
-import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
+import {
+  createUnsupportedProducerTopologyStage,
+  formatGeneratedProducerTopologySourceKey,
+  formatGeneratedAdjacencyTopologySourceKey,
+} from "@/domain/modeling/occ/topology-stage";
+import { getOccDurableRefKey } from "@/domain/modeling/occ/topology";
 
 function buildLoftSectionWire(
   context: OccFeatureExecutionContext,
@@ -190,7 +211,7 @@ function assertLoftGuideTargetsResolve(
   }
 }
 
-function assertSupportedLoftConnections(
+function getSupportedLoftConnection(
   context: OccFeatureExecutionContext,
   definition: AdvancedSolidFeatureDefinition & { kind: "loft" },
   profileTargets: readonly DurableRef[],
@@ -212,7 +233,7 @@ function assertSupportedLoftConnections(
 
   if (connections.length !== 1 || profileTargets.length !== 2) {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC loft match connections require one connection across two ordered profiles; matching is not supported yet.",
+      "advanced-feature-unsupported-kernel-case: OCC loft match connections require one vertex connection across exactly two ordered profiles.",
     );
   }
 
@@ -240,13 +261,252 @@ function assertSupportedLoftConnections(
     }
   }
 
-  // Criterium weights are approximation energy weights, not correspondence.
-  // Rotating wire starts with CheckCompatibility(false) can change pairing,
-  // but the resulting twisted solid is not qualified through the production
-  // native transform/history transaction. Keep this unsupported until it is.
+  if (connection?.from?.kind !== "vertex" || connection.to?.kind !== "vertex") {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported for edge pairing; use one vertex pair.",
+    );
+  }
+  return { from: connection.from, to: connection.to };
+}
+
+type Own = <T extends OccDisposable>(value: T) => T;
+type VertexRef = Extract<DurableRef, { kind: "vertex" }>;
+
+function unsupportedMatching(reason: string): never {
   throw new Error(
-    "advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported by the current loft builder.",
+    `advanced-feature-unsupported-kernel-case: OCC loft vertex matching ${reason}.`,
   );
+}
+
+function buildMatchedLoftSections(
+  context: OccFeatureExecutionContext,
+  profiles: readonly DurableRef[],
+  connection: { from: VertexRef; to: VertexRef },
+  own: Own,
+) {
+  const { oc, modelingTolerance: tolerance } = context;
+  const sections = profiles.map((profile, index) => {
+    if (profile.kind !== "face") {
+      unsupportedMatching("requires durable planar face boundaries");
+    }
+    const body = requireSolidBody(context, profile.bodyId, "loft");
+    const face = requireFace(context, body, profile.faceId);
+    const { frame, plane } = extractPlanarFaceData(oc, face);
+    own(plane);
+    const wires = own(new oc.TopExp_Explorer_2(
+      face,
+      oc.TopAbs_ShapeEnum.TopAbs_WIRE as never,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    ));
+    let wireCount = 0;
+    while (wires.More()) {
+      wireCount++;
+      wires.Next();
+    }
+    if (wireCount !== 1) {
+      unsupportedMatching("requires one closed boundary without holes");
+    }
+    const wire = own(oc.BRepTools.OuterWire(face));
+    if (!wire.Closed_1()) unsupportedMatching("requires closed boundaries");
+    const endpoint = index === 0 ? connection.from : connection.to;
+    if (endpoint.bodyId !== body.bodyId) {
+      unsupportedMatching("endpoints must belong to their ordered profile faces");
+    }
+    const selected = requireVertex(context, body, endpoint.vertexId);
+    return { profile, body, wire, frame, selected };
+  });
+  const normal = sections[0]!.frame.normal;
+  if (magnitude(cross(normal, sections[1]!.frame.normal)) > 1e-12) {
+    unsupportedMatching(
+      "requires parallel section planes; other frames are not qualified",
+    );
+  }
+  const separation = dot(
+    subtract(sections[1]!.frame.origin, sections[0]!.frame.origin), normal,
+  );
+  if (Math.abs(separation) <= tolerance) {
+    unsupportedMatching("requires separated section planes");
+  }
+
+  const readBoundary = (section: (typeof sections)[number]) => {
+    const explorer = own(new oc.BRepTools_WireExplorer_2(section.wire));
+    const edges: InstanceType<OpenCascadeInstance["TopoDS_Edge"]>[] = [];
+    const vertices: InstanceType<OpenCascadeInstance["TopoDS_Vertex"]>[] = [];
+    const points: Vec3[] = [];
+    while (explorer.More()) {
+      const edge = own(explorer.Current());
+      const curve = own(new oc.BRepAdaptor_Curve_2(edge));
+      if (curve.GetType() !== oc.GeomAbs_CurveType.GeomAbs_Line) {
+        unsupportedMatching("currently requires straight-edged boundaries");
+      }
+      edges.push(edge);
+      const vertex = own(explorer.CurrentVertex());
+      vertices.push(vertex);
+      points.push(toVec3FromGpPoint(own(oc.BRep_Tool.Pnt(vertex))));
+      explorer.Next();
+    }
+    if (points.length < 3) {
+      unsupportedMatching("has ambiguous or degenerate winding");
+    }
+    // Inspect the actual traversal, not the face's orientation flag or the
+    // support normal's sign: opposite box faces and reversed plane normals
+    // can give different traversal directions in the SAME section frame.
+    const origin = points[0]!;
+    const area = points.reduce((sum, point, i) => sum + dot(
+      cross(
+        subtract(point, origin),
+        subtract(points[(i + 1) % points.length]!, origin),
+      ), normal,
+    ), 0);
+    if (Math.abs(area) <= tolerance * tolerance) {
+      unsupportedMatching("has ambiguous or degenerate winding");
+    }
+    return { edges, vertices, points, area };
+  };
+  let boundaries = sections.map(readBoundary);
+  if (boundaries[0]!.edges.length !== boundaries[1]!.edges.length) {
+    unsupportedMatching("requires equal edge counts");
+  }
+  // Normalize BEFORE finding/rotating starts. Reversal changes the outgoing
+  // edge at the selected vertex; reversing a rotated list loses that identity.
+  if (boundaries[0]!.area * boundaries[1]!.area < 0) {
+    sections[1]!.wire.Reverse();
+    boundaries = [boundaries[0]!, readBoundary(sections[1]!)];
+  }
+  const ordered = boundaries.map((boundary, sectionIndex) => {
+    const start = boundary.vertices.findIndex(vertex =>
+      vertex.IsSame(sections[sectionIndex]!.selected),
+    );
+    if (start < 0) {
+      unsupportedMatching("endpoint is not an exact vertex of its profile boundary");
+    }
+    const rotate = <T,>(values: readonly T[]) =>
+      values.map((_, i) => values[(i + start) % values.length]!);
+    const edges = rotate(boundary.edges);
+    const builder = own(new oc.BRepBuilderAPI_MakeWire_1());
+    for (const edge of edges) builder.Add_1(edge);
+    const wire = own(builder.Wire());
+    const check = own(new oc.BRepTools_WireExplorer_2(wire));
+    if (!own(check.CurrentVertex()).IsSame(sections[sectionIndex]!.selected)) {
+      unsupportedMatching("could not preserve the selected vertex identity");
+    }
+    return {
+      wire, edges,
+      vertices: rotate(boundary.vertices), points: rotate(boundary.points),
+    };
+  });
+
+  // BRepCheck accepts folded ThruSections surfaces. Certify this deliberately
+  // bounded polygonal case instead: every intermediate polygon must remain
+  // strictly convex. Each supporting-half-plane determinant is quadratic in
+  // section t, so its exact minimum is at an endpoint or its stationary point.
+  // Together with parallel separated planes this excludes self-intersection,
+  // collapsed edges and zero side-surface D1U x D1V throughout the loft.
+  const count = ordered[0]!.points.length;
+  const sign = Math.sign(boundaries[0]!.area);
+  for (let i = 0; i < count; i++) {
+    const edge0 = subtract(
+      ordered[0]!.points[(i + 1) % count]!, ordered[0]!.points[i]!,
+    );
+    const edge1 = subtract(
+      ordered[1]!.points[(i + 1) % count]!, ordered[1]!.points[i]!,
+    );
+    const de = subtract(edge1, edge0);
+    for (let j = 0; j < count; j++) {
+      if (j === i || j === (i + 1) % count) continue;
+      const r0 = subtract(ordered[0]!.points[j]!, ordered[0]!.points[i]!);
+      const dr = subtract(
+        subtract(ordered[1]!.points[j]!, ordered[1]!.points[i]!), r0,
+      );
+      const a = sign * dot(cross(de, dr), normal);
+      const b = sign * dot(add(cross(de, r0), cross(edge0, dr)), normal);
+      const c = sign * dot(cross(edge0, r0), normal);
+      const values = [c, a + b + c];
+      const stationary = a > 0 ? -b / (2 * a) : -1;
+      if (stationary > 0 && stationary < 1) values.push(c - b * b / (4 * a));
+      const clearance = tolerance * Math.max(magnitude(edge0), magnitude(edge1), tolerance);
+      if (Math.min(...values) <= clearance) {
+        unsupportedMatching(
+          "has degenerate, non-convex or self-intersecting correspondence",
+        );
+      }
+    }
+  }
+  return { sections, ordered };
+}
+
+function collectMatchedLoftSourceShapes(
+  oc: OpenCascadeInstance,
+  ownerFeatureId: FeatureId,
+  builder: InstanceType<OpenCascadeInstance["BRepOffsetAPI_ThruSections"]>,
+  matched: ReturnType<typeof buildMatchedLoftSections>,
+  own: Own,
+) {
+  type Shape = InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+  const sourceShapes = new Map<string, Shape[]>();
+  const edgesOf = (shape: Shape) => {
+    const explorer = own(new oc.TopExp_Explorer_2(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE as never,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    ));
+    const edges: Shape[] = [];
+    while (explorer.More()) {
+      edges.push(own(explorer.Current()));
+      explorer.Next();
+    }
+    return edges;
+  };
+  for (const [sectionIndex, section] of matched.sections.entries()) {
+    const key = (
+      sourceKind: "face" | "edge" | "vertex",
+      sourcePublicId: Parameters<typeof formatGeneratedProducerTopologySourceKey>[0]["sourcePublicId"],
+      role: string,
+    ) => formatGeneratedProducerTopologySourceKey({
+      featureId: ownerFeatureId, bodyId: section.body.bodyId,
+      sourceKind, sourcePublicId, role,
+    });
+    sourceShapes.set(key("face", section.profile.faceId, "loft-cap"), [
+      own(sectionIndex === 0 ? builder.FirstShape() : builder.LastShape()),
+    ]);
+    const sideKeys: string[] = [];
+    for (const edge of matched.ordered[sectionIndex]!.edges) {
+      const id = [...section.body.edgesById].find(([, candidate]) =>
+        candidate.IsSame(edge),
+      )?.[0];
+      if (!id) unsupportedMatching("could not identify an exact input boundary edge");
+      sourceShapes.set(key("edge", id, "loft-boundary"), [edge]);
+      if (sectionIndex === 0) {
+        const sideKey = key("edge", id, "loft-side");
+        sourceShapes.set(sideKey, [own(builder.GeneratedFace(edge))]);
+        sideKeys.push(sideKey);
+      }
+    }
+    for (const [index, vertex] of matched.ordered[sectionIndex]!.vertices.entries()) {
+      const id = [...section.body.verticesById].find(([, candidate]) =>
+        candidate.IsSame(vertex),
+      )?.[0];
+      if (!id) unsupportedMatching("could not identify an exact input boundary vertex");
+      sourceShapes.set(key("vertex", id, "loft-boundary"), [vertex]);
+      if (sectionIndex === 0) {
+        // The shipped ThruSections.Generated(vertex) can repeat a different
+        // connector. Use exact incidence of the two GeneratedFace(edge)
+        // witnesses instead; no coordinate or enumeration-based identity.
+        const adjacentKeys = [
+          sideKeys[(index + sideKeys.length - 1) % sideKeys.length]!, sideKeys[index]!,
+        ];
+        const other = edgesOf(sourceShapes.get(adjacentKeys[1]!)![0]!);
+        const shared = edgesOf(sourceShapes.get(adjacentKeys[0]!)![0]!).filter(edge =>
+          other.some(candidate => candidate.IsSame(edge)),
+        );
+        sourceShapes.set(formatGeneratedAdjacencyTopologySourceKey({
+          featureId: ownerFeatureId, bodyId: section.body.bodyId,
+          adjacentSourceKeys: adjacentKeys, role: "loft-connector",
+        }), shared);
+      }
+    }
+  }
+  return sourceShapes;
 }
 
 function transformLoftSectionWire(input: {
@@ -294,7 +554,9 @@ function addPathDrivenLoftSections(input: {
 
 function buildLoftFeatureShape(
   context: OccFeatureExecutionContext,
+  ownerFeatureId: FeatureId,
   definition: AdvancedSolidFeatureDefinition & { kind: "loft" },
+  own: Own,
 ) {
   const profileTargets =
     getAdvancedParticipant(definition, "profile")?.targets ?? [];
@@ -340,7 +602,10 @@ function buildLoftFeatureShape(
   }
 
   assertSupportedLoftProfileConditions(definition);
-  assertSupportedLoftConnections(context, definition, profileTargets);
+  const connection = getSupportedLoftConnection(context, definition, profileTargets);
+  if (connection && pathTargets.length > 0) {
+    unsupportedMatching("cannot be combined with a path");
+  }
 
   if (pathTargets.length > 0 && profileTargets.length !== 2) {
     throw new Error(
@@ -348,14 +613,21 @@ function buildLoftFeatureShape(
     );
   }
 
-  const loftBuilder = new context.oc.BRepOffsetAPI_ThruSections(
+  const matched = connection
+    ? buildMatchedLoftSections(context, profileTargets, connection, own)
+    : undefined;
+  // Two certified polygonal sections use bilinear ruled sides, not a fitted
+  // surface that could invalidate the all-section convexity proof above.
+  const loftBuilder = own(new context.oc.BRepOffsetAPI_ThruSections(
     true,
-    false,
+    !!matched,
     context.modelingTolerance,
-  );
-  loftBuilder.CheckCompatibility(true);
+  ));
+  loftBuilder.CheckCompatibility(!matched);
 
-  if (pathTargets.length > 0) {
+  if (matched) {
+    for (const section of matched.ordered) loftBuilder.AddWire(section.wire);
+  } else if (pathTargets.length > 0) {
     const startWire = buildLoftSectionWire(context, profileTargets[0]!);
     loftBuilder.AddWire(startWire);
     addPathDrivenLoftSections({
@@ -372,13 +644,19 @@ function buildLoftFeatureShape(
     }
   }
 
-  loftBuilder.Build(new context.oc.Message_ProgressRange_1());
+  loftBuilder.Build(own(new context.oc.Message_ProgressRange_1()));
 
   if (!loftBuilder.IsDone()) {
     throw new Error("OCC loft build failed.");
   }
 
-  return loftBuilder.Shape();
+  const shape = own(loftBuilder.Shape());
+  return {
+    shape,
+    sourceShapes: matched
+      ? collectMatchedLoftSourceShapes(context.oc, ownerFeatureId, loftBuilder, matched, own)
+      : undefined,
+  };
 }
 
 function getLoftBooleanPolicy(
@@ -406,28 +684,60 @@ export function executeLoftFeature(
   ownerFeatureId: FeatureId,
   definition: AdvancedSolidFeatureDefinition & { kind: "loft" },
 ): OccFeatureExecutionResult {
-  const featureShape = buildLoftFeatureShape(context, definition);
-  const policy = getLoftBooleanPolicy(definition);
-  const result = applyBooleanPolicy(
-    context,
-    ownerFeatureId,
-    policy.operation,
-    policy.booleanScope,
-    featureShape,
-  );
-
-  return {
-    bodies: result.bodies,
-    constructions: [...context.constructions],
-    constructionPlanes: new Map(context.constructionPlanes),
-    producedTargets: result.producedTargets,
-    entities: [],
-    renderRecords: [],
-    historyInvalidations: result.historyInvalidations,
-    topologyStage: createUnsupportedProducerTopologyStage({
+  return withOccTemporaries(own => {
+    const policy = getLoftBooleanPolicy(definition);
+    const { shape, sourceShapes } = buildLoftFeatureShape(
+      context, ownerFeatureId, definition, own,
+    );
+    const result = applyBooleanPolicy(
+      context,
+      ownerFeatureId,
+      policy.operation,
+      policy.booleanScope,
+      shape,
+      { sourceShapes },
+    );
+    const topologyStage = createUnsupportedProducerTopologyStage({
       featureId: ownerFeatureId,
       bodies: result.bodies,
       producedTargets: result.producedTargets,
-    }),
-  };
+    });
+    try {
+      if (sourceShapes) {
+        for (const output of topologyStage.outputs.values()) {
+          const claims = new Map([...result.featureSourceTargets ?? []].filter(([, targets]) => {
+            const target = targets[0];
+            return targets.length === 1 && target &&
+              (target.kind === "face" || target.kind === "edge" || target.kind === "vertex") &&
+              target.bodyId === output.body.bodyId;
+          }));
+          const body = output.body;
+          const claimedKeys = new Set([...claims.values()].flat().map(getOccDurableRefKey));
+          const count = body.facesById.size + body.edgesById.size + body.verticesById.size;
+          if (claims.size !== sourceShapes.size || claimedKeys.size !== count) {
+            unsupportedMatching("could not qualify complete exact builder topology history");
+          }
+          output.sourceTargets = claims;
+        }
+      }
+    } catch (error) {
+      try {
+        releaseDiscardedOccAuthoringStateObjects({ bodies: result.bodies }, [context]);
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
+    }
+
+    return {
+      bodies: result.bodies,
+      constructions: [...context.constructions],
+      constructionPlanes: new Map(context.constructionPlanes),
+      producedTargets: result.producedTargets,
+      entities: [],
+      renderRecords: [],
+      historyInvalidations: result.historyInvalidations,
+      topologyStage,
+    };
+  });
 }
