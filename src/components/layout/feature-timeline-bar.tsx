@@ -17,6 +17,11 @@ import {
   type WorkbenchContextMenuEntry,
 } from "@/components/layout/workbench-context-menu";
 import { getNextHistoryTreeFocusIndex } from "@/components/layout/feature-timeline-bar.a11y";
+import {
+  InlineRenameInput,
+  type InlineRenameSession,
+} from "@/components/layout/inline-rename";
+import { useRowRenameShortcut } from "@/components/layout/use-row-rename-shortcut";
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
@@ -76,6 +81,7 @@ interface FeatureTimelineBarProps {
     item: Extract<DocumentHistoryItemRecord, { kind: "sketch" }>,
   ) => void;
   onRenameItem: (item: DocumentHistoryItemRecord) => void;
+  renameSession?: InlineRenameSession;
   onChangeSketchPlaneTarget?: (
     target: Extract<PrimitiveRef, { kind: "sketch" }>,
   ) => void;
@@ -92,6 +98,8 @@ interface SketchHistoryTimelineBarProps {
 interface HistoryTimelineVisualItem {
   id: string;
   label: string;
+  renameSession?: InlineRenameSession;
+  onRename?: () => void;
   icon: ReactNode;
   menuItems: WorkbenchContextMenuEntry[];
   ariaLabel: string;
@@ -270,6 +278,7 @@ function HistoryTimelineSurface({
   itemRefs,
   trackRef,
 }: HistoryTimelineSurfaceProps) {
+  const handleRenameShortcut = useRowRenameShortcut();
   const tooltipId = useId();
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<HTMLButtonElement | null>(null);
@@ -504,9 +513,18 @@ function HistoryTimelineSurface({
                     >
                       <WorkbenchContextMenu
                         label={`${item.label} actions`}
+                        returnFocus={!item.renameSession}
                         items={item.menuItems}
                       >
-                        <button
+                        {item.renameSession ? (
+                          <div className="flex h-7 w-44 items-center gap-1.5">
+                            {item.icon}
+                            <InlineRenameInput
+                              label={item.label}
+                              {...item.renameSession}
+                            />
+                          </div>
+                        ) : <button
                           type="button"
                           onPointerDown={item.onPointerDown}
                           onClick={item.onClick}
@@ -560,6 +578,10 @@ function HistoryTimelineSurface({
                             );
                           }}
                           onKeyDown={(event) => {
+                            if (item.onRename) {
+                              handleRenameShortcut(event, item.onRename);
+                            }
+                            if (event.defaultPrevented) return;
                             const nextIndex = getNextHistoryTreeFocusIndex(
                               index,
                               event.key,
@@ -587,7 +609,7 @@ function HistoryTimelineSurface({
                           >
                             {item.label}
                           </span>
-                        </button>
+                        </button>}
                       </WorkbenchContextMenu>
                     </div>
                   ))}
@@ -677,6 +699,7 @@ export function FeatureTimelineBar({
   onDeleteItem,
   onExportItem,
   onRenameItem,
+  renameSession,
   onChangeSketchPlaneTarget,
   onSuppressFeature,
   visibleSelection,
@@ -955,6 +978,9 @@ export function FeatureTimelineBar({
         return {
           id: item.id,
           label: item.label,
+          renameSession:
+            renameSession?.targetKey === targetKey ? renameSession : undefined,
+          onRename: () => onRenameItem(item),
           icon: itemToolIcon ? (
             <ToolIcon icon={itemToolIcon} className="h-3.5 w-3.5" />
           ) : item.kind === "sketch" ? (
@@ -1022,6 +1048,7 @@ export function FeatureTimelineBar({
       onExportItem,
       onChangeSketchPlaneTarget,
       onRenameItem,
+      renameSession,
       onReopenTarget,
       onSelectTarget,
       onSuppressFeature,

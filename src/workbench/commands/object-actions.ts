@@ -28,28 +28,6 @@ interface WorkbenchObjectActionContext {
   showWorkbenchInfo: (message: string) => void;
 }
 
-export function requestWorkbenchRenameLabel(input: {
-  currentLabel: string;
-  showWorkbenchError: (message: string) => void;
-}) {
-  const nextLabel = window.prompt("Rename", input.currentLabel)?.trim();
-
-  if (nextLabel === undefined) {
-    return null;
-  }
-
-  if (!nextLabel) {
-    input.showWorkbenchError("Name cannot be empty.");
-    return null;
-  }
-
-  if (nextLabel === input.currentLabel) {
-    return null;
-  }
-
-  return nextLabel;
-}
-
 export function deleteWorkbenchTarget({
   documentOwner,
   errorReporter,
@@ -182,6 +160,7 @@ export function renameWorkbenchTarget({
   documentOwner,
   errorReporter,
   label,
+  requestedLabel,
   setObjectLabelOverrides,
   showWorkbenchError,
   showWorkbenchInfo,
@@ -190,15 +169,15 @@ export function renameWorkbenchTarget({
 }: WorkbenchObjectActionContext & {
   target: PrimitiveRef;
   label: string;
+  requestedLabel: string;
   setObjectLabelOverrides: Dispatch<SetStateAction<Record<string, string>>>;
 }) {
-  const nextLabel = requestWorkbenchRenameLabel({
-    currentLabel: label,
-    showWorkbenchError,
-  });
+  const nextLabel = requestedLabel.trim();
   if (!nextLabel) {
+    showWorkbenchError("Name cannot be empty.");
     return;
   }
+  if (nextLabel === label) return;
 
   if (!snapshot || !isDurablePrimitiveRef(target)) {
     setObjectLabelOverrides((current) => ({

@@ -14,6 +14,11 @@ import {
 } from "@/components/layout/workbench-context-menu";
 import { BodyColorPicker } from "@/components/layout/body-color-picker";
 import {
+  InlineRenameInput,
+  type InlineRenameSession,
+} from "@/components/layout/inline-rename";
+import { useRowRenameShortcut } from "@/components/layout/use-row-rename-shortcut";
+import {
   resolveBodyAppearanceHex,
   type BodyAppearance,
 } from "@/contracts/modeling/body-appearance";
@@ -47,6 +52,7 @@ interface FloatingPartsTreeProps {
   onObjectDelete: (target: PrimitiveRef, label: string) => void;
   onObjectExport: (target: PrimitiveRef, label: string) => void;
   onRenameTarget: (target: PrimitiveRef, label: string) => void;
+  renameSession?: InlineRenameSession;
   onChangeSketchPlaneTarget?: (
     target: Extract<PrimitiveRef, { kind: "sketch" }>,
   ) => void;
@@ -89,6 +95,7 @@ export function FloatingPartsTree({
   onObjectDelete,
   onObjectExport,
   onRenameTarget,
+  renameSession,
   onChangeSketchPlaneTarget,
   onToggleTargetVisibility,
   onBodyAppearanceChange,
@@ -202,6 +209,7 @@ export function FloatingPartsTree({
             <WorkbenchContextMenu
               key={item.id}
               label={`${itemLabel} actions`}
+              returnFocus={renameSession?.targetKey !== targetKey}
               items={menuItems}
             >
               <Row
@@ -212,6 +220,12 @@ export function FloatingPartsTree({
                 isHidden={isHidden}
                 isAllowed={isAllowed}
                 label={itemLabel}
+                renameSession={
+                  renameSession?.targetKey === targetKey
+                    ? renameSession
+                    : undefined
+                }
+                onRename={() => onRenameTarget(target, itemLabel)}
                 errorSummary={errorSummary}
                 onActivate={() => {
                   if (!isAllowed || isHidden) return;
@@ -267,6 +281,8 @@ interface RowProps extends HTMLAttributes<HTMLDivElement> {
   onActivate: () => void;
   onReopen?: () => void;
   onToggleHidden: () => void;
+  onRename: () => void;
+  renameSession?: InlineRenameSession;
 }
 
 const ROW_BASE: CSSProperties = {
@@ -296,6 +312,8 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
     onActivate,
     onReopen,
     onToggleHidden,
+    onRename,
+    renameSession,
     onMouseEnter,
     onMouseLeave,
     ...rowProps
@@ -303,6 +321,7 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
   ref,
 ) {
   const [isHover, setIsHover] = useState(false);
+  const handleRenameShortcut = useRowRenameShortcut();
   const showLift = isSelected || isHover;
   const style: CSSProperties = {
     ...ROW_BASE,
@@ -366,9 +385,12 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
       >
         {icon}
       </span>
-      <button
+      {renameSession ? (
+        <InlineRenameInput label={label} {...renameSession} />
+      ) : <button
         type="button"
         onClick={onActivate}
+        onKeyDown={(event) => handleRenameShortcut(event, onRename)}
         onDoubleClick={onReopen}
         aria-disabled={!isAllowed || isHidden}
         title={
@@ -391,7 +413,7 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
         }}
       >
         {label}
-      </button>
+      </button>}
       {errorSummary ? (
         <span
           role="img"
