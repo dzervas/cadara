@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openShortcutSettings } from "./helpers/shortcut-settings";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(120_000);
@@ -25,7 +26,7 @@ for (const projection of ["Orthographic", "Perspective"] as const) {
     const mouseZoomed = await workbench.settledCamera();
     expect(mouseZoomed.target).toEqual(initial.target);
 
-    await page.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+    await openShortcutSettings(page);
     await page.getByLabel("Pointing device", { exact: true }).selectOption("touchpad");
     await expect(page.getByText("Two-finger scroll pans", { exact: false })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -58,7 +59,7 @@ for (const projection of ["Orthographic", "Perspective"] as const) {
     else expect(pinched.position).not.toEqual(orbited.position);
 
     await workbench.reloadPreservingStorage();
-    await page.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+    await openShortcutSettings(page);
     await expect(page.getByLabel("Pointing device", { exact: true })).toHaveValue("touchpad");
     await page.getByLabel("Pointing device", { exact: true }).selectOption("mouse");
     await page.keyboard.press("Escape");
@@ -75,7 +76,7 @@ for (const projection of ["Orthographic", "Perspective"] as const) {
 test("Touchpad horizontal/line/page scroll and pinch reach the camera through a sketch annotation", async ({ page }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await workbench.open();
-  await page.getByRole("button", { name: "Keyboard shortcuts", exact: true }).click();
+  await openShortcutSettings(page);
   await page.getByLabel("Pointing device", { exact: true }).selectOption("touchpad");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
