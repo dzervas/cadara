@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, onTestFinished } from "vitest";
 import { makeOccWrapperTracker } from "../../../../test/helpers/occ-wrapper-tracker";
 import {
   releaseOccAuthoringStateObjects,
@@ -75,6 +75,11 @@ import {
 } from "@/domain/modeling/occ/planes";
 import { buildExtrudeFeatureShape, getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { buildAxisFromLineEdge } from "@/domain/modeling/occ/sketch-profile";
+import { toGpVec } from "@/domain/modeling/occ/geometry";
+import { withOccTemporaries } from "@/domain/modeling/occ/exact-edges";
+import { loftAuthoringDefinition, prepareLoftFeatureDefinition } from "@/core/feature-authoring/features/loft";
+import type { FeatureEditorFormField, FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
+import type { LoftFeatureParameterDraft } from "@/core/feature-authoring/definition";
 
 describe("src/domain/modeling/occ/features.spec.ts", () => {
   function assertClose(
@@ -4938,6 +4943,229 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     ).toBe(0);
   }
 
+  async function createLoftControlFixture(offset = 0) {
+    const oc = await getDefaultOpenCascadeInstance();
+    const lower = await makeBoxBody(oc, "body_loft_lower", 2, 2, 1, "feature_lower", [0, 0, -1]);
+    const upper = await makeBoxBody(oc, "body_loft_upper", 2, 2, 1, "feature_upper", [offset, 0, 10]);
+    const faceAt = (body: typeof lower, z: number) => [...body.facesById].find(([, face]) =>
+      getShapeVertexPoints(oc, face).every(p => Math.abs(p[2] - z) < 1e-5),
+    )![0];
+    const context = createOccAuthoringState(oc, { bodies: [lower, upper] });
+    const produced: typeof lower[] = [];
+    onTestFinished(() => releaseOccAuthoringStateObjects({ ...context, bodies: [...context.bodies, ...produced] }));
+    const definition: AdvancedSolidFeatureDefinition & { kind: "loft" } = {
+      kind: "loft",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [{ role: "profile", targets: [
+          { kind: "face", bodyId: lower.bodyId, faceId: faceAt(lower, 0) },
+          { kind: "face", bodyId: upper.bodyId, faceId: faceAt(upper, 10) },
+        ] }],
+      },
+    };
+    const build = (value = definition) => {
+      const result = executeOccFeature(context, "feature_loft_control", value);
+      const body = result.bodies.find(body => body.ownerFeatureId === "feature_loft_control")!;
+      produced.push(body);
+      expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+      expect(result.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe(0);
+      return body;
+    };
+    const edgeMidpoints = (body: ReturnType<typeof build>) => [...body.edgesById.values()].map(edge =>
+      withOccTemporaries(own => {
+        const curve = own(new oc.BRepAdaptor_Curve_2(edge));
+        const point = own(curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2));
+        return [point.X(), point.Y(), point.Z()];
+      }),
+    );
+    return { oc, lower, upper, context, definition, build, edgeMidpoints };
+  }
+
+  test("loft guide: refuse rather than miss the independently known bowed boundary", async () => {
+    const { oc, context, definition, build, edgeMidpoints } = await createLoftControlFixture();
+    const guide = withOccTemporaries(own => {
+      const start = own(toGpPnt(oc, [2, 0, 0]));
+      const end = own(toGpPnt(oc, [2, 0, 10]));
+      // Quadratic Bézier: B(1/2) = [5, 0, 5], endpoints on both sections.
+      const poles = own(new oc.TColgp_Array1OfPnt_2(1, 3));
+      poles.SetValue(1, start);
+      poles.SetValue(2, own(toGpPnt(oc, [8, 0, 5])));
+      poles.SetValue(3, end);
+      const curve = own(new oc.Handle_Geom_Curve_2(new oc.Geom_BezierCurve_1(poles)));
+      const edge = own(new oc.BRepBuilderAPI_MakeEdge_24(curve));
+      const closing = own(new oc.BRepBuilderAPI_MakeEdge_3(end, start));
+      const wire = own(new oc.BRepBuilderAPI_MakeWire_3(own(edge.Edge()), own(closing.Edge())));
+      const face = own(new oc.BRepBuilderAPI_MakeFace_15(own(wire.Wire()), true));
+      const prism = own(new oc.BRepPrimAPI_MakePrism_1(own(face.Face()), own(toGpVec(oc, [0, -1, 0])), false, true));
+      return trackNewSolidBody(oc, { bodyId: "body_loft_guide", ownerFeatureId: "feature_guide", label: "Bowed guide", shape: prism.Shape() });
+    });
+    context.bodies = [...context.bodies, guide];
+    const edgeId = [...guide.edgesById].find(([, edge]) => withOccTemporaries(own => {
+      const curve = own(new oc.BRepAdaptor_Curve_2(edge));
+      const p = own(curve.Value((curve.FirstParameter() + curve.LastParameter()) / 2));
+      return Math.abs(p.X() - 5) < 1e-5 && Math.abs(p.Y()) < 1e-5 && Math.abs(p.Z() - 5) < 1e-5;
+    }))![0];
+    const plain = edgeMidpoints(build());
+    expect(plain.filter(p => Math.abs(p[2]! - 5) < 1e-5)).toHaveLength(4);
+    expect(Math.max(...plain.map(p => p[0]!))).toBeCloseTo(2);
+    // Honoring the guide would move a side boundary through [5,0,5]. The
+    // production reproduction instead returned exactly these plain midpoints.
+    expect(plain.some(p => Math.abs(p[0]! - 5) < 1e-5)).toBe(false);
+    for (const guideContinuity of ["none", "normalToGuide"])
+      expect(() => build({ ...definition, parameters: {
+        ...definition.parameters,
+        participants: [...definition.parameters.participants, { role: "guideCurve", targets: [{ kind: "edge", bodyId: guide.bodyId, edgeId }] }],
+        options: { guideContinuity },
+      } })).toThrow("advanced-feature-unsupported-kernel-case: OCC loft guide curves are not supported");
+    expect(context.bodies).toHaveLength(3);
+  });
+
+  test("loft endpoint: refuse rather than leave the start normal tilted despite a normal condition", async () => {
+    const { oc, definition, build, edgeMidpoints } = await createLoftControlFixture(3);
+    const plain = build();
+    const startNormalZ = (body: typeof plain) => [...body.facesById.values()].flatMap(face => withOccTemporaries(own => {
+      const vertices = getShapeVertexPoints(oc, face);
+      if (!vertices.some(p => Math.abs(p[2]) < 1e-5) || !vertices.some(p => Math.abs(p[2] - 10) < 1e-5)) return [];
+      const surface = own(new oc.BRepAdaptor_Surface_2(face, true));
+      const u0 = surface.FirstUParameter(), u1 = surface.LastUParameter();
+      const v0 = surface.FirstVParameter(), v1 = surface.LastVParameter();
+      return [[(u0 + u1) / 2, v0], [(u0 + u1) / 2, v1], [u0, (v0 + v1) / 2], [u1, (v0 + v1) / 2]].flatMap(([u, v]) => {
+        const p = own(new oc.gp_Pnt_1());
+        const du = own(new oc.gp_Vec_1());
+        const dv = own(new oc.gp_Vec_1());
+        surface.D1(u, v, p, du, dv);
+        const normal = own(du.Crossed(dv));
+        if (Math.abs(p.Z()) > 1e-5 || Math.abs(normal.X()) < 1e-5) return [];
+        return [Math.abs(normal.Z()) / normal.Magnitude()];
+      });
+    }));
+    expect(startNormalZ(plain)).toHaveLength(2);
+    for (const z of startNormalZ(plain)) expect(z).toBeCloseTo(3 / Math.sqrt(109));
+    // A normal start must have |normal.z|=0; the reproduction had the same
+    // 3/sqrt(109) tilt as plain loft even with startMagnitude=3.
+    for (const profileConditions of [
+      { startCondition: "normal", startMagnitude: 3 },
+      { startCondition: "tangent", startMagnitude: 2 },
+      { endCondition: "normal", endMagnitude: 2 },
+      { endCondition: "tangent", endMagnitude: 2 },
+      { startMagnitude: 3 },
+      { endMagnitude: 3 },
+    ]) expect(() => build({ ...definition, parameters: { ...definition.parameters, options: { profileConditions } } }))
+      .toThrow("advanced-feature-unsupported-kernel-case: OCC loft endpoint conditions and magnitudes are not supported");
+    expect(edgeMidpoints(build({ ...definition, parameters: { ...definition.parameters, options: {
+      guideContinuity: "none", profileConditions: { startCondition: "none", endCondition: "none", startMagnitude: 1, endMagnitude: 1 }, matchConnections: [],
+    } } }))).toEqual(edgeMidpoints(plain));
+  });
+
+  test("loft connection: refuse rather than silently retain nearest-vertex pairing", async () => {
+    const { oc, lower, upper, context, definition, build, edgeMidpoints } = await createLoftControlFixture();
+    const vertexAt = (body: typeof lower, coordinates: number[]) => [...body.verticesById].find(([, vertex]) => withOccTemporaries(own => {
+      const p = own(oc.BRep_Tool.Pnt(vertex));
+      return coordinates.every((value, i) => Math.abs([p.X(), p.Y(), p.Z()][i]! - value) < 1e-5);
+    }))![0];
+    const plain = edgeMidpoints(build());
+    expect(plain.some(p => Math.abs(p[0]! - 1) < 1e-5 && Math.abs(p[1]!) < 1e-5 && Math.abs(p[2]! - 5) < 1e-5)).toBe(false);
+    const matchedDefinition: typeof definition = { ...definition, parameters: { ...definition.parameters, options: {
+      matchConnections: [{
+        from: { kind: "vertex", bodyId: lower.bodyId, vertexId: vertexAt(lower, [0, 0, 0]) },
+        to: { kind: "vertex", bodyId: upper.bodyId, vertexId: vertexAt(upper, [2, 0, 10]) },
+      }],
+    } } };
+    // Honoring this pair must create the side midpoint [1,0,5]. Before the
+    // refusal it returned exactly plain geometry, which has no such edge.
+    expect(() => build(matchedDefinition)).toThrow("advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported");
+    expect(() => build({ ...definition, parameters: { ...definition.parameters, options: {
+      matchConnections: [{
+        from: { kind: "edge", bodyId: lower.bodyId, edgeId: lower.topology.edgeIds[0]! },
+        to: { kind: "edge", bodyId: upper.bodyId, edgeId: upper.topology.edgeIds[0]! },
+      }],
+    } } })).toThrow("advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported");
+    expect(context.bodies).toEqual([lower, upper]);
+  });
+
+  test("loft authoring: advanced controls stay truthful and semantic admission stays bounded", async () => {
+    const { definition, build, lower, upper } = await createLoftControlFixture();
+    const draft = loftAuthoringDefinition.hydrateDraft(definition);
+    const form = (value: LoftFeatureParameterDraft = draft): FeatureEditorFormSchema => loftAuthoringDefinition.getFormSchema({
+      mode: "create", featureId: null, previewId: "preview_loft_controls", status: "idle",
+      lastPreviewRevisionId: null, lastCommittedRevisionId: null, diagnostics: [],
+      booleanTargetPreselection: { operationManuallyChanged: false, targetManuallyChanged: false },
+      featureType: "loft", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, draft: value,
+    });
+    const fields = (schema: FeatureEditorFormSchema) => {
+      const result: FeatureEditorFormField[] = [];
+      const visit = (field: FeatureEditorFormField) => {
+        result.push(field);
+        if (field.kind === "optionGroup") field.fields.forEach(visit);
+      };
+      schema.sections.forEach(section => section.fields.forEach(visit));
+      return result;
+    };
+    const initial = fields(form());
+    for (const id of ["loft-start-condition", "loft-end-condition"]) {
+      const field = initial.find(field => field.id === id)!;
+      expect(field.kind === "enum" && field.options.map(option => option.value)).toEqual(["none"]);
+      expect(field.helper).toContain("unavailable");
+    }
+    expect(initial.find(field => field.id === "loft-guide-curves")!.label).toContain("unsupported");
+    expect(initial.find(field => field.id === "loft-match-connections")!.helper).toContain("rejected");
+    for (const id of ["loft-start-condition-magnitude", "loft-end-condition-magnitude"])
+      expect(initial.find(field => field.id === id)!.disabled).toBe(true);
+
+    for (const options of [
+      { profileConditions: { startCondition: "normal", startMagnitude: 3 } },
+      { matchConnections: [{ from: { kind: "edge" as const, bodyId: lower.bodyId, edgeId: lower.topology.edgeIds[0]! }, to: { kind: "edge" as const, bodyId: upper.bodyId, edgeId: upper.topology.edgeIds[0]! } }] },
+    ]) {
+      const parameters = { ...definition.parameters, options };
+      // Deliberately exercise runtime rejection of input outside the narrower
+      // executable TypeScript contract (e.g. deserialized legacy definitions).
+      expect(prepareLoftFeatureDefinition(parameters as unknown as Parameters<typeof prepareLoftFeatureDefinition>[0])).toBeNull();
+      const hydrated = loftAuthoringDefinition.hydrateDraft({ ...definition, parameters });
+      const built = loftAuthoringDefinition.buildDefinition(hydrated)!;
+      expect(built).not.toBeNull();
+      expect(() => build(built)).toThrow("advanced-feature-unsupported-kernel-case");
+    }
+    const legacy = loftAuthoringDefinition.applyPatch(draft, { options: { profileConditions: { startMagnitude: 3 } } });
+    const magnitude = fields(form(legacy)).find(field => field.id === "loft-start-condition-magnitude")!;
+    expect(magnitude.hidden).toBe(false);
+    expect(magnitude.disabled).toBe(false); // Existing unsupported values can be reset, not silently stripped.
+    expect(prepareLoftFeatureDefinition({ ...definition.parameters, participants: [
+      ...definition.parameters.participants,
+      { role: "guideCurve", targets: [{ kind: "edge", bodyId: lower.bodyId, edgeId: lower.topology.edgeIds[0]! }] },
+    ] } as unknown as Parameters<typeof prepareLoftFeatureDefinition>[0])).toBeNull();
+  });
+
+  test("loft ordinary/path updates preserve geometry, body references and downstream rebuilds", async () => {
+    const { oc, context, definition, edgeMidpoints } = await createLoftControlFixture();
+    const path = await makeBoxBody(oc, "body_loft_update_path", 1, 1, 10, "feature_update_path", [10, 10, 0]);
+    context.bodies = [...context.bodies, path];
+    let state = createOccAuthoringState(oc, { bodies: context.bodies });
+    let bodyId: BodyId | undefined;
+    for (const sectionCount of [null, 3, 7]) {
+      const loft: typeof definition = sectionCount === null ? definition : { ...definition, parameters: {
+        ...definition.parameters,
+        participants: [...definition.parameters.participants, { role: "path", targets: [{
+          kind: "edge", bodyId: path.bodyId, edgeId: findEdgeIdByDirection(oc, path, [0, 0, 1])!,
+        }] }], options: { path: { sectionCount } },
+      } };
+      state = rebuildOccAuthoringState(state, [{ featureId: "feature_loft_control", definition: loft, suppressed: false }]);
+      const loftBody = state.bodies.find(body => body.ownerFeatureId === "feature_loft_control")!;
+      bodyId ??= loftBody.bodyId;
+      expect(loftBody.bodyId).toBe(bodyId);
+      expect(await bodyVolume(oc, loftBody.shape)).toBeCloseTo(40);
+      const transformed = executeOccFeature(state, "feature_loft_update_transform", {
+        kind: "transform", featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: { participants: [
+          { role: "body", targets: [{ kind: "body", bodyId }] },
+          { role: "transformReference", targets: [{ kind: "construction", constructionId: "construction_plane-xy" }] },
+        ], options: { distance: 3 } },
+      });
+      const moved = transformed.bodies.find(body => body.bodyId === bodyId)!;
+      expect(edgeMidpoints(moved).filter(p => Math.abs(p[2]! - 8) < 1e-5)).toHaveLength(4);
+      expect(state.featureTopologyStages.get("feature_loft_control")?.outputs.get(bodyId)?.sourceTargets.size).toBe(0);
+    }
+  });
+
   async function testLoftAdvancedControlsAndUnsupportedCombinations() {
     const oc = await getDefaultOpenCascadeInstance();
     const plane = createStandardPlaneDefinition("xy");
@@ -4976,7 +5204,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       bodies: [faceBody],
     })();
 
-    const advancedResult = executeOccFeature(
+    expect(() => executeOccFeature(
       context,
       "feature_phase4_loft_advanced" as FeatureId,
       {
@@ -5028,12 +5256,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           },
         },
       },
-    );
-
-    expect(
-      advancedResult.producedTargets[0]?.kind,
-      "Guide continuity, profile conditions, and one match connection should execute for loft.",
-    ).toBe("body");
+    )).toThrow("advanced-feature-unsupported-kernel-case: OCC loft guide curves are not supported");
 
     let pathGuideError: string | null = null;
     try {
