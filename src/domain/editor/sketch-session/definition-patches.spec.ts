@@ -79,7 +79,7 @@ function solvedSnapshot(
 ): SolvedSketchSnapshot {
   return {
     schemaVersion: "solved-sketch/v1alpha2",
-    status: { solveState: "solved", constraintState: "satisfied" },
+    status: { solveState: "solved", constraintState: "wellConstrained" },
     solvedEntities: Object.entries(handlesByEntity).map(
       ([entityId, handles]) => ({
         entityId: entityId as `sketch_entity_${string}`,
@@ -731,7 +731,6 @@ test("driven spline constraints keep snapshot, applied definition, and fresh sol
     constraints: [],
     dimensionIds: [],
     dimensions: [],
-    derivedRelationshipIds: ["derivation_mirror"],
     derivedRelationships: [
       {
         derivationId: "derivation_mirror",

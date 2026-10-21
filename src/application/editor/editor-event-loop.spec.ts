@@ -69,6 +69,12 @@ function createRuntime(
     async commitSketch() {
       return null;
     },
+    async commitSketchPlane() {
+      throw new Error("Sketch-plane commit is not used by this test.");
+    },
+    async projectSketchReferences() {
+      throw new Error("Sketch projection is not used by this test.");
+    },
     async evaluatePreview() {
       throw new Error("Feature preview is not used by this test.");
     },
@@ -616,7 +622,7 @@ test("src/application/editor/editor-event-loop.spec.ts reports escaped effect er
 
 test("src/application/editor/editor-event-loop.spec.ts stop() discards queued and in-flight effect results", async () => {
   const snapshot = await createSeedDocumentSnapshot();
-  let resolveEffect: ((event: EditorEvent) => void) | null = null;
+  const pending: { resolve?: (event: EditorEvent) => void } = {};
   let inFlightRequestId: EditorEffect["requestId"] | null = null;
   const loop = createEditorEventLoop(
     createRuntime(snapshot),
@@ -624,7 +630,7 @@ test("src/application/editor/editor-event-loop.spec.ts stop() discards queued an
     async (effect) =>
       new Promise<EditorEvent>((resolve) => {
         inFlightRequestId = effect.requestId;
-        resolveEffect = resolve;
+        pending.resolve = resolve;
       }),
   );
 
@@ -635,7 +641,8 @@ test("src/application/editor/editor-event-loop.spec.ts stop() discards queued an
   );
 
   loop.stop();
-  resolveEffect?.({
+  if (!pending.resolve) throw new Error("Expected an in-flight effect.");
+  pending.resolve({
     type: "effect.snapshotLoaded",
     payload: {
       requestId:
@@ -660,7 +667,6 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const operation = createReferenceImageOperation({
     sequence: 1,
     sketchId: sketch.sketchId,
@@ -730,7 +736,7 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
       modeId: mode.id,
       operationId: operation.operationId,
     });
-  const startAndMove = (point: readonly [number, number, number]) => {
+  const startAndMove = (point: readonly [number, number]) => {
     loop.dispatch({ type: "sketch.specialModeDragStarted", handle, point });
     loop.dispatch({ type: "sketch.specialModeDragMoved", handle, point });
   };
@@ -742,6 +748,8 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   };
 
   const dimension = currentSketch().session.definition.dimensions[0]!;
+  if (dimension.kind !== "distance")
+    throw new Error("Expected a seed distance dimension.");
   const originalPlacement = dimension.annotationPlacement;
   const annotationPatch = (
     gesturePhase: "start" | "move" | "end" | "cancel",
@@ -764,13 +772,13 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   expect(currentSketch().session.actionAvailability?.canUndo).toBe(true);
   loop.dispatch({ type: "history.undoRequested" });
   expect(
-    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+    dimensionPlacement(currentSketch().session),
   ).toEqual(originalPlacement);
   annotationPatch("start", [40, 20]);
   annotationPatch("move", [50, 25]);
   annotationPatch("cancel", [50, 25]);
   expect(
-    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+    dimensionPlacement(currentSketch().session),
   ).toEqual(originalPlacement);
   expect(currentSketch().session.actionAvailability).toEqual({
     canUndo: false,
@@ -779,7 +787,7 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   annotationPatch("start", [60, 30]);
   annotationPatch("end", [60, 30]);
   expect(
-    currentSketch().session.definition.dimensions[0]!.annotationPlacement,
+    dimensionPlacement(currentSketch().session),
   ).toEqual(originalPlacement);
   expect(currentSketch().session.actionAvailability).toEqual({
     canUndo: false,
@@ -787,7 +795,7 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   });
 
   enterMode();
-  startAndMove([20, 10, 0]);
+  startAndMove([20, 10]);
   expect(currentSketch().session.definition.points[0]!.position).not.toEqual(
     originalPoint,
   );
@@ -802,7 +810,7 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   expect(currentSketch().session.actionAvailability?.canUndo).toBe(false);
 
   enterMode();
-  startAndMove([30, 15, 0]);
+  startAndMove([30, 15]);
   loop.dispatch({ type: "tool.activated", toolId: "line" });
   expect(currentSketch().session.definition.points[0]!.position).toEqual(
     originalPoint,
@@ -814,11 +822,11 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
   });
 
   enterMode();
-  startAndMove([40, 20, 0]);
+  startAndMove([40, 20]);
   loop.dispatch({
     type: "sketch.specialModeDragEnded",
     handle,
-    point: [40, 20, 0],
+    point: [40, 20],
   });
   const releasedPoint = currentSketch().session.definition.points[0]!.position;
   expect(releasedPoint).not.toEqual(originalPoint);
@@ -838,7 +846,7 @@ test("EditorEventLoop keeps special-mode drag previews out of history until rele
 
   loop.dispatch({ type: "history.undoRequested" });
   enterMode();
-  startAndMove([50, 25, 0]);
+  startAndMove([50, 25]);
   loop.dispatch({ type: "tool.activated", toolId: "finishSketch" });
   await waitForCondition(() => committedPoint !== null);
   expect(committedPoint).toEqual(originalPoint);
@@ -849,7 +857,6 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const operation = createReferenceImageOperation({
     sequence: 2,
     sketchId: sketch.sketchId,
@@ -862,7 +869,7 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   });
   sketch.sketch.definition.referenceImages = [operation];
 
-  const conflictIds = [
+  const conflictIds: readonly `constraint_${string}`[] = [
     "constraint_event_conflict_a",
     "constraint_event_conflict_b",
   ];
@@ -945,12 +952,12 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
     loop.dispatch({
       type: "sketch.specialModeDragStarted",
       handle,
-      point: [x, 0, 0],
+      point: [x, 0],
     });
     loop.dispatch({
       type: "sketch.specialModeDragEnded",
       handle,
-      point: [x, 0, 0],
+      point: [x, 0],
     });
     loop.dispatch({
       type: "command.cancelled",
@@ -1018,10 +1025,19 @@ test("EditorEventLoop Undo and Redo recompute equivalent invalid diagnostics and
   loop.stop();
 });
 
+function dimensionPlacement(
+  session: Extract<EditorState, { kind: "editingSketch" }>["session"],
+) {
+  const dimension = session.definition.dimensions[0];
+  if (dimension?.kind !== "distance")
+    throw new Error("Expected a seed distance dimension.");
+  return dimension.annotationPlacement;
+}
+
 function moveFirstPoint(
   session: Extract<EditorState, { kind: "editingSketch" }>["session"],
-  point: readonly [number, number, number],
-) {
+  point: readonly [number, number],
+): typeof session {
   return {
     ...session,
     definition: {
@@ -1190,9 +1206,9 @@ async function settleOpeningRounds(
   regions: DeriveSketchRegionsOutput["regions"],
 ) {
   await waitForCondition(() => derivations.length >= 1);
-  derivations[0]!.resolve({ regions, diagnostics: [] });
+  derivations[0]!.resolve({ regions, diagnostics: [], offsetPublications: [] });
   await waitForCondition(() => derivations.length >= 2);
-  derivations[1]!.resolve({ regions, diagnostics: [] });
+  derivations[1]!.resolve({ regions, diagnostics: [], offsetPublications: [] });
   await waitForState(
     loop,
     (state) =>
@@ -1206,7 +1222,6 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations, commits } =
     createControlledRegionRuntime(snapshot);
   const loop = createEditorEventLoop(runtime, createTestErrorReporter());
@@ -1265,6 +1280,7 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   derivations[0]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "stale generation"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await waitForCondition(() => derivations.length === 2);
   expect(
@@ -1279,6 +1295,7 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   derivations[1]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "latest generation"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await waitForState(
     loop,
@@ -1326,6 +1343,7 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   derivations[2]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "finished session"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const afterLate = currentSketch();
@@ -1347,12 +1365,14 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   derivations[3]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "reopen entry basis"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await waitForCondition(() => derivations.length === 5);
   expect(currentSketch().session.liveRegions.regions).toBe(reopenedRegions);
   derivations[4]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "reopened session"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await waitForState(
     loop,
@@ -1376,7 +1396,6 @@ test("O30 (cadara-b3k.2): a second Finish while the first commit is in flight do
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const commits: { resolve: () => void }[] = [];
   runtime.commitSketch = () =>
@@ -1397,7 +1416,11 @@ test("O30 (cadara-b3k.2): a second Finish while the first commit is in flight do
   loop.dispatch({ type: "sketch.geometryDragMoved", point: to });
   loop.dispatch({ type: "sketch.geometryDragEnded", point: to });
   await waitForCondition(() => derivations.length === 3);
-  derivations[2]!.resolve({ regions: sketch.sketch.regions, diagnostics: [] });
+  derivations[2]!.resolve({
+    regions: sketch.sketch.regions,
+    diagnostics: [],
+    offsetPublications: [],
+  });
   await waitForState(
     loop,
     (state) =>
@@ -1433,7 +1456,6 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const loop = createEditorEventLoop(runtime, createTestErrorReporter());
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
@@ -1481,7 +1503,6 @@ test.each([false, true])(
     const snapshot = await createSeedDocumentSnapshot();
     const sketch = snapshot.document.sketches[0]!;
     snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-    snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
     const { runtime, derivations } = createControlledRegionRuntime(snapshot);
     const loop = createEditorEventLoop(
       { ...runtime, supersedesSketchRegionDerivation: supersede },
@@ -1506,7 +1527,7 @@ test.each([false, true])(
         },
       });
     const placement = () =>
-      currentSketch().session.definition.dimensions[0]!.annotationPlacement;
+      dimensionPlacement(currentSketch().session);
     /** A label restore re-bases nothing: no request, same generation, regions current. */
     const expectNoDerivation = async (
       derivationCount: number,
@@ -1559,6 +1580,7 @@ test.each([false, true])(
     derivations[2]!.resolve({
       regions: sketch.sketch.regions,
       diagnostics: [],
+      offsetPublications: [],
     });
     await waitForState(
       loop,
@@ -1585,7 +1607,6 @@ test("EditorEventLoop reports a rejected background derivation and marks live re
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const reporter = createTestErrorReporter();
   const loop = createEditorEventLoop(runtime, reporter);
@@ -1593,7 +1614,7 @@ test("EditorEventLoop reports a rejected background derivation and marks live re
   await waitForCondition(() => derivations.length === 1);
   const retained = currentSketch().session.liveRegions.regions;
   // The entry basis's request is stale once the projection result re-based.
-  derivations[0]!.resolve({ regions: [], diagnostics: [] });
+  derivations[0]!.resolve({ regions: [], diagnostics: [], offsetPublications: [] });
   await waitForCondition(() => derivations.length === 2);
 
   derivations[1]!.reject(new Error("Region core exploded."));
@@ -1627,7 +1648,6 @@ test("EditorEventLoop re-derives live regions after stop() drops an in-flight de
   const snapshot = await createSeedDocumentSnapshot();
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
-  snapshot.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const loop = createEditorEventLoop(runtime, createTestErrorReporter());
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
@@ -1640,10 +1660,11 @@ test("EditorEventLoop re-derives live regions after stop() drops an in-flight de
   ).toBe(null);
   loop.start();
   await waitForCondition(() => derivations.length === 2);
-  derivations[0]!.resolve({ regions: [], diagnostics: [] });
+  derivations[0]!.resolve({ regions: [], diagnostics: [], offsetPublications: [] });
   derivations[1]!.resolve({
     regions: relabelRegions(sketch.sketch.regions, "after restart"),
     diagnostics: [],
+    offsetPublications: [],
   });
   await waitForState(
     loop,

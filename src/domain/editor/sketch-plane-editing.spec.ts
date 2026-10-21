@@ -134,7 +134,12 @@ test("sketch-plane-editing.ts omits the flow when a committed sketch no longer h
               ...entry,
               plane: {
                 ...entry.plane,
-                support: { kind: "body" as const, bodyId: "body_unsupported" },
+                // Deliberately malformed persisted support: exercise the runtime
+                // refusal without broadening the valid snapshot contract.
+                support: {
+                  kind: "body",
+                  bodyId: "body_unsupported",
+                } as unknown as typeof entry.plane.support,
               },
             }
           : entry,

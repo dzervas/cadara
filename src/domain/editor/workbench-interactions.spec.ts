@@ -1,4 +1,5 @@
 import { test, expect } from "vitest";
+import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getEditorViewState,
   initialEditorState,
@@ -49,6 +50,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       event?.type,
       "Feature double-click should emit a reopen event.",
     ).toBe("authoring.reopenRequested");
+    if (!event) throw new Error("Expected a feature reopen event.");
     expect(
       event.toolId,
       "Feature double-click should reopen through the committed feature tool.",
@@ -64,6 +66,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
     expect(event?.type, "Sketch double-click should emit a reopen event.").toBe(
       "authoring.reopenRequested",
     );
+    if (!event) throw new Error("Expected a sketch reopen event.");
     expect(
       event.toolId,
       "Sketch double-click should reopen through the sketch flow.",
@@ -580,19 +583,19 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
 
     // No selection: stack[0] (line entity) is dragged.
     expect(
-      resolveSketchDragTarget(stack, [], def),
+      resolveSketchDragTarget(stack, [], def, null),
       "With no selection, stack[0] should be dragged.",
     ).toEqual(lineEntity);
 
     // Selection contains pointA (in stack): pointA is dragged.
     expect(
-      resolveSketchDragTarget(stack, [pointA], def),
+      resolveSketchDragTarget(stack, [pointA], def, null),
       "Selected entry in stack should be dragged.",
     ).toEqual(pointA);
 
     // Selection contains lineEntity (also in stack): lineEntity is dragged.
     expect(
-      resolveSketchDragTarget(stack, [lineEntity], def),
+      resolveSketchDragTarget(stack, [lineEntity], def, null),
       "Selected entity in stack should be dragged.",
     ).toEqual(lineEntity);
 
@@ -603,13 +606,13 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
       pointId: "sketch_point_other" as `sketch_point_${string}`,
     };
     expect(
-      resolveSketchDragTarget(stack, [otherPoint], def),
+      resolveSketchDragTarget(stack, [otherPoint], def, null),
       "Selection not in stack falls back to stack[0].",
     ).toEqual(lineEntity);
 
     // Empty stack: null.
     expect(
-      resolveSketchDragTarget([], [pointA], def),
+      resolveSketchDragTarget([], [pointA], def, null),
       "Empty stack returns null.",
     ).toBe(null);
 
@@ -630,13 +633,12 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
             label: "Derived",
             target: derivedEntity,
             isConstruction: false,
-            relationshipId:
-              "derived_relationship_x" as `derived_relationship_${string}`,
-          } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+            derivationId: "derivation_x",
+          },
         ],
       };
     expect(
-      resolveSketchDragTarget([{ target: derivedEntity }], [], defWithDerived),
+      resolveSketchDragTarget([{ target: derivedEntity }], [], defWithDerived, null),
       "Non-draggable stack[0] returns null.",
     ).toBe(null);
   }
@@ -733,7 +735,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
               tangent: { kind: "automatic" },
             },
           ],
-        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        },
         {
           kind: "lineSegment",
           entityId: otherLineId,
@@ -742,7 +744,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
           isConstruction: false,
           startPointId: fitPointId,
           endPointId: "sketch_point_sp1" as `sketch_point_${string}`,
-        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        },
       ],
       constraintIds: [],
       constraints: [],
@@ -757,6 +759,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         [{ target: fitPoint }, { target: handleTip }, { target: splineEntity }],
         [splineEntity],
         def,
+        null,
       ),
       "D3a(a): spline selected + handle in stack → handle.",
     ).toEqual(handleTip);
@@ -768,6 +771,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         [{ target: fitPoint }, { target: handleTip }],
         [fitPoint],
         def,
+        null,
       ),
       "D3a(b): fit point selected + zero handle in stack → fit point.",
     ).toEqual(fitPoint);
@@ -779,6 +783,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         [{ target: fitPoint }, { target: handleTip }],
         [handleTip],
         def,
+        null,
       ),
       "D3a(c): zero handle selected by cycling → handle.",
     ).toEqual(handleTip);
@@ -791,6 +796,7 @@ test("src/domain/editor/workbench-interactions.spec.ts", async () => {
         [{ target: fitPoint }, { target: otherLine }],
         [otherLine],
         def,
+        null,
       ),
       "O4: a selected line's endpoint remains a vertex drag.",
     ).toEqual(fitPoint);
