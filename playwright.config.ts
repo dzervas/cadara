@@ -31,6 +31,7 @@ const fontconfigFile = findFontconfigFile();
 if (fontconfigFile) process.env.FONTCONFIG_FILE = fontconfigFile;
 
 export default defineConfig({
+  globalSetup: "./e2e/global-setup.ts",
   testDir: "./e2e",
   testMatch: runRealCaptures ? realCaptureTests : undefined,
   // `e2e/offline/` runs only in its own sub-lane on a production preview
