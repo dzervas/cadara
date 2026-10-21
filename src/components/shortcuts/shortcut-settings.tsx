@@ -46,12 +46,14 @@ export function ShortcutSettingsButton() {
       >
         <WorkbenchIcon name="keyboard" className="h-4 w-4" />
       </ActionIcon>
+      {/* Closing must not wait for animation frames while the workbench is busy. */}
       <Modal
         opened={opened}
         onClose={() => setOpened(false)}
         title="Keyboard shortcuts"
         size="xl"
         centered
+        transitionProps={{ exitDuration: 0 }}
       >
         <ShortcutSettings />
       </Modal>
