@@ -751,9 +751,13 @@ export function createSemanticSketchPort(input: {
       terminal.diagnostics = [
         ...terminal.diagnostics,
         ...inspected.diagnostics,
-        ...(finalEditor.kind === "editingSketch" ? finalEditor.session.projectionDiagnostics.map(d => ({ ...d, target: null, detail: null })) : []),
+        ...(finalEditor.kind === "editingSketch" ? finalEditor.session.projectionDiagnostics.map(d => ({ code: d.code, severity: d.severity, message: d.message, target: null, detail: null })) : []),
         ...(terminal.discovery.sketch?.validity.diagnostics ?? []).map((d) => ({
-          ...d,
+          // Sketch-specific context stays in discovery.sketch.validity; this
+          // projection has the narrower ModelingDiagnostic transport shape.
+          code: d.code,
+          severity: d.severity,
+          message: d.message,
           target: null,
           detail: null,
         })),

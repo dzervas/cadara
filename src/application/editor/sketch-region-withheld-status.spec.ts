@@ -13,6 +13,7 @@
  */
 import { describe, expect, test } from "vitest";
 import type { SketchPointId } from "@/contracts/shared/ids";
+import { validateSolvedSketchSnapshot } from "@/contracts/sketch/runtime-schema";
 import type {
   SketchDefinition,
   SketchEntityDefinition,
@@ -31,6 +32,7 @@ import {
 } from "@/domain/editor/sketch-session/internals";
 import { SPEC_SKETCH_UNITS_PER_PIXEL } from "@/domain/editor/sketch-session/test-snap-scale";
 import { describeSketchSessionWithheldRegions } from "@/domain/editor/sketch-session/region-feedback";
+import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import {
   createSketchActionOwnerFixture,
   drawnMixedOutlineSession,
@@ -68,7 +70,7 @@ function withZeroStartTangent(definition: SketchDefinition): SketchDefinition {
 }
 
 const ZERO_JOIN_TEXT =
-  "The declared-join query of ‘3-point arc 2’ and ‘Spline 3’ span 1 is uncertain (join-zero-end-tangent): A cubic has a zero tangent at a declared join location. Affects ‘3-point arc 2’. No region is formed there. Undo, or edit that geometry.";
+  "The declared-join query of ‘3-point arc 2’ and ‘Spline 3’ span 1 is uncertain (join-zero-end-tangent): A cubic has a zero tangent at a declared join location. Affects ‘Spline 3’ start handle. No region is formed there. Undo, drag the handle out of zero, or Reset to automatic.";
 
 describe("T17c6 D-2: a withheld region is explained on the status line", () => {
   test("the spline's end handle at the arc join dragged to exactly zero: one action, the region vanishes and the status explains it (label-based, with Undo); selecting a point keeps it; Undo brings the region back and clears it", async () => {
@@ -115,6 +117,22 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
       "the derivation is current: the region is withheld (fails closed), not pending",
     ).toBe("current");
     expect(f.session.liveRegions.regions, "the region vanished").toEqual([]);
+    expect(f.session.liveRegions.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "region-join-uncertain",
+          joinCause: {
+            code: "join-zero-end-tangent",
+            culprit: {
+              kind: "splineTangentHandle",
+              entityId: spline.entityId,
+              occurrenceId: start.occurrenceId,
+              pointId: start.pointId,
+            },
+          },
+        }),
+      ]),
+    );
     expect(f.session.validationMessage, "the status line explains it").toBe(
       ZERO_JOIN_TEXT,
     );
@@ -148,7 +166,101 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
     expect(f.session.liveRegions.status).toBe("current");
     expect(f.session.liveRegions.regions, "no region").toEqual([]);
     expect(f.session.validationMessage).toBe(ZERO_JOIN_TEXT);
+    const spline = splineOf(f.session.definition);
+    const start = spline.pointOccurrences[0]!;
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: {
+        kind: "sketchTangentHandle",
+        sketchId: spline.target.sketchId,
+        entityId: spline.entityId,
+        occurrenceId: start.occurrenceId,
+        pointId: start.pointId,
+      },
+    });
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "resetTangentToAutomatic" },
+    });
+    await f.settle();
+    expect(splineOf(f.session.definition).pointOccurrences[0]!.tangent.kind).toBe(
+      "automatic",
+    );
+    expect(f.session.liveRegions.regions).toHaveLength(1);
+    expect(f.session.validationMessage).toBeNull();
   });
+
+  test.each([false, true])(
+    "typed handle ownership survives region pair order (reverse entities: %s) and strict snapshot validation",
+    async (reverse) => {
+      const drawn = drawnMixedOutlineSession();
+      const zero = withZeroStartTangent(drawn.definition);
+      const f = await createSketchActionOwnerFixture(
+        rebuildSessionForDefinition(drawn, {
+          definition: {
+            ...zero,
+            entities: reverse ? [...zero.entities].reverse() : zero.entities,
+          },
+        }),
+      );
+      const spline = splineOf(zero);
+      const start = spline.pointOccurrences[0]!;
+      expect(f.session.liveRegions.regions).toEqual([]);
+      const warnings = f.session.liveRegions.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "region-join-uncertain",
+      );
+      expect(warnings.length).toBeGreaterThan(0);
+      for (const warning of warnings) {
+        expect(warning).toMatchObject({
+          joinCause: {
+            code: "join-zero-end-tangent",
+            culprit: {
+              kind: "splineTangentHandle",
+              entityId: spline.entityId,
+              occurrenceId: start.occurrenceId,
+              pointId: start.pointId,
+            },
+          },
+        });
+      }
+      expect(f.session.validationMessage).toContain(
+        "Affects ‘Spline 3’ start handle.",
+      );
+      expect(f.session.validationMessage).toContain(
+        reverse
+          ? "query of ‘Spline 3’ span 1 and ‘3-point arc 2’"
+          : "query of ‘3-point arc 2’ and ‘Spline 3’ span 1",
+      );
+      expect(f.session.validationMessage).toContain(
+        "drag the handle out of zero, or Reset to automatic",
+      );
+      const snapshot = {
+        ...f.session.liveSolve!.solvedSnapshot,
+        diagnostics: warnings,
+      };
+      expect(
+        validateSolvedSketchSnapshot(JSON.parse(JSON.stringify(snapshot)))
+          .success,
+      ).toBe(true);
+      expect(
+        validateSolvedSketchSnapshot({
+          ...snapshot,
+          diagnostics: [{
+            ...warnings[0],
+            joinCause: {
+              code: "join-zero-end-tangent",
+              culprit: {
+                kind: "splineTangentHandle",
+                entityId: spline.entityId,
+                occurrenceId: 42,
+                pointId: start.pointId,
+              },
+            },
+          }],
+        }).success,
+      ).toBe(false);
+    },
+  );
 
   test.each([
     "changed Stroke",
@@ -257,8 +369,8 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
       )!.message;
     expect(
       about(arc!.entityId),
-      "premise: the first warning is about the arc, another about the spline",
-    ).not.toBe(about(spline!.entityId));
+      "both affected branches identify the same actual spline-handle culprit",
+    ).toBe(about(spline!.entityId));
     const lostRegionBoundedBy = (entityId: string) =>
       ({
         regionId: "region_lost",
@@ -275,7 +387,7 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
           },
         ],
       }) as never;
-    const RECOVERY = " No region is formed there. Undo, or edit that geometry.";
+    const RECOVERY = " No region is formed there. Undo, drag the handle out of zero, or Reset to automatic.";
     expect(
       describeSketchSessionWithheldRegions(f.session, [
         lostRegionBoundedBy(arc!.entityId),
@@ -295,6 +407,53 @@ describe("T17c6 D-2: a withheld region is explained on the status line", () => {
       "a lost region bounded by other curves is not explained by these warnings",
     ).toBeNull();
     expect(describeSketchSessionWithheldRegions(f.session, [])).toBeNull();
+  });
+
+  test("a distinct certified uncertainty keeps generic recovery, even with zero-handle prose or stale culprit metadata", async () => {
+    const query = createCertifiedNeutralCurveQuery();
+    const line = (id: string, x: number) => ({
+      kind: "line" as const,
+      form: "endpointSegment" as const,
+      curveId: id,
+      provenance: { sourceEntityId: id, sourceSpanId: "whole" },
+      start: [x, 0] as const,
+      end: [x + 1, 0] as const,
+      sourceDomain: [0, 1] as const,
+    });
+    const failure = query.queryJoin({
+      first: line("before", 0),
+      second: line("after", 2),
+      joins: [{ first: "end", second: "start" }],
+      modelingTolerance: 0.001,
+    });
+    expect(failure).toMatchObject({
+      kind: "uncertain",
+      code: "join-ball-exceeds-tolerance",
+    });
+    if (failure.kind === "verified") throw new Error("Expected a failed join.");
+    const drawn = drawnMixedOutlineSession();
+    const f = await createSketchActionOwnerFixture(
+      rebuildSessionForDefinition(drawn, {
+        definition: withZeroStartTangent(drawn.definition),
+      }),
+    );
+    const diagnostics = f.session.liveRegions.diagnostics.map((warning) => ({
+      ...warning,
+      joinCause: { ...warning.joinCause, code: failure.code },
+    }));
+    const published = publishSketchLiveRegions(f.session, [], diagnostics);
+    expect(published.validationMessage).toBe(
+      `${diagnostics[0]!.message} No region is formed there. Undo, or edit that geometry.`,
+    );
+    expect(published.validationMessage).not.toContain("Reset to automatic");
+    // Without an owner-provided culprit, even the zero-tangent code must not guess.
+    const unlocated = diagnostics.map((warning) => ({
+      ...warning,
+      joinCause: { code: "join-zero-end-tangent" },
+    }));
+    expect(
+      publishSketchLiveRegions(published, [], unlocated).validationMessage,
+    ).not.toContain("Reset to automatic");
   });
 
   test("review R-2: a rectangle beside that silent open-chain warning; deleting a rectangle edge (the user's own removal) shows no withheld-region text", async () => {
