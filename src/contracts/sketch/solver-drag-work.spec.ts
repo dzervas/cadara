@@ -74,12 +74,13 @@ test("a far drag frame evaluates the loss once per line-search trial plus a few 
   ).toBeGreaterThanOrEqual(20);
   // The start-point loss belongs to the caller: the evaluations outside the
   // trials are a handful however many iterations ran. For this fixture the
-  // √18 drag runs as two accepted substeps of four each (phase-A start,
-  // candidate judge, exact-reach start, reached-candidate judge): eight.
+  // √18 drag runs as two accepted substeps: four original outside-search
+  // evaluations plus the conditioning predicate and warm-up start each. The
+  // numerical raw-component probes have their own explicit work counter.
   const outsideSearches = lossEvaluations - lineSearchTrials;
   expect(
     outsideSearches,
     `${lossEvaluations} loss evaluations for ${lineSearchTrials} trials over ${lineSearches} line searches: a line search must not re-evaluate its start`,
   ).toBeLessThan(lineSearches);
-  expect(outsideSearches).toBeLessThanOrEqual(8);
+  expect(outsideSearches).toBeLessThanOrEqual(12);
 });

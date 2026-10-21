@@ -1,0 +1,1363 @@
+{
+  "provenance": "Captured compiled-session inputs from acceptance-mixed-topology.spec.ts:424-501, Line + 3-point Arc + four-fit-point Spline with authored interior tangent; before conditioning recovery fix. Stage drop collapses fit 3 onto fit 2; stage apart grabs fit 2 and moves it toward the midpoint with fit 1. Native starting bits retained.",
+  "sessions": [
+    {
+      "stage": "drop",
+      "compile": {
+        "definition": {
+          "schemaVersion": "sketch-definition/v1alpha2",
+          "references": [],
+          "points": [
+            {
+              "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+              "label": "Line 1 start",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+              },
+              "position": [-10.062499999999998, -5.270833333333332],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+              "label": "Line 1 end",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+              },
+              "position": [-1.9166666923144895, -4.312499981787766],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+              "label": "3-point arc 2 center",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99"
+              },
+              "position": [-4.8874999856331245, -1.5333333295956149],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+              "label": "3-point arc 2 start",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+              },
+              "position": [-1.9166666317052257, -4.31250002597889],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+              "label": "3-point arc 2 through",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+              },
+              "position": [-0.9583333608968064, -0.47916667418732695],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+              "label": "3-point arc 2 end",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+              },
+              "position": [-3.8333333179407942, 2.3958333733621706],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+              "label": "Spline 3 point 1",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34"
+              },
+              "position": [-3.8333333448429068, 2.395833304854091],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+              "label": "Spline 3 point 2",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627"
+              },
+              "position": [-5.989583333333333, 4.072916666666666],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+              "label": "Spline 3 point 3",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb"
+              },
+              "position": [-10.78125, -0.8385416666666675],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+              "label": "Spline 3 point 4",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+              },
+              "position": [-10.062499999999998, -5.270833333333332],
+              "isConstruction": false
+            }
+          ],
+          "entities": [
+            {
+              "kind": "lineSegment",
+              "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+              "label": "Line 1",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e"
+              },
+              "isConstruction": false,
+              "startPointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+              "endPointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+            },
+            {
+              "kind": "arc",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "label": "3-point arc 2",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35"
+              },
+              "isConstruction": false,
+              "centerPointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+              "startPointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+              "endPointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+              "sweepDirection": "counterClockwise"
+            },
+            {
+              "kind": "spline",
+              "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+              "label": "Spline 3",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c"
+              },
+              "isConstruction": false,
+              "pointOccurrenceIds": [
+                "spline_occurrence_48fa5f0b-68b2-4216-bda4-25cdebb14f94",
+                "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2",
+                "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f",
+                "spline_occurrence_f5102752-b5e3-459e-b5c5-b2fd81a8b2bb"
+              ],
+              "pointOccurrences": [
+                {
+                  "occurrenceId": "spline_occurrence_48fa5f0b-68b2-4216-bda4-25cdebb14f94",
+                  "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2",
+                  "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f",
+                  "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+                  "tangent": {
+                    "kind": "authored",
+                    "vector": [0.6999707132755913, -1.0962010242434301]
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_f5102752-b5e3-459e-b5c5-b2fd81a8b2bb",
+                  "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                }
+              ],
+              "closure": "open",
+              "interpolationPolicy": "centripetal-mean-arm-v1"
+            }
+          ],
+          "constraints": [
+            {
+              "constraintId": "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+              "kind": "pointOnCurve",
+              "label": "3-point arc 2 through point",
+              "point": {
+                "kind": "localPoint",
+                "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+              },
+              "curve": {
+                "kind": "localEntity",
+                "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35"
+              }
+            },
+            {
+              "constraintId": "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+              "kind": "coincident",
+              "label": "Inferred coincident 2",
+              "pointIds": [
+                "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+                "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+              ]
+            },
+            {
+              "constraintId": "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+              "kind": "coincident",
+              "label": "Inferred coincident 3",
+              "pointIds": [
+                "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+                "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+              ]
+            },
+            {
+              "constraintId": "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75",
+              "kind": "coincident",
+              "label": "Inferred coincident 3",
+              "pointIds": [
+                "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+                "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+              ]
+            }
+          ],
+          "dimensions": [
+            {
+              "dimensionId": "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+              "kind": "arcStartPointCoincident",
+              "label": "3-point arc 2 start",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+            },
+            {
+              "dimensionId": "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597",
+              "kind": "arcEndPointCoincident",
+              "label": "3-point arc 2 end",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+            }
+          ],
+          "svgRenderingEnabled": false,
+          "referenceIds": [],
+          "pointIds": [
+            "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+            "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+            "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+            "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+            "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+            "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+            "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+            "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+          ],
+          "entityIds": [
+            "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+            "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+            "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c"
+          ],
+          "constraintIds": [
+            "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+            "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+            "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+            "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75"
+          ],
+          "dimensionIds": [
+            "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+            "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597"
+          ],
+          "derivedRelationships": []
+        },
+        "projectedReferences": [],
+        "tolerances": {
+          "coincidence": 0.001,
+          "angleRadians": 0.0001,
+          "minimumSegmentLength": 0.001
+        },
+        "modelingTolerance": 0.001,
+        "partialSolvePolicy": "failOnConflict",
+        "strategy": "bfgs",
+        "degenerateSplineSpanDragPointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb"
+      },
+      "priorSolvedSnapshot": {
+        "schemaVersion": "solved-sketch/v1alpha2",
+        "status": {
+          "solveState": "solved",
+          "constraintState": "underConstrained"
+        },
+        "solvedEntities": [
+          {
+            "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+            "kind": "lineSegment",
+            "startPosition": [-10.062499999999998, -5.270833333333332],
+            "endPosition": [-1.9166666923144895, -4.312499981787766]
+          },
+          {
+            "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+            "kind": "arc",
+            "centerPosition": [-4.8874999856331245, -1.5333333295956149],
+            "startPosition": [-1.916666631705226, -4.31250002597889],
+            "endPosition": [-3.83333331793472, 2.395833373384809],
+            "sweepDirection": "counterClockwise"
+          },
+          {
+            "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+            "kind": "spline",
+            "reconstruction": {
+              "validity": "valid",
+              "diagnostics": [],
+              "spans": [
+                {
+                  "source": {
+                    "splineId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+                    "spanIndex": 0,
+                    "startPointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+                    "endPointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+                    "startOccurrenceId": "spline_occurrence_48fa5f0b-68b2-4216-bda4-25cdebb14f94",
+                    "endOccurrenceId": "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2"
+                  },
+                  "orientation": "forward",
+                  "validity": "valid",
+                  "interval": [0, 1.652776541973982],
+                  "poles": [
+                    [-3.8333333448429068, 2.395833304854091],
+                    [-4.552083341006382, 2.954861092124949],
+                    [-5.159019383222945, 4.129774296086817],
+                    [-5.989583333333333, 4.072916666666666]
+                  ],
+                  "differential": {
+                    "interval": [0, 0],
+                    "poles": [
+                      [0, 0],
+                      [0, 0],
+                      [0, 0],
+                      [0, 0]
+                    ]
+                  }
+                },
+                {
+                  "source": {
+                    "splineId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+                    "spanIndex": 1,
+                    "startPointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+                    "endPointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+                    "startOccurrenceId": "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2",
+                    "endOccurrenceId": "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f"
+                  },
+                  "orientation": "forward",
+                  "validity": "valid",
+                  "interval": [1.652776541973982, 4.27225518088945],
+                  "poles": [
+                    [-5.989583333333333, 4.072916666666666],
+                    [-7.30594066919493, 3.9828032472521016],
+                    [-11.555150559624302, 0.3734384491195669],
+                    [-10.78125, -0.8385416666666675]
+                  ],
+                  "differential": {
+                    "interval": [0, 0],
+                    "poles": [
+                      [0, 0],
+                      [0, 0],
+                      [0, 0],
+                      [0, 0]
+                    ]
+                  }
+                },
+                {
+                  "source": {
+                    "splineId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+                    "spanIndex": 2,
+                    "startPointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+                    "endPointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+                    "startOccurrenceId": "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f",
+                    "endOccurrenceId": "spline_occurrence_f5102752-b5e3-459e-b5c5-b2fd81a8b2bb"
+                  },
+                  "orientation": "forward",
+                  "validity": "valid",
+                  "interval": [4.27225518088945, 6.3912621483985435],
+                  "poles": [
+                    [-10.78125, -0.8385416666666675],
+                    [-10.15520913307312, -1.8189635993672935],
+                    [-10.302083333333332, -3.7934027777777772],
+                    [-10.062499999999998, -5.270833333333332]
+                  ],
+                  "differential": {
+                    "interval": [0, 0],
+                    "poles": [
+                      [0, 0],
+                      [0, 0],
+                      [0, 0],
+                      [0, 0]
+                    ]
+                  }
+                }
+              ],
+              "handles": [
+                [-0.7187499961634753, 0.5590277872708582],
+                [-1.0734606429859928, -0.07348552441735741],
+                [0.6999707132755913, -1.0962010242434301],
+                [0.23958333333333395, -1.477430555555555]
+              ],
+              "handleDifferentials": [
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                [0, 0]
+              ]
+            }
+          }
+        ],
+        "solvedPoints": [
+          {
+            "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+            },
+            "solvedPosition": [-10.062499999999998, -5.270833333333332]
+          },
+          {
+            "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+            },
+            "solvedPosition": [-1.9166666923144895, -4.312499981787766]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99"
+            },
+            "solvedPosition": [-4.8874999856331245, -1.5333333295956149]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+            },
+            "solvedPosition": [-1.9166666317052257, -4.31250002597889]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+            },
+            "solvedPosition": [-0.9583333608968064, -0.47916667418732695]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+            },
+            "solvedPosition": [-3.8333333179407942, 2.3958333733621706]
+          },
+          {
+            "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34"
+            },
+            "solvedPosition": [-3.8333333448429068, 2.395833304854091]
+          },
+          {
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627"
+            },
+            "solvedPosition": [-5.989583333333333, 4.072916666666666]
+          },
+          {
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb"
+            },
+            "solvedPosition": [-10.78125, -0.8385416666666675]
+          },
+          {
+            "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+            },
+            "solvedPosition": [-10.062499999999998, -5.270833333333332]
+          }
+        ],
+        "constraintStatuses": [
+          {
+            "constraintId": "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75",
+            "status": "satisfied"
+          }
+        ],
+        "dimensionStatuses": [
+          {
+            "dimensionId": "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+            "status": "driving",
+            "solvedValue": 0
+          },
+          {
+            "dimensionId": "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597",
+            "status": "driving",
+            "solvedValue": 0
+          }
+        ],
+        "diagnostics": []
+      },
+      "initialValues": [
+        -10.062499999999998, -5.270833333333332, -1.9166666923144895,
+        -4.312499981787766, -4.8874999856331245, -1.5333333295956149,
+        -1.9166666317052257, -4.31250002597889, -0.9583333608968064,
+        -0.47916667418732695, -3.8333333179407942, 2.3958333733621706,
+        -3.8333333448429068, 2.395833304854091, -5.989583333333333,
+        4.072916666666666, -10.78125, -0.8385416666666675, -10.062499999999998,
+        -5.270833333333332, 4.068122213392368, -0.752077169395218,
+        1.3086764875975612, 0.6999707132755913, -1.0962010242434301
+      ],
+      "fitIds": [
+        "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+        "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+        "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+        "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+      ],
+      "frames": [
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-10.481770833333332, -0.5315755208333325]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-10.182291666666666, -0.224609375]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-9.882812500000002, 0.08235677083333376]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-9.583333333333334, 0.38932291666666624]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-9.283854166666666, 0.6962890625]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-8.984374999999998, 1.0032552083333337]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-8.684895833333334, 1.3102213541666663]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-8.385416666666668, 1.6171875]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-8.0859375, 1.9241536458333337]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-7.786458333333332, 2.231119791666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-7.486979166666667, 2.5380859375]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-7.187499999999999, 2.845052083333334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-6.888020833333334, 3.152018229166666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-6.588541666666666, 3.458984375]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-6.289062500000001, 3.765950520833334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-5.989583333333333, 4.072916666666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "position": [-5.989583333333333, 4.072916666666666]
+          },
+          "tolerance": 0.0001
+        }
+      ],
+      "baselineFrameKinds": [
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved"
+      ]
+    },
+    {
+      "stage": "apart",
+      "compile": {
+        "definition": {
+          "schemaVersion": "sketch-definition/v1alpha2",
+          "references": [],
+          "points": [
+            {
+              "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+              "label": "Line 1 start",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+              },
+              "position": [-10.062499999999998, -5.270833333333332],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+              "label": "Line 1 end",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+              },
+              "position": [-1.9166666630451998, -4.312500003586407],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+              "label": "3-point arc 2 center",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99"
+              },
+              "position": [-4.887500009837136, -1.5333333361089705],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+              "label": "3-point arc 2 start",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+              },
+              "position": [-1.9166666630451998, -4.312500003586407],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+              "label": "3-point arc 2 through",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+              },
+              "position": [-0.9583333331454925, -0.4791666667418525],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+              "label": "3-point arc 2 end",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+              },
+              "position": [-3.8333333321301595, 2.3958333383451498],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+              "label": "Spline 3 point 1",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34"
+              },
+              "position": [-3.8333333321301595, 2.3958333383451498],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+              "label": "Spline 3 point 2",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627"
+              },
+              "position": [-5.989583333333333, 4.072916666666666],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+              "label": "Spline 3 point 3",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb"
+              },
+              "position": [-5.989583333333333, 4.072916666666666],
+              "isConstruction": false
+            },
+            {
+              "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+              "label": "Spline 3 point 4",
+              "target": {
+                "kind": "sketchPoint",
+                "sketchId": "sketch_draft",
+                "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+              },
+              "position": [-10.062499999999998, -5.270833333333332],
+              "isConstruction": false
+            }
+          ],
+          "entities": [
+            {
+              "kind": "lineSegment",
+              "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+              "label": "Line 1",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e"
+              },
+              "isConstruction": false,
+              "startPointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+              "endPointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+            },
+            {
+              "kind": "arc",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "label": "3-point arc 2",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35"
+              },
+              "isConstruction": false,
+              "centerPointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+              "startPointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+              "endPointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+              "sweepDirection": "counterClockwise"
+            },
+            {
+              "kind": "spline",
+              "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+              "label": "Spline 3",
+              "target": {
+                "kind": "sketchEntity",
+                "sketchId": "sketch_draft",
+                "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c"
+              },
+              "isConstruction": false,
+              "pointOccurrenceIds": [
+                "spline_occurrence_48fa5f0b-68b2-4216-bda4-25cdebb14f94",
+                "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2",
+                "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f",
+                "spline_occurrence_f5102752-b5e3-459e-b5c5-b2fd81a8b2bb"
+              ],
+              "pointOccurrences": [
+                {
+                  "occurrenceId": "spline_occurrence_48fa5f0b-68b2-4216-bda4-25cdebb14f94",
+                  "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_f8916870-2677-494a-aeb3-803846d223b2",
+                  "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_7e83e798-02f2-4293-b929-390e6daf3b3f",
+                  "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+                  "tangent": {
+                    "kind": "authored",
+                    "vector": [0.6999707132755913, -1.0962010242434301]
+                  }
+                },
+                {
+                  "occurrenceId": "spline_occurrence_f5102752-b5e3-459e-b5c5-b2fd81a8b2bb",
+                  "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+                  "tangent": {
+                    "kind": "automatic"
+                  }
+                }
+              ],
+              "closure": "open",
+              "interpolationPolicy": "centripetal-mean-arm-v1"
+            }
+          ],
+          "constraints": [
+            {
+              "constraintId": "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+              "kind": "pointOnCurve",
+              "label": "3-point arc 2 through point",
+              "point": {
+                "kind": "localPoint",
+                "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+              },
+              "curve": {
+                "kind": "localEntity",
+                "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35"
+              }
+            },
+            {
+              "constraintId": "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+              "kind": "coincident",
+              "label": "Inferred coincident 2",
+              "pointIds": [
+                "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+                "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+              ]
+            },
+            {
+              "constraintId": "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+              "kind": "coincident",
+              "label": "Inferred coincident 3",
+              "pointIds": [
+                "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+                "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+              ]
+            },
+            {
+              "constraintId": "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75",
+              "kind": "coincident",
+              "label": "Inferred coincident 3",
+              "pointIds": [
+                "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+                "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+              ]
+            }
+          ],
+          "dimensions": [
+            {
+              "dimensionId": "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+              "kind": "arcStartPointCoincident",
+              "label": "3-point arc 2 start",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+            },
+            {
+              "dimensionId": "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597",
+              "kind": "arcEndPointCoincident",
+              "label": "3-point arc 2 end",
+              "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+            }
+          ],
+          "svgRenderingEnabled": false,
+          "referenceIds": [],
+          "pointIds": [
+            "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+            "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+            "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+            "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+            "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+            "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+            "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+            "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+          ],
+          "entityIds": [
+            "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+            "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+            "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c"
+          ],
+          "constraintIds": [
+            "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+            "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+            "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+            "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75"
+          ],
+          "dimensionIds": [
+            "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+            "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597"
+          ],
+          "derivedRelationships": []
+        },
+        "projectedReferences": [],
+        "tolerances": {
+          "coincidence": 0.001,
+          "angleRadians": 0.0001,
+          "minimumSegmentLength": 0.001
+        },
+        "modelingTolerance": 0.001,
+        "partialSolvePolicy": "failOnConflict",
+        "strategy": "bfgs",
+        "degenerateSplineSpanDragPointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627"
+      },
+      "priorSolvedSnapshot": {
+        "schemaVersion": "solved-sketch/v1alpha2",
+        "status": {
+          "solveState": "failed",
+          "constraintState": "inconsistent"
+        },
+        "solvedEntities": [
+          {
+            "entityId": "sketch_entity_1_line_2a016bf3-1af8-4abd-8755-81bf0f05d12e",
+            "kind": "lineSegment",
+            "startPosition": [-10.062499999999998, -5.270833333333332],
+            "endPosition": [-1.9166666630451998, -4.312500003586407]
+          },
+          {
+            "entityId": "sketch_entity_2_three-point-arc_e7d318ed-58f8-49fe-86b4-ed277f3b8a35",
+            "kind": "arc",
+            "centerPosition": [-4.887500009837136, -1.5333333361089705],
+            "startPosition": [-1.9166666630451998, -4.312500003586406],
+            "endPosition": [-3.83333333213016, 2.395833338345149],
+            "sweepDirection": "counterClockwise"
+          },
+          {
+            "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c",
+            "kind": "spline",
+            "reconstruction": {
+              "validity": "invalid",
+              "diagnostics": [
+                {
+                  "code": "coincident-points",
+                  "spanIndex": 1
+                }
+              ],
+              "spans": []
+            }
+          }
+        ],
+        "solvedPoints": [
+          {
+            "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_1_line-start_a0d1ea8e-0d2d-421b-950b-228e58551c65"
+            },
+            "solvedPosition": [-10.062499999999998, -5.270833333333332]
+          },
+          {
+            "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_1_line-end_3c4017c4-e5d5-42b8-8d5a-b6485550669f"
+            },
+            "solvedPosition": [-1.9166666630451998, -4.312500003586407]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-center_735a030c-84e6-425e-adc7-ff9e29afcc99"
+            },
+            "solvedPosition": [-4.887500009837136, -1.5333333361089705]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4"
+            },
+            "solvedPosition": [-1.9166666630451998, -4.312500003586407]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-through_8300737a-1b1e-4d1b-9576-26db1848abb9"
+            },
+            "solvedPosition": [-0.9583333331454925, -0.4791666667418525]
+          },
+          {
+            "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_2_three-point-arc-end_c7ba58d7-9237-4814-9326-808f227dc3e0"
+            },
+            "solvedPosition": [-3.8333333321301595, 2.3958333383451498]
+          },
+          {
+            "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34"
+            },
+            "solvedPosition": [-3.8333333321301595, 2.3958333383451498]
+          },
+          {
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627"
+            },
+            "solvedPosition": [-5.989583333333333, 4.072916666666666]
+          },
+          {
+            "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb"
+            },
+            "solvedPosition": [-5.989583333333333, 4.072916666666666]
+          },
+          {
+            "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed",
+            "target": {
+              "kind": "sketchPoint",
+              "sketchId": "sketch_draft",
+              "pointId": "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+            },
+            "solvedPosition": [-10.062499999999998, -5.270833333333332]
+          }
+        ],
+        "constraintStatuses": [
+          {
+            "constraintId": "constraint_2_three-point-arc-through_5b809d75-2650-4aea-a3b8-91ff028c6824",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_2_start-sketch_point_2_three-point-arc-start_4af4b3ae-8147-4f8e-8158-6332ca41c5e4-inferred-coincident-0_dc529602-5e9d-40a3-98f7-d4ca5e070ab3",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_3_start-sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34-inferred-coincident-0_ca65ce08-2836-4f69-b41b-e22bc935ee31",
+            "status": "satisfied"
+          },
+          {
+            "constraintId": "constraint_3_end-sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed-inferred-coincident-0_3e48cc17-0874-4358-be42-ef20ce85ff75",
+            "status": "satisfied"
+          }
+        ],
+        "dimensionStatuses": [
+          {
+            "dimensionId": "dimension_2_arc-start_ec708377-6362-47da-8fea-65103fb32aee",
+            "status": "driving",
+            "solvedValue": 0
+          },
+          {
+            "dimensionId": "dimension_2_arc-end_55701976-f8d5-405a-8c34-a42079d1a597",
+            "status": "driving",
+            "solvedValue": 0
+          }
+        ],
+        "diagnostics": [
+          {
+            "code": "invalid-spline-coincident-points",
+            "severity": "error",
+            "message": "Spline 3 has two consecutive fit points at the same place (Spline 3 point 2 and Spline 3 point 3); the sketch's profiles are blocked. Undo, or drag one of them apart (delete the Coincident between them first, if there is one).",
+            "target": {
+              "kind": "entity",
+              "entityId": "sketch_entity_3_spline_a441e93a-3d0e-4895-8556-1b7c0a34ba8c"
+            }
+          }
+        ]
+      },
+      "initialValues": [
+        -10.062499999999998, -5.270833333333332, -1.9166666630451998,
+        -4.312500003586407, -4.887500009837136, -1.5333333361089705,
+        -1.9166666630451998, -4.312500003586407, -0.9583333331454925,
+        -0.4791666667418525, -3.8333333321301595, 2.3958333383451498,
+        -3.8333333321301595, 2.3958333383451498, -5.989583333333333,
+        4.072916666666666, -5.989583333333333, 4.072916666666666,
+        -10.062499999999998, -5.270833333333332, 4.068122188433947,
+        -0.7520771654046484, 1.3086764834043028, 0.6999707132755913,
+        -1.0962010242434301
+      ],
+      "fitIds": [
+        "sketch_point_3_spline-1_01bfbe81-04d1-4549-b78a-95244339eb34",
+        "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+        "sketch_point_3_spline-3_9dd94f71-8714-4a42-a0ee-0c9012de15bb",
+        "sketch_point_3_spline-4_7aa85611-ac7b-497b-95df-a30391cf01ed"
+      ],
+      "frames": [
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.989583333333333, 4.072916666666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.989583333333333, 4.072916666666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.720052083333333, 3.86328125]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.652669270833333, 3.810872395833334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.585286458333333, 3.758463541666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.517903645833333, 3.7060546875]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.450520833333333, 3.653645833333334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.383138020833333, 3.601236979166666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.315755208333333, 3.548828125]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.248372395833333, 3.496419270833334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.180989583333333, 3.444010416666666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.113606770833333, 3.3916015625]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-5.046223958333333, 3.339192708333334]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-4.978841145833333, 3.286783854166666]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-4.911458333333333, 3.234375]
+          },
+          "tolerance": null
+        },
+        {
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_91a724d3-6ee5-415a-9d71-d67c7fc3a627",
+            "position": [-4.911458333333333, 3.234375]
+          },
+          "tolerance": 0.0001
+        }
+      ],
+      "baselineFrameKinds": [
+        "blocked",
+        "blocked",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved"
+      ]
+    }
+  ]
+}

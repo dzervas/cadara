@@ -1,0 +1,3675 @@
+{
+  "provenance": "T18 t18-regions-blocked-fixed.cadara; native EditorEventLoop inputs and pre-conditioning release coordinates captured at 583a789f (cadara-b3k.35). No OCC/browser required to replay.",
+  "compile": {
+    "definition": {
+      "constraintIds": [
+        "constraint_1_end-sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df-inferred-point-on-datum-0_bef1476d-8a3f-4676-9067-6fc26e179567",
+        "constraint_1_start-sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b-inferred-coincident-datum-0_1b58a58c-9039-45e4-8ab9-eff24199f02e",
+        "constraint_2_end-sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298-inferred-point-on-0_905b1a8a-aeb6-44bf-afe4-4249db5fe810",
+        "constraint_6_start-sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c-inferred-coincident-0_b5fca8da-c1f2-4195-b08d-3641e129d637",
+        "constraint_7_start-sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26-inferred-point-on-datum-0_aa2d14d6-5358-4c6f-908f-270f54c9efe4",
+        "constraint_8_start-sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418-inferred-coincident-0_44c96e51-6647-43d2-a594-80fea005f3ea",
+        "constraint_8_tangent-arc-source_a77177ee-5265-4e6e-8dc7-0d5d0ea9c564",
+        "constraint_8_tangent-arc-start-on-source_e5153b0f-1bdd-4996-8fde-286271b90c3d",
+        "constraint_13_fix-0_522e3534-47e9-469d-b986-424bab89fbe3",
+        "constraint_14_fix-0_a71d6bd0-a167-4519-beb3-cd91bccd6c17",
+        "constraint_15_bottom-horizontal_6c90f6db-72d0-4ec2-92ac-7fafe920730c",
+        "constraint_15_top-horizontal_8c35521f-629b-4ee6-8133-68bd9408671e",
+        "constraint_15_right-vertical_b3851d1d-8953-4eee-b8d4-d23cdf2defc7",
+        "constraint_15_left-vertical_50f04405-769b-4d96-a3c9-e262aca02afe",
+        "constraint_17_fillet-tangent-a_cd616c8e-5fd3-451e-8950-0673b0f5ee75",
+        "constraint_17_fillet-tangent-b_96979720-a43a-49ce-8d8b-c5f2fabb751b",
+        "constraint_19_equal_53b6c930-c947-4405-9f9d-c38903903be9",
+        "constraint_20_perpendicular_c6f72404-6100-4daa-bfd8-f1da05bc72eb",
+        "constraint_21_fix-0_40767bf0-4d7c-4337-9d42-0c4a369807ba",
+        "constraint_22_point-on-curve_4d48d31f-e586-47b4-94a5-25681f077cf3"
+      ],
+      "constraints": [
+        {
+          "constraintId": "constraint_1_end-sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df-inferred-point-on-datum-0_bef1476d-8a3f-4676-9067-6fc26e179567",
+          "kind": "pointOnProjectedCurve",
+          "label": "Inferred point on sketch datum 1",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df"
+          },
+          "projectedCurve": {
+            "datum": "xAxis",
+            "kind": "sketchDatum"
+          }
+        },
+        {
+          "constraintId": "constraint_1_start-sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b-inferred-coincident-datum-0_1b58a58c-9039-45e4-8ab9-eff24199f02e",
+          "kind": "coincidentProjectedPoint",
+          "label": "Inferred coincident sketch datum 1",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b"
+          },
+          "projectedPoint": {
+            "datum": "origin",
+            "kind": "sketchDatum"
+          }
+        },
+        {
+          "constraintId": "constraint_2_end-sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298-inferred-point-on-0_905b1a8a-aeb6-44bf-afe4-4249db5fe810",
+          "curve": {
+            "entityId": "sketch_entity_1_line_04193d61-077c-49b9-8266-d1db4582adda",
+            "kind": "localEntity"
+          },
+          "kind": "pointOnCurve",
+          "label": "Inferred point on curve 2",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298"
+          }
+        },
+        {
+          "constraintId": "constraint_6_start-sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c-inferred-coincident-0_b5fca8da-c1f2-4195-b08d-3641e129d637",
+          "kind": "coincident",
+          "label": "Inferred coincident 6",
+          "pointIds": [
+            "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+            "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+          ]
+        },
+        {
+          "constraintId": "constraint_7_start-sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26-inferred-point-on-datum-0_aa2d14d6-5358-4c6f-908f-270f54c9efe4",
+          "kind": "pointOnProjectedCurve",
+          "label": "Inferred point on sketch datum 7",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26"
+          },
+          "projectedCurve": {
+            "datum": "xAxis",
+            "kind": "sketchDatum"
+          }
+        },
+        {
+          "constraintId": "constraint_8_start-sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418-inferred-coincident-0_44c96e51-6647-43d2-a594-80fea005f3ea",
+          "kind": "coincident",
+          "label": "Inferred coincident 8",
+          "pointIds": [
+            "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+            "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4"
+          ]
+        },
+        {
+          "constraintId": "constraint_8_tangent-arc-source_a77177ee-5265-4e6e-8dc7-0d5d0ea9c564",
+          "entityIds": [
+            "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+            "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704"
+          ],
+          "kind": "tangent",
+          "label": "Tangent arc 8 tangent",
+          "relation": "external"
+        },
+        {
+          "constraintId": "constraint_8_tangent-arc-start-on-source_e5153b0f-1bdd-4996-8fde-286271b90c3d",
+          "curve": {
+            "entityId": "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704",
+            "kind": "localEntity"
+          },
+          "kind": "pointOnCurve",
+          "label": "Tangent arc 8 start on source",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418"
+          }
+        },
+        {
+          "constraintId": "constraint_13_fix-0_522e3534-47e9-469d-b986-424bab89fbe3",
+          "kind": "fixPoint",
+          "label": "Fix 13",
+          "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          "position": [-5.033667512028085, 7.799818930040927]
+        },
+        {
+          "constraintId": "constraint_14_fix-0_a71d6bd0-a167-4519-beb3-cd91bccd6c17",
+          "kind": "fixPoint",
+          "label": "Fix 14",
+          "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          "position": [-0.6882885617424944, 7.833776626100649]
+        },
+        {
+          "constraintId": "constraint_15_bottom-horizontal_6c90f6db-72d0-4ec2-92ac-7fafe920730c",
+          "entityId": "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+          "kind": "horizontal",
+          "label": "Rectangle 15 bottom horizontal"
+        },
+        {
+          "constraintId": "constraint_15_top-horizontal_8c35521f-629b-4ee6-8133-68bd9408671e",
+          "entityId": "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+          "kind": "horizontal",
+          "label": "Rectangle 15 top horizontal"
+        },
+        {
+          "constraintId": "constraint_15_right-vertical_b3851d1d-8953-4eee-b8d4-d23cdf2defc7",
+          "entityId": "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+          "kind": "vertical",
+          "label": "Rectangle 15 right vertical"
+        },
+        {
+          "constraintId": "constraint_15_left-vertical_50f04405-769b-4d96-a3c9-e262aca02afe",
+          "entityId": "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896",
+          "kind": "vertical",
+          "label": "Rectangle 15 left vertical"
+        },
+        {
+          "constraintId": "constraint_17_fillet-tangent-a_cd616c8e-5fd3-451e-8950-0673b0f5ee75",
+          "entityIds": [
+            "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+            "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710"
+          ],
+          "kind": "tangent",
+          "label": "Fillet 17 tangent A",
+          "relation": "external"
+        },
+        {
+          "constraintId": "constraint_17_fillet-tangent-b_96979720-a43a-49ce-8d8b-c5f2fabb751b",
+          "entityIds": [
+            "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+            "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896"
+          ],
+          "kind": "tangent",
+          "label": "Fillet 17 tangent B",
+          "relation": "external"
+        },
+        {
+          "constraintId": "constraint_19_equal_53b6c930-c947-4405-9f9d-c38903903be9",
+          "entityIds": [
+            "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+            "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246"
+          ],
+          "kind": "equalLength",
+          "label": "Equal 19"
+        },
+        {
+          "constraintId": "constraint_20_perpendicular_c6f72404-6100-4daa-bfd8-f1da05bc72eb",
+          "entityIds": [
+            "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+            "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0"
+          ],
+          "kind": "perpendicular",
+          "label": "Perpendicular 20"
+        },
+        {
+          "constraintId": "constraint_21_fix-0_40767bf0-4d7c-4337-9d42-0c4a369807ba",
+          "kind": "fixPoint",
+          "label": "Fix 21",
+          "pointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          "position": [-8.678809061888089, -0.18767089599447903]
+        },
+        {
+          "constraintId": "constraint_22_point-on-curve_4d48d31f-e586-47b4-94a5-25681f077cf3",
+          "curve": {
+            "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+            "kind": "localEntity"
+          },
+          "kind": "pointOnCurve",
+          "label": "Coincident 22",
+          "point": {
+            "kind": "localPoint",
+            "pointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c"
+          }
+        }
+      ],
+      "dimensionIds": [
+        "dimension_6_arc-end_3b0013ba-97b9-4fb1-865b-977138cb27c3",
+        "dimension_6_arc-start_3c4b22bb-2bb9-4de0-95fc-08288f3e350f",
+        "dimension_8_arc-end_debb0ad8-3ec8-4bf9-b493-8d23b7519cd8",
+        "dimension_8_arc-start_afbcdc67-b7eb-47b4-bb48-253a4b483f2f",
+        "dimension_17_fillet-arc-start_1800229c-b17b-4c70-8f3e-a74122bb3190",
+        "dimension_17_fillet-arc-end_a728cb6d-ff18-4728-8b5e-4137df39d913"
+      ],
+      "dimensions": [
+        {
+          "dimensionId": "dimension_6_arc-end_3b0013ba-97b9-4fb1-865b-977138cb27c3",
+          "entityId": "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+          "kind": "arcEndPointCoincident",
+          "label": "Tangent arc 6 end",
+          "pointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09"
+        },
+        {
+          "dimensionId": "dimension_6_arc-start_3c4b22bb-2bb9-4de0-95fc-08288f3e350f",
+          "entityId": "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+          "kind": "arcStartPointCoincident",
+          "label": "Tangent arc 6 start",
+          "pointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c"
+        },
+        {
+          "dimensionId": "dimension_8_arc-end_debb0ad8-3ec8-4bf9-b493-8d23b7519cd8",
+          "entityId": "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+          "kind": "arcEndPointCoincident",
+          "label": "Tangent arc 8 end",
+          "pointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d"
+        },
+        {
+          "dimensionId": "dimension_8_arc-start_afbcdc67-b7eb-47b4-bb48-253a4b483f2f",
+          "entityId": "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+          "kind": "arcStartPointCoincident",
+          "label": "Tangent arc 8 start",
+          "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418"
+        },
+        {
+          "dimensionId": "dimension_17_fillet-arc-start_1800229c-b17b-4c70-8f3e-a74122bb3190",
+          "entityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+          "kind": "arcStartPointCoincident",
+          "label": "Fillet 17 start",
+          "pointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3"
+        },
+        {
+          "dimensionId": "dimension_17_fillet-arc-end_a728cb6d-ff18-4728-8b5e-4137df39d913",
+          "entityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+          "kind": "arcEndPointCoincident",
+          "label": "Fillet 17 end",
+          "pointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95"
+        }
+      ],
+      "entities": [
+        {
+          "endPointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          "entityId": "sketch_entity_1_line_04193d61-077c-49b9-8266-d1db4582adda",
+          "isConstruction": true,
+          "kind": "lineSegment",
+          "label": "Line 1",
+          "startPointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          "target": {
+            "entityId": "sketch_entity_1_line_04193d61-077c-49b9-8266-d1db4582adda",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          "entityId": "sketch_entity_2_line_d1533ea2-4e6c-4ebe-878d-e202647c0d4b",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Line 2",
+          "startPointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          "target": {
+            "entityId": "sketch_entity_2_line_d1533ea2-4e6c-4ebe-878d-e202647c0d4b",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "closure": "open",
+          "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+          "interpolationPolicy": "centripetal-mean-arm-v1",
+          "isConstruction": false,
+          "kind": "spline",
+          "label": "Spline 3",
+          "pointOccurrenceIds": [
+            "spline_occurrence_24862607-2c9f-419c-8727-beffb2bc70b5",
+            "spline_occurrence_8f2d23a1-af2b-4fb9-92aa-82f585ee51c7"
+          ],
+          "pointOccurrences": [
+            {
+              "occurrenceId": "spline_occurrence_24862607-2c9f-419c-8727-beffb2bc70b5",
+              "pointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "tangent": {
+                "kind": "authored",
+                "vector": [0.3888232747926391, -1.3945385590101502]
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_8f2d23a1-af2b-4fb9-92aa-82f585ee51c7",
+              "pointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+              "tangent": {
+                "kind": "authored",
+                "vector": [1.5547235593917206, -1.0047871732169829]
+              }
+            }
+          ],
+          "target": {
+            "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "closure": "open",
+          "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+          "interpolationPolicy": "centripetal-mean-arm-v1",
+          "isConstruction": false,
+          "kind": "spline",
+          "label": "Spline 5",
+          "pointOccurrenceIds": [
+            "spline_occurrence_ad91cfc9-9886-4015-a8f9-54905fe64f20",
+            "spline_occurrence_6c945233-b64f-48cb-9984-4730baa5dc28",
+            "spline_occurrence_195d022b-e773-4a9b-b67b-e729066c5308"
+          ],
+          "pointOccurrences": [
+            {
+              "occurrenceId": "spline_occurrence_ad91cfc9-9886-4015-a8f9-54905fe64f20",
+              "pointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_6c945233-b64f-48cb-9984-4730baa5dc28",
+              "pointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_195d022b-e773-4a9b-b67b-e729066c5308",
+              "pointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+              "tangent": {
+                "kind": "automatic"
+              }
+            }
+          ],
+          "target": {
+            "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "centerPointId": "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          "endPointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          "entityId": "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+          "isConstruction": false,
+          "kind": "arc",
+          "label": "Tangent arc 6",
+          "startPointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          "sweepDirection": "clockwise",
+          "target": {
+            "entityId": "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          "entityId": "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Line 7",
+          "startPointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          "target": {
+            "entityId": "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "centerPointId": "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          "endPointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          "entityId": "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+          "isConstruction": false,
+          "kind": "arc",
+          "label": "Tangent arc 8",
+          "startPointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          "sweepDirection": "clockwise",
+          "target": {
+            "entityId": "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "closure": "open",
+          "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+          "interpolationPolicy": "centripetal-mean-arm-v1",
+          "isConstruction": false,
+          "kind": "spline",
+          "label": "Spline 9",
+          "pointOccurrenceIds": [
+            "spline_occurrence_0c232e75-522a-4b38-9cd4-d8b39fda07f1",
+            "spline_occurrence_76e5d98e-ebe6-4b6d-a1d5-5ae257da1b3d"
+          ],
+          "pointOccurrences": [
+            {
+              "occurrenceId": "spline_occurrence_0c232e75-522a-4b38-9cd4-d8b39fda07f1",
+              "pointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_76e5d98e-ebe6-4b6d-a1d5-5ae257da1b3d",
+              "pointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+              "tangent": {
+                "kind": "automatic"
+              }
+            }
+          ],
+          "target": {
+            "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "closure": "open",
+          "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+          "interpolationPolicy": "centripetal-mean-arm-v1",
+          "isConstruction": false,
+          "kind": "spline",
+          "label": "Spline 10",
+          "pointOccurrenceIds": [
+            "spline_occurrence_93a5d404-d1c6-4701-981d-dd4dfb716b4a",
+            "spline_occurrence_40d836a5-6385-4511-9a80-b585477327bc",
+            "spline_occurrence_e80e5d36-01e6-426b-8479-a8d97ff70fd2",
+            "spline_occurrence_9c0a7f8c-4f7f-4f4c-b763-887701bc12e3",
+            "spline_occurrence_e5881881-6f3e-4539-8c99-a487e82d8124",
+            "spline_occurrence_fc1cb538-a78f-415b-a0d6-13dac7238e91",
+            "spline_occurrence_445f5170-9693-4270-b4a2-7fbddb61874c"
+          ],
+          "pointOccurrences": [
+            {
+              "occurrenceId": "spline_occurrence_93a5d404-d1c6-4701-981d-dd4dfb716b4a",
+              "pointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_40d836a5-6385-4511-9a80-b585477327bc",
+              "pointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_e80e5d36-01e6-426b-8479-a8d97ff70fd2",
+              "pointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_9c0a7f8c-4f7f-4f4c-b763-887701bc12e3",
+              "pointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_e5881881-6f3e-4539-8c99-a487e82d8124",
+              "pointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_fc1cb538-a78f-415b-a0d6-13dac7238e91",
+              "pointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+              "tangent": {
+                "kind": "automatic"
+              }
+            },
+            {
+              "occurrenceId": "spline_occurrence_445f5170-9693-4270-b4a2-7fbddb61874c",
+              "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+              "tangent": {
+                "kind": "automatic"
+              }
+            }
+          ],
+          "target": {
+            "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "entityId": "sketch_entity_12_point_a0db0d95-341c-4167-b59d-4af1cb16cf0f",
+          "isConstruction": false,
+          "kind": "point",
+          "label": "Point 12",
+          "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          "target": {
+            "entityId": "sketch_entity_12_point_a0db0d95-341c-4167-b59d-4af1cb16cf0f",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          "entityId": "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Rectangle 15 bottom",
+          "startPointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          "target": {
+            "entityId": "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          "entityId": "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Rectangle 15 right",
+          "startPointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          "target": {
+            "entityId": "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          "entityId": "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Rectangle 15 top",
+          "startPointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          "target": {
+            "entityId": "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          "entityId": "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Rectangle 15 left",
+          "startPointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          "target": {
+            "entityId": "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "centerPointId": "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          "endPointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          "entityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+          "isConstruction": false,
+          "kind": "arc",
+          "label": "Fillet 17",
+          "startPointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          "sweepDirection": "counterClockwise",
+          "target": {
+            "entityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "endPointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          "entityId": "sketch_entity_18_offset-sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710_52740d1f-3731-4e3e-91a8-66d16eee7e69",
+          "isConstruction": false,
+          "kind": "lineSegment",
+          "label": "Rectangle 15 top offset",
+          "startPointId": "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          "target": {
+            "entityId": "sketch_entity_18_offset-sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710_52740d1f-3731-4e3e-91a8-66d16eee7e69",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "centerPointId": "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          "endPointId": "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          "entityId": "sketch_entity_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b_51104466-ceda-4c16-abeb-3a7da27d93fe",
+          "isConstruction": false,
+          "kind": "arc",
+          "label": "Fillet 17 offset",
+          "startPointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          "sweepDirection": "counterClockwise",
+          "target": {
+            "entityId": "sketch_entity_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b_51104466-ceda-4c16-abeb-3a7da27d93fe",
+            "kind": "sketchEntity",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        }
+      ],
+      "entityIds": [
+        "sketch_entity_1_line_04193d61-077c-49b9-8266-d1db4582adda",
+        "sketch_entity_2_line_d1533ea2-4e6c-4ebe-878d-e202647c0d4b",
+        "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+        "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+        "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+        "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704",
+        "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+        "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+        "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+        "sketch_entity_12_point_a0db0d95-341c-4167-b59d-4af1cb16cf0f",
+        "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+        "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+        "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+        "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896",
+        "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+        "sketch_entity_18_offset-sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710_52740d1f-3731-4e3e-91a8-66d16eee7e69",
+        "sketch_entity_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b_51104466-ceda-4c16-abeb-3a7da27d93fe"
+      ],
+      "pointIds": [
+        "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+        "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+        "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+        "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+        "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+        "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+        "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+        "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+        "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+        "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+        "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+        "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+        "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+        "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+        "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+        "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+        "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+        "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+        "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+        "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+        "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+        "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+        "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+        "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+        "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+        "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+        "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+        "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+        "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+        "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+        "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+        "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+        "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+        "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+        "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+        "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+        "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7"
+      ],
+      "points": [
+        {
+          "isConstruction": false,
+          "label": "Line 1 end",
+          "pointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          "position": [7.430853001165502, 0],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Line 1 start",
+          "pointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          "position": [0, 0],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Line 2 end",
+          "pointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          "position": [5.548183153651902, 0],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 3 point 1",
+          "pointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+          "position": [-9.698444260296053, 6.617325198515034],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 3 point 2",
+          "pointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+          "position": [-6.80397758593422, 5.421728334071113],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 5 point 1",
+          "pointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+          "position": [-1.1586143890831397, 4.240457459207461],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 5 point 2",
+          "pointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+          "position": [1.7297888743201257, 5.782111985236986],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 5 point 3",
+          "pointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+          "position": [3.529624356870821, 5.396677949044261],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 6 center",
+          "pointId": "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          "position": [-8.019455045065952, 3.8352190552166254],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 6 end",
+          "pointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          "position": [-9.298905268132497, 2.299835114287033],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 6 start",
+          "pointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          "position": [-6.803977669945536, 5.421728323903517],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Line 7 end",
+          "pointId": "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          "position": [-1.0209643616040696, -2.634706737976598],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Line 7 start",
+          "pointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          "position": [-5.4089017040354035, -2.1510114962425477e-10],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 8 center",
+          "pointId": "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          "position": [-2.0080885044499936, -4.2830846686899084],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 8 end",
+          "pointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          "position": [-1.0528032069586017, -5.950115091084332],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Tangent arc 8 start",
+          "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          "position": [-1.0209645664436644, -2.6347069786351276],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 9 point 1",
+          "pointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+          "position": [1.9634384712509707, 3.548095134032635],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 9 point 2",
+          "pointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+          "position": [5.44563422688423, 1.2400112907925405],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 1",
+          "pointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+          "position": [-1.414654970491223, 5.911837400051921],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 2",
+          "pointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+          "position": [1.163696129097134, 2.3287646224347234],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 3",
+          "pointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+          "position": [3.420050440877218, 1.503811556881109],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 4",
+          "pointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+          "position": [4.719357104408157, 2.9018418231904386],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 5",
+          "pointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+          "position": [2.7311659583020464, 4.492353976338275],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 6",
+          "pointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+          "position": [3.545591096294609, 5.81470230432549],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Spline 10 point 7",
+          "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          "position": [-0.6882885617424944, 7.833776626100649],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Point 12",
+          "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          "position": [-5.033667512028085, 7.799818930040927],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Rectangle 15 bottom left",
+          "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          "position": [-14.739876647757066, -0.18767104292234157],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Rectangle 15 bottom right",
+          "pointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          "position": [-8.678809128956484, -0.1876709301747513],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Rectangle 15 top right",
+          "pointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          "position": [-8.678809225388429, 5.8733966156649],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Rectangle 15 top left",
+          "pointId": "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+          "position": [-13.68060565558844, 6.836606400290151],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Fillet 17 center",
+          "pointId": "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          "position": [-13.054774059215903, 4.188293717128684],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Fillet 17 tangent A",
+          "pointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          "position": [-13.05476269712594, 5.873396761106702],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Fillet 17 tangent B",
+          "pointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          "position": [-14.73987649219968, 4.1863480863508675],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Offset 18 corner 1",
+          "pointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          "position": [-13.054762022859164, 5.9733967611044285],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Offset 18 start",
+          "pointId": "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          "position": [-8.67880922206477, 5.9733966156649],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Offset 18 end",
+          "pointId": "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          "position": [-14.83987591335787, 4.186232626336235],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        },
+        {
+          "isConstruction": false,
+          "label": "Offset 18 Fillet 17 center",
+          "pointId": "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          "position": [-13.054774059215903, 4.188293717128684],
+          "target": {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+            "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+          }
+        }
+      ],
+      "referenceIds": [],
+      "references": [],
+      "schemaVersion": "sketch-definition/v1alpha2",
+      "svgRenderingEnabled": false,
+      "derivedRelationships": [
+        {
+          "derivationId": "sketch_derivation_18_offset_fe14e88b-d96e-4e06-b039-ab0024c57c3d",
+          "distance": -0.1,
+          "jointOutputs": [],
+          "jointPolicy": "trimExtendArcFallback",
+          "kind": "offset",
+          "label": "offset 18",
+          "outputs": [
+            {
+              "instanceIndex": 1,
+              "outputEntityId": "sketch_entity_18_offset-sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710_52740d1f-3731-4e3e-91a8-66d16eee7e69",
+              "outputPointIds": [
+                "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+                "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b"
+              ],
+              "seedEntityId": "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+              "seedPointIds": [
+                "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+                "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3"
+              ]
+            },
+            {
+              "instanceIndex": 1,
+              "outputEntityId": "sketch_entity_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b_51104466-ceda-4c16-abeb-3a7da27d93fe",
+              "outputPointIds": [
+                "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+                "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+                "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b"
+              ],
+              "seedEntityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+              "seedPointIds": [
+                "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+                "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+                "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95"
+              ]
+            }
+          ],
+          "piecewiseCubicOutputs": [],
+          "seedEntityIds": [
+            "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+            "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b"
+          ]
+        }
+      ]
+    },
+    "projectedReferences": [],
+    "tolerances": {
+      "coincidence": 0.001,
+      "angleRadians": 0.0001,
+      "minimumSegmentLength": 0.001
+    },
+    "modelingTolerance": 0.001,
+    "offsetPlans": [
+      {
+        "derivationId": "sketch_derivation_18_offset_fe14e88b-d96e-4e06-b039-ab0024c57c3d",
+        "plan": {
+          "origin": "published",
+          "adjacencies": [
+            {
+              "kind": "absorbed",
+              "keeper": "second"
+            }
+          ]
+        }
+      }
+    ],
+    "documentVariables": [],
+    "partialSolvePolicy": "failOnConflict"
+  },
+  "priorSolvedSnapshot": {
+    "schemaVersion": "solved-sketch/v1alpha2",
+    "status": {
+      "solveState": "solved",
+      "constraintState": "underConstrained"
+    },
+    "solvedEntities": [
+      {
+        "entityId": "sketch_entity_1_line_04193d61-077c-49b9-8266-d1db4582adda",
+        "kind": "lineSegment",
+        "startPosition": [0, 0],
+        "endPosition": [7.430853001165502, 0]
+      },
+      {
+        "entityId": "sketch_entity_2_line_d1533ea2-4e6c-4ebe-878d-e202647c0d4b",
+        "kind": "lineSegment",
+        "startPosition": [0, 0],
+        "endPosition": [5.548183153651902, 0]
+      },
+      {
+        "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+        "kind": "spline",
+        "reconstruction": {
+          "validity": "valid",
+          "diagnostics": [],
+          "spans": [
+            {
+              "source": {
+                "splineId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+                "spanIndex": 0,
+                "startPointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+                "endPointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+                "startOccurrenceId": "spline_occurrence_24862607-2c9f-419c-8727-beffb2bc70b5",
+                "endOccurrenceId": "spline_occurrence_8f2d23a1-af2b-4fb9-92aa-82f585ee51c7"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [0, 1.769653960919894],
+              "poles": [
+                [-9.698444260296053, 6.617325198515034],
+                [-9.309620985503415, 5.222786639504884],
+                [-8.358701145325941, 6.426515507288096],
+                [-6.80397758593422, 5.421728334071113]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            }
+          ],
+          "handles": [
+            [0.3888232747926391, -1.3945385590101502],
+            [1.5547235593917206, -1.0047871732169829]
+          ],
+          "handleDifferentials": [
+            [0, 0],
+            [0, 0]
+          ]
+        }
+      },
+      {
+        "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+        "kind": "spline",
+        "reconstruction": {
+          "validity": "valid",
+          "diagnostics": [],
+          "spans": [
+            {
+              "source": {
+                "splineId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+                "spanIndex": 0,
+                "startPointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+                "endPointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+                "startOccurrenceId": "spline_occurrence_ad91cfc9-9886-4015-a8f9-54905fe64f20",
+                "endOccurrenceId": "spline_occurrence_6c945233-b64f-48cb-9984-4730baa5dc28"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [0, 1.8094407315900602],
+              "poles": [
+                [-1.1586143890831397, 4.240457459207461],
+                [-0.1958133012820512, 4.754342301217302],
+                [0.8599426531862058, 5.65983755871892],
+                [1.7297888743201257, 5.782111985236986]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+                "spanIndex": 1,
+                "startPointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+                "endPointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+                "startOccurrenceId": "spline_occurrence_6c945233-b64f-48cb-9984-4730baa5dc28",
+                "endOccurrenceId": "spline_occurrence_195d022b-e773-4a9b-b67b-e729066c5308"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [1.8094407315900602, 3.166143771219083],
+              "poles": [
+                [1.7297888743201257, 5.782111985236986],
+                [2.3819920615365238, 5.873792294644069],
+                [2.9296791960205892, 5.525155961108503],
+                [3.529624356870821, 5.396677949044261]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            }
+          ],
+          "handles": [
+            [0.9628010878010885, 0.5138848420098417],
+            [0.761024704175159, 0.10697736796257476],
+            [0.5999451608502318, -0.12847801206424148]
+          ],
+          "handleDifferentials": [
+            [0, 0],
+            [0, 0],
+            [0, 0]
+          ]
+        }
+      },
+      {
+        "entityId": "sketch_entity_6_tangent-arc_3740be28-13bd-42d7-b853-88479617151f",
+        "kind": "arc",
+        "centerPosition": [-8.019455045065952, 3.8352190552166254],
+        "startPosition": [-6.803977669945536, 5.421728323903517],
+        "endPosition": [-9.29890529851234, 2.299835077830185],
+        "sweepDirection": "clockwise"
+      },
+      {
+        "entityId": "sketch_entity_7_line_e99bbb47-ab8c-4ec2-a2bb-aef236d19704",
+        "kind": "lineSegment",
+        "startPosition": [-5.4089017040354035, -2.1510114962425477e-10],
+        "endPosition": [-1.0209643616040696, -2.634706737976598]
+      },
+      {
+        "entityId": "sketch_entity_8_tangent-arc_c268becc-44a0-43cc-b1d1-2c0384d0dcad",
+        "kind": "arc",
+        "centerPosition": [-2.0080885044499936, -4.2830846686899084],
+        "startPosition": [-1.0209645664436644, -2.634706978635128],
+        "endPosition": [-1.0528029159315055, -5.950115598944157],
+        "sweepDirection": "clockwise"
+      },
+      {
+        "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+        "kind": "spline",
+        "reconstruction": {
+          "validity": "valid",
+          "diagnostics": [],
+          "spans": [
+            {
+              "source": {
+                "splineId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+                "spanIndex": 0,
+                "startPointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+                "endPointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+                "startOccurrenceId": "spline_occurrence_0c232e75-522a-4b38-9cd4-d8b39fda07f1",
+                "endOccurrenceId": "spline_occurrence_76e5d98e-ebe6-4b6d-a1d5-5ae257da1b3d"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [0, 2.04393527240899],
+              "poles": [
+                [1.9634384712509707, 3.548095134032635],
+                [3.1241703897953905, 2.7787338529526036],
+                [4.2849023083398095, 2.0093725718725723],
+                [5.44563422688423, 1.2400112907925405]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            }
+          ],
+          "handles": [
+            [1.1607319185444198, -0.7693612810800317],
+            [1.1607319185444198, -0.7693612810800317]
+          ],
+          "handleDifferentials": [
+            [0, 0],
+            [0, 0]
+          ]
+        }
+      },
+      {
+        "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+        "kind": "spline",
+        "reconstruction": {
+          "validity": "valid",
+          "diagnostics": [],
+          "spans": [
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 0,
+                "startPointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+                "endPointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+                "startOccurrenceId": "spline_occurrence_93a5d404-d1c6-4701-981d-dd4dfb716b4a",
+                "endOccurrenceId": "spline_occurrence_40d836a5-6385-4511-9a80-b585477327bc"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [0, 2.10103058012661],
+              "poles": [
+                [-1.414654970491223, 5.911837400051921],
+                [-0.5552046039617708, 4.717479807512855],
+                [0.21213513917519478, 3.050313744604548],
+                [1.163696129097134, 2.3287646224347234]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 1,
+                "startPointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+                "endPointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+                "startOccurrenceId": "spline_occurrence_40d836a5-6385-4511-9a80-b585477327bc",
+                "endOccurrenceId": "spline_occurrence_e80e5d36-01e6-426b-8479-a8d97ff70fd2"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [2.10103058012661, 3.651008834219344],
+              "poles": [
+                [1.163696129097134, 2.3287646224347234],
+                [1.8656844084552964, 1.796461352219811],
+                [2.8086826646225367, 1.3569616133576066],
+                [3.420050440877218, 1.503811556881109]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 2,
+                "startPointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+                "endPointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+                "startOccurrenceId": "spline_occurrence_e80e5d36-01e6-426b-8479-a8d97ff70fd2",
+                "endOccurrenceId": "spline_occurrence_9c0a7f8c-4f7f-4f4c-b763-887701bc12e3"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [3.651008834219344, 5.032523332626964],
+              "poles": [
+                [3.420050440877218, 1.503811556881109],
+                [3.9649699870223705, 1.6347007003464218],
+                [4.753490923002855, 2.4390745509793876],
+                [4.719357104408157, 2.9018418231904386]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 3,
+                "startPointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+                "endPointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+                "startOccurrenceId": "spline_occurrence_9c0a7f8c-4f7f-4f4c-b763-887701bc12e3",
+                "endOccurrenceId": "spline_occurrence_e5881881-6f3e-4539-8c99-a487e82d8124"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [5.032523332626964, 6.628174146104212],
+              "poles": [
+                [4.719357104408157, 2.9018418231904386],
+                [4.679932505194401, 3.4363385477672224],
+                [2.8266147483300994, 3.942974392876047],
+                [2.7311659583020464, 4.492353976338275]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 4,
+                "startPointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+                "endPointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+                "startOccurrenceId": "spline_occurrence_e5881881-6f3e-4539-8c99-a487e82d8124",
+                "endOccurrenceId": "spline_occurrence_fc1cb538-a78f-415b-a0d6-13dac7238e91"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [6.628174146104212, 7.874379255579738],
+              "poles": [
+                [2.7311659583020464, 4.492353976338275],
+                [2.656620344172974, 4.921420059073629],
+                [3.6698690565482526, 5.393468138668894],
+                [3.545591096294609, 5.81470230432549]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            },
+            {
+              "source": {
+                "splineId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+                "spanIndex": 5,
+                "startPointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+                "endPointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+                "startOccurrenceId": "spline_occurrence_fc1cb538-a78f-415b-a0d6-13dac7238e91",
+                "endOccurrenceId": "spline_occurrence_445f5170-9693-4270-b4a2-7fbddb61874c"
+              },
+              "orientation": "forward",
+              "validity": "valid",
+              "interval": [7.874379255579738, 10.040175042022813],
+              "poles": [
+                [3.545591096294609, 5.81470230432549],
+                [3.329606840879095, 6.546770544255008],
+                [0.7230046576032071, 7.160751852175596],
+                [-0.6882885617424944, 7.833776626100649]
+              ],
+              "differential": {
+                "interval": [0, 0],
+                "poles": [
+                  [0, 0],
+                  [0, 0],
+                  [0, 0],
+                  [0, 0]
+                ]
+              }
+            }
+          ],
+          "handles": [
+            [0.8594503665294522, -1.1943575925390657],
+            [0.8267746346400507, -0.6269261961923683],
+            [0.5781436611999168, 0.13886954349440767],
+            [-0.03677920890422681, 0.4986319983939174],
+            [-0.08499720207856276, 0.48922283309879133],
+            [-0.17013110783457885, 0.5766512027930568],
+            [-1.4112932193457015, 0.6730247739250531]
+          ],
+          "handleDifferentials": [
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0],
+            [0, 0]
+          ]
+        }
+      },
+      {
+        "entityId": "sketch_entity_12_point_a0db0d95-341c-4167-b59d-4af1cb16cf0f",
+        "kind": "point",
+        "solvedPosition": [-5.033667512028085, 7.799818930040927]
+      },
+      {
+        "entityId": "sketch_entity_15_rect-bottom_f7644ee9-23e7-4537-a775-3dfc0e7891a0",
+        "kind": "lineSegment",
+        "startPosition": [-14.739876647757066, -0.18767104292234157],
+        "endPosition": [-8.678809128956484, -0.1876709301747513]
+      },
+      {
+        "entityId": "sketch_entity_15_rect-right_18dcac4b-1981-4632-9b68-5c63bc61c246",
+        "kind": "lineSegment",
+        "startPosition": [-8.678809128956484, -0.1876709301747513],
+        "endPosition": [-8.678809225388429, 5.8733966156649]
+      },
+      {
+        "entityId": "sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710",
+        "kind": "lineSegment",
+        "startPosition": [-8.678809225388429, 5.8733966156649],
+        "endPosition": [-13.05476269712594, 5.873396761106702]
+      },
+      {
+        "entityId": "sketch_entity_15_rect-left_7a808991-779b-4f19-9e59-b36857f0b896",
+        "kind": "lineSegment",
+        "startPosition": [-14.73987649219968, 4.1863480863508675],
+        "endPosition": [-14.739876647757066, -0.18767104292234157]
+      },
+      {
+        "entityId": "sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b",
+        "kind": "arc",
+        "centerPosition": [-13.054774059215903, 4.188293717128684],
+        "startPosition": [-13.05476269712594, 5.873396761106702],
+        "endPosition": [-14.73987649219968, 4.1863480863508675],
+        "sweepDirection": "counterClockwise"
+      },
+      {
+        "entityId": "sketch_entity_18_offset-sketch_entity_15_rect-top_a1394043-0922-4d89-b12c-bf4b58e91710_52740d1f-3731-4e3e-91a8-66d16eee7e69",
+        "kind": "lineSegment",
+        "startPosition": [-8.67880922206477, 5.9733966156649],
+        "endPosition": [-13.054762022859164, 5.9733967611044285]
+      },
+      {
+        "entityId": "sketch_entity_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b_51104466-ceda-4c16-abeb-3a7da27d93fe",
+        "kind": "arc",
+        "centerPosition": [-13.054774059215903, 4.188293717128684],
+        "startPosition": [-13.054762022859164, 5.9733967611044285],
+        "endPosition": [-14.83987591335787, 4.186232626336235],
+        "sweepDirection": "counterClockwise"
+      }
+    ],
+    "solvedPoints": [
+      {
+        "pointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [7.430853001165502, 0]
+      },
+      {
+        "pointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [0, 0]
+      },
+      {
+        "pointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [5.548183153651902, 0]
+      },
+      {
+        "pointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-9.698444260296053, 6.617325198515034]
+      },
+      {
+        "pointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-6.80397758593422, 5.421728334071113]
+      },
+      {
+        "pointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-1.1586143890831397, 4.240457459207461]
+      },
+      {
+        "pointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [1.7297888743201257, 5.782111985236986]
+      },
+      {
+        "pointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [3.529624356870821, 5.396677949044261]
+      },
+      {
+        "pointId": "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-8.019455045065952, 3.8352190552166254]
+      },
+      {
+        "pointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-9.298905268132497, 2.299835114287033]
+      },
+      {
+        "pointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-6.803977669945536, 5.421728323903517]
+      },
+      {
+        "pointId": "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-1.0209643616040696, -2.634706737976598]
+      },
+      {
+        "pointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-5.4089017040354035, -2.1510114962425477e-10]
+      },
+      {
+        "pointId": "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-2.0080885044499936, -4.2830846686899084]
+      },
+      {
+        "pointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-1.0528032069586017, -5.950115091084332]
+      },
+      {
+        "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-1.0209645664436644, -2.6347069786351276]
+      },
+      {
+        "pointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [1.9634384712509707, 3.548095134032635]
+      },
+      {
+        "pointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [5.44563422688423, 1.2400112907925405]
+      },
+      {
+        "pointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-1.414654970491223, 5.911837400051921]
+      },
+      {
+        "pointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [1.163696129097134, 2.3287646224347234]
+      },
+      {
+        "pointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [3.420050440877218, 1.503811556881109]
+      },
+      {
+        "pointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [4.719357104408157, 2.9018418231904386]
+      },
+      {
+        "pointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [2.7311659583020464, 4.492353976338275]
+      },
+      {
+        "pointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [3.545591096294609, 5.81470230432549]
+      },
+      {
+        "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-0.6882885617424944, 7.833776626100649]
+      },
+      {
+        "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-5.033667512028085, 7.799818930040927]
+      },
+      {
+        "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-14.739876647757066, -0.18767104292234157]
+      },
+      {
+        "pointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-8.678809128956484, -0.1876709301747513]
+      },
+      {
+        "pointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-8.678809225388429, 5.8733966156649]
+      },
+      {
+        "pointId": "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-13.68060565558844, 6.836606400290151]
+      },
+      {
+        "pointId": "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-13.054774059215903, 4.188293717128684]
+      },
+      {
+        "pointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-13.05476269712594, 5.873396761106702]
+      },
+      {
+        "pointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-14.73987649219968, 4.1863480863508675]
+      },
+      {
+        "pointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-13.054762022859164, 5.9733967611044285]
+      },
+      {
+        "pointId": "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-8.67880922206477, 5.9733966156649]
+      },
+      {
+        "pointId": "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-14.83987591335787, 4.186232626336235]
+      },
+      {
+        "pointId": "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+        "target": {
+          "kind": "sketchPoint",
+          "pointId": "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          "sketchId": "sketch_2f7b1b27-d54b-4969-a48f-ed1705cbbab3"
+        },
+        "solvedPosition": [-13.054774059215903, 4.188293717128684]
+      }
+    ],
+    "constraintStatuses": [
+      {
+        "constraintId": "constraint_1_end-sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df-inferred-point-on-datum-0_bef1476d-8a3f-4676-9067-6fc26e179567",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_1_start-sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b-inferred-coincident-datum-0_1b58a58c-9039-45e4-8ab9-eff24199f02e",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_2_end-sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298-inferred-point-on-0_905b1a8a-aeb6-44bf-afe4-4249db5fe810",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_6_start-sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c-inferred-coincident-0_b5fca8da-c1f2-4195-b08d-3641e129d637",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_7_start-sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26-inferred-point-on-datum-0_aa2d14d6-5358-4c6f-908f-270f54c9efe4",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_8_start-sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418-inferred-coincident-0_44c96e51-6647-43d2-a594-80fea005f3ea",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_8_tangent-arc-source_a77177ee-5265-4e6e-8dc7-0d5d0ea9c564",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_8_tangent-arc-start-on-source_e5153b0f-1bdd-4996-8fde-286271b90c3d",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_13_fix-0_522e3534-47e9-469d-b986-424bab89fbe3",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_14_fix-0_a71d6bd0-a167-4519-beb3-cd91bccd6c17",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_15_bottom-horizontal_6c90f6db-72d0-4ec2-92ac-7fafe920730c",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_15_top-horizontal_8c35521f-629b-4ee6-8133-68bd9408671e",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_15_right-vertical_b3851d1d-8953-4eee-b8d4-d23cdf2defc7",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_15_left-vertical_50f04405-769b-4d96-a3c9-e262aca02afe",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_17_fillet-tangent-a_cd616c8e-5fd3-451e-8950-0673b0f5ee75",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_17_fillet-tangent-b_96979720-a43a-49ce-8d8b-c5f2fabb751b",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_19_equal_53b6c930-c947-4405-9f9d-c38903903be9",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_20_perpendicular_c6f72404-6100-4daa-bfd8-f1da05bc72eb",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_21_fix-0_40767bf0-4d7c-4337-9d42-0c4a369807ba",
+        "status": "satisfied"
+      },
+      {
+        "constraintId": "constraint_22_point-on-curve_4d48d31f-e586-47b4-94a5-25681f077cf3",
+        "status": "satisfied"
+      }
+    ],
+    "dimensionStatuses": [
+      {
+        "dimensionId": "dimension_6_arc-end_3b0013ba-97b9-4fb1-865b-977138cb27c3",
+        "status": "driving",
+        "solvedValue": 0
+      },
+      {
+        "dimensionId": "dimension_6_arc-start_3c4b22bb-2bb9-4de0-95fc-08288f3e350f",
+        "status": "driving",
+        "solvedValue": 0
+      },
+      {
+        "dimensionId": "dimension_8_arc-end_debb0ad8-3ec8-4bf9-b493-8d23b7519cd8",
+        "status": "driving",
+        "solvedValue": 0
+      },
+      {
+        "dimensionId": "dimension_8_arc-start_afbcdc67-b7eb-47b4-bb48-253a4b483f2f",
+        "status": "driving",
+        "solvedValue": 0
+      },
+      {
+        "dimensionId": "dimension_17_fillet-arc-start_1800229c-b17b-4c70-8f3e-a74122bb3190",
+        "status": "driving",
+        "solvedValue": 0
+      },
+      {
+        "dimensionId": "dimension_17_fillet-arc-end_a728cb6d-ff18-4728-8b5e-4137df39d913",
+        "status": "driving",
+        "solvedValue": 0
+      }
+    ],
+    "diagnostics": [],
+    "offsetFramePlans": [
+      {
+        "derivationId": "sketch_derivation_18_offset_fe14e88b-d96e-4e06-b039-ab0024c57c3d",
+        "plan": {
+          "origin": "published",
+          "adjacencies": [
+            {
+              "kind": "absorbed",
+              "keeper": "second"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "initialValues": [
+    7.430853001165502, 0, 0, 0, 5.548183153651902, 0, -9.698444260296053,
+    6.617325198515034, -6.80397758593422, 5.421728334071113,
+    -1.1586143890831397, 4.240457459207461, 1.7297888743201257,
+    5.782111985236986, 3.529624356870821, 5.396677949044261, -8.019455045065952,
+    3.8352190552166254, -9.298905268132497, 2.299835114287033,
+    -6.803977669945536, 5.421728323903517, -1.0209643616040696,
+    -2.634706737976598, -5.4089017040354035, -2.1510114962425477e-10,
+    -2.0080885044499936, -4.2830846686899084, -1.0528032069586017,
+    -5.950115091084332, -1.0209645664436644, -2.6347069786351276,
+    1.9634384712509707, 3.548095134032635, 5.44563422688423, 1.2400112907925405,
+    -1.414654970491223, 5.911837400051921, 1.163696129097134,
+    2.3287646224347234, 3.420050440877218, 1.503811556881109, 4.719357104408157,
+    2.9018418231904386, 2.7311659583020464, 4.492353976338275,
+    3.545591096294609, 5.81470230432549, -0.6882885617424944, 7.833776626100649,
+    -5.033667512028085, 7.799818930040927, -14.739876647757066,
+    -0.18767104292234157, -8.678809128956484, -0.1876709301747513,
+    -8.678809225388429, 5.8733966156649, -13.68060565558844, 6.836606400290151,
+    -13.054774059215903, 4.188293717128684, -13.05476269712594,
+    5.873396761106702, -14.73987649219968, 4.1863480863508675,
+    -13.054762022859164, 5.9733967611044285, -8.67880922206477, 5.9733966156649,
+    -14.83987591335787, 4.186232626336235, -13.054774059215903,
+    4.188293717128684, 1.9985987363798248, 0.9170496910970833,
+    -2.265520613723359, 1.921343977026357, 1.0312259880738657,
+    -1.0504316875655892, 1.6851030440163228, 1.5707895841271384,
+    -3.140438047273198, 1.785103044016323, 1.5707895841271384,
+    -3.140438047273198, 0.3888232747926391, -1.3945385590101502,
+    1.5547235593917206, -1.0047871732169829
+  ],
+  "cases": [
+    {
+      "scenario": "drag-large",
+      "compileOptions": {},
+      "targets": [
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1, 1]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0001627024821715, 1.0001756481631974]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0003273835868756, 1.0001495438518386]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002887779767473, 1.0001348711904967]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002664089238102, 1.00013057377015]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002536100048491, 1.0001272782424646]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.000245035313191, 1.0001245204767741]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002381611061546, 1.0001236226764547]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002341292271972, 1.0001205636626196]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002303264281616, 1.00011907945221]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002271870569688, 1.0001178035946872]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002245632264308, 1.0001167113511436]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002223095896166, 1.0001157583501943]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002203726493875, 1.0001149160188625]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002170583494578, 1.0001149103051041]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002171126038188, 1.0001135002153916]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002157327289183, 1.0001128791711764]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.00021427322734, 1.0001123087989434]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002133834387017, 1.0001118208210222]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0002123432755958, 1.0001113413653826]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.00021138164588130337, 0.00011090353086373739]
+          },
+          0.0001
+        ]
+      ],
+      "baselineReleasePoints": [
+        [
+          "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          7.430853001165502,
+          0
+        ],
+        [
+          "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          0,
+          0
+        ],
+        [
+          "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          5.548183153651902,
+          0
+        ],
+        [
+          "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+          10.301555704425434,
+          26.617325306548974
+        ],
+        [
+          "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+          13.195039036856295,
+          25.419791361146835
+        ],
+        [
+          "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+          -1.1586143890831397,
+          4.240457459207461
+        ],
+        [
+          "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+          1.7297888743201257,
+          5.782111985236986
+        ],
+        [
+          "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+          3.529624356870821,
+          5.396677949044261
+        ],
+        [
+          "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          1.8251952897807575,
+          13.981201507336003
+        ],
+        [
+          "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          -9.287159778550196,
+          2.2923072296148077
+        ],
+        [
+          "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          13.195039035621358,
+          25.419791361863606
+        ],
+        [
+          "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          -1.0209643616040696,
+          -2.634706737976598
+        ],
+        [
+          "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          -5.4089017040354035,
+          -2.1510114962425477e-10
+        ],
+        [
+          "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          -2.0080885044499936,
+          -4.2830846686899084
+        ],
+        [
+          "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          -1.0528032069586017,
+          -5.950115091084332
+        ],
+        [
+          "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          -1.0209645664436644,
+          -2.6347069786351276
+        ],
+        [
+          "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+          1.9634384712509707,
+          3.548095134032635
+        ],
+        [
+          "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+          5.44563422688423,
+          1.2400112907925405
+        ],
+        [
+          "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+          -1.414654970491223,
+          5.911837400051921
+        ],
+        [
+          "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+          1.163696129097134,
+          2.3287646224347234
+        ],
+        [
+          "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+          3.420050440877218,
+          1.503811556881109
+        ],
+        [
+          "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+          4.719357104408157,
+          2.9018418231904386
+        ],
+        [
+          "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+          2.7311659583020464,
+          4.492353976338275
+        ],
+        [
+          "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+          3.545591096294609,
+          5.81470230432549
+        ],
+        [
+          "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          -0.6882885617424944,
+          7.833776626100649
+        ],
+        [
+          "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          -5.033667512028085,
+          7.799818930040927
+        ],
+        [
+          "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          -24.331306571720784,
+          -0.187670897174532
+        ],
+        [
+          "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          -8.678809057366053,
+          -0.18767089339442838
+        ],
+        [
+          "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          -8.67880906040822,
+          15.464826624710673
+        ],
+        [
+          "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+          -13.68060565558844,
+          6.836606400290151
+        ],
+        [
+          "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          -13.057252581753463,
+          4.190776068829001
+        ],
+        [
+          "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          -13.047543995288105,
+          15.464826631121971
+        ],
+        [
+          "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          -24.331306573169837,
+          4.185736061884877
+        ],
+        [
+          "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          -13.047457880871535,
+          15.5648265940435
+        ],
+        [
+          "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          -8.678809060261466,
+          15.564826624710673
+        ],
+        [
+          "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          -24.43130618774676,
+          4.185691357579553
+        ],
+        [
+          "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          -13.057252581753463,
+          4.190776068829001
+        ]
+      ],
+      "baselineReleaseSplines": [
+        {
+          "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+          "poles": [
+            [
+              [10.301555704425434, 26.617325306548974],
+              [-20.38607278590765, 8.860301367636367],
+              [-9.758645104456457, 15.25074393475262],
+              [13.195039036856295, 25.419791361146835]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+          "poles": [
+            [
+              [-1.1586143890831397, 4.240457459207461],
+              [-0.1958133012820512, 4.754342301217302],
+              [0.8599426531862058, 5.65983755871892],
+              [1.7297888743201257, 5.782111985236986]
+            ],
+            [
+              [1.7297888743201257, 5.782111985236986],
+              [2.3819920615365238, 5.873792294644069],
+              [2.9296791960205892, 5.525155961108503],
+              [3.529624356870821, 5.396677949044261]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+          "poles": [
+            [
+              [1.9634384712509707, 3.548095134032635],
+              [3.1241703897953905, 2.7787338529526036],
+              [4.2849023083398095, 2.0093725718725723],
+              [5.44563422688423, 1.2400112907925405]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+          "poles": [
+            [
+              [-1.414654970491223, 5.911837400051921],
+              [-0.5552046039617708, 4.717479807512855],
+              [0.21213513917519478, 3.050313744604548],
+              [1.163696129097134, 2.3287646224347234]
+            ],
+            [
+              [1.163696129097134, 2.3287646224347234],
+              [1.8656844084552964, 1.796461352219811],
+              [2.8086826646225367, 1.3569616133576066],
+              [3.420050440877218, 1.503811556881109]
+            ],
+            [
+              [3.420050440877218, 1.503811556881109],
+              [3.9649699870223705, 1.6347007003464218],
+              [4.753490923002855, 2.4390745509793876],
+              [4.719357104408157, 2.9018418231904386]
+            ],
+            [
+              [4.719357104408157, 2.9018418231904386],
+              [4.679932505194401, 3.4363385477672224],
+              [2.8266147483300994, 3.942974392876047],
+              [2.7311659583020464, 4.492353976338275]
+            ],
+            [
+              [2.7311659583020464, 4.492353976338275],
+              [2.656620344172974, 4.921420059073629],
+              [3.6698690565482526, 5.393468138668894],
+              [3.545591096294609, 5.81470230432549]
+            ],
+            [
+              [3.545591096294609, 5.81470230432549],
+              [3.329606840879095, 6.546770544255008],
+              [0.7230046576032071, 7.160751852175596],
+              [-0.6882885617424944, 7.833776626100649]
+            ]
+          ]
+        }
+      ],
+      "baselineFrameDigests": [],
+      "baselineKinds": [
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved"
+      ]
+    },
+    {
+      "scenario": "drag-corner",
+      "compileOptions": {
+        "degenerateSplineSpanDragPointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58"
+      },
+      "targets": [
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-13.739876647757066, 0.8123289570776584]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-12.739876647757066, 1.8123289570776584]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-11.739876647757066, 2.8123289570776584]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-10.739876647757066, 3.8123289570776584]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-9.739876647757066, 4.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-8.739876647757066, 5.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-7.739876647757066, 6.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-6.739876647757066, 7.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-5.739876647757066, 8.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-4.739876647757066, 9.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-3.7398766477570664, 10.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-2.7398766477570664, 11.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-1.7398766477570664, 12.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [-0.7398766477570664, 13.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [0.2601233522429336, 14.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [1.2601233522429336, 15.812328957077659]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [2.2601233522429336, 16.812328957077657]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [3.2601233522429336, 17.812328957077657]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [4.260123352242934, 18.812328957077657]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [5.260123352242934, 19.812328957077657]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchPoint",
+            "pointId": "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+            "position": [5.260123352242934, 19.812328957077657]
+          },
+          0.0001
+        ]
+      ],
+      "baselineReleasePoints": [
+        [
+          "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          7.430853001165502,
+          0
+        ],
+        [
+          "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          0,
+          0
+        ],
+        [
+          "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          5.548183153651902,
+          0
+        ],
+        [
+          "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+          -9.48636414609009,
+          5.751615103714396
+        ],
+        [
+          "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+          -6.7365131417865145,
+          5.204427929930764
+        ],
+        [
+          "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+          -1.1586143890831397,
+          4.240457459207461
+        ],
+        [
+          "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+          1.7297888743201257,
+          5.782111985236986
+        ],
+        [
+          "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+          3.529624356870821,
+          5.396677949044261
+        ],
+        [
+          "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          -8.034734822203902,
+          3.7668396145074485
+        ],
+        [
+          "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          -9.294106167035544,
+          2.295097869187991
+        ],
+        [
+          "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          -6.73651311131883,
+          5.204427930254882
+        ],
+        [
+          "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          -1.0209643616040696,
+          -2.634706737976598
+        ],
+        [
+          "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          -5.4089017040354035,
+          -2.1510114962425477e-10
+        ],
+        [
+          "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          -2.0080885044499936,
+          -4.2830846686899084
+        ],
+        [
+          "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          -1.0528032069586017,
+          -5.950115091084332
+        ],
+        [
+          "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          -1.0209645664436644,
+          -2.6347069786351276
+        ],
+        [
+          "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+          1.9634384712509707,
+          3.548095134032635
+        ],
+        [
+          "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+          5.44563422688423,
+          1.2400112907925405
+        ],
+        [
+          "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+          -1.414654970491223,
+          5.911837400051921
+        ],
+        [
+          "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+          1.163696129097134,
+          2.3287646224347234
+        ],
+        [
+          "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+          3.420050440877218,
+          1.503811556881109
+        ],
+        [
+          "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+          4.719357104408157,
+          2.9018418231904386
+        ],
+        [
+          "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+          2.7311659583020464,
+          4.492353976338275
+        ],
+        [
+          "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+          3.545591096294609,
+          5.81470230432549
+        ],
+        [
+          "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          -0.6882885617424944,
+          7.833776626100649
+        ],
+        [
+          "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          -5.033667512028085,
+          7.799818930040927
+        ],
+        [
+          "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          -13.746473301556401,
+          -0.18767090609312903
+        ],
+        [
+          "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          -8.678809040829199,
+          -0.18767090601120118
+        ],
+        [
+          "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          -8.678809043536987,
+          4.879993343541006
+        ],
+        [
+          "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+          -13.68060565558844,
+          6.836606400290151
+        ],
+        [
+          "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          -13.054558501251119,
+          4.188079473910144
+        ],
+        [
+          "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          -13.053395361791008,
+          4.879993294287982
+        ],
+        [
+          "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          -13.746473299352111,
+          4.187932182640085
+        ],
+        [
+          "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          -13.053227257356266,
+          4.979993152992377
+        ],
+        [
+          "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          -8.678809044662877,
+          4.979993343541006
+        ],
+        [
+          "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          -13.846473281331065,
+          4.1879108951573025
+        ],
+        [
+          "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          -13.054558501251119,
+          4.188079473910144
+        ]
+      ],
+      "baselineReleaseSplines": [
+        {
+          "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+          "poles": [
+            [
+              [-9.48636414609009, 5.751615103714396],
+              [-8.953636297033492, 3.769741168337096],
+              [-8.190291127691488, 5.797365959294508],
+              [-6.7365131417865145, 5.204427929930764]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+          "poles": [
+            [
+              [-1.1586143890831397, 4.240457459207461],
+              [-0.1958133012820512, 4.754342301217302],
+              [0.8599426531862058, 5.65983755871892],
+              [1.7297888743201257, 5.782111985236986]
+            ],
+            [
+              [1.7297888743201257, 5.782111985236986],
+              [2.3819920615365238, 5.873792294644069],
+              [2.9296791960205892, 5.525155961108503],
+              [3.529624356870821, 5.396677949044261]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+          "poles": [
+            [
+              [1.9634384712509707, 3.548095134032635],
+              [3.1241703897953905, 2.7787338529526036],
+              [4.2849023083398095, 2.0093725718725723],
+              [5.44563422688423, 1.2400112907925405]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+          "poles": [
+            [
+              [-1.414654970491223, 5.911837400051921],
+              [-0.5552046039617708, 4.717479807512855],
+              [0.21213513917519478, 3.050313744604548],
+              [1.163696129097134, 2.3287646224347234]
+            ],
+            [
+              [1.163696129097134, 2.3287646224347234],
+              [1.8656844084552964, 1.796461352219811],
+              [2.8086826646225367, 1.3569616133576066],
+              [3.420050440877218, 1.503811556881109]
+            ],
+            [
+              [3.420050440877218, 1.503811556881109],
+              [3.9649699870223705, 1.6347007003464218],
+              [4.753490923002855, 2.4390745509793876],
+              [4.719357104408157, 2.9018418231904386]
+            ],
+            [
+              [4.719357104408157, 2.9018418231904386],
+              [4.679932505194401, 3.4363385477672224],
+              [2.8266147483300994, 3.942974392876047],
+              [2.7311659583020464, 4.492353976338275]
+            ],
+            [
+              [2.7311659583020464, 4.492353976338275],
+              [2.656620344172974, 4.921420059073629],
+              [3.6698690565482526, 5.393468138668894],
+              [3.545591096294609, 5.81470230432549]
+            ],
+            [
+              [3.545591096294609, 5.81470230432549],
+              [3.329606840879095, 6.546770544255008],
+              [0.7230046576032071, 7.160751852175596],
+              [-0.6882885617424944, 7.833776626100649]
+            ]
+          ]
+        }
+      ],
+      "baselineFrameDigests": [],
+      "baselineKinds": [
+        "solved",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked",
+        "blocked"
+      ]
+    },
+    {
+      "scenario": "drag-small",
+      "compileOptions": {},
+      "targets": [
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.019999999999999574, 0.019999999999999574]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.019999976545641118, 0.02000203843423254]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.019999978885753222, 0.020001997651704073]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000001502109683, 0.02000199979427908]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000028594605368, 0.020002046892752645]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000019878843034, 0.020002069756003493]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000053126938866, 0.020002142363970243]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000098900842644, 0.020002253754669574]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000011087400999, 0.020002296185332114]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000149802129386, 0.020002387186351278]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000179432644316, 0.02000245431560721]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000236718050957, 0.020002565453934196]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000280682042515, 0.02000265662654055]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000035474438988, 0.020002772878804365]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000443963859027, 0.020002892207461542]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000517547195784, 0.020003019569307945]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.020000085500187836, 0.020002847832731874]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000052190418522, 0.020001912718853987]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000081544760235, 0.02000326174141609]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [0.02000090265933885, 0.02000333560938472]
+          },
+          null
+        ],
+        [
+          {
+            "kind": "sketchTranslate",
+            "pointIds": [
+              "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+              "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8"
+            ],
+            "delta": [1.0591206311971746e-6, 3.4663200532136784e-6]
+          },
+          0.0001
+        ]
+      ],
+      "baselineReleasePoints": [
+        [
+          "sketch_point_1_line-end_eff52847-cef2-4891-8987-ada4cfdb34df",
+          7.430853001165502,
+          0
+        ],
+        [
+          "sketch_point_1_line-start_be09269f-25dc-46ac-9bb1-716a0d24c83b",
+          0,
+          0
+        ],
+        [
+          "sketch_point_2_line-end_ca089d88-be42-4e09-a8da-93d246ca3298",
+          5.548183153651902,
+          0
+        ],
+        [
+          "sketch_point_3_spline-1_95f7a2ed-28a3-4406-a03c-fcfa2cb3c024",
+          -9.298445319416684,
+          7.017321732194981
+        ],
+        [
+          "sketch_point_3_spline-2_02d480f2-9f51-4426-a001-55c28467fbc8",
+          -6.4040370350070805,
+          5.821682077131186
+        ],
+        [
+          "sketch_point_5_spline-1_7206c756-7f09-48f0-90c2-b96c7445ab82",
+          -1.1586143890831397,
+          4.240457459207461
+        ],
+        [
+          "sketch_point_5_spline-2_041cbf1b-247b-42f7-a11c-4fb0d447e0b5",
+          1.7297888743201257,
+          5.782111985236986
+        ],
+        [
+          "sketch_point_5_spline-3_2b68e605-1394-408e-ad49-0ec5dde91f64",
+          3.529624356870821,
+          5.396677949044261
+        ],
+        [
+          "sketch_point_6_tangent-arc-center_d3733ab7-bafa-430b-86a1-967933a76109",
+          -7.8375552009491996,
+          4.049400427540761
+        ],
+        [
+          "sketch_point_6_tangent-arc-end_20ca6c94-7810-4336-8c09-52ab72d18e09",
+          -9.29841279886599,
+          2.299585752136531
+        ],
+        [
+          "sketch_point_6_tangent-arc-start_c772aa5e-245c-4b93-9c97-3daff3dd563c",
+          -6.404037064038433,
+          5.821682046461817
+        ],
+        [
+          "sketch_point_7_line-end_9c40f6f0-cdde-4278-8bf6-71328f7d13f4",
+          -1.0209643616040696,
+          -2.634706737976598
+        ],
+        [
+          "sketch_point_7_line-start_d5c78d77-cb0d-4fbc-8176-16b8fee7ab26",
+          -5.4089017040354035,
+          -2.1510114962425477e-10
+        ],
+        [
+          "sketch_point_8_tangent-arc-center_44a57ee2-c76c-49ea-9aff-b4ead20bf34d",
+          -2.0080885044499936,
+          -4.2830846686899084
+        ],
+        [
+          "sketch_point_8_tangent-arc-end_d732e886-8393-4e22-9859-ee814e8be17d",
+          -1.0528032069586017,
+          -5.950115091084332
+        ],
+        [
+          "sketch_point_8_tangent-arc-start_01c6f14f-cfc9-485d-99f5-ba96d11b4418",
+          -1.0209645664436644,
+          -2.6347069786351276
+        ],
+        [
+          "sketch_point_9_spline-1_f2c26221-77bc-472b-8ddc-ee3106504d94",
+          1.9634384712509707,
+          3.548095134032635
+        ],
+        [
+          "sketch_point_9_spline-2_cd538347-b5ba-4838-a929-fe2b99e03c2d",
+          5.44563422688423,
+          1.2400112907925405
+        ],
+        [
+          "sketch_point_10_spline-1_b1a7c2a3-ddcb-4ddc-8fc6-34b8a4b577cc",
+          -1.414654970491223,
+          5.911837400051921
+        ],
+        [
+          "sketch_point_10_spline-2_e113e2cc-948d-419d-a6ef-dd035967781a",
+          1.163696129097134,
+          2.3287646224347234
+        ],
+        [
+          "sketch_point_10_spline-3_6d9cccd4-7fbd-4d9e-8ebd-62d1d16bb381",
+          3.420050440877218,
+          1.503811556881109
+        ],
+        [
+          "sketch_point_10_spline-4_aabfc6b0-9883-4e2e-8798-5391715517fb",
+          4.719357104408157,
+          2.9018418231904386
+        ],
+        [
+          "sketch_point_10_spline-5_6106fb07-d738-4612-b249-eabeacbbb95d",
+          2.7311659583020464,
+          4.492353976338275
+        ],
+        [
+          "sketch_point_10_spline-6_4e7009a7-79e5-44d6-a522-0a6390102458",
+          3.545591096294609,
+          5.81470230432549
+        ],
+        [
+          "sketch_point_10_spline-7_5d956140-eb2c-4d76-bc13-7823bf4aa91a",
+          -0.6882885617424944,
+          7.833776626100649
+        ],
+        [
+          "sketch_point_12_point_f7d94aff-4d4d-4b61-9b17-9cf6bcf01b0b",
+          -5.033667512028085,
+          7.799818930040927
+        ],
+        [
+          "sketch_point_15_rect-bottom-left_a8ef54f2-2e82-49f6-8fe8-3a233eb9ca58",
+          -14.949121044211134,
+          -0.18767087013239445
+        ],
+        [
+          "sketch_point_15_rect-bottom-right_b580508a-71fd-449c-8f5a-7da5b81a9967",
+          -8.678809022174601,
+          -0.18767087122928663
+        ],
+        [
+          "sketch_point_15_rect-top-right_1e09fdd4-81de-4e30-9e42-9249badb948c",
+          -8.678809008028674,
+          6.082641175429312
+        ],
+        [
+          "sketch_point_15_rect-top-left_3809f7ca-d89f-4d3b-8974-32ecf53428a1",
+          -13.68060565558844,
+          6.836606400290151
+        ],
+        [
+          "sketch_point_17_fillet-center_cf2f15c8-8e69-44f7-85ed-6cc36d8ade62",
+          -13.054582936617365,
+          4.188103212838175
+        ],
+        [
+          "sketch_point_17_fillet-tangent-a_5925c0ab-a6b6-49fe-a600-0040c0ce1cd3",
+          -13.05376411285395,
+          6.082641164011179
+        ],
+        [
+          "sketch_point_17_fillet-tangent-b_c220e745-199e-4b30-96ef-4fd200090b95",
+          -14.949121031705092,
+          4.187668972287239
+        ],
+        [
+          "sketch_point_18_offset-corner-1_6d174545-e38f-4b9c-aa62-7ad4f39c873b",
+          -13.053720892622524,
+          6.182641154671236
+        ],
+        [
+          "sketch_point_18_offset-start_6e7a3355-2d7f-40b9-b86e-54f4e7cb50d0",
+          -8.678809008289663,
+          6.182641175429311
+        ],
+        [
+          "sketch_point_18_offset-end_b7f6b315-9b47-4661-9ac3-8f2ea870fb7b",
+          -15.049121012346967,
+          4.187646051636131
+        ],
+        [
+          "sketch_point_18_offset-sketch_entity_17_fillet-arc_598733fa-9732-4a6c-b208-10d789e06f2b-center_9dccaf58-447a-438c-bf5d-d431ea2ec8c7",
+          -13.054582936617365,
+          4.188103212838175
+        ]
+      ],
+      "baselineReleaseSplines": [
+        {
+          "entityId": "sketch_entity_3_spline_ea24ce4b-e2a6-4335-b802-3d57c35500cc",
+          "poles": [
+            [
+              [-9.298445319416684, 7.017321732194981],
+              [-8.928172021332644, 5.295659593157895],
+              [-7.970172112494598, 6.534568120019375],
+              [-6.4040370350070805, 5.821682077131186]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_5_spline_33d5c77a-ed3a-4edc-9cd9-5039dc6aae16",
+          "poles": [
+            [
+              [-1.1586143890831397, 4.240457459207461],
+              [-0.1958133012820512, 4.754342301217302],
+              [0.8599426531862058, 5.65983755871892],
+              [1.7297888743201257, 5.782111985236986]
+            ],
+            [
+              [1.7297888743201257, 5.782111985236986],
+              [2.3819920615365238, 5.873792294644069],
+              [2.9296791960205892, 5.525155961108503],
+              [3.529624356870821, 5.396677949044261]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_9_spline_cea83fe5-021b-4447-9d1d-511cb0ef857b",
+          "poles": [
+            [
+              [1.9634384712509707, 3.548095134032635],
+              [3.1241703897953905, 2.7787338529526036],
+              [4.2849023083398095, 2.0093725718725723],
+              [5.44563422688423, 1.2400112907925405]
+            ]
+          ]
+        },
+        {
+          "entityId": "sketch_entity_10_spline_089ee959-6678-4b8e-a5f7-c7f794d0a21b",
+          "poles": [
+            [
+              [-1.414654970491223, 5.911837400051921],
+              [-0.5552046039617708, 4.717479807512855],
+              [0.21213513917519478, 3.050313744604548],
+              [1.163696129097134, 2.3287646224347234]
+            ],
+            [
+              [1.163696129097134, 2.3287646224347234],
+              [1.8656844084552964, 1.796461352219811],
+              [2.8086826646225367, 1.3569616133576066],
+              [3.420050440877218, 1.503811556881109]
+            ],
+            [
+              [3.420050440877218, 1.503811556881109],
+              [3.9649699870223705, 1.6347007003464218],
+              [4.753490923002855, 2.4390745509793876],
+              [4.719357104408157, 2.9018418231904386]
+            ],
+            [
+              [4.719357104408157, 2.9018418231904386],
+              [4.679932505194401, 3.4363385477672224],
+              [2.8266147483300994, 3.942974392876047],
+              [2.7311659583020464, 4.492353976338275]
+            ],
+            [
+              [2.7311659583020464, 4.492353976338275],
+              [2.656620344172974, 4.921420059073629],
+              [3.6698690565482526, 5.393468138668894],
+              [3.545591096294609, 5.81470230432549]
+            ],
+            [
+              [3.545591096294609, 5.81470230432549],
+              [3.329606840879095, 6.546770544255008],
+              [0.7230046576032071, 7.160751852175596],
+              [-0.6882885617424944, 7.833776626100649]
+            ]
+          ]
+        }
+      ],
+      "baselineFrameDigests": [
+        "795927d8dd085bf8007a98d7539d5f46946e858828bb7c65ab3a6937222df884",
+        "6f800107d41249a207e00d9cc9ba2c7a509a6381ad13918cd5cb897481445bcc",
+        "f30174ba934679e6e6420cc7057e9eb81299566edfa501cff1b614bf46ccf70c",
+        "4918d1b54cffdeb4469e23192bf2c13a7f320e1ca09b389a30ed66e164cc6e2e",
+        "bbca1fa1dc0b559ddbe1474f466256d8a197b8766934c5ea2e78008c59a5000a",
+        "1e30aca3b83801dc4ff28f284e6bbd71b9e2c9b2dc2bb26ce3686b0f2f69fc05",
+        "ecf892351cf22e4ccee9fe8c8ba9265080276cd4957e9c8fc704c334e788f6db",
+        "90973e9c31eacac16c34ed1ee80a1dc7ee263967c8a1e646c5b7d4c912473f92",
+        "1bbda83ca34a72b53d313e7c5b595631eb5789313a877d72e11b99abe5058f67",
+        "3c4948cd1106f2e047ef8360f26de44e0eca41b4f63799d5d05e6be7fae86a0e",
+        "0d225133dc36bc9d65839f9ce05d8e23d1e2fe3350f78ecc7120bfc5e63d90b0",
+        "a4a1f124305928055ff108145ee3d4445aa48bc6607fe51b1c25b4df78b2444e",
+        "bc4c60c8a45e851b701073df3052650996dbfa3b424d3b9ea5fb3a34c2c4942f",
+        "6190da46572a6e21f0a7dd8a46c1299f8e4fd2e02526467156617f530d6a0adb",
+        "bec1a7a0a3bc9ae6bd37ec3fa47d776c9c54caaa4574169b6f386bc57e3f9c92",
+        "c945fedc449ec300d6bf0038afcc64ed34f1ca374a2ab10cc97bcb925b5baaca",
+        "2b1280ca9c94a821a0a583bac0468d35138923b5481a4a5392e07e75f7ef0c13",
+        "9a187618e69582c2df3a9921f8a5db2a8cb0cdd6cafa0121fd5c2eaa7a6040f2",
+        "708c68f2c0b6398657013926abc8f8692d36f6a5c1bfe883f5875b9b4db85706",
+        "e6745691bde542b1084723d387c3c21301e3aab6d1b340bc1f2f947c5e927886",
+        "e6745691bde542b1084723d387c3c21301e3aab6d1b340bc1f2f947c5e927886"
+      ],
+      "baselineKinds": [
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved",
+        "solved"
+      ]
+    }
+  ]
+}
