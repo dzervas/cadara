@@ -4680,6 +4680,7 @@ describe("T16f: the Dimension tool routed to a shared driver through the authore
     const { f, seeded, open } = await routed();
     open();
     const label = f.session.activeAnnotationEdit!.target;
+    if (label.kind !== "dimension") throw new Error("Expected the routed dimension edit.");
     f.dispatch({ type: "viewport.selectionRequested", target: label });
     expect(undoLabels(f)).toEqual([]);
     expect(f.session.definition).toBe(seeded.definition);

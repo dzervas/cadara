@@ -34,6 +34,7 @@ function offsetRemovalConsequence(entry: SketchOffsetActionEntry) {
 
 export interface SketchOffsetActionsProps {
   entries: readonly SketchOffsetActionEntry[];
+  onEditDistance: (derivationId: string) => void;
   onRemove: (derivationId: string) => void;
 }
 
@@ -43,6 +44,7 @@ export interface SketchOffsetActionsProps {
  */
 export function SketchOffsetActions({
   entries,
+  onEditDistance,
   onRemove,
 }: SketchOffsetActionsProps) {
   return (
@@ -68,6 +70,14 @@ export function SketchOffsetActions({
               {`Broken: ${entry.health.reason}. Undo, or remove the offset.`}
             </p>
           ) : null}
+          <Button
+            size="compact-xs"
+            variant="default"
+            onClick={() => onEditDistance(entry.derivationId)}
+            data-testid="offset-edit-distance"
+          >
+            Edit distance
+          </Button>
           <Button
             size="compact-xs"
             variant="default"

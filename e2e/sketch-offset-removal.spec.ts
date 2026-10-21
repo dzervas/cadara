@@ -165,7 +165,7 @@ test("T17c: a spline offset's shell → Offset panel → Remove offset: one Remo
   await selectShell();
   const panel = page.getByRole("region", { name: "Offset" });
   const consequence =
-    /^Offsetoffset \d+HealthyRemove offsetRemoves 2 offset curves\.$/;
+    /^Offsetoffset \d+HealthyEdit distanceRemove offsetRemoves 2 offset curves\.$/;
   await expect(panel).toHaveText(consequence, { timeout: 15_000 });
   // Delete alone is refused (the selection clears, as after any Delete),
   // and the text names the panel.

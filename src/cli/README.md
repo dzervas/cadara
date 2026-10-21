@@ -476,8 +476,14 @@ healthy source regions can still remain consumable when a descendant fails.
 Source changes propagate through the production solver. Existing supported
 requirements on offset outputs can size the originals and can be edited with
 `sketch.dimension.update`; they do not change the relationship's authored
-separation. There is no independent browser distance/side/expression setter,
-so this command does not invent one. `sketch.offset.remove` takes the current
+separation. `sketch.offset.update` takes current basis/draft, the discovered
+`derivationId`, `value` (a signed distance number or authored expression such as
+`"2*depth"`), and `intent`. It shares the browser's **Edit distance** / Save
+owner: one undoable edit, stable output identities, expression/variable binding
+retained across save/reopen. Unresolved or degenerate distances keep the
+relationship with structured diagnostics and withhold its failed outputs from
+profiles; independent healthy source regions may remain usable under the
+existing publication rules. `sketch.offset.remove` takes the current
 basis/draft, discovered `derivationId` and `intent`. Recipes can select that
 relationship by `derivationId: { "alias": "offset", "label": "Offset 2" }`, using
 its exact unique discovered label (never a guessed ID or first match). It uses the browser's
