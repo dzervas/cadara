@@ -382,14 +382,18 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
       solverAdapter.requests
         .filter((request) => request.requestId.includes("request_restore_"))
         .map((request) => [request.kind, request.tolerances]),
-      "Mock restore projection, validation, and solve must use persisted document settings.",
+      "Mock restore validation and solve must use persisted document settings.",
     ).toEqual([
-      ["project", expectedAuthored],
       ["validate", expectedAuthored],
       ["solve", expectedAuthored],
     ]);
+    expect(
+      adapter.projectionTolerances,
+      "Mock restore snapshot projection must use persisted document settings.",
+    ).toEqual([expectedAuthored]);
 
     solverAdapter.requests.length = 0;
+    adapter.projectionTolerances.length = 0;
     const updated = await adapter.updateDocumentVariable({
       contractVersion: "modeling-contract/v1alpha1",
       documentId: "doc_workspace",

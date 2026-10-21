@@ -594,6 +594,18 @@ function validateDefinition(
     }
 
     switch (constraint.kind) {
+      case "tangent":
+        // The non-moving mock does not evaluate local tangency. A conflicting
+        // status alone must not let validation and the overall solve succeed.
+        diagnostics.push(
+          makeDiagnostic(
+            "mock-unsupported-constraint",
+            "error",
+            `The mock solver does not support the local tangent constraint ‘${constraint.label}’. Use the production sketch solver.`,
+            { kind: "constraint", constraintId: constraint.constraintId },
+          ),
+        );
+        break;
       case "coincident":
         if (
           !points.has(constraint.pointIds[0]) ||
@@ -784,6 +796,20 @@ function validateDefinition(
     }
 
     switch (dimension.kind) {
+      case "pointDatumDistance":
+        // Reference dimensions use the shared measurement path; driving datum
+        // distances require motion that this mock deliberately does not solve.
+        if (!isReferenceDimension(dimension)) {
+          diagnostics.push(
+            makeDiagnostic(
+              "mock-unsupported-dimension",
+              "error",
+              `The mock solver does not support the driving datum distance ‘${dimension.label}’. Use the production sketch solver.`,
+              { kind: "dimension", dimensionId: dimension.dimensionId },
+            ),
+          );
+        }
+        break;
       case "distance":
       case "horizontalDistance":
       case "verticalDistance":
@@ -871,6 +897,14 @@ function validateDefinition(
         break;
       case "arcStartPointCoincident":
       case "arcEndPointCoincident":
+        diagnostics.push(
+          makeDiagnostic(
+            "mock-unsupported-dimension",
+            "error",
+            `The mock solver does not support the arc endpoint binding ‘${dimension.label}’. Use the production sketch solver.`,
+            { kind: "dimension", dimensionId: dimension.dimensionId },
+          ),
+        );
         if (
           !entities.has(dimension.entityId) ||
           !points.has(dimension.pointId)

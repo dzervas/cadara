@@ -5364,151 +5364,170 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     snapshot.document.name = document.name;
     snapshot.document.settings = structuredClone(document.settings);
     snapshot.document.variables = structuredClone(document.variables);
-    snapshot.document.sketches = await Promise.all(
-      document.sketches.map(async (sketch) => {
-        const resolvedDefinition = resolveSketchDimensionValues({
-          definition: sketch.definition,
-          variables: document.variables,
-        });
-        const evaluation = resolvedDefinition.ok
-          ? await (async () => {
-              const tolerances = createDocumentSolverTolerances(
-                document.settings,
-              );
-              const requestId =
-                `request_restore_${sketch.sketchId}` as RequestId;
-              const projected =
-                await restoreSolverAdapter.projectExternalReferences({
-                  contractVersion: CONTRACT_VERSION,
-                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                  requestId: `${requestId}:project` as RequestId,
-                  documentId: document.documentId,
-                  revisionId: document.revisionId,
-                  sketchId: sketch.sketchId,
-                  plane: sketch.plane.frame,
-                  tolerances,
-                  references: sketch.definition.references.map((reference) => ({
-                    referenceId: reference.referenceId,
-                    reference,
-                  })),
-                });
-              const validation = await restoreSolverAdapter.validateSketch({
+    // Rebuild source sketches before their consumers, just as production
+    // restore does. Projection must see this document, never the old snapshot
+    // or the solver stub (which has no source geometry).
+    const sketchOrder = new Map(
+      document.historyOrder.map((item, index) => [
+        item.kind === "sketch" ? item.sketchId : item.featureId,
+        index,
+      ]),
+    );
+    snapshot.document.sketches = [];
+    snapshot.presentation.documentHistory = [];
+    snapshot.document.cursor = { kind: "empty" };
+    for (const sketch of [...document.sketches].sort(
+      (a, b) => sketchOrder.get(a.sketchId)! - sketchOrder.get(b.sketchId)!,
+    )) {
+      const resolvedDefinition = resolveSketchDimensionValues({
+        definition: sketch.definition,
+        variables: document.variables,
+      });
+      const evaluation = resolvedDefinition.ok
+        ? await (async () => {
+            const tolerances = createDocumentSolverTolerances(
+              document.settings,
+            );
+            const requestId = `request_restore_${sketch.sketchId}` as RequestId;
+            const projected = this.projectSketchReferencesFromSnapshot(
+              snapshot,
+              {
                 contractVersion: CONTRACT_VERSION,
                 solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                requestId: `${requestId}:validate` as RequestId,
+                requestId: `${requestId}:project` as RequestId,
+                documentId: document.documentId,
+                revisionId: document.revisionId,
+                sketchId: sketch.sketchId,
+                plane: sketch.plane.frame,
+                tolerances,
+                references: sketch.definition.references.map((reference) => ({
+                  referenceId: reference.referenceId,
+                  reference,
+                })),
+              },
+            );
+            const validation = await restoreSolverAdapter.validateSketch({
+              contractVersion: CONTRACT_VERSION,
+              solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+              requestId: `${requestId}:validate` as RequestId,
+              documentId: document.documentId,
+              revisionId: document.revisionId,
+              sketchId: sketch.sketchId,
+              plane: sketch.plane.frame,
+              tolerances,
+              modelingTolerance: document.settings.modelingTolerance,
+              definition: resolvedDefinition.definition,
+              projectedReferences: projected.projectedReferences,
+            });
+            const {
+              solved: solve,
+              regions,
+              offsetDiagnostics,
+            } = await solveAndDeriveSketchWithOffsets(
+              restoreSolverAdapter,
+              {
+                contractVersion: CONTRACT_VERSION,
+                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                requestId: `${requestId}:solve` as RequestId,
                 documentId: document.documentId,
                 revisionId: document.revisionId,
                 sketchId: sketch.sketchId,
                 plane: sketch.plane.frame,
                 tolerances,
                 modelingTolerance: document.settings.modelingTolerance,
+                partialSolvePolicy: "bestEffort",
                 definition: resolvedDefinition.definition,
                 projectedReferences: projected.projectedReferences,
-              });
-              const {
-                solved: solve,
-                regions,
-                offsetDiagnostics,
-              } = await solveAndDeriveSketchWithOffsets(
-                restoreSolverAdapter,
-                {
-                  contractVersion: CONTRACT_VERSION,
-                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                  requestId: `${requestId}:solve` as RequestId,
-                  documentId: document.documentId,
-                  revisionId: document.revisionId,
-                  sketchId: sketch.sketchId,
-                  plane: sketch.plane.frame,
-                  tolerances,
-                  modelingTolerance: document.settings.modelingTolerance,
-                  partialSolvePolicy: "bestEffort",
-                  definition: resolvedDefinition.definition,
-                  projectedReferences: projected.projectedReferences,
-                },
-                {
-                  contractVersion: CONTRACT_VERSION,
-                  solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-                  requestId: `${requestId}:regions` as RequestId,
-                  documentId: document.documentId,
-                  revisionId: document.revisionId,
-                  sketchId: sketch.sketchId,
-                  definition: resolvedDefinition.definition,
-                  projectedReferences: projected.projectedReferences,
-                  modelingTolerance: document.settings.modelingTolerance,
-                },
-              );
-              return {
+              },
+              {
+                contractVersion: CONTRACT_VERSION,
+                solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+                requestId: `${requestId}:regions` as RequestId,
+                documentId: document.documentId,
+                revisionId: document.revisionId,
+                sketchId: sketch.sketchId,
+                definition: resolvedDefinition.definition,
                 projectedReferences: projected.projectedReferences,
-                projectionDiagnostics: projected.diagnostics,
-                validation,
-                solve,
-                regions,
-                offsetDiagnostics,
-              };
-            })()
-          : null;
-        // T17d (B5): the derivation Finish (commit) uses, same inputs.
-        const { solvedSnapshot, derivedValidity } =
-          deriveCommittedSketchValidity(
-            evaluation
-              ? {
-                  kind: "solved",
-                  solvedSnapshot: evaluation.solve.solvedSnapshot,
-                  validationIsValid: evaluation.validation.isValid,
-                  diagnostics: [
-                    evaluation.projectionDiagnostics,
-                    evaluation.validation.diagnostics,
-                    evaluation.solve.diagnostics,
-                    evaluation.regions.diagnostics,
-                  ],
-                  offsetDiagnostics: evaluation.offsetDiagnostics,
-                }
-              : {
-                  kind: "unresolvedValues",
-                  diagnostics: resolvedDefinition.ok
-                    ? []
-                    : resolvedDefinition.diagnostics.map(
-                        mapModelingDiagnosticToSketchDiagnostic,
-                      ),
-                },
-          );
-        const sketchRecord: SketchRecord = {
-          ownerDocumentId: document.documentId,
-          ownerRevisionId: document.revisionId,
-          ownerFeatureId: null,
-          ownerSketchId: sketch.sketchId,
-          ownerBodyId: null,
-          sketchId: sketch.sketchId,
-          label: sketch.label,
-          planeSupport: sketch.plane.support,
-          definition: structuredClone(sketch.definition),
-          solvedSnapshot,
-          derivedValidity,
-          projectedReferences: structuredClone(
-            evaluation?.projectedReferences ?? [],
-          ),
-          regions:
-            derivedValidity.state === "current"
-              ? (evaluation?.regions.regions ?? []).map((region) => ({
-                  ...region,
-                  ownerRevisionId: document.revisionId,
-                }))
-              : [],
-        };
+                modelingTolerance: document.settings.modelingTolerance,
+              },
+            );
+            return {
+              projectedReferences: projected.projectedReferences,
+              projectionDiagnostics: projected.diagnostics,
+              validation,
+              solve,
+              regions,
+              offsetDiagnostics,
+            };
+          })()
+        : null;
+      // T17d (B5): the derivation Finish (commit) uses, same inputs.
+      const { solvedSnapshot, derivedValidity } = deriveCommittedSketchValidity(
+        evaluation
+          ? {
+              kind: "solved",
+              solvedSnapshot: evaluation.solve.solvedSnapshot,
+              validationIsValid: evaluation.validation.isValid,
+              diagnostics: [
+                evaluation.projectionDiagnostics,
+                evaluation.validation.diagnostics,
+                evaluation.solve.diagnostics,
+                evaluation.regions.diagnostics,
+              ],
+              offsetDiagnostics: evaluation.offsetDiagnostics,
+            }
+          : {
+              kind: "unresolvedValues",
+              diagnostics: resolvedDefinition.ok
+                ? []
+                : resolvedDefinition.diagnostics.map(
+                    mapModelingDiagnosticToSketchDiagnostic,
+                  ),
+            },
+      );
+      const sketchRecord: SketchRecord = {
+        ownerDocumentId: document.documentId,
+        ownerRevisionId: document.revisionId,
+        ownerFeatureId: null,
+        ownerSketchId: sketch.sketchId,
+        ownerBodyId: null,
+        sketchId: sketch.sketchId,
+        label: sketch.label,
+        planeSupport: sketch.plane.support,
+        definition: structuredClone(sketch.definition),
+        solvedSnapshot,
+        derivedValidity,
+        projectedReferences: structuredClone(
+          evaluation?.projectedReferences ?? [],
+        ),
+        regions:
+          derivedValidity.state === "current"
+            ? (evaluation?.regions.regions ?? []).map((region) => ({
+                ...region,
+                ownerRevisionId: document.revisionId,
+              }))
+            : [],
+      };
 
-        return {
-          ownerDocumentId: document.documentId,
-          ownerRevisionId: document.revisionId,
-          ownerFeatureId: null,
-          ownerSketchId: sketch.sketchId,
-          ownerBodyId: null,
-          sketchId: sketch.sketchId,
-          label: sketch.label,
-          plane: structuredClone(sketch.plane),
-          sketch: sketchRecord,
-        };
-      }),
-    );
+      snapshot.document.sketches.push({
+        ownerDocumentId: document.documentId,
+        ownerRevisionId: document.revisionId,
+        ownerFeatureId: null,
+        ownerSketchId: sketch.sketchId,
+        ownerBodyId: null,
+        sketchId: sketch.sketchId,
+        label: sketch.label,
+        plane: structuredClone(sketch.plane),
+        sketch: sketchRecord,
+      });
+      snapshot.presentation.documentHistory = createDocumentHistoryItems({
+        featureTree: [],
+        features: [],
+        sketches: snapshot.document.sketches,
+        historyOrder: document.historyOrder,
+      });
+      snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
+    }
     snapshot.document.features = orderedFeatures.map((feature) => ({
       ownerDocumentId: document.documentId,
       ownerRevisionId: document.revisionId,
