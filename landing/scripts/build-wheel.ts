@@ -3,6 +3,10 @@
 // because region labels ("Outer region") are not sketch-qualified CLI aliases.
 // Each saved stage's exact discovered references feed the following recipe.
 import { buildExample } from "./build-example";
+import { finishBodyAppearance, type Finish } from "../finishes";
+
+const wheelFinish = (i: number): Finish =>
+  i === 0 ? "silver" : i === 1 ? "gold" : "black";
 import { join } from "node:path";
 await buildExample("wheel", async (dir, repoRoot) => {
   type RecordValue = Record<string, unknown>;
@@ -329,6 +333,12 @@ await buildExample("wheel", async (dir, repoRoot) => {
   // Screws' heads start below flange top only inside the clearance's void? The
   // clearance is enlarged below to counterbore heads, avoiding any solid overlap.
   for (let i = 0; i < 3; i++) extrusion(`head-${i}`, 11.75, 0.25, "cut", "Hub");
+  for (const [i, label] of labels.entries())
+    add("body.color.set", {
+      bodyId: ref(current, label),
+      appearance: finishBodyAppearance(wheelFinish(i)),
+      intent: "fulfill",
+    });
   save("wheel.cadara");
   add("document.inspect");
   await run("");
@@ -344,7 +354,7 @@ await buildExample("wheel", async (dir, repoRoot) => {
           ? "wheel-hub.stl"
           : `wheel-screw-${i - 1}.stl`,
     label,
-    finish: i === 0 ? "silver" : i === 1 ? "orange" : "black",
+    finish: wheelFinish(i),
     explode: [0, 0, i === 0 ? 0 : i === 1 ? 25 : 40],
   }));
   for (const part of parts)

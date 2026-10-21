@@ -3,7 +3,8 @@ import wheel from "./examples/wheel/model.json";
 import enclosure from "./examples/enclosure/model.json";
 
 export type ModelId = "bracket" | "wheel" | "enclosure";
-export type Finish = "silver" | "graphite" | "orange" | "black";
+import type { Finish } from "./finishes";
+
 export type NativePart = {
   file: string;
   label: string;

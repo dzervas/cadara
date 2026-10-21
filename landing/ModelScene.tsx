@@ -16,13 +16,8 @@ import {
   type ModelId,
   type NativePart,
 } from "./model-assets";
+import { finishes } from "./finishes";
 
-const finishes = {
-  silver: { color: "#bfc6cc", metalness: 0.55, roughness: 0.36 },
-  graphite: { color: "#7f8a96", metalness: 0.3, roughness: 0.48 },
-  orange: { color: "#f0a14a", metalness: 0.38, roughness: 0.36 },
-  black: { color: "#14171a", metalness: 0.08, roughness: 0.55 },
-};
 
 function Part({
   model,

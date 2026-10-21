@@ -2,6 +2,7 @@
 // JSON authoring + production CLI only. Stages are needed because different
 // sketches expose identical region labels; typed refs come from saved discovery.
 import { buildExample } from "./build-example";
+import { finishBodyAppearance } from "../finishes";
 import type {
   SemanticDiscovery,
   SemanticResult,
@@ -265,6 +266,11 @@ await buildExample("bracket", async (dir, repoRoot) => {
       participants: [{ role: "edge", targets: edges }],
       options: { widthForm: "equalOffsets", distance: 0.6 },
     },
+  });
+  op("body.color.set", {
+    bodyId: { alias: current, label: "Extrude 1" },
+    appearance: finishBodyAppearance("silver"),
+    intent: "fulfill",
   });
   save();
   op("document.inspect");

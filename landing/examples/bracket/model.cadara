@@ -3,6 +3,15 @@
     "records": [],
     "schemaVersion": "geometry-asset-manifest/v1alpha1"
   },
+  "bodyAppearances": [
+    {
+      "appearance": {
+        "hex": "#bfc6cc",
+        "kind": "custom"
+      },
+      "bodyId": "body_feature_extrude-1"
+    }
+  ],
   "bodyLabels": [
     {
       "bodyId": "body_feature_extrude-1",
@@ -14,7 +23,7 @@
     "featureId": "feature_chamfer-1",
     "kind": "feature"
   },
-  "documentId": "doc_0572f8e9-bf0a-4861-9fb8-99ed7689c929",
+  "documentId": "doc_ca2c023e-d368-414c-9a12-a3a42fff8403",
   "embeddedBinaryAssets": [],
   "featureOrder": [
     "feature_extrude-1",
@@ -58,8 +67,16 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_7c7e5e5a8b45d9c5e9889340323e2f32",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "regionId": "region_f3cd512c3a201eae4bccbce94e62cf58",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  0,
+                  22
+                ]
+              },
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           ],
           "resultBodyType": "solid",
@@ -103,8 +120,16 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_6c57798f92cd28f50b36212876119ab9",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "regionId": "region_9b0223b723420ad12bfec784662bbd51",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  0,
+                  2.5
+                ]
+              },
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           ],
           "resultBodyType": "solid",
@@ -148,23 +173,55 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_9d21f964bafb6ee4c356e0a6642aa17e",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "regionId": "region_7ab4a491b15d00889600ab1ff5091ec4",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  -20,
+                  16
+                ]
+              },
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             },
             {
               "kind": "region",
-              "regionId": "region_ed6d02ba9ed2bbde20dffc2fa88942ad",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "regionId": "region_57199d54ea28bb6d9f409d8f0c4820f9",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  -20,
+                  35
+                ]
+              },
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             },
             {
               "kind": "region",
-              "regionId": "region_3c8e0f31037f0c9792db3c0b2fca3c3b",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "regionId": "region_01a5840d9f8cd85eb362f6c67e4c7a40",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  20,
+                  16
+                ]
+              },
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             },
             {
               "kind": "region",
-              "regionId": "region_ccbc92ac6f3aaf21d2ec9d3a5dc11950",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "regionId": "region_38e7a253194ea0df237aef658218c649",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  20,
+                  35
+                ]
+              },
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           ],
           "resultBodyType": "solid",
@@ -208,28 +265,68 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_fe8c6fd9419c511c41778020a69b257a",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "regionId": "region_861b3ac189df6294da28e32a6e16e355",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  0,
+                  28
+                ]
+              },
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             },
             {
               "kind": "region",
-              "regionId": "region_7ab9522a84f19f7a81c5c750d218b688",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "regionId": "region_afd222e78ef2e138ddbdb8593b24e72d",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  -20,
+                  17
+                ]
+              },
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             },
             {
               "kind": "region",
-              "regionId": "region_adf4a876c58dfaf8f8af938cebdf6ab3",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "regionId": "region_7e6c12c4da9b79eeae3902a73ccd77b7",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  -20,
+                  39
+                ]
+              },
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             },
             {
               "kind": "region",
-              "regionId": "region_8a939cdc6b236b2480c9a977a514ee51",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "regionId": "region_7ec88dbcdcc75dd32d97ec64133c2f4f",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  20,
+                  17
+                ]
+              },
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             },
             {
               "kind": "region",
-              "regionId": "region_4502fe110310962c0e6b05ddc3b0ed56",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "regionId": "region_8674f31e8b4da8d73001f3ac727bf188",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  20,
+                  39
+                ]
+              },
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           ],
           "resultBodyType": "solid",
@@ -309,8 +406,16 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_9e3e72261aa4fc749e2e747a13ef1a36",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "regionId": "region_cf6f7a60ea33fd4a8c027081abd4ee84",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_line_34aa58a2-e200-4dd4-82ec-5a91b620534d\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_3_line_17f8f33a-280d-43a6-878e-0f26056a7e34\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  12,
+                  23.5
+                ]
+              },
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           ],
           "resultBodyType": "solid",
@@ -390,8 +495,16 @@
           "profiles": [
             {
               "kind": "region",
-              "regionId": "region_33a905dcc360c097da23dcd5cae71427",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "regionId": "region_bf470345e22716fb583b1811e823c710",
+              "selector": {
+                "expectedBoundaryIdentity": "import-region-boundary/v1:[\"[\\\"outer\\\",true,\\\"[\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_1_line_102ded30-96bd-48ea-ae39-aea0144e4fb4\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\",\\\\\\\"[\\\\\\\\\\\\\\\"entity:sketch_entity_3_line_6758937f-34a6-48f0-a535-bd7e3fc3e336\\\\\\\\\\\\\\\",0,\\\\\\\\\\\\\\\"forward\\\\\\\\\\\\\\\",[]]\\\\\\\"]\\\"]\"]",
+                "kind": "interiorPoint",
+                "point": [
+                  12,
+                  23.5
+                ]
+              },
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           ],
           "resultBodyType": "solid",
@@ -451,7 +564,7 @@
   "historyOrder": [
     {
       "kind": "sketch",
-      "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+      "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
     },
     {
       "featureId": "feature_extrude-1",
@@ -459,7 +572,7 @@
     },
     {
       "kind": "sketch",
-      "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+      "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
     },
     {
       "featureId": "feature_extrude-2",
@@ -467,7 +580,7 @@
     },
     {
       "kind": "sketch",
-      "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+      "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
     },
     {
       "featureId": "feature_extrude-3",
@@ -475,7 +588,7 @@
     },
     {
       "kind": "sketch",
-      "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+      "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
     },
     {
       "featureId": "feature_extrude-4",
@@ -487,7 +600,7 @@
     },
     {
       "kind": "sketch",
-      "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+      "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
     },
     {
       "featureId": "feature_extrude-5",
@@ -499,7 +612,7 @@
     },
     {
       "kind": "sketch",
-      "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+      "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
     },
     {
       "featureId": "feature_extrude-6",
@@ -511,7 +624,7 @@
     }
   ],
   "name": "Precision gusseted angle bracket · 60 × 44 × 50 mm",
-  "revisionId": "rev_0026",
+  "revisionId": "rev_0027",
   "schemaVersion": "authored-model-document/v1alpha1",
   "settings": {
     "angularToleranceRadians": 0.0001,
@@ -522,33 +635,33 @@
     {
       "definition": {
         "constraintIds": [
-          "constraint_1_bottom-horizontal_bb8a769f-0105-40af-8cbe-5a9f5313ec25",
-          "constraint_1_top-horizontal_58613e24-d02a-472f-8469-3f62f57b8bb1",
-          "constraint_1_right-vertical_95fd184b-a678-48de-ad69-ef60325081a0",
-          "constraint_1_left-vertical_46f2d2e2-2fe1-4b5d-bbaf-a4751301910f"
+          "constraint_1_bottom-horizontal_fe3ca933-1f4d-42b3-b1b3-ed20384234f2",
+          "constraint_1_top-horizontal_372d7f3f-8ff3-40a8-b044-195d8e89f9ce",
+          "constraint_1_right-vertical_94cd0db4-2fdd-4f6c-b917-ffc53bbf6b2e",
+          "constraint_1_left-vertical_d770e578-6f1b-4495-a9c3-42225a14aa20"
         ],
         "constraints": [
           {
-            "constraintId": "constraint_1_bottom-horizontal_bb8a769f-0105-40af-8cbe-5a9f5313ec25",
-            "entityId": "sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335",
+            "constraintId": "constraint_1_bottom-horizontal_fe3ca933-1f4d-42b3-b1b3-ed20384234f2",
+            "entityId": "sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49",
             "kind": "horizontal",
             "label": "Rectangle 1 bottom horizontal"
           },
           {
-            "constraintId": "constraint_1_top-horizontal_58613e24-d02a-472f-8469-3f62f57b8bb1",
-            "entityId": "sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3",
+            "constraintId": "constraint_1_top-horizontal_372d7f3f-8ff3-40a8-b044-195d8e89f9ce",
+            "entityId": "sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485",
             "kind": "horizontal",
             "label": "Rectangle 1 top horizontal"
           },
           {
-            "constraintId": "constraint_1_right-vertical_95fd184b-a678-48de-ad69-ef60325081a0",
-            "entityId": "sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea",
+            "constraintId": "constraint_1_right-vertical_94cd0db4-2fdd-4f6c-b917-ffc53bbf6b2e",
+            "entityId": "sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2",
             "kind": "vertical",
             "label": "Rectangle 1 right vertical"
           },
           {
-            "constraintId": "constraint_1_left-vertical_46f2d2e2-2fe1-4b5d-bbaf-a4751301910f",
-            "entityId": "sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947",
+            "constraintId": "constraint_1_left-vertical_d770e578-6f1b-4495-a9c3-42225a14aa20",
+            "entityId": "sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e",
             "kind": "vertical",
             "label": "Rectangle 1 left vertical"
           }
@@ -558,125 +671,125 @@
         "dimensions": [],
         "entities": [
           {
-            "endPointId": "sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87",
-            "entityId": "sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335",
+            "endPointId": "sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6",
+            "entityId": "sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 bottom",
-            "startPointId": "sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee",
+            "startPointId": "sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71",
             "target": {
-              "entityId": "sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335",
+              "entityId": "sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49",
               "kind": "sketchEntity",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493",
-            "entityId": "sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea",
+            "endPointId": "sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173",
+            "entityId": "sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 right",
-            "startPointId": "sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87",
+            "startPointId": "sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6",
             "target": {
-              "entityId": "sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea",
+              "entityId": "sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2",
               "kind": "sketchEntity",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311",
-            "entityId": "sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3",
+            "endPointId": "sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43",
+            "entityId": "sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 top",
-            "startPointId": "sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493",
+            "startPointId": "sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173",
             "target": {
-              "entityId": "sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3",
+              "entityId": "sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485",
               "kind": "sketchEntity",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee",
-            "entityId": "sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947",
+            "endPointId": "sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71",
+            "entityId": "sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 left",
-            "startPointId": "sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311",
+            "startPointId": "sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43",
             "target": {
-              "entityId": "sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947",
+              "entityId": "sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e",
               "kind": "sketchEntity",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335",
-          "sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea",
-          "sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3",
-          "sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947"
+          "sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49",
+          "sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2",
+          "sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485",
+          "sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e"
         ],
         "pointIds": [
-          "sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee",
-          "sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87",
-          "sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493",
-          "sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311"
+          "sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71",
+          "sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6",
+          "sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173",
+          "sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Rectangle 1 bottom left",
-            "pointId": "sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee",
+            "pointId": "sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71",
             "position": [
               -30,
               0
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "pointId": "sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71",
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 bottom right",
-            "pointId": "sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87",
+            "pointId": "sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6",
             "position": [
               30,
               0
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "pointId": "sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6",
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 top right",
-            "pointId": "sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493",
+            "pointId": "sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173",
             "position": [
               30,
               44
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "pointId": "sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173",
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 top left",
-            "pointId": "sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311",
+            "pointId": "sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43",
             "position": [
               -30,
               44
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311",
-              "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+              "pointId": "sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43",
+              "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
             }
           }
         ],
@@ -717,38 +830,38 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_ea990bd2-7e37-4013-b684-98c8f0f36936"
+      "sketchId": "sketch_117df778-cde5-4ea4-8076-6b570ceadfcd"
     },
     {
       "definition": {
         "constraintIds": [
-          "constraint_1_bottom-horizontal_f703ab31-17fd-46b7-ae45-6374054fa475",
-          "constraint_1_top-horizontal_6574100d-af40-41dc-9cba-31f1447bbaaa",
-          "constraint_1_right-vertical_d3d4a2e5-aa72-4349-819d-daa4b63ed657",
-          "constraint_1_left-vertical_50810ce2-d6a3-41d7-9207-a04c295c531e"
+          "constraint_1_bottom-horizontal_031a0909-3c72-4fa2-bfca-9e52f91ff31f",
+          "constraint_1_top-horizontal_f6baea6a-a51a-4214-8cef-85f5842b185a",
+          "constraint_1_right-vertical_8aafb84b-1738-4b10-9fda-712ea5e12492",
+          "constraint_1_left-vertical_187b00e5-22ad-47a7-9c02-fd5081bd1a17"
         ],
         "constraints": [
           {
-            "constraintId": "constraint_1_bottom-horizontal_f703ab31-17fd-46b7-ae45-6374054fa475",
-            "entityId": "sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288",
+            "constraintId": "constraint_1_bottom-horizontal_031a0909-3c72-4fa2-bfca-9e52f91ff31f",
+            "entityId": "sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55",
             "kind": "horizontal",
             "label": "Rectangle 1 bottom horizontal"
           },
           {
-            "constraintId": "constraint_1_top-horizontal_6574100d-af40-41dc-9cba-31f1447bbaaa",
-            "entityId": "sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66",
+            "constraintId": "constraint_1_top-horizontal_f6baea6a-a51a-4214-8cef-85f5842b185a",
+            "entityId": "sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c",
             "kind": "horizontal",
             "label": "Rectangle 1 top horizontal"
           },
           {
-            "constraintId": "constraint_1_right-vertical_d3d4a2e5-aa72-4349-819d-daa4b63ed657",
-            "entityId": "sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9",
+            "constraintId": "constraint_1_right-vertical_8aafb84b-1738-4b10-9fda-712ea5e12492",
+            "entityId": "sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8",
             "kind": "vertical",
             "label": "Rectangle 1 right vertical"
           },
           {
-            "constraintId": "constraint_1_left-vertical_50810ce2-d6a3-41d7-9207-a04c295c531e",
-            "entityId": "sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637",
+            "constraintId": "constraint_1_left-vertical_187b00e5-22ad-47a7-9c02-fd5081bd1a17",
+            "entityId": "sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36",
             "kind": "vertical",
             "label": "Rectangle 1 left vertical"
           }
@@ -758,125 +871,125 @@
         "dimensions": [],
         "entities": [
           {
-            "endPointId": "sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01",
-            "entityId": "sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288",
+            "endPointId": "sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a",
+            "entityId": "sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 bottom",
-            "startPointId": "sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c",
+            "startPointId": "sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92",
             "target": {
-              "entityId": "sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288",
+              "entityId": "sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55",
               "kind": "sketchEntity",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947",
-            "entityId": "sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9",
+            "endPointId": "sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1",
+            "entityId": "sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 right",
-            "startPointId": "sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01",
+            "startPointId": "sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a",
             "target": {
-              "entityId": "sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9",
+              "entityId": "sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8",
               "kind": "sketchEntity",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37",
-            "entityId": "sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66",
+            "endPointId": "sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68",
+            "entityId": "sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 top",
-            "startPointId": "sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947",
+            "startPointId": "sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1",
             "target": {
-              "entityId": "sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66",
+              "entityId": "sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c",
               "kind": "sketchEntity",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
-            "endPointId": "sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c",
-            "entityId": "sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637",
+            "endPointId": "sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92",
+            "entityId": "sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Rectangle 1 left",
-            "startPointId": "sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37",
+            "startPointId": "sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68",
             "target": {
-              "entityId": "sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637",
+              "entityId": "sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36",
               "kind": "sketchEntity",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288",
-          "sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9",
-          "sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66",
-          "sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637"
+          "sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55",
+          "sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8",
+          "sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c",
+          "sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36"
         ],
         "pointIds": [
-          "sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c",
-          "sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01",
-          "sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947",
-          "sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37"
+          "sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92",
+          "sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a",
+          "sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1",
+          "sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Rectangle 1 bottom left",
-            "pointId": "sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c",
+            "pointId": "sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92",
             "position": [
               -30,
               0
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "pointId": "sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92",
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 bottom right",
-            "pointId": "sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01",
+            "pointId": "sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a",
             "position": [
               30,
               0
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "pointId": "sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a",
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 top right",
-            "pointId": "sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947",
+            "pointId": "sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1",
             "position": [
               30,
               5
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "pointId": "sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1",
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           },
           {
             "isConstruction": false,
             "label": "Rectangle 1 top left",
-            "pointId": "sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37",
+            "pointId": "sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68",
             "position": [
               -30,
               5
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37",
-              "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+              "pointId": "sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68",
+              "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
             }
           }
         ],
@@ -917,7 +1030,7 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4"
+      "sketchId": "sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37"
     },
     {
       "definition": {
@@ -928,125 +1041,125 @@
         "dimensions": [],
         "entities": [
           {
-            "centerPointId": "sketch_point_1_circle-center_84dd7b2f-80aa-42da-ba51-f57966e3f7ab",
-            "entityId": "sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3",
+            "centerPointId": "sketch_point_1_circle-center_3f57f447-ee13-4aaa-ad41-5384c064ed98",
+            "entityId": "sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 1",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3",
+              "entityId": "sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3",
               "kind": "sketchEntity",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
-            "centerPointId": "sketch_point_2_circle-center_ec9d6644-ed13-42c4-8d40-9740fc82a70f",
-            "entityId": "sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4",
+            "centerPointId": "sketch_point_2_circle-center_2c454cf8-88fe-4f65-8f10-8404b53762a4",
+            "entityId": "sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 2",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4",
+              "entityId": "sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5",
               "kind": "sketchEntity",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
-            "centerPointId": "sketch_point_3_circle-center_b860ed09-bdab-4c34-9a7b-c67b037eb459",
-            "entityId": "sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f",
+            "centerPointId": "sketch_point_3_circle-center_775d7852-e460-4679-8966-f038451471d7",
+            "entityId": "sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 3",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f",
+              "entityId": "sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2",
               "kind": "sketchEntity",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
-            "centerPointId": "sketch_point_4_circle-center_95f9b4f5-64f1-4cfc-a168-513a42c674c4",
-            "entityId": "sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d",
+            "centerPointId": "sketch_point_4_circle-center_af8c763a-e199-4f3d-a0f1-6dda3214d6ad",
+            "entityId": "sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 4",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d",
+              "entityId": "sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa",
               "kind": "sketchEntity",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3",
-          "sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4",
-          "sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f",
-          "sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d"
+          "sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3",
+          "sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5",
+          "sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2",
+          "sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa"
         ],
         "pointIds": [
-          "sketch_point_1_circle-center_84dd7b2f-80aa-42da-ba51-f57966e3f7ab",
-          "sketch_point_2_circle-center_ec9d6644-ed13-42c4-8d40-9740fc82a70f",
-          "sketch_point_3_circle-center_b860ed09-bdab-4c34-9a7b-c67b037eb459",
-          "sketch_point_4_circle-center_95f9b4f5-64f1-4cfc-a168-513a42c674c4"
+          "sketch_point_1_circle-center_3f57f447-ee13-4aaa-ad41-5384c064ed98",
+          "sketch_point_2_circle-center_2c454cf8-88fe-4f65-8f10-8404b53762a4",
+          "sketch_point_3_circle-center_775d7852-e460-4679-8966-f038451471d7",
+          "sketch_point_4_circle-center_af8c763a-e199-4f3d-a0f1-6dda3214d6ad"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Circle 1 center",
-            "pointId": "sketch_point_1_circle-center_84dd7b2f-80aa-42da-ba51-f57966e3f7ab",
+            "pointId": "sketch_point_1_circle-center_3f57f447-ee13-4aaa-ad41-5384c064ed98",
             "position": [
               -20,
               16
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_circle-center_84dd7b2f-80aa-42da-ba51-f57966e3f7ab",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "pointId": "sketch_point_1_circle-center_3f57f447-ee13-4aaa-ad41-5384c064ed98",
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 2 center",
-            "pointId": "sketch_point_2_circle-center_ec9d6644-ed13-42c4-8d40-9740fc82a70f",
+            "pointId": "sketch_point_2_circle-center_2c454cf8-88fe-4f65-8f10-8404b53762a4",
             "position": [
               -20,
               35
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_2_circle-center_ec9d6644-ed13-42c4-8d40-9740fc82a70f",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "pointId": "sketch_point_2_circle-center_2c454cf8-88fe-4f65-8f10-8404b53762a4",
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 3 center",
-            "pointId": "sketch_point_3_circle-center_b860ed09-bdab-4c34-9a7b-c67b037eb459",
+            "pointId": "sketch_point_3_circle-center_775d7852-e460-4679-8966-f038451471d7",
             "position": [
               20,
               16
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_3_circle-center_b860ed09-bdab-4c34-9a7b-c67b037eb459",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "pointId": "sketch_point_3_circle-center_775d7852-e460-4679-8966-f038451471d7",
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 4 center",
-            "pointId": "sketch_point_4_circle-center_95f9b4f5-64f1-4cfc-a168-513a42c674c4",
+            "pointId": "sketch_point_4_circle-center_af8c763a-e199-4f3d-a0f1-6dda3214d6ad",
             "position": [
               20,
               35
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_4_circle-center_95f9b4f5-64f1-4cfc-a168-513a42c674c4",
-              "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+              "pointId": "sketch_point_4_circle-center_af8c763a-e199-4f3d-a0f1-6dda3214d6ad",
+              "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
             }
           }
         ],
@@ -1087,7 +1200,7 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9"
+      "sketchId": "sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb"
     },
     {
       "definition": {
@@ -1098,154 +1211,154 @@
         "dimensions": [],
         "entities": [
           {
-            "centerPointId": "sketch_point_1_circle-center_f7fb5b87-a9e2-4ea9-91a4-201c7b132718",
-            "entityId": "sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326",
+            "centerPointId": "sketch_point_1_circle-center_41d67ef7-5fa1-43dd-87ef-f8305b5e73d8",
+            "entityId": "sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 1",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326",
+              "entityId": "sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068",
               "kind": "sketchEntity",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
-            "centerPointId": "sketch_point_2_circle-center_0a12af42-0572-4941-947f-7043c00bc318",
-            "entityId": "sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db",
+            "centerPointId": "sketch_point_2_circle-center_b60ee856-8465-4c29-8374-c009193e827a",
+            "entityId": "sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 2",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db",
+              "entityId": "sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057",
               "kind": "sketchEntity",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
-            "centerPointId": "sketch_point_3_circle-center_9daee801-5014-4752-8cc5-ea6d080b289a",
-            "entityId": "sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8",
+            "centerPointId": "sketch_point_3_circle-center_d99c4e86-1759-482f-a5df-5d61903adb8d",
+            "entityId": "sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 3",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8",
+              "entityId": "sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6",
               "kind": "sketchEntity",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
-            "centerPointId": "sketch_point_4_circle-center_90780e45-e864-4f08-aac0-97857e636056",
-            "entityId": "sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b",
+            "centerPointId": "sketch_point_4_circle-center_42b2b8ee-1737-4663-b496-9fdbfd72d591",
+            "entityId": "sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 4",
             "radius": 3.1999999999999993,
             "target": {
-              "entityId": "sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b",
+              "entityId": "sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222",
               "kind": "sketchEntity",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
-            "centerPointId": "sketch_point_5_circle-center_9bc1a81b-1a91-4483-a6e9-ddbbafad9ece",
-            "entityId": "sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1",
+            "centerPointId": "sketch_point_5_circle-center_6c898e99-fd95-4172-8024-7aa648400cd5",
+            "entityId": "sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42",
             "isConstruction": false,
             "kind": "circle",
             "label": "Circle 5",
             "radius": 9,
             "target": {
-              "entityId": "sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1",
+              "entityId": "sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42",
               "kind": "sketchEntity",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326",
-          "sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db",
-          "sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8",
-          "sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b",
-          "sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1"
+          "sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068",
+          "sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057",
+          "sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6",
+          "sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222",
+          "sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42"
         ],
         "pointIds": [
-          "sketch_point_1_circle-center_f7fb5b87-a9e2-4ea9-91a4-201c7b132718",
-          "sketch_point_2_circle-center_0a12af42-0572-4941-947f-7043c00bc318",
-          "sketch_point_3_circle-center_9daee801-5014-4752-8cc5-ea6d080b289a",
-          "sketch_point_4_circle-center_90780e45-e864-4f08-aac0-97857e636056",
-          "sketch_point_5_circle-center_9bc1a81b-1a91-4483-a6e9-ddbbafad9ece"
+          "sketch_point_1_circle-center_41d67ef7-5fa1-43dd-87ef-f8305b5e73d8",
+          "sketch_point_2_circle-center_b60ee856-8465-4c29-8374-c009193e827a",
+          "sketch_point_3_circle-center_d99c4e86-1759-482f-a5df-5d61903adb8d",
+          "sketch_point_4_circle-center_42b2b8ee-1737-4663-b496-9fdbfd72d591",
+          "sketch_point_5_circle-center_6c898e99-fd95-4172-8024-7aa648400cd5"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Circle 1 center",
-            "pointId": "sketch_point_1_circle-center_f7fb5b87-a9e2-4ea9-91a4-201c7b132718",
+            "pointId": "sketch_point_1_circle-center_41d67ef7-5fa1-43dd-87ef-f8305b5e73d8",
             "position": [
               -20,
               17
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_circle-center_f7fb5b87-a9e2-4ea9-91a4-201c7b132718",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "pointId": "sketch_point_1_circle-center_41d67ef7-5fa1-43dd-87ef-f8305b5e73d8",
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 2 center",
-            "pointId": "sketch_point_2_circle-center_0a12af42-0572-4941-947f-7043c00bc318",
+            "pointId": "sketch_point_2_circle-center_b60ee856-8465-4c29-8374-c009193e827a",
             "position": [
               -20,
               39
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_2_circle-center_0a12af42-0572-4941-947f-7043c00bc318",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "pointId": "sketch_point_2_circle-center_b60ee856-8465-4c29-8374-c009193e827a",
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 3 center",
-            "pointId": "sketch_point_3_circle-center_9daee801-5014-4752-8cc5-ea6d080b289a",
+            "pointId": "sketch_point_3_circle-center_d99c4e86-1759-482f-a5df-5d61903adb8d",
             "position": [
               20,
               17
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_3_circle-center_9daee801-5014-4752-8cc5-ea6d080b289a",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "pointId": "sketch_point_3_circle-center_d99c4e86-1759-482f-a5df-5d61903adb8d",
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 4 center",
-            "pointId": "sketch_point_4_circle-center_90780e45-e864-4f08-aac0-97857e636056",
+            "pointId": "sketch_point_4_circle-center_42b2b8ee-1737-4663-b496-9fdbfd72d591",
             "position": [
               20,
               39
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_4_circle-center_90780e45-e864-4f08-aac0-97857e636056",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "pointId": "sketch_point_4_circle-center_42b2b8ee-1737-4663-b496-9fdbfd72d591",
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           },
           {
             "isConstruction": false,
             "label": "Circle 5 center",
-            "pointId": "sketch_point_5_circle-center_9bc1a81b-1a91-4483-a6e9-ddbbafad9ece",
+            "pointId": "sketch_point_5_circle-center_6c898e99-fd95-4172-8024-7aa648400cd5",
             "position": [
               0,
               28
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_5_circle-center_9bc1a81b-1a91-4483-a6e9-ddbbafad9ece",
-              "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+              "pointId": "sketch_point_5_circle-center_6c898e99-fd95-4172-8024-7aa648400cd5",
+              "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
             }
           }
         ],
@@ -1286,7 +1399,7 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_0e75ace5-dad5-4630-b48d-1745e1028356"
+      "sketchId": "sketch_0b7ce409-7396-424a-9535-ed0505515169"
     },
     {
       "definition": {
@@ -1297,96 +1410,96 @@
         "dimensions": [],
         "entities": [
           {
-            "endPointId": "sketch_point_2_line-start_945eb199-aba2-4b59-ba03-0ae6a4497a0d",
-            "entityId": "sketch_entity_1_line_dac289e2-ed13-49f0-ab79-54ecf03cc82e",
+            "endPointId": "sketch_point_2_line-start_50a618c7-13fa-4eaf-9b44-0c654e52914f",
+            "entityId": "sketch_entity_1_line_34aa58a2-e200-4dd4-82ec-5a91b620534d",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Left rib segment 1",
-            "startPointId": "sketch_point_1_line-start_3c5e3d85-1c4d-416e-9389-a4cf3d4010d9",
+            "startPointId": "sketch_point_1_line-start_82342d6e-86bb-4e06-b8e3-c34f51687b46",
             "target": {
-              "entityId": "sketch_entity_1_line_dac289e2-ed13-49f0-ab79-54ecf03cc82e",
+              "entityId": "sketch_entity_1_line_34aa58a2-e200-4dd4-82ec-5a91b620534d",
               "kind": "sketchEntity",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           },
           {
-            "endPointId": "sketch_point_3_line-start_c13ad65d-d91e-4d32-bf86-e0dc5971654e",
-            "entityId": "sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600",
+            "endPointId": "sketch_point_3_line-start_f9557255-8b8a-4ad7-adf0-474a3211b301",
+            "entityId": "sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Left rib segment 2",
-            "startPointId": "sketch_point_2_line-start_945eb199-aba2-4b59-ba03-0ae6a4497a0d",
+            "startPointId": "sketch_point_2_line-start_50a618c7-13fa-4eaf-9b44-0c654e52914f",
             "target": {
-              "entityId": "sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600",
+              "entityId": "sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721",
               "kind": "sketchEntity",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           },
           {
-            "endPointId": "sketch_point_1_line-start_3c5e3d85-1c4d-416e-9389-a4cf3d4010d9",
-            "entityId": "sketch_entity_3_line_c4603ea5-a8cc-43fc-8a94-59ae9556334b",
+            "endPointId": "sketch_point_1_line-start_82342d6e-86bb-4e06-b8e3-c34f51687b46",
+            "entityId": "sketch_entity_3_line_17f8f33a-280d-43a6-878e-0f26056a7e34",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Left rib segment 3",
-            "startPointId": "sketch_point_3_line-start_c13ad65d-d91e-4d32-bf86-e0dc5971654e",
+            "startPointId": "sketch_point_3_line-start_f9557255-8b8a-4ad7-adf0-474a3211b301",
             "target": {
-              "entityId": "sketch_entity_3_line_c4603ea5-a8cc-43fc-8a94-59ae9556334b",
+              "entityId": "sketch_entity_3_line_17f8f33a-280d-43a6-878e-0f26056a7e34",
               "kind": "sketchEntity",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_line_dac289e2-ed13-49f0-ab79-54ecf03cc82e",
-          "sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600",
-          "sketch_entity_3_line_c4603ea5-a8cc-43fc-8a94-59ae9556334b"
+          "sketch_entity_1_line_34aa58a2-e200-4dd4-82ec-5a91b620534d",
+          "sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721",
+          "sketch_entity_3_line_17f8f33a-280d-43a6-878e-0f26056a7e34"
         ],
         "pointIds": [
-          "sketch_point_1_line-start_3c5e3d85-1c4d-416e-9389-a4cf3d4010d9",
-          "sketch_point_2_line-start_945eb199-aba2-4b59-ba03-0ae6a4497a0d",
-          "sketch_point_3_line-start_c13ad65d-d91e-4d32-bf86-e0dc5971654e"
+          "sketch_point_1_line-start_82342d6e-86bb-4e06-b8e3-c34f51687b46",
+          "sketch_point_2_line-start_50a618c7-13fa-4eaf-9b44-0c654e52914f",
+          "sketch_point_3_line-start_f9557255-8b8a-4ad7-adf0-474a3211b301"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Left rib 1 start",
-            "pointId": "sketch_point_1_line-start_3c5e3d85-1c4d-416e-9389-a4cf3d4010d9",
+            "pointId": "sketch_point_1_line-start_82342d6e-86bb-4e06-b8e3-c34f51687b46",
             "position": [
               4,
               4
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_line-start_3c5e3d85-1c4d-416e-9389-a4cf3d4010d9",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "pointId": "sketch_point_1_line-start_82342d6e-86bb-4e06-b8e3-c34f51687b46",
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           },
           {
             "isConstruction": false,
             "label": "Left rib 2 start",
-            "pointId": "sketch_point_2_line-start_945eb199-aba2-4b59-ba03-0ae6a4497a0d",
+            "pointId": "sketch_point_2_line-start_50a618c7-13fa-4eaf-9b44-0c654e52914f",
             "position": [
               36,
               4
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_2_line-start_945eb199-aba2-4b59-ba03-0ae6a4497a0d",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "pointId": "sketch_point_2_line-start_50a618c7-13fa-4eaf-9b44-0c654e52914f",
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           },
           {
             "isConstruction": false,
             "label": "Left rib 3 start",
-            "pointId": "sketch_point_3_line-start_c13ad65d-d91e-4d32-bf86-e0dc5971654e",
+            "pointId": "sketch_point_3_line-start_f9557255-8b8a-4ad7-adf0-474a3211b301",
             "position": [
               4,
               43
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_3_line-start_c13ad65d-d91e-4d32-bf86-e0dc5971654e",
-              "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+              "pointId": "sketch_point_3_line-start_f9557255-8b8a-4ad7-adf0-474a3211b301",
+              "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
             }
           }
         ],
@@ -1427,7 +1540,7 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8"
+      "sketchId": "sketch_c8a9d992-552c-436e-99f1-a8d57727b62a"
     },
     {
       "definition": {
@@ -1438,96 +1551,96 @@
         "dimensions": [],
         "entities": [
           {
-            "endPointId": "sketch_point_2_line-start_047517aa-7e92-457f-9b2f-cba3551de7fe",
-            "entityId": "sketch_entity_1_line_8e9d7c90-3486-4dfe-8b65-ffc3b37cef0e",
+            "endPointId": "sketch_point_2_line-start_95c16d6e-587c-451c-9d3f-907fad8ec7bb",
+            "entityId": "sketch_entity_1_line_102ded30-96bd-48ea-ae39-aea0144e4fb4",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Right rib segment 1",
-            "startPointId": "sketch_point_1_line-start_70610455-645d-4668-9ae7-2cc0add9ccb4",
+            "startPointId": "sketch_point_1_line-start_abb4785f-a0ce-4076-8793-1ac4d68ffa4c",
             "target": {
-              "entityId": "sketch_entity_1_line_8e9d7c90-3486-4dfe-8b65-ffc3b37cef0e",
+              "entityId": "sketch_entity_1_line_102ded30-96bd-48ea-ae39-aea0144e4fb4",
               "kind": "sketchEntity",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           },
           {
-            "endPointId": "sketch_point_3_line-start_1c4f1717-175b-4be8-ba83-343bc212c183",
-            "entityId": "sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260",
+            "endPointId": "sketch_point_3_line-start_4a8ea6a0-fb26-45f6-b0c2-4fd806a2b679",
+            "entityId": "sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Right rib segment 2",
-            "startPointId": "sketch_point_2_line-start_047517aa-7e92-457f-9b2f-cba3551de7fe",
+            "startPointId": "sketch_point_2_line-start_95c16d6e-587c-451c-9d3f-907fad8ec7bb",
             "target": {
-              "entityId": "sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260",
+              "entityId": "sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7",
               "kind": "sketchEntity",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           },
           {
-            "endPointId": "sketch_point_1_line-start_70610455-645d-4668-9ae7-2cc0add9ccb4",
-            "entityId": "sketch_entity_3_line_df56f0e0-865d-49df-9d95-f224c1df6f10",
+            "endPointId": "sketch_point_1_line-start_abb4785f-a0ce-4076-8793-1ac4d68ffa4c",
+            "entityId": "sketch_entity_3_line_6758937f-34a6-48f0-a535-bd7e3fc3e336",
             "isConstruction": false,
             "kind": "lineSegment",
             "label": "Right rib segment 3",
-            "startPointId": "sketch_point_3_line-start_1c4f1717-175b-4be8-ba83-343bc212c183",
+            "startPointId": "sketch_point_3_line-start_4a8ea6a0-fb26-45f6-b0c2-4fd806a2b679",
             "target": {
-              "entityId": "sketch_entity_3_line_df56f0e0-865d-49df-9d95-f224c1df6f10",
+              "entityId": "sketch_entity_3_line_6758937f-34a6-48f0-a535-bd7e3fc3e336",
               "kind": "sketchEntity",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           }
         ],
         "entityIds": [
-          "sketch_entity_1_line_8e9d7c90-3486-4dfe-8b65-ffc3b37cef0e",
-          "sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260",
-          "sketch_entity_3_line_df56f0e0-865d-49df-9d95-f224c1df6f10"
+          "sketch_entity_1_line_102ded30-96bd-48ea-ae39-aea0144e4fb4",
+          "sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7",
+          "sketch_entity_3_line_6758937f-34a6-48f0-a535-bd7e3fc3e336"
         ],
         "pointIds": [
-          "sketch_point_1_line-start_70610455-645d-4668-9ae7-2cc0add9ccb4",
-          "sketch_point_2_line-start_047517aa-7e92-457f-9b2f-cba3551de7fe",
-          "sketch_point_3_line-start_1c4f1717-175b-4be8-ba83-343bc212c183"
+          "sketch_point_1_line-start_abb4785f-a0ce-4076-8793-1ac4d68ffa4c",
+          "sketch_point_2_line-start_95c16d6e-587c-451c-9d3f-907fad8ec7bb",
+          "sketch_point_3_line-start_4a8ea6a0-fb26-45f6-b0c2-4fd806a2b679"
         ],
         "points": [
           {
             "isConstruction": false,
             "label": "Right rib 1 start",
-            "pointId": "sketch_point_1_line-start_70610455-645d-4668-9ae7-2cc0add9ccb4",
+            "pointId": "sketch_point_1_line-start_abb4785f-a0ce-4076-8793-1ac4d68ffa4c",
             "position": [
               4,
               4
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_1_line-start_70610455-645d-4668-9ae7-2cc0add9ccb4",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "pointId": "sketch_point_1_line-start_abb4785f-a0ce-4076-8793-1ac4d68ffa4c",
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           },
           {
             "isConstruction": false,
             "label": "Right rib 2 start",
-            "pointId": "sketch_point_2_line-start_047517aa-7e92-457f-9b2f-cba3551de7fe",
+            "pointId": "sketch_point_2_line-start_95c16d6e-587c-451c-9d3f-907fad8ec7bb",
             "position": [
               36,
               4
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_2_line-start_047517aa-7e92-457f-9b2f-cba3551de7fe",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "pointId": "sketch_point_2_line-start_95c16d6e-587c-451c-9d3f-907fad8ec7bb",
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           },
           {
             "isConstruction": false,
             "label": "Right rib 3 start",
-            "pointId": "sketch_point_3_line-start_1c4f1717-175b-4be8-ba83-343bc212c183",
+            "pointId": "sketch_point_3_line-start_4a8ea6a0-fb26-45f6-b0c2-4fd806a2b679",
             "position": [
               4,
               43
             ],
             "target": {
               "kind": "sketchPoint",
-              "pointId": "sketch_point_3_line-start_1c4f1717-175b-4be8-ba83-343bc212c183",
-              "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+              "pointId": "sketch_point_3_line-start_4a8ea6a0-fb26-45f6-b0c2-4fd806a2b679",
+              "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
             }
           }
         ],
@@ -1568,7 +1681,7 @@
           "kind": "construction"
         }
       },
-      "sketchId": "sketch_32570a34-edee-4286-bbf9-00253f673555"
+      "sketchId": "sketch_61fbbbe0-e787-422f-bc20-434d35e43585"
     }
   ],
   "topologyLineage": [
@@ -1579,7 +1692,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:cap:first:face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:cap:first:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1589,7 +1702,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:cap:last:face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:cap:last:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1599,7 +1712,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1609,7 +1722,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335:first-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1619,7 +1732,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-bottom_f7e8aea7-ccc1-41f3-a21e-0af10c9f1335:last-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-bottom_c7b7b65b-07f0-4adc-8fc0-f87558171b49:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1629,7 +1742,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1639,7 +1752,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea:first-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1649,7 +1762,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-right_b0ca9f56-aaa6-4089-b863-86c8516b31ea:last-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-right_67fabc45-51cd-4335-a1db-efb3513dc9f2:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1659,7 +1772,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1669,7 +1782,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3:first-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1679,7 +1792,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-top_5be991e5-5b50-40f6-9911-6780f3bc73c3:last-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-top_c2721b0a-0d1e-4e4b-9e29-fdfd661d2485:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1689,7 +1802,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1699,7 +1812,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947:first-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1709,7 +1822,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-entity:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_entity_1_rect-left_f4c610ae-a975-4d96-850c-298e3361f947:last-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-entity:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_entity_1_rect-left_3813d612-2700-4893-9620-cf7363a06c5e:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1719,7 +1832,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1729,7 +1842,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee:first-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1739,7 +1852,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-left_7664bdea-5b65-4909-8972-4dae9025e4ee:last-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-left_c75c1237-4a4e-4a11-b00f-515f5bf87b71:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1749,7 +1862,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1759,7 +1872,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87:first-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1769,7 +1882,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-bottom-right_e98e2e17-c271-4ead-a293-9cda366fce87:last-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-bottom-right_7f954546-e2bd-48fb-8e3e-c491ffcaa7e6:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1779,7 +1892,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1789,7 +1902,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493:first-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1799,7 +1912,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-right_c93e76b2-5e64-41c4-aa33-3eeb671e4493:last-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-right_49224445-da10-4128-940d-dae3b27bd173:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1809,7 +1922,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1819,7 +1932,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311:first-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1829,7 +1942,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-1:profile-region:region_7c7e5e5a8b45d9c5e9889340323e2f32:end:one-side-end:sketch-point:sketch_ea990bd2-7e37-4013-b684-98c8f0f36936:sketch_point_1_rect-top-left_870f2460-d772-4f4b-840b-d95012698311:last-vertex",
+              "sourceKey": "extrude:feature_extrude-1:profile-region:region_f3cd512c3a201eae4bccbce94e62cf58:end:one-side-end:sketch-point:sketch_117df778-cde5-4ea4-8076-6b570ceadfcd:sketch_point_1_rect-top-left_f28e070d-de9e-43e7-b3d6-1bb1c3a53d43:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1885,7 +1998,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:cap:first:face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:cap:first:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1895,7 +2008,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:cap:last:face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:cap:last:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1905,7 +2018,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1915,7 +2028,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288:first-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1925,7 +2038,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-bottom_eed42a27-15b5-4ce6-b069-a096cd324288:last-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-bottom_207a7b21-dd13-41b1-82c3-a1c135d08b55:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1935,7 +2048,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1945,7 +2058,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9:first-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1955,7 +2068,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-right_a3034841-3f72-49a2-9e16-5045e5a6c4a9:last-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-right_07b5f095-c622-45ea-afb3-1fa26d5279f8:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1965,7 +2078,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1980,7 +2093,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-top_e91548c9-a17d-49af-85cd-8b822b0c8a66:last-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-top_2866c180-7abb-49e7-a0c9-bc16fb089c5c:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -1990,7 +2103,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2000,7 +2113,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637:first-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2010,7 +2123,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-entity:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_entity_1_rect-left_6a7246b7-4a95-410f-bded-26cd4a6db637:last-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-entity:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_entity_1_rect-left_d73c9331-f195-446d-a05f-3313e4842b36:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2020,7 +2133,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2030,7 +2143,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c:first-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2040,7 +2153,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-left_e1335cc4-e045-4709-9b37-435202510f8c:last-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-left_6468cd89-8c7c-4869-8d89-98c15ae73e92:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2050,7 +2163,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2060,7 +2173,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01:first-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a:first-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2070,7 +2183,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-bottom-right_d1828f9d-587b-4301-8ec2-160a52e8fe01:last-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-bottom-right_b1b3a5d1-837c-4e31-bfdc-25d1bd51a08a:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2080,7 +2193,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2095,7 +2208,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-top-right_343a3d68-4f51-4adb-8fdc-78e453258947:last-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-top-right_baa5f312-f8d1-4864-8704-4a46f0f524a1:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2105,7 +2218,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37:generated-side-edge",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68:generated-side-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2120,7 +2233,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-2:profile-region:region_6c57798f92cd28f50b36212876119ab9:end:one-side-end:sketch-point:sketch_12c0d3c3-7771-4309-8adc-9f21a9322df4:sketch_point_1_rect-top-left_766fbb42-815f-4465-ba11-b62f02f4fa37:last-vertex",
+              "sourceKey": "extrude:feature_extrude-2:profile-region:region_9b0223b723420ad12bfec784662bbd51:end:one-side-end:sketch-point:sketch_ad47ce1d-d0ee-49f1-a5b0-561bea57eb37:sketch_point_1_rect-top-left_82401b32-def9-4eec-94a1-1edc981d7e68:last-vertex",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2538,7 +2651,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_9d21f964bafb6ee4c356e0a6642aa17e:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_7ab4a491b15d00889600ab1ff5091ec4:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2548,7 +2661,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_9d21f964bafb6ee4c356e0a6642aa17e:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3:first-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_7ab4a491b15d00889600ab1ff5091ec4:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2558,7 +2671,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_9d21f964bafb6ee4c356e0a6642aa17e:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_1_circle_2c8ae11a-26ea-49ea-9e8a-af93fbc931e3:last-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_7ab4a491b15d00889600ab1ff5091ec4:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_1_circle_8ac78e7a-3422-4cce-883a-3674188be7f3:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2568,7 +2681,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ed6d02ba9ed2bbde20dffc2fa88942ad:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_57199d54ea28bb6d9f409d8f0c4820f9:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2578,7 +2691,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ed6d02ba9ed2bbde20dffc2fa88942ad:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4:first-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_57199d54ea28bb6d9f409d8f0c4820f9:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2588,7 +2701,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ed6d02ba9ed2bbde20dffc2fa88942ad:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_2_circle_b0fb0fd2-0b44-4ee4-84d8-49b8e1b4f8b4:last-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_57199d54ea28bb6d9f409d8f0c4820f9:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_2_circle_83584d64-f746-4b37-ac8d-ca80ab1a7aa5:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2598,7 +2711,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_3c8e0f31037f0c9792db3c0b2fca3c3b:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_01a5840d9f8cd85eb362f6c67e4c7a40:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2608,7 +2721,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_3c8e0f31037f0c9792db3c0b2fca3c3b:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f:first-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_01a5840d9f8cd85eb362f6c67e4c7a40:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2618,7 +2731,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_3c8e0f31037f0c9792db3c0b2fca3c3b:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_3_circle_26a539f1-6a0b-48cc-b57f-2058d5e0ef1f:last-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_01a5840d9f8cd85eb362f6c67e4c7a40:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_3_circle_30128e0a-6b0c-4749-bc66-b92eeb8b17e2:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2628,7 +2741,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ccbc92ac6f3aaf21d2ec9d3a5dc11950:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_38e7a253194ea0df237aef658218c649:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2638,7 +2751,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ccbc92ac6f3aaf21d2ec9d3a5dc11950:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d:first-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_38e7a253194ea0df237aef658218c649:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -2648,7 +2761,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-3:profile-region:region_ccbc92ac6f3aaf21d2ec9d3a5dc11950:end:one-side-end:sketch-entity:sketch_3ca253cb-bf70-4553-813f-3800a6cfe8e9:sketch_entity_4_circle_40a77a45-8738-4fa4-a5e7-3bfc2555892d:last-edge",
+              "sourceKey": "extrude:feature_extrude-3:profile-region:region_38e7a253194ea0df237aef658218c649:end:one-side-end:sketch-entity:sketch_1a75bfba-3e3b-428c-8742-ad0f76215feb:sketch_entity_4_circle_c29606ac-e1ea-4fa5-92a3-83ebe13770fa:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3500,7 +3613,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_fe8c6fd9419c511c41778020a69b257a:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_861b3ac189df6294da28e32a6e16e355:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3510,7 +3623,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_fe8c6fd9419c511c41778020a69b257a:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1:first-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_861b3ac189df6294da28e32a6e16e355:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3520,7 +3633,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_fe8c6fd9419c511c41778020a69b257a:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_5_circle_ac0f9dd2-80a1-4feb-880c-a512352c82f1:last-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_861b3ac189df6294da28e32a6e16e355:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_5_circle_10474be2-9587-4e43-941b-a02742376f42:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3530,7 +3643,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ab9522a84f19f7a81c5c750d218b688:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_afd222e78ef2e138ddbdb8593b24e72d:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3540,7 +3653,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ab9522a84f19f7a81c5c750d218b688:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326:first-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_afd222e78ef2e138ddbdb8593b24e72d:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3550,7 +3663,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ab9522a84f19f7a81c5c750d218b688:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_1_circle_43d3d778-1adf-478c-97bc-ec87217c2326:last-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_afd222e78ef2e138ddbdb8593b24e72d:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_1_circle_503c9d2f-ed0f-4273-a517-bba265097068:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3560,7 +3673,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_adf4a876c58dfaf8f8af938cebdf6ab3:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7e6c12c4da9b79eeae3902a73ccd77b7:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3570,7 +3683,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_adf4a876c58dfaf8f8af938cebdf6ab3:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db:first-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7e6c12c4da9b79eeae3902a73ccd77b7:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3580,7 +3693,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_adf4a876c58dfaf8f8af938cebdf6ab3:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_2_circle_d1571a22-2c4a-4a79-be7e-6aea7c5ab8db:last-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7e6c12c4da9b79eeae3902a73ccd77b7:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_2_circle_11e78e6a-35ba-4144-afd8-efe4ce162057:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3590,7 +3703,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8a939cdc6b236b2480c9a977a514ee51:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ec88dbcdcc75dd32d97ec64133c2f4f:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3600,7 +3713,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8a939cdc6b236b2480c9a977a514ee51:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8:first-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ec88dbcdcc75dd32d97ec64133c2f4f:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3610,7 +3723,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8a939cdc6b236b2480c9a977a514ee51:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_3_circle_34b5dcd5-9e3c-4449-aac0-7e1c3f3547a8:last-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_7ec88dbcdcc75dd32d97ec64133c2f4f:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_3_circle_d94e90fe-70ef-4da1-9291-a7ba6f8129f6:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3620,7 +3733,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_4502fe110310962c0e6b05ddc3b0ed56:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8674f31e8b4da8d73001f3ac727bf188:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3630,7 +3743,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_4502fe110310962c0e6b05ddc3b0ed56:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b:first-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8674f31e8b4da8d73001f3ac727bf188:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -3640,7 +3753,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-4:profile-region:region_4502fe110310962c0e6b05ddc3b0ed56:end:one-side-end:sketch-entity:sketch_0e75ace5-dad5-4630-b48d-1745e1028356:sketch_entity_4_circle_9c0a9f5b-b462-4be4-8841-c491d6aa9c8b:last-edge",
+              "sourceKey": "extrude:feature_extrude-4:profile-region:region_8674f31e8b4da8d73001f3ac727bf188:end:one-side-end:sketch-entity:sketch_0b7ce409-7396-424a-9535-ed0505515169:sketch_entity_4_circle_4d29d011-79ba-41b6-a55d-0e319d35d222:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -5006,7 +5119,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-5:profile-region:region_9e3e72261aa4fc749e2e747a13ef1a36:end:one-side-end:cap:first:face",
+              "sourceKey": "extrude:feature_extrude-5:profile-region:region_cf6f7a60ea33fd4a8c027081abd4ee84:end:one-side-end:cap:first:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -5031,7 +5144,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-5:profile-region:region_9e3e72261aa4fc749e2e747a13ef1a36:end:one-side-end:cap:last:face",
+              "sourceKey": "extrude:feature_extrude-5:profile-region:region_cf6f7a60ea33fd4a8c027081abd4ee84:end:one-side-end:cap:last:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -5056,7 +5169,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-5:profile-region:region_9e3e72261aa4fc749e2e747a13ef1a36:end:one-side-end:sketch-entity:sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8:sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-5:profile-region:region_cf6f7a60ea33fd4a8c027081abd4ee84:end:one-side-end:sketch-entity:sketch_c8a9d992-552c-436e-99f1-a8d57727b62a:sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -5076,7 +5189,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-5:profile-region:region_9e3e72261aa4fc749e2e747a13ef1a36:end:one-side-end:sketch-entity:sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8:sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600:first-edge",
+              "sourceKey": "extrude:feature_extrude-5:profile-region:region_cf6f7a60ea33fd4a8c027081abd4ee84:end:one-side-end:sketch-entity:sketch_c8a9d992-552c-436e-99f1-a8d57727b62a:sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -5096,7 +5209,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-5:profile-region:region_9e3e72261aa4fc749e2e747a13ef1a36:end:one-side-end:sketch-entity:sketch_8eabb27c-bbe8-43f2-a199-78e9adcb99d8:sketch_entity_2_line_6cbb0ddd-0f5a-4f9a-b561-e2b5d5a7c600:last-edge",
+              "sourceKey": "extrude:feature_extrude-5:profile-region:region_cf6f7a60ea33fd4a8c027081abd4ee84:end:one-side-end:sketch-entity:sketch_c8a9d992-552c-436e-99f1-a8d57727b62a:sketch_entity_2_line_c63e4fc5-e2f0-4a21-a76d-a6190d309721:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -7070,7 +7183,7 @@
           "outputSlot": "body_feature_extrude-1",
           "sourceTargets": [
             {
-              "sourceKey": "extrude:feature_extrude-6:profile-region:region_33a905dcc360c097da23dcd5cae71427:end:one-side-end:cap:first:face",
+              "sourceKey": "extrude:feature_extrude-6:profile-region:region_bf470345e22716fb583b1811e823c710:end:one-side-end:cap:first:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -7095,7 +7208,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-6:profile-region:region_33a905dcc360c097da23dcd5cae71427:end:one-side-end:cap:last:face",
+              "sourceKey": "extrude:feature_extrude-6:profile-region:region_bf470345e22716fb583b1811e823c710:end:one-side-end:cap:last:face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -7120,7 +7233,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-6:profile-region:region_33a905dcc360c097da23dcd5cae71427:end:one-side-end:sketch-entity:sketch_32570a34-edee-4286-bbf9-00253f673555:sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260:generated-side-face",
+              "sourceKey": "extrude:feature_extrude-6:profile-region:region_bf470345e22716fb583b1811e823c710:end:one-side-end:sketch-entity:sketch_61fbbbe0-e787-422f-bc20-434d35e43585:sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7:generated-side-face",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -7140,7 +7253,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-6:profile-region:region_33a905dcc360c097da23dcd5cae71427:end:one-side-end:sketch-entity:sketch_32570a34-edee-4286-bbf9-00253f673555:sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260:first-edge",
+              "sourceKey": "extrude:feature_extrude-6:profile-region:region_bf470345e22716fb583b1811e823c710:end:one-side-end:sketch-entity:sketch_61fbbbe0-e787-422f-bc20-434d35e43585:sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7:first-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
@@ -7160,7 +7273,7 @@
               ]
             },
             {
-              "sourceKey": "extrude:feature_extrude-6:profile-region:region_33a905dcc360c097da23dcd5cae71427:end:one-side-end:sketch-entity:sketch_32570a34-edee-4286-bbf9-00253f673555:sketch_entity_2_line_6653754f-83eb-42b0-a8f5-49df3e5a2260:last-edge",
+              "sourceKey": "extrude:feature_extrude-6:profile-region:region_bf470345e22716fb583b1811e823c710:end:one-side-end:sketch-entity:sketch_61fbbbe0-e787-422f-bc20-434d35e43585:sketch_entity_2_line_c0f39ad3-2679-4c4e-8872-53f154f55ec7:last-edge",
               "targets": [
                 {
                   "bodyId": "body_feature_extrude-1",
