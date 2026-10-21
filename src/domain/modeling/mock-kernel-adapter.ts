@@ -144,6 +144,7 @@ import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-
 import {
   bodyPaletteSlotForIndex,
   isBodyAppearance,
+  withAutoBodyAppearances,
   type BodyAppearance,
 } from "@/contracts/modeling/body-appearance";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
@@ -5590,11 +5591,20 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         object.label = label.label;
       }
     }
-    for (const record of document.bodyAppearances ?? []) {
-      const body = snapshot.document.bodies.find(
-        (entry) => entry.bodyId === record.bodyId,
-      );
-      if (body) body.appearance = structuredClone(record.appearance);
+    // Like the OCC kernel: unrecorded bodies (a document saved before body
+    // colours) get auto slots in document body order.
+    const appearances = withAutoBodyAppearances(
+      new Map(
+        (document.bodyAppearances ?? []).map((record) => [
+          record.bodyId,
+          record.appearance,
+        ]),
+      ),
+      document.bodyLabels.map((label) => label.bodyId),
+    );
+    for (const body of snapshot.document.bodies) {
+      const appearance = appearances.get(body.bodyId);
+      if (appearance) body.appearance = structuredClone(appearance);
     }
 
     rebuildFeatureTree(snapshot);

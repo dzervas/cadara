@@ -9,6 +9,7 @@ import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
+import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 
 const documentId = "doc_workspace";
 const bodyId = "body_part-1";
@@ -83,5 +84,108 @@ test("a body colour change is persisted, undone to the previous colour and redon
     expect(await liveAppearance()).toEqual(custom);
   } finally {
     service.dispose();
+  }
+});
+
+// cadara-01k.1 follow-up. Seam: the workbench "Open a copy" entry point
+// (`openDocumentCopyAsTab`: `repository.initialize` with the parsed file, then
+// the tab's service restores it) for a document saved before body colours.
+// Its bodies have kernel auto slots but the stored document has no
+// `bodyAppearances`: the first colour change and the first feature action
+// persist them as undoable actions, and a first timeline cursor move persists
+// them without becoming an undo entry.
+async function openOldDocumentCopy() {
+  const document = await createSeedAuthoredModelDocument(documentId);
+  delete document.bodyAppearances;
+  const repository = createMemoryDocumentRepository();
+  expect((await repository.initialize({ documentId, document })).ok).toBe(true);
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: documentId,
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  const snapshot = await service.getCurrentDocumentSnapshot();
+  const stored = async () => {
+    await service.waitForPersistence();
+    const loaded = await repository.load({
+      documentId,
+      seedDocument: document,
+    });
+    if (!loaded.ok) throw new Error("The stored document must load.");
+    return loaded.document;
+  };
+  const undoLabels = async () =>
+    (
+      await repository.getDurableHistoryAvailability(documentId)
+    ).undoEntries?.map((entry) => entry.label);
+  return { service, repository, snapshot, stored, undoLabels };
+}
+
+test("an old document's first colour change through the workbench open path persists and undoes", async () => {
+  const { service, repository, snapshot, stored, undoLabels } =
+    await openOldDocumentCopy();
+  try {
+    expect(await stored(), "premise: opening wrote nothing").not.toHaveProperty(
+      "bodyAppearances",
+    );
+    const set = await service.setBodyAppearance({
+      baseRevisionId: snapshot.document.revisionId,
+      bodyId,
+      appearance: { kind: "palette", slot: 4 },
+    });
+    expect(set.isOk() && set.value.revisionState.kind).toBe("accepted");
+    expect(storedAppearance(await stored())).toEqual({
+      kind: "palette",
+      slot: 4,
+    });
+    expect(await undoLabels()).toEqual(["Change Body Color"]);
+    expect((await service.getHistoryRestoreState()).kind).not.toBe("failed");
+
+    const undone = await repository.undoDurableHistory(documentId);
+    expect(undone?.ok && undone.document).not.toHaveProperty("bodyAppearances");
+    expect(
+      (await service.getCurrentDocumentSnapshot()).document.bodies[0]
+        ?.appearance,
+    ).toEqual({ kind: "palette", slot: 0 });
+  } finally {
+    service.dispose();
+  }
+});
+
+test("an old document's first feature action persists its auto slots; a first cursor move persists them without an undo entry", async () => {
+  const feature = await openOldDocumentCopy();
+  try {
+    const seed = feature.snapshot.document.features[0]!;
+    const created = await feature.service.createFeature({
+      baseRevisionId: feature.snapshot.document.revisionId,
+      definition: seed.definition,
+    });
+    expect(created.isOk() && created.value.revisionState.kind).toBe("accepted");
+    expect(storedAppearance(await feature.stored())).toEqual({
+      kind: "palette",
+      slot: 0,
+    });
+    expect(await feature.undoLabels()).toHaveLength(1);
+  } finally {
+    feature.service.dispose();
+  }
+
+  const cursor = await openOldDocumentCopy();
+  try {
+    const moved = await cursor.service.setFeatureCursor({
+      baseRevisionId: cursor.snapshot.document.revisionId,
+      cursor: { kind: "empty" },
+    });
+    expect(moved.isOk() && moved.value.revisionState.kind).toBe("accepted");
+    expect(storedAppearance(await cursor.stored())).toEqual({
+      kind: "palette",
+      slot: 0,
+    });
+    expect(
+      await cursor.undoLabels(),
+      "a timeline cursor move is never an undo entry",
+    ).toEqual([]);
+  } finally {
+    cursor.service.dispose();
   }
 });

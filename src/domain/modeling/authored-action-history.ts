@@ -643,8 +643,16 @@ export class AuthoredActionHistory {
     // Keep its checked writes in repository storage, but do not create an undo
     // entry or discard redo. Mixed authored actions retain their cursor writes
     // (e.g. creating a feature also selects it) for document validity.
+    // A document saved before body colours gets its auto palette slots on open
+    // (kernel state only) and persists them with its next write; when that write
+    // is a cursor move, creating those records is not authored intent either.
     const cursorOnly = identity.context.kind === "document" &&
-      writes.every((change) => change.address[0] === "cursor");
+      writes.some((change) => change.address[0] === "cursor") &&
+      writes.every(
+        (change) =>
+          change.address[0] === "cursor" ||
+          (change.address[0] === "bodyAppearances" && !change.before.exists),
+      );
     if (!cursorOnly) {
       ledger.undo.push(structuredClone(action));
       ledger.undo = ledger.undo.slice(-250);
