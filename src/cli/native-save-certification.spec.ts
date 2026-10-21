@@ -6,10 +6,14 @@ import { resolve } from "node:path";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 
-// Released-CLI production-kernel regression for cadara-3sq.1. A body rename on
-// the public nine-feature bracket rebuilds keyed topology lineage, whose
+// Released-CLI production-kernel regression for cadara-3sq.1. Setting the
+// timeline cursor of the public nine-feature bracket to the feature it already
+// is at re-runs every feature and rebuilds keyed topology lineage, whose
 // repository materialization orders keyed records differently from the live
-// export. Keep this row until a smaller genuinely red geometry fixture exists.
+// export; the saves fail unless certification compares keyed records by key.
+// (Until cadara-49h a body rename rebuilt lineage the same way and was this
+// reproduction; a rename now re-runs no feature and stays below as a control.)
+// Keep this row until a smaller genuinely red geometry fixture exists.
 const root = resolve(import.meta.dirname, "../..");
 const bracketSource = resolve(root, "landing/examples/bracket/model.cadara");
 const BRACKET_SHA256 =
@@ -64,8 +68,8 @@ const topologyId = (target: object) => {
   return ids.faceId ?? ids.edgeId ?? ids.vertexId ?? "";
 };
 
-it("saves, re-saves and reopens the public bracket after renaming its body to its existing label", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "cadara-bracket-rename-"));
+it("saves, re-saves and reopens the public bracket after re-setting its timeline cursor", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "cadara-bracket-cursor-"));
   try {
     const { path, body } = await bracketFixture(directory);
     const saved = resolve(directory, "saved.cadara");
@@ -79,24 +83,23 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
         as: "opened",
       },
       {
-        commandId: "rename",
-        operation: "body.rename",
+        commandId: "rebuild",
+        operation: "timeline.cursor.set",
         basis: { alias: "opened" },
-        bodyId: body.bodyId,
-        label: body.label,
+        cursor: { kind: "feature", featureId: "feature_chamfer-1" },
         intent: "fulfill",
-        as: "renamed",
+        as: "rebuilt",
       },
       {
         commandId: "save",
         operation: "document.save",
-        basis: { alias: "renamed" },
+        basis: { alias: "rebuilt" },
         path: saved,
       },
       {
         commandId: "save-again",
         operation: "document.save",
-        basis: { alias: "renamed" },
+        basis: { alias: "rebuilt" },
         path: savedAgain,
       },
     ]);
@@ -104,9 +107,9 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
       outcomes(first),
       JSON.stringify(first.results.map((r) => r.diagnostics)),
     ).toEqual(["completed", "completed", "completed", "completed"]);
-    const renamed = first.results[1]!;
-    expect(renamed.completion.persistence.kind).toBe("committed");
-    const accepted = renamed.completion.live.state;
+    const rebuilt = first.results[1]!;
+    expect(rebuilt.completion.persistence.kind).toBe("committed");
+    const accepted = rebuilt.completion.live.state;
     for (const [index, file] of [
       [2, saved],
       [3, savedAgain],
@@ -123,11 +126,11 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
         kind: "written",
         path: file,
       });
-      expect(save.discovery?.history).toEqual(renamed.discovery?.history);
+      expect(save.discovery?.history).toEqual(rebuilt.discovery?.history);
     }
     expect(await readFile(savedAgain)).toEqual(await readFile(saved));
 
-    const top = renamed.discovery!.model!.bodies[0]!.topology!.find(
+    const top = rebuilt.discovery!.model!.bodies[0]!.topology!.find(
       (entry) =>
         entry.entityClass === "face" &&
         entry.geometryType === "plane" &&
@@ -150,7 +153,7 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
       },
     ]);
     expect(outcomes(second)).toEqual(["completed", "completed"]);
-    const before = renamed.discovery!;
+    const before = rebuilt.discovery!;
     const after = second.results[0]!.discovery!;
     expect(
       after.references.filter((reference) => reference.target.kind === "body"),
@@ -192,6 +195,8 @@ it("saves, re-saves and reopens the public bracket after renaming its body to it
   }
 }, 240000);
 
+// Control: a body rename (label-only since cadara-49h) and a document rename
+// on the bracket save through the same certification.
 it("keeps the public bracket open/save and real document-rename controls passing", async () => {
   const directory = await mkdtemp(
     resolve(tmpdir(), "cadara-bracket-controls-"),
