@@ -34,7 +34,9 @@ For the complete structured `error` fields, read `<cli>/README.md`, **Errors and
 
 ## Reading or editing an existing recipe
 
-A recipe has `{version:1,operations:[...]}`. Each operation has a unique `commandId`; `as` gives its result a recipe-local alias. `basis`/`draft` aliases identify authority, while label selectors identify modelling targets. An alias is an immutable discovery snapshot, not a live variable. Preserve this distinction when editing a recipe or trace; an older authority can conflict even if a target label still exists.
+A recipe has `{version:1|2,operations:[...]}`. New SDK traces always emit v2; current readers replay unchanged v1, but old v1-only binaries explicitly refuse v2. Per-operation semantic versions and native files stay unchanged. Each operation has a unique `commandId`; `as` gives its result a recipe-local alias. `basis`/`draft` aliases identify immutable authority snapshots, not live variables; an older authority can conflict even if a target still exists.
+
+For v2 `recipeRef` targets, read README **Recipe versions and creation-output references** before editing. Preserve producer/owner/output slots: they identify supported authored creations, independent of labels or discovery order. Tangents use the spline's ordered fit-point occurrence slot, including repeated points, and resolve fresh handles after reopen. Unavailable outputs and pre-existing ambiguous asset references refuse explicitly. Keep structured command/path/reason evidence; semantic slots are not first/last discovery matches. Probes preserve bindings while omitting writes. `--schema` exposes both readable versions and the generated transport/reference shapes.
 
 Use `<cli>/README.md`, **Typed targets and owner-scoped discovery** and **Sketch-owner-qualified target selectors**, when reading/editing target fields. Resolve ambiguity by intended sketch owner or an exact discovered typed target; published geometry uses the publish alias as owner. For full basis/draft encoding and operation shape, consult the README and generated schema rather than hand-building a chain from guessed IDs.
 

@@ -1,10 +1,10 @@
 import type { SemanticCommand } from "@/contracts/semantic/schema";
-import type { SelectableCommand } from "./target-inputs";
+import type { RecipeCommand } from "@/contracts/semantic/recipe";
 import type { SemanticHandle } from "./sdk";
 
 export type OperationId = SemanticCommand["operation"];
 /** Distribute over arms AND their operation literals (undo/redo and svg/dxf share arms). */
-type CommandFor<K extends OperationId, T = SelectableCommand> = T extends { operation: infer O }
+type CommandFor<K extends OperationId, T = RecipeCommand> = T extends { operation: infer O }
   ? K extends O ? Omit<T, "operation"> & { operation: K } : never
   : never;
 type Fields<T> = T extends unknown
@@ -23,4 +23,4 @@ type OperationsAt<Paths extends string, Prefix extends string = ""> = {
     : OperationsAt<Paths extends `${K}.${infer Rest}` ? Rest : never, `${Prefix}${K}.`>;
 };
 export type Operations = OperationsAt<OperationId>;
-export type RecipeTrace = { version: 1; operations: readonly (SelectableCommand & { as?: string })[] };
+export type { RecipeTrace } from "@/contracts/semantic/recipe";

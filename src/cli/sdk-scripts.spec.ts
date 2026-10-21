@@ -73,6 +73,73 @@ finally { const cleanup = await doc.close(); if (cleanup.kind !== "closed") thro
   } finally { await rm(directory, { recursive: true, force: true }); }
 }, 120_000);
 
+test("built CLI replays exported duplicate-label and reopened tangent creation references", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-sdk-creation-refs-"));
+  try {
+    const script = join(directory, "references.ts");
+    await writeFile(script, `export default async (doc) => {
+      await doc.ops.sketch.begin({plane:"xy"});
+      const targets = [];
+      for (const position of [[0,0],[8,9]]) {
+        await doc.ops.sketch.author({primitive:{kind:"point",position},construction:false});
+        targets.push(doc.references({kind:"sketchPoint"}).at(-1).target);
+      }
+      for (const target of targets) await doc.ops.sketch.label.set({target,label:"duplicate"});
+      await doc.ops.sketch.construction.set({target:targets[0],construction:true});
+      await doc.ops.sketch.geometry.update({edit:{kind:"point",target:targets[1],position:[11,12]}});
+      await doc.ops.sketch.author({primitive:{kind:"spline",fitPoints:[[20,0],[23,2],[26,0]]},construction:false});
+      const editTangent = async (slot,vector) => {
+        const sketch = doc.current.discovery.sketch;
+        const entity = sketch.entities.find(e=>e.kind === "spline");
+        const tangent = entity.tangents[slot];
+        await doc.ops.sketch.geometry.update({edit:{kind:"tangent",target:{kind:"sketchTangentHandle",sketchId:sketch.sketchId,entityId:entity.entityId,pointId:tangent.pointId,occurrenceId:tangent.occurrenceId},vector}});
+      };
+      await editTangent(0,[2,0]);
+      await editTangent(2,[0,-3]);
+      const published = await doc.ops.sketch.publish({requireProfiles:false});
+      await doc.ops.sketch.open({sketchId:published.discovery.sketch.sketchId});
+      await editTangent(1,[4,1]);
+      return {points:doc.current.discovery.sketch.points,entities:doc.current.discovery.sketch.entities};
+    };`);
+    const run = await exec("bun", [cliEntry(), "script", script, "--trace", "references.json"], { cwd: directory, timeout: 60_000 });
+    const source = JSON.parse(run.stdout).value;
+    const trace = JSON.parse(await readFile(join(directory, "references.json"), "utf8"));
+    expect(trace.version).toBe(2);
+    expect(trace.operations.at(-1).edit.target).toMatchObject({ kind: "recipeRef", version: 1, output: { role: "splineOccurrence", index: 1 } });
+    const replay = await invokeCliDocumentRecipe(["references.json"], { cwd: directory, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+    expect(replay.code, replay.stderr).toBe(0);
+    const actual = JSON.parse(replay.stdout).results.at(-1).discovery.sketch;
+    expect(actual.points.slice(0, 2).map((p: { position: number[]; construction: boolean }) => [p.position, p.construction])).toEqual([[[0, 0], true], [[11, 12], false]]);
+    expect(actual.entities.find((e: { kind: string }) => e.kind === "spline").tangents.map((t: { vector: number[] | null }) => t.vector)).toEqual([[2, 0], [4, 1], [0, -3]]);
+    expect(actual.points[0].pointId).not.toBe(source.points[0].pointId);
+    expect(actual.entities.find((e: { kind: string }) => e.kind === "spline").tangents[0].occurrenceId).not.toBe(source.entities.find((e: { kind: string }) => e.kind === "spline").tangents[0].occurrenceId);
+
+    await copyCliRuntimeWithoutAssets(directory);
+    const mutations = [
+      (r: typeof trace) => { r.version = 99; },
+      (r: typeof trace) => { r.extra = true; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.kind = "unknownRef"; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.version = 99; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.extra = true; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.createdBy = "future"; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.owner.alias = "missing"; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.output.index = -1; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.output.index = 0.5; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.output.index = 999; },
+      (r: typeof trace) => { r.operations.at(-1).edit.target.output.kind = "sketchPoint"; },
+    ];
+    for (const mutate of mutations) {
+      const malformed = structuredClone(trace);
+      mutate(malformed);
+      await writeFile(join(directory, "malformed.json"), JSON.stringify(malformed));
+      const refused = await invokeCliDocumentRecipe(["malformed.json"], { cwd: directory, entry: join(directory, "main.js"), timeout: 20_000 });
+      expect(refused.code, refused.stderr).toBe(2);
+      expect(refused.stdout).toBe("");
+      expect(JSON.parse(refused.stderr.split("\n")[0]!).error).toMatchObject({ code: "invalid-recipe", phase: "preflight" });
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+}, 120_000);
+
 test("script failures preserve semantic evidence and cleanup but omit failed recipe steps; initialization stays structured", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cadara-sdk-errors-"));
   try {
