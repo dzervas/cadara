@@ -12,6 +12,8 @@ type RecordNaming = {
   readonly id: string;
   readonly label: string;
   readonly noun: string;
+  /** The collection holding the record's label, when not its own. */
+  readonly labels?: string;
 };
 
 /** The document records a blocked action can name. */
@@ -20,6 +22,13 @@ const NAMED_RECORDS = {
   features: { id: "featureId", label: "label", noun: "a feature" },
   variables: { id: "variableId", label: "name", noun: "a variable" },
   bodyLabels: { id: "bodyId", label: "label", noun: "a body" },
+  // An appearance record is named by its body's label.
+  bodyAppearances: {
+    id: "bodyId",
+    label: "label",
+    noun: "a body",
+    labels: "bodyLabels",
+  },
 } as const satisfies Record<string, RecordNaming>;
 
 type NamedCollection = keyof typeof NAMED_RECORDS;
@@ -174,12 +183,13 @@ export function describeBlockedDocumentAction(input: {
         !Object.hasOwn(NAMED_RECORDS, collection)
       )
         return null;
+      const naming: RecordNaming = NAMED_RECORDS[collection as NamedCollection];
       return {
-        naming: NAMED_RECORDS[collection as NamedCollection],
+        naming,
         id,
-        records: input.current?.[collection as NamedCollection] as
-          | readonly Record<string, unknown>[]
-          | undefined,
+        records: input.current?.[
+          (naming.labels ?? collection) as NamedCollection
+        ] as readonly Record<string, unknown>[] | undefined,
         root: [collection, id],
       };
     },

@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
-import { createAppError, err, ok } from "@/contracts/errors";
+import { createAppError, err, ok, ResultAsync } from "@/contracts/errors";
 import type { ImportProvider } from "@/contracts/import/provider";
 import type { ImportReviewEnvelope } from "@/contracts/import/review";
 import type { ResolvedImportSource } from "@/contracts/import/source";
@@ -511,6 +511,75 @@ test("document owner routes rename operations for bodies, features, and sketches
       .length,
     "Accepted rename mutations should refresh the snapshot after each accepted operation.",
   ).toBe(3);
+});
+
+test("document owner routes a body colour change to the modeling service and refreshes the snapshot", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const dispatched: EditorEvent[] = [];
+  const body = snapshot.document.bodies[0]!;
+  const calls: unknown[] = [];
+  const owner = createOwner({
+    machineState: { snapshot } as EditorState,
+    dispatch: (event) => dispatched.push(event),
+    modelingService: {
+      currentDocumentId: snapshot.document.documentId,
+      sketchSolver: null,
+      async getCurrentDocumentSnapshot() {
+        return snapshot;
+      },
+      setBodyAppearance(input) {
+        calls.push(input);
+        return ResultAsync.fromSafePromise(
+          Promise.resolve({
+            revisionId: snapshot.document.revisionId,
+            bodyId: input.bodyId,
+            revisionState: {
+              kind: "accepted" as const,
+              baseRevisionId: input.baseRevisionId,
+            },
+            rebuildResult: {
+              kind: "rebuilt" as const,
+              revisionId: snapshot.document.revisionId,
+              invalidatedTargets: [],
+              diagnostics: [],
+            },
+            changedTargets: [],
+            diagnostics: [],
+          }),
+        );
+      },
+    },
+  });
+  const options = {
+    operation: "Change body color",
+    fallbackMessage: "Change body color failed.",
+  };
+
+  const changed = await owner.setBodyAppearance(
+    { kind: "body", bodyId: body.bodyId },
+    { kind: "custom", hex: "#336699" },
+    options,
+  );
+  expect(changed.isOk()).toBe(true);
+  expect(calls).toEqual([
+    {
+      baseRevisionId: snapshot.document.revisionId,
+      bodyId: body.bodyId,
+      appearance: { kind: "custom", hex: "#336699" },
+    },
+  ]);
+  expect(
+    dispatched.map((event) => event.type),
+    "an accepted colour change refreshes the snapshot",
+  ).toEqual(["document.snapshotLoaded"]);
+  await expect(
+    owner.setBodyAppearance(
+      { kind: "feature", featureId: snapshot.document.features[0]!.featureId },
+      { kind: "palette", slot: 1 },
+      options,
+    ),
+  ).rejects.toThrow("Only bodies can change color.");
+  expect(calls).toHaveLength(1);
 });
 
 test("document owner enforces rename and delete guardrails", async () => {

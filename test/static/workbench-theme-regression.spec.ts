@@ -2,7 +2,12 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { test } from "vitest";
 
-const allowedFiles = new Set(["src/theme/workbench-theme.ts"]);
+const allowedFiles = new Set([
+  "src/theme/workbench-theme.ts",
+  // The body palette is persisted document data (a body stores a slot) shared
+  // by the viewport and model exporters, not Mantine shell chrome.
+  "src/contracts/modeling/body-appearance.ts",
+]);
 const allowedDirectories = ["src/assets/"];
 const scannedExtensions = new Set([".css", ".ts", ".tsx"]);
 const literalPattern = /#(?:[0-9a-fA-F]{3,8})\b|rgba?\(|hsla?\(/g;

@@ -112,8 +112,12 @@ export interface OccAuthoringFeatureRecordLike {
   definition: FeatureDefinition;
 }
 
+/** Appearance is display data joined in by the snapshot builder, so a colour
+ * change never needs a new reference state. */
+export type OccBodySnapshotRecord = Omit<BodySnapshotRecord, "appearance">;
+
 export interface OccReferenceState {
-  bodySnapshots: BodySnapshotRecord[];
+  bodySnapshots: OccBodySnapshotRecord[];
   liveReferencesByKey: Map<string, ResolvedReferenceRecord>;
   invalidatedReferencesByKey: Map<string, ResolvedReferenceRecord>;
 }
@@ -1770,7 +1774,7 @@ export function createBodySnapshotRecord(
     revisionId: RevisionId;
   },
   body: OccTrackedBody,
-): BodySnapshotRecord {
+): OccBodySnapshotRecord {
   return {
     ownerDocumentId: input.documentId,
     ownerRevisionId: input.revisionId,

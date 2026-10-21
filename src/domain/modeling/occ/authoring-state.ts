@@ -6,6 +6,10 @@ import {
   type GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
+import {
+  withAutoBodyAppearances,
+  type BodyAppearance,
+} from "@/contracts/modeling/body-appearance";
 import type {
   DocumentFeatureCursor,
   DocumentVariableRecord,
@@ -81,6 +85,8 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   baseConstructions: OccFeatureExecutionContext["constructions"];
   baseConstructionPlanes: ReadonlyMap<ConstructionId, SketchPlaneDefinition>;
   bodyLabels: ReadonlyMap<BodyId, string>;
+  /** Display colour per body id, kept for inactive bodies like `bodyLabels`. */
+  bodyAppearances: ReadonlyMap<BodyId, BodyAppearance>;
   variables: readonly DocumentVariableRecord[];
   features: readonly OccAuthoringFeatureRecord[];
   assets: GeometryAssetManifest;
@@ -252,6 +258,7 @@ export function createOccAuthoringState(
     sketches?: readonly SketchSnapshotRecord[];
     bodies?: readonly OccTrackedBody[];
     bodyLabels?: ReadonlyMap<BodyId, string>;
+    bodyAppearances?: ReadonlyMap<BodyId, BodyAppearance>;
     variables?: readonly DocumentVariableRecord[];
     features?: readonly OccAuthoringFeatureRecord[];
     assets?: GeometryAssetManifest;
@@ -302,6 +309,10 @@ export function createOccAuthoringState(
   const bodyLabels = new Map<BodyId, string>(input.bodyLabels ?? []);
   const variables = [...(input.variables ?? [])];
   const baseBodies = applyBodyLabels(input.bodies ?? [], bodyLabels);
+  const bodyAppearances = withAutoBodyAppearances(
+    new Map(input.bodyAppearances ?? []),
+    baseBodies.map((body) => body.bodyId),
+  );
   const features = [...(input.features ?? [])];
   const assets = structuredClone(
     input.assets ?? createEmptyGeometryAssetManifest(),
@@ -361,6 +372,7 @@ export function createOccAuthoringState(
     baseConstructions,
     baseConstructionPlanes: constructionPlanes,
     bodyLabels,
+    bodyAppearances,
     variables,
     features,
     assets,
@@ -577,6 +589,12 @@ function applyFeatureResult(
       ...state.bodyLabels,
       ...bodies.map((body) => [body.bodyId, body.label] as const),
     ]),
+    // A body id seen for the first time gets the next auto palette slot here,
+    // inside the authored action whose feature created it.
+    bodyAppearances: withAutoBodyAppearances(
+      state.bodyAppearances,
+      bodies.map((body) => body.bodyId),
+    ),
     bodies,
     constructions: result.constructions,
     constructionPlanes: result.constructionPlanes,
@@ -748,6 +766,7 @@ export function rebuildOccAuthoringState(
     variables: state.variables,
     bodies: state.baseBodies,
     bodyLabels: state.bodyLabels,
+    bodyAppearances: state.bodyAppearances,
     constructions: state.baseConstructions,
     constructionPlanes: state.baseConstructionPlanes,
     features: [],

@@ -7,6 +7,9 @@
 // - T17b0 P-8 / T17e routed: a Finish of a sketch a peer deleted, and edits
 //   of a feature or body that no longer exists, said "‹Kind› ‹id› does not
 //   resolve in the current OCC authoring state."; they name no id.
+// - cadara-01k.1: a body's colour is persisted display data; setting it reuses
+//   the evaluated state (no feature rebuild, topology lineage untouched) and
+//   survives export → restore.
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
@@ -186,4 +189,73 @@ test("a mutation naming a sketch, feature or body that no longer exists is refus
     ["The body no longer exists in this document."],
   ]);
   expectNoInternalIds(messages.flat());
+}, 120_000);
+
+test("a body's colour is set without a rebuild, refused when invalid or missing, and survives export and restore", async () => {
+  const adapter = occAdapter();
+  const snapshot = await extruded(adapter);
+  const body = snapshot.document.bodies[0]!;
+  expect(body.appearance, "a new document's first body").toEqual({
+    kind: "palette",
+    slot: 0,
+  });
+  const before = await adapter.exportAuthoredModelDocument("doc_workspace");
+  expect(before.bodyAppearances).toEqual([
+    { bodyId: body.bodyId, appearance: { kind: "palette", slot: 0 } },
+  ]);
+
+  for (const [bodyId, appearance] of [
+    [body.bodyId, { kind: "custom", hex: "#ABCDEF" }],
+    [body.bodyId, { kind: "custom", hex: "#abc" }],
+    [body.bodyId, { kind: "palette", slot: 6 }],
+    ["body_feature_extrude-9", { kind: "palette", slot: 1 }],
+  ] as const) {
+    const refused = await adapter.setBodyAppearance({
+      ...request,
+      baseRevisionId: snapshot.document.revisionId,
+      bodyId: bodyId as BodyId,
+      appearance: appearance as never,
+    });
+    expect(refused.revisionState.kind, JSON.stringify(appearance)).toBe(
+      "rejected",
+    );
+  }
+  expect(
+    await adapter.exportAuthoredModelDocument("doc_workspace"),
+    "refusals leave the document untouched",
+  ).toEqual(before);
+
+  const set = await adapter.setBodyAppearance({
+    ...request,
+    baseRevisionId: snapshot.document.revisionId,
+    bodyId: body.bodyId,
+    appearance: { kind: "custom", hex: "#336699" },
+  });
+  expect(set.revisionState.kind).toBe("accepted");
+  expect(set.changedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+  const after = await adapter.exportAuthoredModelDocument("doc_workspace");
+  expect(after.revisionId).not.toBe(before.revisionId);
+  expect(after.bodyAppearances).toEqual([
+    { bodyId: body.bodyId, appearance: { kind: "custom", hex: "#336699" } },
+  ]);
+  // cadara-3sq.1 rebuilt keyed lineage on a body rename; a colour change must
+  // leave every other authored field, lineage order included, byte-identical.
+  expect(
+    JSON.stringify({ ...after, revisionId: null, bodyAppearances: null }),
+  ).toBe(
+    JSON.stringify({ ...before, revisionId: null, bodyAppearances: null }),
+  );
+  const recoloured = (await adapter.getDocumentSnapshot(request)).snapshot;
+  expect(recoloured.document.bodies[0]!.appearance).toEqual({
+    kind: "custom",
+    hex: "#336699",
+  });
+  expect(recoloured.document.bodies[0]!.topology).toEqual(body.topology);
+
+  const reopened = occAdapter();
+  await reopened.restoreAuthoredModelDocument(after);
+  expect(
+    (await reopened.getDocumentSnapshot(request)).snapshot.document.bodies[0]!
+      .appearance,
+  ).toEqual({ kind: "custom", hex: "#336699" });
 }, 120_000);

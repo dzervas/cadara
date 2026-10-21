@@ -9,6 +9,7 @@ import type {
   DocumentHistoryItemRecord,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import { ok, type ErrorReporter } from "@/contracts/errors";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
@@ -247,5 +248,42 @@ export function renameWorkbenchTarget({
       return next;
     });
     showWorkbenchInfo(`Renamed ${label} to ${nextLabel}.`);
+  });
+}
+
+export function setWorkbenchBodyAppearance({
+  appearance,
+  documentOwner,
+  errorReporter,
+  label,
+  showWorkbenchError,
+  snapshot,
+  target,
+}: WorkbenchObjectActionContext & {
+  target: Extract<PrimitiveRef, { kind: "body" }>;
+  label: string;
+  appearance: BodyAppearance;
+}) {
+  if (!snapshot) {
+    return;
+  }
+
+  const context = [
+    { key: "baseRevisionId", value: snapshot.document.revisionId },
+    { key: "bodyId", value: target.bodyId },
+  ];
+  void runWorkbenchAction({
+    operation: `Change ${label} color`,
+    reporter: errorReporter,
+    reporting: { mappedFailure: "expected" },
+    context,
+    action: () =>
+      documentOwner.setBodyAppearance(target, appearance, {
+        operation: `Change ${label} color`,
+        fallbackMessage: `Change ${label} color failed.`,
+        context,
+      }),
+    mapSuccess: (result) => ok(result),
+    onError: (error) => showWorkbenchError(error.message),
   });
 }

@@ -96,6 +96,18 @@ function validateAuthoredModelDocumentInvariants(
     );
   }
 
+  // Slot range and lowercase `#rrggbb` are enforced structurally by Typia
+  // (`BodyAppearance`); record identity is the body id.
+  const appearanceBodyIds = new Set(
+    (document.bodyAppearances ?? []).map((record) => record.bodyId),
+  );
+  if (appearanceBodyIds.size !== (document.bodyAppearances ?? []).length) {
+    return createDiagnostic(
+      "invalid-authored-document",
+      "Authored model document contains duplicate body appearance records.",
+    );
+  }
+
   const lineageFeatureIds = new Set<string>();
   for (const lineage of document.topologyLineage ?? []) {
     if (

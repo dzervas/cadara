@@ -6,6 +6,7 @@ import type {
   DeleteFeatureRequest,
   RenameBodyRequest,
   ReorderDocumentHistoryRequest,
+  SetBodyAppearanceRequest,
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
   SetFeatureSuppressionRequest,
@@ -53,6 +54,10 @@ export type PersistedRenameBodyPayload = Omit<
   RenameBodyRequest,
   "contractVersion" | "documentId" | "baseRevisionId"
 >;
+export type PersistedSetBodyAppearancePayload = Omit<
+  SetBodyAppearanceRequest,
+  "contractVersion" | "documentId" | "baseRevisionId"
+>;
 export type PersistedReorderFeaturePayload = Omit<
   ReorderFeatureRequest,
   "contractVersion" | "documentId" | "baseRevisionId"
@@ -85,6 +90,7 @@ export type ModelingOperationHistoryEntry =
   | { kind: "deleteFeature"; payload: PersistedDeleteFeaturePayload }
   | { kind: "deleteTarget"; payload: PersistedDeleteTargetPayload }
   | { kind: "renameBody"; payload: PersistedRenameBodyPayload }
+  | { kind: "setBodyAppearance"; payload: PersistedSetBodyAppearancePayload }
   | { kind: "reorderFeature"; payload: PersistedReorderFeaturePayload }
   | {
       kind: "reorderDocumentHistory";
@@ -230,6 +236,18 @@ export function createRenameBodyHistoryEntry(
     payload: {
       bodyId: payload.bodyId,
       bodyLabel: payload.bodyLabel,
+    },
+  };
+}
+
+export function createSetBodyAppearanceHistoryEntry(
+  payload: SetBodyAppearanceRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: "setBodyAppearance",
+    payload: {
+      bodyId: payload.bodyId,
+      appearance: structuredClone(payload.appearance),
     },
   };
 }

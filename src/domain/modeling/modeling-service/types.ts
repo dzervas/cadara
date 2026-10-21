@@ -117,6 +117,9 @@ export interface ModelingService {
   renameBody(
     input: ModelingRenameBodyInput,
   ): AppResultAsync<ModelingRenameBodyResult>;
+  setBodyAppearance(
+    input: ModelingSetBodyAppearanceInput,
+  ): AppResultAsync<ModelingSetBodyAppearanceResult>;
   reorderFeature(
     input: ModelingReorderFeatureInput,
   ): AppResultAsync<ModelingReorderFeatureResult>;
@@ -248,6 +251,15 @@ export interface ModelingRenameBodyResult {
   diagnostics: schema.ModelingDiagnostic[];
 }
 
+export interface ModelingSetBodyAppearanceResult {
+  revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
+  bodyId: BodyId;
+  revisionState: schema.MutationRevisionState;
+  rebuildResult: schema.RebuildResult;
+  changedTargets: PrimitiveRef[];
+  diagnostics: schema.ModelingDiagnostic[];
+}
+
 export interface ModelingReorderFeatureResult {
   revisionId: schema.WorkspaceSnapshot["document"]["revisionId"];
   featureId: FeatureId;
@@ -353,6 +365,13 @@ export type ModelingDeleteTargetInput = Omit<
   };
 export type ModelingRenameBodyInput = Omit<
   schema.RenameBodyRequest,
+  "contractVersion" | "documentId"
+> &
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
+export type ModelingSetBodyAppearanceInput = Omit<
+  schema.SetBodyAppearanceRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput> & {

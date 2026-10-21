@@ -19,6 +19,7 @@ import type {
   RebuildResult,
   RenameBodyResponse,
   ResolvedReferenceRecord,
+  SetBodyAppearanceResponse,
   ResolveReferenceResponse,
   ReorderDocumentHistoryResponse,
   ReorderFeatureResponse,
@@ -119,6 +120,8 @@ const deleteDocumentTargetResponseValidator =
   typia.createValidateEquals<DeleteDocumentTargetResponse>();
 const renameBodyResponseValidator =
   typia.createValidateEquals<RenameBodyResponse>();
+const setBodyAppearanceResponseValidator =
+  typia.createValidateEquals<SetBodyAppearanceResponse>();
 const addDocumentVariableResponseValidator =
   typia.createValidateEquals<AddDocumentVariableResponse>();
 const updateDocumentVariableResponseValidator =
@@ -378,6 +381,16 @@ export function requireRenameBodyResponse(value: unknown): RenameBodyResponse {
     renameBodyResponseValidator,
     value,
     "Rename body response",
+  );
+}
+
+export function requireSetBodyAppearanceResponse(
+  value: unknown,
+): SetBodyAppearanceResponse {
+  return requireContract(
+    setBodyAppearanceResponseValidator,
+    value,
+    "Set body appearance response",
   );
 }
 

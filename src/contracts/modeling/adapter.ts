@@ -30,6 +30,8 @@ import type {
   ReorderFeatureResponse,
   ResolveReferenceRequest,
   ResolveReferenceResponse,
+  SetBodyAppearanceRequest,
+  SetBodyAppearanceResponse,
   SetFeatureCursorRequest,
   SetFeatureCursorResponse,
   SetFeatureSuppressionRequest,
@@ -156,6 +158,10 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   ): Promise<DeleteDocumentTargetResponse>;
   /** Renames an existing durable body without changing its topology. */
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>;
+  /** Sets an existing durable body's display colour without changing geometry. */
+  setBodyAppearance(
+    request: SetBodyAppearanceRequest,
+  ): Promise<SetBodyAppearanceResponse>;
   /** Reorders an existing durable feature within the document feature list. */
   reorderFeature(
     request: ReorderFeatureRequest,

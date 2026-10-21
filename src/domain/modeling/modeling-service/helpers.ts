@@ -23,6 +23,7 @@ import type {
   MutationRevisionState,
   RenameBodyRequest,
   ResolvedReferenceRecord,
+  SetBodyAppearanceRequest,
   ResolveReferenceRequest,
   ReorderDocumentHistoryRequest,
   ReorderFeatureRequest,
@@ -34,6 +35,7 @@ import type {
 import { requireDocumentExportRequest } from "@/contracts/modeling/export.runtime-schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
+import { isBodyAppearance } from "@/contracts/modeling/body-appearance";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { RequestId } from "@/contracts/shared/ids";
 import {
@@ -52,6 +54,7 @@ import type {
   ModelingDeleteFeatureInput,
   ModelingDeleteTargetInput,
   ModelingRenameBodyInput,
+  ModelingSetBodyAppearanceInput,
   ModelingAddDocumentVariableInput,
   ModelingUpdateDocumentVariableInput,
   ModelingReorderFeatureInput,
@@ -264,6 +267,26 @@ export function normalizeRenameBodyInput(
 
   return {
     ...requestInput,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  };
+}
+
+export function normalizeSetBodyAppearanceInput(
+  input: ModelingSetBodyAppearanceInput,
+  documentId: DocumentId,
+): SetBodyAppearanceRequest {
+  assertMutationBase(input);
+  if (!isBodyAppearance(input.appearance)) {
+    throw new Error(
+      "Invalid body appearance: expected a palette slot 0-5 or a lowercase #rrggbb colour.",
+    );
+  }
+  const requestInput = stripRepositoryMutationBasis(input);
+
+  return {
+    ...requestInput,
+    appearance: structuredClone(input.appearance),
     contractVersion: CONTRACT_VERSION,
     documentId,
   };

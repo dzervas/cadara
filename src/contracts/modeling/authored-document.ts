@@ -17,6 +17,7 @@ import type {
   VertexId,
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
+import type { AuthoredBodyAppearanceRecord } from "@/contracts/modeling/body-appearance";
 import type { GeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
@@ -92,6 +93,13 @@ export interface AuthoredModelDocument {
   historyOrder: AuthoredDocumentHistoryOrderEntry[];
   cursor: DocumentFeatureCursor;
   bodyLabels: AuthoredBodyLabelRecord[];
+  /**
+   * Persisted display colour per body id, assigned when a feature first
+   * creates the body. Optional because documents saved before body colours
+   * carry none; such bodies get deterministic slots in kernel state on open
+   * and are persisted by the next real authored action (never by the open).
+   */
+  bodyAppearances?: AuthoredBodyAppearanceRecord[];
   assets: GeometryAssetManifest;
   embeddedBinaryAssets: EmbeddedBinaryAssetRecord[];
   /** Exact feature/source-key topology provenance; never geometric matching data. */
@@ -142,6 +150,10 @@ export function createAuthoredModelDocumentFromSnapshot(
     bodyLabels: snapshot.document.bodies.map((body) => ({
       bodyId: body.bodyId,
       label: body.label,
+    })),
+    bodyAppearances: snapshot.document.bodies.map((body) => ({
+      bodyId: body.bodyId,
+      appearance: structuredClone(body.appearance),
     })),
     assets: createEmptyGeometryAssetManifest(),
     embeddedBinaryAssets: [],

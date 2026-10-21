@@ -113,6 +113,8 @@ import type {
   DocumentVariableRecord,
   RenameBodyRequest,
   RenameBodyResponse,
+  SetBodyAppearanceRequest,
+  SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
   ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
@@ -139,6 +141,11 @@ import {
   type AuthoredModelDocument as RepositoryAuthoredModelDocument,
 } from "@/contracts/modeling/authored-document";
 import { createEmptyGeometryAssetManifest } from "@/contracts/modeling/geometry-assets";
+import {
+  bodyPaletteSlotForIndex,
+  isBodyAppearance,
+  type BodyAppearance,
+} from "@/contracts/modeling/body-appearance";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -612,10 +619,25 @@ function getFeatureDefinitionChangedTargets(definition: FeatureDefinition) {
   }
 }
 
+/**
+ * The mock's auto palette slot for a body it is about to add. Unlike the OCC
+ * kernel it keeps no records for inactive bodies, so it counts live bodies.
+ */
+function nextMockBodyAppearance(
+  snapshot: WorkspaceSnapshot,
+  pending = 0,
+): BodyAppearance {
+  return {
+    kind: "palette",
+    slot: bodyPaletteSlotForIndex(snapshot.document.bodies.length + pending),
+  };
+}
+
 function createMockBakedBodyArtifacts(input: {
   featureId: FeatureId;
   featureLabel: string;
   revisionId: RevisionId;
+  appearance: BodyAppearance;
 }) {
   const suffix = input.featureId
     .replace(/^feature_/, "")
@@ -642,6 +664,7 @@ function createMockBakedBodyArtifacts(input: {
       ownerBodyId: bodyId,
       bodyId,
       label: input.featureLabel,
+      appearance: input.appearance,
       bodyKind: "solid" as const,
       topology: {
         faceIds: [faceId],
@@ -1597,6 +1620,7 @@ function createMockPatternBodyArtifacts(input: {
         ownerBodyId: bodyId,
         bodyId,
         label,
+        appearance: nextMockBodyAppearance(input.snapshot, bodies.length),
         bodyKind: "solid",
         topology: { faceIds: [], edgeIds: [], vertexIds: [] },
         topologyPresentation: "bodyOnlyMesh",
@@ -4480,6 +4504,7 @@ async function buildSnapshot(
         ownerBodyId: "body_part-1",
         bodyId: "body_part-1",
         label: "Part 1",
+        appearance: { kind: "palette", slot: 0 },
         bodyKind: "solid",
         topology: {
           faceIds: [
@@ -5565,6 +5590,12 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         object.label = label.label;
       }
     }
+    for (const record of document.bodyAppearances ?? []) {
+      const body = snapshot.document.bodies.find(
+        (entry) => entry.bodyId === record.bodyId,
+      );
+      if (body) body.appearance = structuredClone(record.appearance);
+    }
 
     rebuildFeatureTree(snapshot);
     rebuildObjectTree(snapshot);
@@ -5786,6 +5817,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
               featureId,
               featureLabel,
               revisionId: nextRevisionId,
+              appearance: nextMockBodyAppearance(mutableSnapshot),
             })
           : null;
       const planeArtifacts =
@@ -7217,6 +7249,104 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       changedTargets: [],
       diagnostics,
     };
+  }
+
+  async setBodyAppearance(
+    request: SetBodyAppearanceRequest,
+  ): Promise<SetBodyAppearanceResponse> {
+    assertSupportedModelingRequest(request);
+    const snapshot = await this.getSnapshot();
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [
+        createRevisionConflictDiagnostic(
+          request.baseRevisionId,
+          this.currentRevisionId,
+        ),
+      ];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: "conflict",
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "revisionConflict",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+    const refusal = !isBodyAppearance(request.appearance)
+      ? {
+          reasonCode: "mock-invalid-body-appearance",
+          diagnostic: {
+            code: "mock-invalid-body-appearance",
+            severity: "error" as const,
+            message:
+              "Body colour must be a palette slot 0-5 or a lowercase #rrggbb colour.",
+            target: { kind: "body" as const, bodyId: request.bodyId },
+            detail: null,
+          },
+        }
+      : !snapshot.document.bodies.some((body) => body.bodyId === request.bodyId)
+        ? {
+            reasonCode: "mock-missing-body",
+            diagnostic: createMissingBodyDiagnostic(request.bodyId),
+          }
+        : null;
+    if (refusal) {
+      const diagnostics = [refusal.diagnostic];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: refusal.reasonCode,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      for (const body of mutableSnapshot.document.bodies) {
+        if (body.bodyId === request.bodyId) {
+          body.appearance = structuredClone(request.appearance);
+          body.ownerRevisionId = nextRevisionId;
+        }
+      }
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        bodyId: request.bodyId,
+        revisionState: {
+          kind: "accepted",
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "rebuilt",
+          revisionId: nextRevisionId,
+          diagnostics: [],
+        }),
+        changedTargets: [{ kind: "body", bodyId: request.bodyId }],
+        diagnostics: [],
+      };
+    });
   }
 
   async renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse> {

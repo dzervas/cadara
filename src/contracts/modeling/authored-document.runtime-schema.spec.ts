@@ -177,3 +177,57 @@ test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async ()
     "Structurally malformed authored geometry must remain rejected.",
   ).toBe(false);
 });
+
+test("body appearance records are optional, and only palette slots 0-5 or lowercase #rrggbb colours parse", async () => {
+  const snapshot = (
+    await new MockKernelAdapter().getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot;
+  const document = createAuthoredModelDocumentFromSnapshot(snapshot);
+  const bodyId = document.bodyLabels[0]!.bodyId;
+  const withAppearances = (bodyAppearances: unknown) =>
+    parseAuthoredModelDocument({ ...document, bodyAppearances });
+
+  const legacy = structuredClone(document);
+  delete legacy.bodyAppearances;
+  const parsedLegacy = parseAuthoredModelDocument(legacy);
+  expect(parsedLegacy.ok, "documents saved before body colours still open").toBe(
+    true,
+  );
+  expect(parsedLegacy.ok && parsedLegacy.document).not.toHaveProperty(
+    "bodyAppearances",
+  );
+
+  for (const appearance of [
+    { kind: "palette", slot: 0 },
+    { kind: "palette", slot: 5 },
+    { kind: "custom", hex: "#0a1b2c" },
+  ])
+    expect(
+      withAppearances([{ bodyId, appearance }]).ok,
+      JSON.stringify(appearance),
+    ).toBe(true);
+  for (const appearance of [
+    { kind: "palette", slot: 6 },
+    { kind: "palette", slot: -1 },
+    { kind: "palette", slot: 1.5 },
+    { kind: "custom", hex: "#0A1B2C" },
+    { kind: "custom", hex: "#abc" },
+    { kind: "custom", hex: "0a1b2c" },
+    { kind: "custom", hex: "#0a1b2c", slot: 1 },
+  ])
+    expect(
+      withAppearances([{ bodyId, appearance }]).ok,
+      JSON.stringify(appearance),
+    ).toBe(false);
+
+  const duplicate = withAppearances([
+    { bodyId, appearance: { kind: "palette", slot: 0 } },
+    { bodyId, appearance: { kind: "palette", slot: 1 } },
+  ]);
+  expect(!duplicate.ok && duplicate.diagnostic.message).toBe(
+    "Authored model document contains duplicate body appearance records.",
+  );
+});

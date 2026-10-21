@@ -48,6 +48,7 @@ import type {
 } from "@/contracts/modeling/advanced-solid";
 import type { FeatureReplayFeatureParameters } from "@/contracts/modeling/feature-replay";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import type {
   GeometryAssetDiagnosticDetail,
   GeometryAssetFormat,
@@ -1188,6 +1189,8 @@ export interface BodySnapshotRecord extends SnapshotOwnershipRecord {
   bodyId: BodyId;
   /** Human-readable body label. */
   label: string;
+  /** Persisted display colour (see `@/contracts/modeling/body-appearance`). */
+  appearance: BodyAppearance;
   /** Explicit result shape family owned by this body. */
   bodyKind: BodyKind;
   /** Explicit topology membership owned by the body snapshot. */
@@ -1611,6 +1614,24 @@ export interface RenameBodyRequest extends DocumentMutationRequest {
  */
 export interface RenameBodyResponse extends ModelingOperationResult {
   /** Durable body identity that was targeted by the rename. */
+  bodyId: BodyId;
+}
+
+/**
+ * Body appearance (display colour) request.
+ */
+export interface SetBodyAppearanceRequest extends DocumentMutationRequest {
+  /** Durable body identity to recolour in-place. */
+  bodyId: BodyId;
+  /** Display colour to store on the document body appearance record. */
+  appearance: BodyAppearance;
+}
+
+/**
+ * Body appearance (display colour) response.
+ */
+export interface SetBodyAppearanceResponse extends ModelingOperationResult {
+  /** Durable body identity that was targeted by the colour change. */
   bodyId: BodyId;
 }
 
