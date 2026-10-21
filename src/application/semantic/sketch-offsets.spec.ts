@@ -49,8 +49,8 @@ test("a durable circle offset is certified, follows its source and is one undoab
       intent: "fulfill",
     });
     expect(moved.discovery!.sketch!.entities.map((e) => e.radius)).toEqual([
-      8, 7,
-    ]); // Authored output placeholder is not solved geometry.
+      8, 10,
+    ]); // Fast radius writes refresh derived placeholders, as point writes do.
     expect(
       moved.discovery!.sketch!.offsets[0]!.currentGeometry!.map(
         (e) => e.radius,

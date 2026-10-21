@@ -4263,7 +4263,8 @@ function usesUnconstrainedDragFastPath(definition: SketchDefinition) {
 
 /**
  * Unconstrained fast path: apply the drag target directly to the definition
- * without running the solver.
+ * without running the solver. Radius and tangent writes re-evaluate derived
+ * copies just like point writes; no subsequent solve is needed to refresh them.
  */
 function applyUnconstrainedDrag(
   definition: SketchDefinition,
@@ -4316,16 +4317,19 @@ function applyUnconstrainedDrag(
       if (dragTarget.kind !== "sketchRadius") break;
       return {
         kind: "accepted",
-        definition: {
-          ...definition,
-          entities: definition.entities.map((e) => {
-            if (e.entityId !== intent.entityId) return e;
-            if (e.kind === "circle")
-              return { ...e, radius: Math.max(1e-9, dragTarget.targetRadius) };
-            // Unsupported non-circle radius targets are not changed.
-            return e;
-          }),
-        },
+        definition: evaluateAuthoredSketchDerivations({
+          ...derivation,
+          definition: {
+            ...definition,
+            entities: definition.entities.map((e) => {
+              if (e.entityId !== intent.entityId) return e;
+              if (e.kind === "circle")
+                return { ...e, radius: Math.max(1e-9, dragTarget.targetRadius) };
+              // Unsupported non-circle radius targets are not changed.
+              return e;
+            }),
+          },
+        }).definition,
         interactiveSolveSession: null,
       };
     }
@@ -4333,26 +4337,29 @@ function applyUnconstrainedDrag(
       if (dragTarget.kind !== "sketchTangentVector") break;
       return {
         kind: "accepted",
-        definition: {
-          ...definition,
-          entities: definition.entities.map((e) => {
-            if (e.entityId !== intent.entityId || e.kind !== "spline") return e;
-            return {
-              ...e,
-              pointOccurrences: e.pointOccurrences.map((occ) =>
-                occ.occurrenceId === intent.occurrenceId
-                  ? {
-                      ...occ,
-                      tangent: {
-                        kind: "authored" as const,
-                        vector: dragTarget.targetVector,
-                      },
-                    }
-                  : occ,
-              ),
-            };
-          }),
-        },
+        definition: evaluateAuthoredSketchDerivations({
+          ...derivation,
+          definition: {
+            ...definition,
+            entities: definition.entities.map((e) => {
+              if (e.entityId !== intent.entityId || e.kind !== "spline") return e;
+              return {
+                ...e,
+                pointOccurrences: e.pointOccurrences.map((occ) =>
+                  occ.occurrenceId === intent.occurrenceId
+                    ? {
+                        ...occ,
+                        tangent: {
+                          kind: "authored" as const,
+                          vector: dragTarget.targetVector,
+                        },
+                      }
+                    : occ,
+                ),
+              };
+            }),
+          },
+        }).definition,
         interactiveSolveSession: null,
       };
     }
