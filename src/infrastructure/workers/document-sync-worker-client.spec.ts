@@ -121,6 +121,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         metadata: {
           documentId: seed.documentId,
           heads: ["head_1"],
+          actorId: "actor_peer",
           source: "peer",
         },
       },
@@ -144,6 +145,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
         metadata: {
           documentId: seed.documentId,
           heads: ["head_2"],
+          actorId: "actor_peer",
           source: "peer",
         },
       },
@@ -249,6 +251,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       metadata: {
         documentId: seed.documentId,
         heads: ["head_normalized"],
+        actorId: "actor_restore",
         source: "restore",
       },
     });
@@ -732,6 +735,7 @@ test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () 
       metadata: {
         documentId: seed.documentId,
         heads: ["cached-head-a", "cached-head-b"],
+        actorId: "actor_restore",
         source: "restore",
         storageKey: "automerge:cached-repository-url",
       },

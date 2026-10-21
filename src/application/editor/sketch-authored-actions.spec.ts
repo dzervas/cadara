@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { assert, describe, expect, test } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   SketchEntityId,
@@ -147,6 +147,7 @@ async function fixture(constrained = false, initial?: SketchSessionState) {
     session,
     pendingCommitRequestId: null,
     pendingProjectionRequestId: null,
+    pendingRegionRequest: null,
   };
   function apply(event: EditorEvent, candidate?: SketchSessionState) {
     const result = owner.transition(state, event, (current) => ({
@@ -368,7 +369,7 @@ test("gesture frames and cancellation do not enter history; release enters once"
   );
   const after = projection(f.session);
   f.apply(
-    { type: "sketch.geometryDragEnded", point: [3, 4, 0] },
+    { type: "sketch.geometryDragEnded", point: [3, 4] },
     { ...f.session, activeDrag: null },
   );
   expect(f.session.actionAvailability?.canUndo).toBe(true);
@@ -438,7 +439,7 @@ test("T12b: radius-intent drag enters one action; Undo restores original radius,
     },
   };
   f.apply(
-    { type: "sketch.geometryDragEnded", point: [5, 0, 0] },
+    { type: "sketch.geometryDragEnded", point: [5, 0] },
     { ...afterRadiusSession, activeDrag: null },
   );
   const afterRadius = projection(f.session);
@@ -522,7 +523,7 @@ test("T12b: tangent-vector-intent drag enters one action; Undo restores automati
     },
   };
   f.apply(
-    { type: "sketch.geometryDragEnded", point: [5, 3, 0] },
+    { type: "sketch.geometryDragEnded", point: [5, 3] },
     { ...afterDragSession, activeDrag: null },
   );
   const afterDrag = projection(f.session);
@@ -2278,7 +2279,7 @@ describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
     };
     // Commit the authored tangent as a drag end action.
     f.apply(
-      { type: "sketch.geometryDragEnded" },
+      { type: "sketch.geometryDragEnded", point: [3, 4] },
       { ...f.session, definition: authoredDef },
     );
     const labelsBeforeReset = undoLabels(f);
@@ -2330,6 +2331,7 @@ describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
       afterUndo[1]!.tangent.kind,
       "After Undo, occurrence 1 must be authored.",
     ).toBe("authored");
+    assert(afterUndo[1]!.tangent.kind === "authored");
     expect(
       afterUndo[1]!.tangent.vector,
       "Undo restores the exact authored vector.",
@@ -2374,6 +2376,7 @@ describe("T12e: tangent reset-to-automatic and set-to-zero actions", () => {
       afterZero[1]!.tangent.kind,
       "After zero, occurrence 1 must be authored.",
     ).toBe("authored");
+    assert(afterZero[1]!.tangent.kind === "authored");
     expect(
       afterZero[1]!.tangent.vector,
       "Zero must store exactly [0, 0].",
@@ -3808,6 +3811,7 @@ describe("T16a: Remove Mirror through the authored-action owner", () => {
     const before = f.session.definition;
     const beforeProjection = projection(f.session);
     const copy = entityRef(f.session, setup.outputOf("ab").outputEntityId);
+    assert(copy.kind === "sketchEntity");
     f.dispatch({ type: "viewport.selectionRequested", target: copy });
     const panel = computeSketchMirrorActionState(f.session, f.state.selection);
     expect(
@@ -4069,11 +4073,9 @@ describe("T17c2: Close Spline through the authored-action owner", () => {
     const event = await runEditorEffect(effect, {
       querySketchEditIntersections: querySketchEditIntersectionsForTest,
     } as EditorEffectRuntime);
-    f.apply(
-      event,
-      transitionEditorState(emitted.state as SketchEditorState, event).state
-        .session as SketchSessionState,
-    );
+    const resolved = transitionEditorState(emitted.state, event).state;
+    assert(resolved.kind === "editingSketch");
+    f.apply(event, resolved.session);
     expect(f.session.actionHistory?.undo.at(-1)?.label, "premise: Trim").toBe(
       "Trim",
     );

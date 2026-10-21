@@ -191,12 +191,12 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       kind: "sketchOperation" as const,
       sketchId: "sketch_draft",
       operationId: "sketch_operation_1_reference-image",
-    };
+    } as const;
     const rejectedTarget = {
       kind: "face" as const,
       bodyId: "body_fixture",
       faceId: "face_fixture",
-    };
+    } as const;
 
     const baseState: EditorState = {
       ...initialEditorState,
@@ -214,6 +214,7 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const entered = transitionWithFixtureModes(baseState, {
@@ -248,6 +249,9 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       async commitSketch() {
         return null;
       },
+      async commitSketchPlane() {
+        throw new Error("Sketch plane commit is not used in this test.");
+      },
       async projectSketchReferences() {
         return { projectedReferences: [], diagnostics: [] };
       },
@@ -278,10 +282,9 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
     );
     expect(
       enteredResolved.state.kind === "editingSketch" &&
-        enteredResolved.state.session.activeSpecialMode?.state.lastPayload ===
-          operationTarget.operationId,
+        enteredResolved.state.session.activeSpecialMode?.state,
       "Effect completion should re-enter the reducer through the registered mode definition.",
-    ).toBeTruthy();
+    ).toMatchObject({ lastPayload: operationTarget.operationId });
 
     const rejectedHover = transitionWithFixtureModes(enteredResolved.state, {
       type: "viewport.hovered",
@@ -312,11 +315,11 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
     });
     expect(
       clicked.state.kind === "editingSketch" &&
-        clicked.state.session.activeSpecialMode?.state.clicks === 1 &&
         clicked.state.session.activeSpecialMode?.selectedTarget?.targetId ===
-          "sketch_special_target_resolved",
+          "sketch_special_target_resolved" &&
+        clicked.state.session.activeSpecialMode.state,
       "Special-mode click events should use the resolved mode-local target contract.",
-    ).toBeTruthy();
+    ).toMatchObject({ clicks: 1 });
 
     const handle = createSketchSpecialModeHandleRef(
       operationTarget.operationId,
@@ -339,10 +342,9 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
     });
     expect(
       draggedEnd.state.kind === "editingSketch" &&
-        draggedEnd.state.session.activeSpecialMode?.state.lastPayload ===
-          `${handle.handleId}:10,12`,
+        draggedEnd.state.session.activeSpecialMode?.state,
       "Special-mode handle drags should flow through the dedicated drag channel with durable handle ids.",
-    ).toBeTruthy();
+    ).toMatchObject({ lastPayload: `${handle.handleId}:10,12` });
 
     const invoked = transitionWithFixtureModes(draggedEnd.state, {
       type: "sketch.specialModePanelActionInvoked",
@@ -462,6 +464,7 @@ test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
       session: builtinSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     },
     {
       type: "sketch.specialModeDoubleClickRequested",

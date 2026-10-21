@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 
 import { ResultAsync, type AppError } from "@/contracts/errors";
 import type {
+  CommandSessionId,
   ConstructionId,
   DocumentId,
   ReferenceId,
@@ -86,6 +87,7 @@ test("commits the current authored sketch after deletion without resurrecting a 
       return ResultAsync.fromPromise(
         Promise.resolve({
           revisionId: "rev_0002" as RevisionId,
+          sketchId: deletedSession.actionContextId,
           revisionState: { kind: "accepted" as const },
           diagnostics: [],
         }),
@@ -115,8 +117,6 @@ test("commits the current authored sketch after deletion without resurrecting a 
     requestId: "request_commit_full_sketch" as RequestId,
     baseRevisionId: "rev_0001" as RevisionId,
     baseRepositoryHeads: [],
-    documentId: "doc_fixture" as DocumentId,
-    commandSessionId: "command_sketch_fixture",
     session: deletedSession,
   });
 
@@ -224,6 +224,8 @@ test("live region derivation goes through the modeling service sketch solver bou
       },
       createCommitCorrelation: unused,
       projectExternalReferences: unused,
+      querySketchEditIntersections: unused,
+      querySketchSnapIntersections: unused,
     },
     commitSketch: unused,
     evaluatePreview: unused,
@@ -359,6 +361,8 @@ test("a derive response whose offset publications fail validation rejects instea
         },
         createCommitCorrelation: unused,
         projectExternalReferences: unused,
+        querySketchEditIntersections: unused,
+        querySketchSnapIntersections: unused,
       },
       commitSketch: unused,
       evaluatePreview: unused,
@@ -426,6 +430,8 @@ test("two documents with different tolerances reach the live region queries with
           }),
         createCommitCorrelation: unused,
         projectExternalReferences: unused,
+        querySketchEditIntersections: unused,
+        querySketchSnapIntersections: unused,
       },
       commitSketch: unused,
       evaluatePreview: unused,
@@ -494,7 +500,7 @@ test("a superseded live derivation completes as a stale failure event; real erro
     snapshot,
   )!;
   const session = withLiveSolveBasis(opened, opened.definition);
-  const sessionState = (commandSessionId: string): SketchEditorState => ({
+  const sessionState = (commandSessionId: CommandSessionId): SketchEditorState => ({
     ...initialEditorState,
     document: {
       documentId: snapshot.document.documentId,
@@ -540,6 +546,8 @@ test("a superseded live derivation completes as a stale failure event; real erro
         },
         createCommitCorrelation: unused,
         projectExternalReferences: unused,
+        querySketchEditIntersections: unused,
+        querySketchSnapIntersections: unused,
       },
       commitSketch: unused,
       evaluatePreview: unused,

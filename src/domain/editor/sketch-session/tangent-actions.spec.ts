@@ -32,10 +32,10 @@ function getSplineOccurrences(
 // ── Fixtures ─────────────────────────────────────────────────────────────
 
 const SKETCH_ID = "sketch_1";
-const ENTITY_ID = "spline_1" as SketchEntityId;
-const POINT_A = "pt_a" as SketchPointId;
-const POINT_B = "pt_b" as SketchPointId;
-const POINT_C = "pt_c" as SketchPointId;
+const ENTITY_ID: SketchEntityId = "sketch_entity_spline_1";
+const POINT_A: SketchPointId = "sketch_point_a";
+const POINT_B: SketchPointId = "sketch_point_b";
+const POINT_C: SketchPointId = "sketch_point_c";
 const OCC_A = "occ_a";
 const OCC_B = "occ_b";
 const OCC_C = "occ_c";
@@ -50,28 +50,37 @@ function makeSplineDefinition(
   }[],
 ): SketchDefinition {
   return {
+    schemaVersion: "sketch-definition/v1alpha2",
+    pointIds: occurrences.map((occ) => occ.pointId),
     points: occurrences.map((occ) => ({
       pointId: occ.pointId,
+      label: occ.pointId,
+      target: { kind: "sketchPoint", sketchId: SKETCH_ID, pointId: occ.pointId },
       position: [0, 0] as readonly [number, number],
+      isConstruction: false,
     })),
+    entityIds: [ENTITY_ID],
     entities: [
       {
         entityId: ENTITY_ID,
         kind: "spline",
+        label: "Spline",
+        target: { kind: "sketchEntity", sketchId: SKETCH_ID, entityId: ENTITY_ID },
         isConstruction: false,
-        style: {},
         pointOccurrenceIds: occurrences.map((o) => o.occurrenceId),
         pointOccurrences: occurrences,
         closure: "open",
         interpolationPolicy: "centripetal-mean-arm-v1",
-      } as SketchDefinition["entities"][number],
+      },
     ],
+    constraintIds: [],
     constraints: [],
+    dimensionIds: [],
     dimensions: [],
     referenceImages: [],
+    referenceIds: [],
     references: [],
-    relationships: [],
-  } as unknown as SketchDefinition;
+  };
 }
 
 const MIXED_DEFINITION = makeSplineDefinition([
@@ -176,7 +185,7 @@ describe("T12e: resolveTangentActionTargets", () => {
     const ref: PrimitiveRef = {
       kind: "sketchEntity",
       sketchId: SKETCH_ID,
-      entityId: "line_1" as SketchEntityId,
+      entityId: "sketch_entity_line_1",
     };
     const targets = resolveTangentActionTargets(
       [ref],
@@ -189,7 +198,7 @@ describe("T12e: resolveTangentActionTargets", () => {
   test("wrong sketch ID yields empty", () => {
     const ref: PrimitiveRef = {
       kind: "sketchTangentHandle",
-      sketchId: "other_sketch",
+      sketchId: "sketch_other",
       entityId: ENTITY_ID,
       occurrenceId: OCC_B,
       pointId: POINT_B,
