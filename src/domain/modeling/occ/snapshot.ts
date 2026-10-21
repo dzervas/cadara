@@ -1521,7 +1521,8 @@ function buildRegionRenderRecords(
   return sketches.flatMap((sketch) => {
     const cached = regionRenderRecordCache.get(sketch);
     if (
-      cached?.oc === state.oc &&
+      cached !== undefined &&
+      cached.oc === state.oc &&
       cached.modelingTolerance === state.modelingTolerance &&
       cached.tierId === tessellationTier.id
     ) {
