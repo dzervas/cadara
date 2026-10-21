@@ -13,6 +13,8 @@ const OFFLINE_PREVIEW_PORT = 4180;
 
 export default defineConfig({
   ...appConfig,
+  // The production preview is started by the spec, not before global setup.
+  globalSetup: undefined,
   testDir: "./e2e/offline",
   testMatch: undefined,
   testIgnore: undefined,

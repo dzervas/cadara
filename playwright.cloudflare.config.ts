@@ -4,6 +4,8 @@ import appConfig from "./playwright.config";
 // Exercise the actual Workers Static Assets router, not Vite's SPA fallback.
 export default defineConfig({
   ...appConfig,
+  // Production assets are already built and do not expose the dev debug platform.
+  globalSetup: undefined,
   testDir: "./e2e/production",
   testMatch: "landing-routing.spec.ts",
   testIgnore: [],
