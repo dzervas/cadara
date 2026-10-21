@@ -1131,16 +1131,13 @@ function solveDefinition(
   offsetPlans: SolveSketchRequest["offsetPlans"],
   tolerances: SolveSketchRequest["tolerances"],
 ) {
-  // T08b-g5: offsets come from the shared contracts solve frame at τ;
-  // T15b (T-14): mirrors from their owner, always.
+  // Every relationship uses the shared evaluator, including pattern/transform
+  // sketches with neither a mirror nor an offset to trigger evaluation.
   const hasOffsets = (authoredDefinition.derivedRelationships ?? []).some(
     (relationship) => relationship.kind === "offset",
   );
-  const hasMirrors = (authoredDefinition.derivedRelationships ?? []).some(
-    (relationship) => relationship.kind === "mirror",
-  );
   const evaluation =
-    hasOffsets || hasMirrors
+    authoredDefinition.derivedRelationships?.length
       ? evaluateSketchDerivations({
           definition: authoredDefinition,
           modelingTolerance,
