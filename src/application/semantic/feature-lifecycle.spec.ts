@@ -99,3 +99,64 @@ test("feature suppression and restoration rebuild actual geometry and preserve t
     await w.close();
   }
 }, 180_000);
+
+// cadara-49h: a body rename re-runs no feature; Undo and Redo still restore
+// the name on the body and on every reference to it or its faces.
+test("undo and redo of a body rename restore its name", async () => {
+  const w = await createSketchWorkflow();
+  try {
+    await w.author({ kind: "circle", center: [0, 0], radius: 2 });
+    const sketch = (
+      await w.execute({
+        operation: "sketch.publish",
+        draft: w.draft(),
+        requireProfiles: true,
+      })
+    ).discovery!.sketch!;
+    const solid = await w.execute({
+      operation: "extrude.create",
+      profile: {
+        kind: "region",
+        sketchId: sketch.sketchId,
+        regionId: sketch.profiles[0]!.regionId,
+      },
+      depth: 7,
+      intent: "fulfill",
+    });
+    const bodyId = solid.discovery!.model!.bodies[0]!.bodyId;
+    /** The names the body and its faces, edges and vertices are listed under. */
+    const names = (result: typeof solid) => [
+      ...new Set(
+        result
+          .discovery!.references.filter(
+            (reference) =>
+              "bodyId" in reference.target &&
+              reference.target.bodyId === bodyId,
+          )
+          .map((reference) =>
+            reference.label.replace(
+              / (Face |Edge |Vertex )?(face|edge|vertex)_\S+$/,
+              "",
+            ),
+          ),
+      ),
+    ];
+    expect(names(solid)).toEqual(["Extrude 1"]);
+    const renamed = await w.execute({
+      operation: "body.rename",
+      bodyId,
+      label: "Sleeve",
+      intent: "fulfill",
+    });
+    expect(names(renamed)).toEqual(["Sleeve"]);
+    expect(renamed.discovery!.history!.undoEntries!.at(-1)!.label).toBe(
+      "Rename Body",
+    );
+    const undone = await w.execute({ operation: "history.undo", draft: null });
+    expect(names(undone)).toEqual(names(solid));
+    const redone = await w.execute({ operation: "history.redo", draft: null });
+    expect(names(redone)).toEqual(names(renamed));
+  } finally {
+    await w.close();
+  }
+}, 180_000);
