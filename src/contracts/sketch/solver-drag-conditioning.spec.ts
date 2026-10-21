@@ -21,14 +21,16 @@ for (const row of dragConditioningFixture.cases.filter(
 )) {
   test(`${row.scenario}: far-frame conditioning bounds BFGS work and exposes every numerical residual probe`, () => {
     const session = startConditioningReplay(row);
+    const previous = session.lastAcceptedSnapshot;
     const [target, tolerance] = row.targets[0]!;
     const trace = traceSketchSolverForTest(() =>
       updateCompiledSketchSolveSession(session, target, tolerance),
     );
     expect(trace.result.kind).toBe("solved");
-    // Baseline first frames need 460 / 425 iterations: these ceilings fail on
-    // a no-op, with headroom over the conditioned 71 / 55 (plus ten GN steps).
-    expect(trace.work.bfgsIterations).toBeLessThanOrEqual(140);
+    // Unbudgeted GN10 needs 71 / 55 BFGS steps and 11210 / 10620 raw
+    // blocks. A bare cap/fallback must not move that work into another phase.
+    expect(trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0)).toBeLessThanOrEqual(48);
+    expect(trace.result.solvedSnapshot).toBe(previous);
     expect(trace.work.dragConditioningIterations).toBeGreaterThan(0);
     expect(trace.work.dragConditioningIterations).toBeLessThanOrEqual(10);
     // Ten Jacobians, each with one base + two evaluations per solved variable,
@@ -38,7 +40,7 @@ for (const row of dragConditioningFixture.cases.filter(
       trace.work.dragConditioningIterations * (1 + 2 * 29) * blocks,
     );
     expect(trace.work.dragConditioningResidualEvaluations).toBeLessThanOrEqual(
-      12_000,
+      2500,
     );
     expect(trace.work.lossEvaluations).toBeLessThanOrEqual(200);
     expect(trace.work.lineSearchTrials).toBeLessThanOrEqual(190);

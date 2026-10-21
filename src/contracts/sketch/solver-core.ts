@@ -368,6 +368,45 @@ const DRAG_TARGET_WEIGHT = 1e-2;
 // Condition far targets only: near-cursor frames keep their existing BFGS path.
 const DRAG_CONDITIONING_TARGET_LOSS = 1e-4;
 const DRAG_CONDITIONING_MAX_ITERATIONS = 10;
+// cadara-b3k.34: 48 iterative steps retain the complete small-delta trajectory
+// (the T18 approval peaks at 43). 2500 raw block evaluations fit two T18
+// Jacobians, instead of ten (~11210 blocks). Both budgets belong to the whole
+// preview, not each phase/stage/substep/retry. Release drains without a budget.
+const DRAG_PREVIEW_ITERATIONS = 48;
+const DRAG_PREVIEW_RAW_BLOCKS = 2500;
+
+type SolveWork = { kind: "iteration" | "raw"; count: number };
+type SolveSteps<T> = Generator<SolveWork, T, void>;
+
+function finishSolve<T>(steps: SolveSteps<T>): T {
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+// Batch rebuild callbacks are deliberately atomic; this adapter lets them share
+// the same rebuild policy without inventing a work checkpoint for a sync solve.
+// eslint-disable-next-line require-yield
+function* immediateSolve<T>(run: () => T): SolveSteps<T> {
+  return run();
+}
+
+// A suspended stack is the typed continuation: it owns the unaccepted iterate,
+// Hessian, recentlyReset, iteration stop, anchor, goal, frozen stage and rebuild
+// context. Nothing from that stack is published until the normal judge accepts.
+type DragContinuation = {
+  steps: SolveSteps<SketchDraggedPointSolveResult>;
+  next: IteratorResult<SolveWork, SketchDraggedPointSolveResult>;
+  deferred?: SketchDragTarget;
+};
+const dragContinuations = new WeakMap<
+  SketchCompiledSolveSession,
+  DragContinuation
+>();
+const deferredDragTargets = new WeakMap<
+  SketchCompiledSolveSession,
+  SketchDragTarget
+>();
 const DRAG_MAX_SUBSTEPS = 8;
 const DRAG_SUBSTEP_LIMIT = 4;
 
@@ -7226,17 +7265,6 @@ function lineSearchWolfe(
   return null;
 }
 
-function solveBfgs(
-  initialValues: Float64Array,
-  constraints: ScalarConstraintRecord[],
-) {
-  const { values, loss, perConstraint } = solveBfgsOver(
-    initialValues,
-    constraints,
-  );
-  return { values, loss, perConstraint };
-}
-
 /**
  * BFGS over `variableIndices` (every index by default); the other indices
  * keep their initial values and their gradient is not part of the stop test. T13a2 (c3): restricting to a set outside of
@@ -7246,6 +7274,17 @@ function solveBfgs(
  * test and a reset to the identity on a failed line search are the same.
  */
 function solveBfgsOver(
+  initialValues: Float64Array,
+  constraints: ScalarConstraintRecord[],
+  options: {
+    variableIndices?: readonly number[];
+    initialInverseHessian?: Float64Array[] | null;
+  } = {},
+) {
+  return finishSolve(solveBfgsOverSteps(initialValues, constraints, options));
+}
+
+function* solveBfgsOverSteps(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   options: {
@@ -7280,6 +7319,7 @@ function solveBfgsOver(
       break;
     }
 
+    yield { kind: "iteration", count: 1 } satisfies SolveWork;
     if (solverWorkTrace) solverWorkTrace.bfgsIterations += 1;
 
     const searchDirection = multiplyMatrixVector(inverseHessian, gradient);
@@ -7333,7 +7373,7 @@ function solveBfgsOver(
   };
 }
 
-function solveGradientDescent(
+function* solveGradientDescentSteps(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
 ) {
@@ -7345,6 +7385,7 @@ function solveGradientDescent(
       break;
     }
 
+    yield { kind: "iteration", count: 1 } satisfies SolveWork;
     const direction = cloneValues(state.gradient);
     for (let index = 0; index < direction.length; index += 1) {
       direction[index] = -direction[index]!;
@@ -7580,7 +7621,7 @@ function sparseNormalMatrix(jacobian: readonly Float64Array[], size: number) {
   return normal;
 }
 
-function solveGaussNewtonLike(
+function* solveGaussNewtonLikeSteps(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   options: {
@@ -7620,6 +7661,8 @@ function solveGaussNewtonLike(
     iteration < options.maxIterations && state.loss > options.minLoss;
     iteration += 1
   ) {
+    yield { kind: "iteration", count: 1 } satisfies SolveWork;
+    if (solverWorkTrace) solverWorkTrace.gaussNewtonIterations += 1;
     iterations += 1;
     const jacobian = state.evaluations.map((evaluation) =>
       cloneValues(evaluation.gradient),
@@ -7700,7 +7743,10 @@ function solveGaussNewtonLike(
   };
 }
 
-type SolvedSystemValues = ReturnType<typeof solveBfgs>;
+type SolvedSystemValues = Pick<
+  ReturnType<typeof solveBfgsOver>,
+  "values" | "loss" | "perConstraint"
+>;
 
 /** T13e2: one Gauss–Newton fallback run, as recorded by `traceSketchSolverForTest`. */
 export interface SketchGaussNewtonFallbackTrace {
@@ -7731,6 +7777,7 @@ let gaussNewtonFallbackTrace: SketchGaussNewtonFallbackTrace[] | null = null;
  * candidates), never one per BFGS iteration.
  */
 export interface SketchSolverWorkTrace {
+  gaussNewtonIterations: number;
   bfgsIterations: number;
   bfgsResets: number;
   dragConditioningIterations: number;
@@ -7759,6 +7806,7 @@ export function traceSketchSolverForTest<T>(run: () => T): {
   const previousWork = solverWorkTrace;
   const trace: SketchGaussNewtonFallbackTrace[] = [];
   const work: SketchSolverWorkTrace = {
+    gaussNewtonIterations: 0,
     bfgsIterations: 0,
     bfgsResets: 0,
     dragConditioningIterations: 0,
@@ -7792,12 +7840,12 @@ export function traceSketchSolverForTest<T>(run: () => T): {
  * - Review A-1: with an acceptance callback it stops at the first accepted
  *   iterate (a rescue no longer polishes to the 1000-iteration cap).
  */
-function solveBfgsWithGaussNewtonFallback(
+function* solveBfgsWithGaussNewtonFallbackSteps(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   isAccepted?: (solved: SolvedSystemValues) => boolean,
 ) {
-  const bfgs = solveBfgs(initialValues, constraints);
+  const bfgs = yield* solveBfgsOverSteps(initialValues, constraints);
   // A low total loss is not acceptance: each requirement is judged against
   // its own document tolerance, which can be tighter than this threshold.
   if (isAccepted ? isAccepted(bfgs) : bfgs.loss < SOLVED_LOSS_THRESHOLD) {
@@ -7811,7 +7859,7 @@ function solveBfgsWithGaussNewtonFallback(
     return bfgs;
   }
 
-  const gaussNewton = solveGaussNewtonLike(bfgs.values, constraints, {
+  const gaussNewton = yield* solveGaussNewtonLikeSteps(bfgs.values, constraints, {
     maxIterations: 1000,
     minLoss: 1e-14,
     stepSize: 1,
@@ -7838,10 +7886,21 @@ function solveSystemValues(
   /** Absent (drag phase B): a low loss stands for acceptance. */
   isAccepted?: (solved: SolvedSystemValues) => boolean,
 ) {
+  return finishSolve(
+    solveSystemValuesSteps(initialValues, constraints, strategy, isAccepted),
+  );
+}
+
+function* solveSystemValuesSteps(
+  initialValues: Float64Array,
+  constraints: ScalarConstraintRecord[],
+  strategy: SketchSolveStrategy,
+  isAccepted?: (solved: SolvedSystemValues) => boolean,
+) {
   return strategy === "gradientDescent"
-    ? solveGradientDescent(initialValues, constraints)
+    ? yield* solveGradientDescentSteps(initialValues, constraints)
     : strategy === "gaussNewton"
-      ? solveGaussNewtonLike(initialValues, constraints, {
+      ? yield* solveGaussNewtonLikeSteps(initialValues, constraints, {
           maxIterations: 500,
           minLoss: 1e-8,
           stepSize: 1,
@@ -7849,7 +7908,7 @@ function solveSystemValues(
           pseudoInverseEpsilon: 1e-6,
         })
       : strategy === "levenbergMarquardt"
-        ? solveGaussNewtonLike(initialValues, constraints, {
+        ? yield* solveGaussNewtonLikeSteps(initialValues, constraints, {
             maxIterations: 1000,
             minLoss: 1e-10,
             stepSize: 0.1,
@@ -7857,8 +7916,8 @@ function solveSystemValues(
             pseudoInverseEpsilon: 1e-6,
           })
         : strategy === "bfgsWithoutFallback"
-          ? solveBfgs(initialValues, constraints)
-          : solveBfgsWithGaussNewtonFallback(
+          ? yield* solveBfgsOverSteps(initialValues, constraints)
+          : yield* solveBfgsWithGaussNewtonFallbackSteps(
               initialValues,
               constraints,
               isAccepted,
@@ -9405,10 +9464,40 @@ function solveWithRebuildRetry<T>(input: {
   reevaluate: (values: Float64Array) => T;
   isAccepted: (result: T) => boolean;
 }): T {
+  return finishSolve(
+    solveWithRebuildRetrySteps({
+      ...input,
+      solve: () => immediateSolve(input.solve),
+      retry: (from) => immediateSolve(() => input.retry(from)),
+    }),
+  );
+}
+
+function* solveWithRebuildRetrySteps<T>(input: {
+  program: SketchCompiledSolveProgram;
+  startValues: Float64Array;
+  solve: () => SolveSteps<T>;
+  retry: (from: Float64Array) => SolveSteps<T>;
+  valuesOf: (result: T) => Float64Array | null;
+  reevaluate: (values: Float64Array) => T;
+  isAccepted: (result: T) => boolean;
+}): SolveSteps<T> {
   const projection = input.program.system.parameterProjection;
-  const run = (blocked: ReadonlySet<string>, solve: () => T) =>
-    projection.withBlockedRelationships(blocked, () => {
-      const result = solve();
+  const run = function* (
+    blocked: ReadonlySet<string>,
+    solve: () => SolveSteps<T>,
+  ) {
+    const steps = solve();
+    // Scope EACH resume, not creation of the generator. Yielding must restore
+    // projection state for probes/other sessions, and a retry must resume with
+    // its reduced blocked set rather than re-deciding from the accepted start.
+    let next = projection.withBlockedRelationships(blocked, () => steps.next());
+    while (!next.done) {
+      yield next.value;
+      next = projection.withBlockedRelationships(blocked, () => steps.next());
+    }
+    const result = next.value;
+    return projection.withBlockedRelationships(blocked, () => {
       const values = blocked.size > 0 ? input.valuesOf(result) : null;
       return {
         result,
@@ -9418,6 +9507,7 @@ function solveWithRebuildRetry<T>(input: {
           : new Set<string>(),
       };
     });
+  };
   const without = (
     blocked: ReadonlySet<string>,
     rebuilt: ReadonlySet<string>,
@@ -9425,7 +9515,7 @@ function solveWithRebuildRetry<T>(input: {
     new Set([...blocked].filter((derivationId) => !rebuilt.has(derivationId)));
   const judged = (
     blocked: ReadonlySet<string>,
-    solved: ReturnType<typeof run>,
+    solved: { result: T; values: Float64Array | null; rebuilt: ReadonlySet<string> },
   ) =>
     solved.rebuilt.size === 0
       ? solved.result
@@ -9435,14 +9525,14 @@ function solveWithRebuildRetry<T>(input: {
         );
 
   const blockedAtStart = projection.relationshipFailuresAt(input.startValues);
-  const first = run(blockedAtStart, input.solve);
+  const first = yield* run(blockedAtStart, input.solve);
   if (first.rebuilt.size === 0) return first.result;
   const kept = judged(blockedAtStart, first);
   if (input.isAccepted(kept)) return kept;
   const blocked = without(blockedAtStart, first.rebuilt);
   const retried = judged(
     blocked,
-    run(blocked, () => input.retry(first.values!)),
+    yield* run(blocked, () => input.retry(first.values!)),
   );
   return input.isAccepted(retried) ? retried : kept;
 }
@@ -10705,8 +10795,17 @@ function solveDraggedPointFrameWithRebuild(input: {
   dragTarget: SketchDraggedPointTarget;
   interactive?: { targetTolerance: number | null };
 }): DraggedPointCandidate | null {
+  return finishSolve(solveDraggedPointFrameWithRebuildSteps(input));
+}
+
+function* solveDraggedPointFrameWithRebuildSteps(input: {
+  session: SketchCompiledSolveSession;
+  component: SketchCompiledSolveComponent | null;
+  dragTarget: SketchDraggedPointTarget;
+  interactive?: { targetTolerance: number | null };
+}): SolveSteps<DraggedPointCandidate | null> {
   const { session, component, dragTarget, interactive } = input;
-  return solveWithRebuildRetry<DraggedPointCandidate | null>({
+  return yield* solveWithRebuildRetrySteps<DraggedPointCandidate | null>({
     program: session.program,
     startValues: session.values,
     solve: () =>
@@ -10934,19 +11033,19 @@ type DragFrameInput = {
  * caller keeps the last accepted frame). Without a frozen axis the frame is
  * the unchanged single stage.
  */
-function solveDragFrameGeneral(
+function* solveDragFrameGeneral(
   input: DragFrameInput,
-): DraggedPointCandidate | null {
+): SolveSteps<DraggedPointCandidate | null> {
   const frozen = dragFrozenAxisVariables(
     input.session.program,
     input.session.lastAcceptedSnapshot,
     input.component,
     input.draggedVariableIndices,
   );
-  const preferred = solveDragFrameStage(input, frozen);
+  const preferred = yield* solveDragFrameStage(input, frozen);
   if (frozen.size === 0 || preferred === null || preferred.accepted)
     return preferred;
-  return solveDragFrameStage(input, NO_FROZEN_VARIABLES);
+  return yield* solveDragFrameStage(input, NO_FROZEN_VARIABLES);
 }
 
 /**
@@ -10956,10 +11055,10 @@ function solveDragFrameGeneral(
  * only its own stage's inverse Hessian (a different variable set or
  * objective restarts from the identity).
  */
-function solveDragFrameStage(
+function* solveDragFrameStage(
   input: DragFrameInput,
   frozen: ReadonlySet<number>,
-): DraggedPointCandidate | null {
+): SolveSteps<DraggedPointCandidate | null> {
   const { session, component } = input;
   const program = session.program;
   const parameterCount = program.system.parameterCount;
@@ -11092,9 +11191,9 @@ function solveDragFrameStage(
       evaluateLoss(start, input.dragConstraints).loss >
       DRAG_CONDITIONING_TARGET_LOSS;
     const conditionedStart = condition
-      ? conditionDragStart(start, phaseAConstraints, solvedVariables)
+      ? yield* conditionDragStart(start, phaseAConstraints, solvedVariables)
       : start;
-    const solved = solveBfgsOver(
+    const solved = yield* solveBfgsOverSteps(
       cloneValues(conditionedStart),
       phaseAConstraints,
       {
@@ -11110,10 +11209,12 @@ function solveDragFrameStage(
       ? { key: curvatureKey, inverseHessian: solved.inverseHessian }
       : undefined;
   } else {
-    solvedA = solveSystemValues(
-      cloneValues(input.startValues ?? session.values),
-      withFrozenVariables(phaseAConstraints, frozen),
-      program.strategy,
+    solvedA = (
+      yield* solveSystemValuesSteps(
+        cloneValues(input.startValues ?? session.values),
+        withFrozenVariables(phaseAConstraints, frozen),
+        program.strategy,
+      )
     ).values;
   }
   const candidateA = judge(candidateOf(solvedA));
@@ -11125,7 +11226,7 @@ function solveDragFrameStage(
   const phaseBConstraints: ScalarConstraintRecord[] = [
     ...solvedHardConstraints,
   ];
-  const solvedB = solveSystemValues(
+  const solvedB = yield* solveSystemValuesSteps(
     cloneValues(candidateA.values),
     phaseBConstraints,
     program.strategy,
@@ -11146,17 +11247,24 @@ function solveDragFrameStage(
  * Every finite-difference block evaluation is traced, not hidden behind the
  * reduced BFGS iteration count. Small targets never enter this path.
  */
-function conditionDragStart(
+function* conditionDragStart(
   values: Float64Array,
   constraints: ScalarConstraintRecord[],
   indices: readonly number[],
 ) {
-  const evaluate = (at: Float64Array) =>
-    constraints.flatMap((constraint) => {
+  const evaluate = function* (
+    at: Float64Array,
+    split: boolean,
+  ): SolveSteps<number[]> {
+    const residuals: number[] = [];
+    for (const constraint of constraints) {
+      if (split) yield { kind: "raw", count: 1 };
       if (solverWorkTrace)
         solverWorkTrace.dragConditioningResidualEvaluations += 1;
-      return constraint.evaluateComponents(at);
-    });
+      residuals.push(...constraint.evaluateComponents(at));
+    }
+    return residuals;
+  };
   let current = cloneValues(values);
   let state = evaluateLoss(current, constraints);
   for (
@@ -11164,11 +11272,16 @@ function conditionDragStart(
     iteration < DRAG_CONDITIONING_MAX_ITERATIONS;
     iteration += 1
   ) {
+    const blocks = (1 + 2 * indices.length) * constraints.length;
+    // Keep ordinary Jacobians atomic (the measured T18 scheduling policy), but
+    // split oversized ones by block so a single Jacobian cannot starve forever.
+    const split = blocks > DRAG_PREVIEW_RAW_BLOCKS;
+    if (!split) yield { kind: "raw", count: blocks } satisfies SolveWork;
     // Do not borrow BFGS's loose absolute loss/gradient stop: on a soft target
     // it can leave cursor lag (mirror previews pin this). Failed Wolfe progress
     // or the short iteration bound ends conditioning; BFGS still polishes.
     if (solverWorkTrace) solverWorkTrace.dragConditioningIterations += 1;
-    const residuals = evaluate(current);
+    const residuals = yield* evaluate(current, split);
     const jacobian = residuals.map(() => zeroVector(indices.length));
     for (let column = 0; column < indices.length; column += 1) {
       const index = indices[column]!;
@@ -11178,8 +11291,8 @@ function conditionDragStart(
         Math.cbrt(Number.EPSILON) * Math.max(1, Math.abs(current[index]!));
       plus[index] += step;
       minus[index] -= step;
-      const next = evaluate(plus);
-      const previous = evaluate(minus);
+      const next = yield* evaluate(plus, split);
+      const previous = yield* evaluate(minus, split);
       for (let row = 0; row < residuals.length; row += 1)
         jacobian[row]![column] = (next[row]! - previous[row]!) / (2 * step);
     }
@@ -11203,7 +11316,7 @@ function conditionDragStart(
   return current;
 }
 
-function solveDraggedPointFrame(input: {
+function* solveDraggedPointFrame(input: {
   session: SketchCompiledSolveSession;
   component: SketchCompiledSolveComponent | null;
   dragTarget: SketchDraggedPointTarget;
@@ -11211,7 +11324,7 @@ function solveDraggedPointFrame(input: {
   exactReachTolerance?: number;
   reuseCurvature?: boolean;
   repeatsAcceptedFrame?: boolean;
-}): DraggedPointCandidate | null {
+}): SolveSteps<DraggedPointCandidate | null> {
   const { session, component, dragTarget } = input;
   const constraint = createDragTargetConstraint(
     session.program.system,
@@ -11225,7 +11338,7 @@ function solveDraggedPointFrame(input: {
   const draggedVariableIndices = draggedRecord
     ? [draggedRecord.baseIndex, draggedRecord.baseIndex + 1]
     : [];
-  return solveDragFrameGeneral({
+  return yield* solveDragFrameGeneral({
     session,
     component,
     dragConstraints: [constraint],
@@ -11252,14 +11365,14 @@ function solveDraggedPointFrame(input: {
 /**
  * T12b: generalized frame solve with rebuild retry for any drag target type.
  */
-function solveDragFrameGeneralWithRebuild(input: {
+function* solveDragFrameGeneralWithRebuild(input: {
   session: SketchCompiledSolveSession;
   resolved: NonNullable<ReturnType<typeof resolveDragTargetFrame>>;
   constraintLabel: string;
   reuseCurvature: boolean;
-}): DraggedPointCandidate | null {
+}): SolveSteps<DraggedPointCandidate | null> {
   const { session, resolved, constraintLabel } = input;
-  return solveWithRebuildRetry<DraggedPointCandidate | null>({
+  return yield* solveWithRebuildRetrySteps<DraggedPointCandidate | null>({
     program: session.program,
     startValues: session.values,
     solve: () =>
@@ -11365,11 +11478,78 @@ export function updateCompiledSketchSolveSession(
   dragTarget: SketchDragTarget,
   targetTolerance: number | null = session.program.tolerances.coincidence,
 ): SketchDraggedPointSolveResult {
-  const result = updateCompiledSketchSolveSessionFrame(
-    session,
-    dragTarget,
-    targetTolerance,
-  );
+  // Reject invalid input before it can replace/coalesce a valid pending goal.
+  if (session.disposed) {
+    dragContinuations.delete(session);
+    deferredDragTargets.delete(session);
+    return finishSolve(
+      updateCompiledSketchSolveSessionFrame(session, dragTarget, targetTolerance),
+    );
+  }
+  const validationError = validateDragTarget(session, dragTarget);
+  if (validationError) return validationError;
+  let continuation = dragContinuations.get(session);
+  const coalesce = (
+    older: SketchDragTarget | undefined,
+    newer: SketchDragTarget,
+  ): SketchDragTarget =>
+    older?.kind === "sketchTranslate" && newer.kind === "sketchTranslate"
+      ? {
+          ...newer,
+          delta: [older.delta[0] + newer.delta[0], older.delta[1] + newer.delta[1]],
+        }
+      : newer;
+  if (continuation) {
+    // Finish the in-flight goal against its original accepted-frame anchor
+    // before coalescing newer goals. Translation inputs are RELATIVE, so none
+    // of their withheld deltas may be dropped (including the release delta).
+    continuation.deferred = coalesce(continuation.deferred, dragTarget);
+  } else {
+    dragTarget = coalesce(deferredDragTargets.get(session), dragTarget);
+    deferredDragTargets.delete(session);
+    const steps = updateCompiledSketchSolveSessionFrame(
+      session,
+      dragTarget,
+      targetTolerance,
+    );
+    continuation = { steps, next: steps.next() };
+  }
+  let iterations = targetTolerance === null ? DRAG_PREVIEW_ITERATIONS : Infinity;
+  let raw = targetTolerance === null ? DRAG_PREVIEW_RAW_BLOCKS : Infinity;
+  while (!continuation.next.done) {
+    const work = continuation.next.value;
+    const available = work.kind === "iteration" ? iterations : raw;
+    if (work.count > available) {
+      dragContinuations.set(session, continuation);
+      return {
+        kind: "solved",
+        solvedSnapshot: session.lastAcceptedSnapshot,
+        diagnostics: session.lastAcceptedSnapshot.diagnostics,
+      };
+    }
+    if (work.kind === "iteration") iterations -= work.count;
+    else raw -= work.count;
+    continuation.next = continuation.steps.next();
+  }
+  let result = continuation.next.value;
+  dragContinuations.delete(session);
+  if (continuation.deferred) {
+    if (targetTolerance !== null) {
+      // Release flushes the preview first, then runs the actual release protocol
+      // (including exact reach / zero-delta hard-row polishing) without caps.
+      result = finishSolve(
+        updateCompiledSketchSolveSessionFrame(
+          session,
+          continuation.deferred,
+          targetTolerance,
+        ),
+      );
+    } else {
+      // Preserve the prototype's coalescing cadence: start the newer goal on the
+      // next preview, not with a fresh per-phase budget in this call.
+      deferredDragTargets.set(session, continuation.deferred);
+    }
+  }
   if (targetTolerance !== null && result.kind === "solved") {
     classifySolvedConstrainedness(session.program, session.values, {
       status: result.solvedSnapshot.status,
@@ -11380,11 +11560,11 @@ export function updateCompiledSketchSolveSession(
   return result;
 }
 
-function updateCompiledSketchSolveSessionFrame(
+function* updateCompiledSketchSolveSessionFrame(
   session: SketchCompiledSolveSession,
   dragTarget: SketchDragTarget,
   targetTolerance: number | null,
-): SketchDraggedPointSolveResult {
+): SolveSteps<SketchDraggedPointSolveResult> {
   if (session.disposed) {
     return {
       kind: "blocked",
@@ -11444,7 +11624,7 @@ function updateCompiledSketchSolveSessionFrame(
         session.program,
         stepTarget.pointId,
       );
-      const frame = solveDraggedPointFrameWithRebuild({
+      const frame = yield* solveDraggedPointFrameWithRebuildSteps({
         session,
         component,
         dragTarget: stepTarget,
@@ -11481,7 +11661,7 @@ function updateCompiledSketchSolveSessionFrame(
       break;
     }
 
-    const solvedFrame = solveDragFrameGeneralWithRebuild({
+    const solvedFrame = yield* solveDragFrameGeneralWithRebuild({
       session,
       resolved,
       constraintLabel: dragTargetLabel(dragTarget),
