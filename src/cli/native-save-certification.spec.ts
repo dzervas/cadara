@@ -68,7 +68,10 @@ const topologyId = (target: object) => {
   return ids.faceId ?? ids.edgeId ?? ids.vertexId ?? "";
 };
 
-it("saves, re-saves and reopens the public bracket after re-setting its timeline cursor", async () => {
+it.each([
+  { travel: "re-setting its timeline cursor", rollback: false },
+  { travel: "rolling its timeline cursor back and returning", rollback: true },
+])("saves, re-saves and reopens the public bracket after $travel", async ({ rollback }) => {
   const directory = await mkdtemp(resolve(tmpdir(), "cadara-bracket-cursor-"));
   try {
     const { path, body } = await bracketFixture(directory);
@@ -82,10 +85,20 @@ it("saves, re-saves and reopens the public bracket after re-setting its timeline
         path,
         as: "opened",
       },
+      ...(rollback
+        ? [{
+            commandId: "roll-back",
+            operation: "timeline.cursor.set",
+            basis: { alias: "opened" },
+            cursor: { kind: "feature", featureId: "feature_extrude-6" },
+            intent: "fulfill",
+            as: "rolled-back",
+          }]
+        : []),
       {
         commandId: "rebuild",
         operation: "timeline.cursor.set",
-        basis: { alias: "opened" },
+        basis: { alias: rollback ? "rolled-back" : "opened" },
         cursor: { kind: "feature", featureId: "feature_chamfer-1" },
         intent: "fulfill",
         as: "rebuilt",
@@ -106,13 +119,14 @@ it("saves, re-saves and reopens the public bracket after re-setting its timeline
     expect(
       outcomes(first),
       JSON.stringify(first.results.map((r) => r.diagnostics)),
-    ).toEqual(["completed", "completed", "completed", "completed"]);
-    const rebuilt = first.results[1]!;
+    ).toEqual(Array(rollback ? 5 : 4).fill("completed"));
+    const rebuiltIndex = rollback ? 2 : 1;
+    const rebuilt = first.results[rebuiltIndex]!;
     expect(rebuilt.completion.persistence.kind).toBe("committed");
     const accepted = rebuilt.completion.live.state;
     for (const [index, file] of [
-      [2, saved],
-      [3, savedAgain],
+      [rebuiltIndex + 1, saved],
+      [rebuiltIndex + 2, savedAgain],
     ] as const) {
       const save = first.results[index]!;
       // Each save observes its own synchronization of the exact accepted basis:
@@ -184,6 +198,10 @@ it("saves, re-saves and reopens the public bracket after re-setting its timeline
     expect(
       stable(before).filter((r) => r.includes('"kind":"face"')),
     ).toHaveLength(26);
+    // Reopen is canonical: returning must not publish 52 fresh native hashes
+    // whose lineage depends on revision-sensitive fallback input ids.
+    expect(stable(before)).toHaveLength(174);
+    expect(stable(after)).toHaveLength(174);
     expect(
       stable(after),
       "stable target identities survive save and reopen",
