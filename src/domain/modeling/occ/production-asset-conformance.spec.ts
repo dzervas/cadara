@@ -1961,6 +1961,7 @@ describe("src/domain/modeling/occ/production-asset-conformance.spec.ts", () => {
         const result = await provider.export({
           target,
           targetLabel: "touching prism",
+          targetAppearance: null,
           options: provider.getDefaultOptions() as never,
           capabilities,
         });

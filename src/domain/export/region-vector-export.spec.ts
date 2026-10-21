@@ -62,6 +62,7 @@ async function svgRegionPaths(record: SketchSnapshotRecord) {
   const result = await svgSketchExportProvider.export({
     target: { kind: "sketch", sketchId: record.sketchId },
     targetLabel: "Sketch",
+    targetAppearance: null,
     options: {},
     capabilities: capabilitiesOf(modelOf(record)),
   });
@@ -319,6 +320,7 @@ describe("vector export: region paths are the exact resolved segments (T10e, B5)
     const result = await dxfSketchExportProvider.export({
       target: { kind: "sketch", sketchId: record.sketchId },
       targetLabel: "Sketch",
+      targetAppearance: null,
       options: {},
       capabilities: capabilitiesOf(model),
     });

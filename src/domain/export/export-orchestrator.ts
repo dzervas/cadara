@@ -4,6 +4,7 @@ import type {
   DocumentExportResult,
   DocumentExportSuccessResult,
 } from "@/contracts/modeling/export";
+import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ExportProviderRegistry } from "@/domain/export/provider-registry";
 import { exportProviderSupportsTarget } from "@/contracts/export/provider";
@@ -13,6 +14,7 @@ export interface OrchestratorGeometryExportInput {
   options: unknown;
   target: DurableRef;
   targetLabel: string;
+  targetAppearance: BodyAppearance | null;
 }
 
 function createExportFilename(targetLabel: string, extension: string): string {
@@ -86,6 +88,7 @@ export async function orchestrateGeometryExport(
   const result = await provider.export({
     target: input.target,
     targetLabel: input.targetLabel,
+    targetAppearance: input.targetAppearance,
     options: input.options,
     capabilities,
   });

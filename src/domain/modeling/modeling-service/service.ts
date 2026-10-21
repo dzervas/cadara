@@ -2407,13 +2407,26 @@ export function createModelingService(
           return mapExportDocumentResponse(failure);
         }
 
+        const { target } = request;
+        const targetAppearance =
+          target.kind === "body"
+            ? (validateSnapshotResponse(
+                await adapter.getDocumentSnapshot(
+                  buildDocumentRequest(currentDocumentId),
+                ),
+                currentDocumentId,
+              ).document.bodies.find((body) => body.bodyId === target.bodyId)
+                ?.appearance ?? null)
+            : null;
+
         return mapExportDocumentResponse(
           await orchestrateGeometryExport(
             {
               format: request.format,
               options: request.options,
-              target: request.target,
+              target,
               targetLabel: request.targetLabel,
+              targetAppearance,
             },
             capabilitiesOrDiagnostic,
             exportProviders,

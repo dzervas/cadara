@@ -1559,6 +1559,7 @@ test("display, pick, snap, measure and vector export (model and SVG) of one spli
   const svg = await svgSketchExportProvider.export({
     target: { kind: "sketch", sketchId: record.sketchId },
     targetLabel: "Sketch",
+    targetAppearance: null,
     options: {},
     capabilities: {
       sketchVector: { resolveSketchVectorModel: async () => exported },

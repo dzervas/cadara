@@ -1,6 +1,8 @@
+import { strFromU8, unzipSync } from "fflate";
 import { test, expect } from "vitest";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import { BODY_PALETTE } from "@/contracts/modeling/body-appearance";
 import { getDefaultCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
 import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
@@ -9,6 +11,7 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createBuiltinExportProviderRegistry } from "@/domain/export/builtin-provider-composition";
 import { stepExportProvider } from "@/domain/export/providers/step-export-provider";
 import { stlExportProvider } from "@/domain/export/providers/stl-export-provider";
+import { threeMfExportProvider } from "@/domain/export/providers/threemf-export-provider";
 
 test("src/domain/modeling/modeling-export.spec.ts", async () => {
   async function testCadaraExportsDurableDocumentJson() {
@@ -246,4 +249,49 @@ test("src/domain/modeling/modeling-export.spec.ts", async () => {
   await testFileMenuExportImportsAuthoredDocumentJson();
   await testFileMenuImportRejectsInvalidDocumentJson();
   await testGeometryExportRequiresExplicitComposition();
+});
+
+test("3MF export carries the exported body's current colour from the document", async () => {
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: "doc_workspace",
+    exportProviders: createBuiltinExportProviderRegistry(),
+  });
+  const exportedColors = async () => {
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const result = await service.exportDocument({
+      baseRevisionId: snapshot.document.revisionId,
+      target: { kind: "body", bodyId: "body_part-1" },
+      targetLabel: "Part 1",
+      format: "3mf",
+      options: threeMfExportProvider.getDefaultOptions(),
+    });
+    if (!result.ok || !(result.payload instanceof Uint8Array))
+      throw new Error("3MF export should succeed for the seed body.");
+    const xml = strFromU8(unzipSync(result.payload)["3D/3dmodel.model"]!);
+    expect(xml, "the body object references the colour group").toContain(
+      '<object id="1" type="model" pid="2" pindex="0">',
+    );
+    return {
+      revisionId: snapshot.document.revisionId,
+      colors: [...xml.matchAll(/<m:color color="([^"]+)"\/>/g)].map(
+        (match) => match[1],
+      ),
+    };
+  };
+  try {
+    const initial = await exportedColors();
+    expect(initial.colors, "seed body: auto palette slot 0").toEqual([
+      BODY_PALETTE[0].hex.toUpperCase(),
+    ]);
+
+    const set = await service.setBodyAppearance({
+      baseRevisionId: initial.revisionId,
+      bodyId: "body_part-1",
+      appearance: { kind: "custom", hex: "#336699" },
+    });
+    expect(set.isOk(), "premise: the colour change is accepted").toBe(true);
+    expect((await exportedColors()).colors).toEqual(["#336699"]);
+  } finally {
+    service.dispose();
+  }
 });
