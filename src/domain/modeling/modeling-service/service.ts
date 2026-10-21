@@ -179,6 +179,10 @@ export function createModelingService(
     return ++runtimeGeneration;
   }
   let repositoryChangePromise = Promise.resolve();
+  let repositoryRestoreFailure: {
+    error: unknown;
+    previousHistoryState: ModelingHistoryRestoreState;
+  } | null = null;
   let pendingPublicationRestore: (() => Promise<void>) | null = null;
   let publicationRecovery: Promise<void> | null = null;
 
@@ -391,17 +395,37 @@ export function createModelingService(
 
   /** T17k3 (A-1): a document mutation runs after the repository changes
    * received before it; a change received during it is restored after it. */
+  function runLocalDocumentChange<T>(action: () => Promise<T>, replaceContext = false) {
+    const changesBefore = repositoryChangePromise;
+    const mutationsBefore = localMutations;
+    const run = (async () => {
+      await ensureInitialized();
+      await waitForRepositoryChanges(changesBefore);
+      await mutationsBefore;
+      // A new editing context must not be overwritten by an older queued write.
+      if (replaceContext) await repositoryPersistencePromise;
+      await recoverPublishedDocument();
+      return action();
+    })();
+    // Ordering only: the caller still receives `run`'s rejection.
+    localMutations = run.catch(() => undefined);
+    return run;
+  }
+
+  async function waitForRepositoryChanges(changes = repositoryChangePromise) {
+    await changes;
+    // Never read or mutate an incomplete runtime, even if no new peer has
+    // arrived yet. The next repository event can retry without this rejection.
+    if (repositoryRestoreFailure) throw repositoryRestoreFailure.error;
+  }
+
   function runLocalMutation<T extends ModelingMutationBoundaryResult>(
     input: Parameters<typeof runModelingMutationBoundary<T>>[0],
   ) {
     return runModelingMutationBoundary<T>({
       ...input,
-      action: () => {
-        const changesBefore = repositoryChangePromise;
-        const run = (async () => {
-          await ensureInitialized();
-          await changesBefore;
-          await recoverPublishedDocument();
+      action: () =>
+        runLocalDocumentChange(async () => {
           const previousBasis = repositorySnapshotBasis;
           const generation = beginRuntimeChange();
           const result = await input.action();
@@ -412,14 +436,7 @@ export function createModelingService(
             stateGeneration += 1;
           }
           return result;
-        })();
-        // Ordering only: the caller still receives `run`'s rejection.
-        localMutations = Promise.all([
-          localMutations,
-          run.catch(() => undefined),
-        ]);
-        return run;
-      },
+        }),
     });
   }
 
@@ -1160,11 +1177,42 @@ export function createModelingService(
           if (disposed) return;
           const latest = latestRepositoryEvent ?? event;
           if (latest !== restoredRepositoryEvent) {
+            const rollbackDocument = await exportAuthoredDocumentForRepository();
+            const rollbackBasis = repositorySnapshotBasis;
+            try {
+              await restoreRepositoryState(latest.document, latest.diagnostics, latest.metadata);
+            } catch (error) {
+              try {
+                await restoreAuthoredRepositoryDocument(rollbackDocument);
+                if (rollbackBasis) repositorySnapshotBasis = {
+                  ...rollbackBasis, runtimeRevisionId: await currentRevisionId(),
+                };
+              } catch (rollbackError) {
+                throw new AggregateError([error, rollbackError], "Repository refresh and runtime rollback failed.");
+              }
+              throw error;
+            }
             restoredRepositoryEvent = latest;
-            rememberRepositoryMetadata(latest.metadata);
-            await restoreRepositoryState(latest.document, latest.diagnostics, latest.metadata);
+          }
+          if (repositoryRestoreFailure) {
+            historyRestoreState = repositoryRestoreFailure.previousHistoryState;
+            repositoryRestoreFailure = null;
           }
           if (!disposed) notifyModelingDocumentChange(event);
+        }).catch((error: unknown) => {
+          // Report each failed attempt through the existing restore diagnostic
+          // channel, while keeping the subscription tail usable for later events.
+          repositoryRestoreFailure = {
+            error,
+            previousHistoryState: repositoryRestoreFailure?.previousHistoryState ?? historyRestoreState,
+          };
+          historyRestoreState = createRestoreFailure(
+            "repository-restore-exception",
+            error instanceof Error ? error.message : "Repository refresh failed unexpectedly.",
+            null,
+            historyRestoreState.entriesReplayed,
+          );
+          initialLoadingStatus.set("failed");
         });
       },
     );
@@ -1690,7 +1738,7 @@ export function createModelingService(
     },
     async waitForPersistence() {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       await repositoryPersistencePromise;
     },
     async getHistoryRestoreState() {
@@ -1707,7 +1755,7 @@ export function createModelingService(
         await ensureInitialized();
         for (;;) {
           const changes = repositoryChangePromise;
-          await changes;
+          await waitForRepositoryChanges(changes);
           await recoverPublishedDocument();
           const generation = stateGeneration;
           const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
@@ -1724,7 +1772,7 @@ export function createModelingService(
     },
     async buildNativeExactBrepPayload(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       if (!adapter.buildNativeExactBrepPayload) {
         return {
           kind: "nativeTopologyUnavailable",
@@ -1746,91 +1794,91 @@ export function createModelingService(
       return result as OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>;
     },
     async createNewDocument(input) {
-      await ensureInitialized();
-      await repositoryChangePromise;
-      const current = validateSnapshotResponse(
-        await adapter.getDocumentSnapshot(
-          buildDocumentRequest(currentDocumentId),
-        ),
-        currentDocumentId,
-      );
-      const seed = await getSeedAuthoredDocument();
-      // A reset is a new authoritative revision, not a replay of the cached seed.
-      // Reuse the kernel's allocator so subsequent modeling revisions stay ordered.
-      return replaceCurrentAuthoredDocument(
-        {
-          ...seed,
-          name: input?.name ?? seed.name,
-          revisionId: createRevisionId(
-            parseRevisionSequence(current.document.revisionId) + 1,
-          ),
-        },
-        [],
-        { observeTransaction: input?.observe },
-      );
-    },
-    async importDocument(input) {
-      await ensureInitialized();
-      await repositoryChangePromise;
-      const normalized = normalizeImportedDocument(input.document);
-      if (!normalized.ok) {
-        return normalized;
-      }
-
-      const current = validateSnapshotResponse(
-        await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
-        currentDocumentId,
-      );
-      // Fresh editing contexts cannot reuse a saved basis from an earlier owner.
-      return replaceCurrentAuthoredDocument(
-        {
-          ...normalized.document,
-          revisionId: createRevisionId(
-            Math.max(
-              parseRevisionSequence(current.document.revisionId),
-              parseRevisionSequence(normalized.document.revisionId),
-            ) + 1,
-          ),
-        },
-        input.assets ?? [],
-        {
-          validateEmbeddedAssetsBeforePersist: true,
-          validateBeforePersist: true,
-          observeTransaction: input.observe,
-        },
-      );
-    },
-    async renameDocument(input) {
-      await ensureInitialized();
-      await repositoryChangePromise;
-      const document = await exportAuthoredDocumentForRepository();
-      if (document.name === input.name) {
-        const snapshot = validateSnapshotResponse(
+      return runLocalDocumentChange(async () => {
+        const current = validateSnapshotResponse(
           await adapter.getDocumentSnapshot(
             buildDocumentRequest(currentDocumentId),
           ),
           currentDocumentId,
         );
-        return {
-          ok: true,
-          revisionId: snapshot.document.revisionId,
-          diagnostics: snapshot.document.diagnostics,
-        };
-      }
+        const seed = await getSeedAuthoredDocument();
+        // A reset is a new authoritative revision, not a replay of the cached seed.
+        // Reuse the kernel's allocator so subsequent modeling revisions stay ordered.
+        return replaceCurrentAuthoredDocument(
+          {
+            ...seed,
+            name: input?.name ?? seed.name,
+            revisionId: createRevisionId(
+              parseRevisionSequence(current.document.revisionId) + 1,
+            ),
+          },
+          [],
+          { observeTransaction: input?.observe },
+        );
+      }, true);
+    },
+    async importDocument(input) {
+      return runLocalDocumentChange(async () => {
+        const normalized = normalizeImportedDocument(input.document);
+        if (!normalized.ok) {
+          return normalized;
+        }
 
-      return replaceCurrentAuthoredDocument(
-        {
-          ...document,
-          name: input.name,
-          revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
-        },
-        [],
-        { observeTransaction: input.observe, authoredAction: { expected: document, label: "Rename document" } },
-      );
+        const current = validateSnapshotResponse(
+          await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)),
+          currentDocumentId,
+        );
+        // Fresh editing contexts cannot reuse a saved basis from an earlier owner.
+        return replaceCurrentAuthoredDocument(
+          {
+            ...normalized.document,
+            revisionId: createRevisionId(
+              Math.max(
+                parseRevisionSequence(current.document.revisionId),
+                parseRevisionSequence(normalized.document.revisionId),
+              ) + 1,
+            ),
+          },
+          input.assets ?? [],
+          {
+            validateEmbeddedAssetsBeforePersist: true,
+            validateBeforePersist: true,
+            observeTransaction: input.observe,
+          },
+        );
+      }, true);
+    },
+    async renameDocument(input) {
+      return runLocalDocumentChange(async () => {
+        const document = await exportAuthoredDocumentForRepository();
+        if (document.name === input.name) {
+          const snapshot = validateSnapshotResponse(
+            await adapter.getDocumentSnapshot(
+              buildDocumentRequest(currentDocumentId),
+            ),
+            currentDocumentId,
+          );
+          return {
+            ok: true,
+            revisionId: snapshot.document.revisionId,
+            diagnostics: snapshot.document.diagnostics,
+          };
+        }
+
+        return replaceCurrentAuthoredDocument(
+          {
+            ...document,
+            name: input.name,
+            revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
+          },
+          [],
+          { observeTransaction: input.observe, authoredAction: { expected: document, label: "Rename document" } },
+        );
+      }, true);
     },
     async bindLocalFile(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       if (!isLocalFileSyncDocumentRepository(documentRepository)) {
         return {
           ok: false,
@@ -1874,7 +1922,7 @@ export function createModelingService(
     },
     async restoreLocalFileBinding() {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       if (!isLocalFileSyncDocumentRepository(documentRepository)) {
         return null;
       }
@@ -1901,7 +1949,7 @@ export function createModelingService(
     },
     async exportCurrentDocument(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       // Saving is not a new authored mutation. A rebuilt restore may carry
       // different native witnesses and a fresh live id; synchronize and export
       // the exact stored basis it still represents, not a phantom new action.
@@ -1983,7 +2031,7 @@ export function createModelingService(
     },
     async projectSketchExternalReferences(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       return adapter.projectSketchExternalReferences(
         withContractVersion<ProjectSketchExternalReferencesRequest>({
           ...input,
@@ -2297,7 +2345,7 @@ export function createModelingService(
     },
     async evaluatePreview(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       const response = await adapter.evaluatePreview(
         normalizePreviewInput(input, currentDocumentId),
       );
@@ -2306,7 +2354,7 @@ export function createModelingService(
     },
     async exportDocument(input) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       const request = normalizeExportDocumentInput(input, currentDocumentId);
 
       if (request.format !== "cadara") {
@@ -2375,7 +2423,7 @@ export function createModelingService(
     },
     async resolveReference(target) {
       await ensureInitialized();
-      await repositoryChangePromise;
+      await waitForRepositoryChanges();
       const response = await adapter.resolveReference(
         normalizeResolveReferenceInput(target, currentDocumentId),
       );
