@@ -28,6 +28,8 @@ test("src/domain/editor/visibility.spec.ts", async () => {
     sketchTarget?.kind,
     "Visibility fixture should expose the consumed primary sketch row.",
   ).toBe("sketch");
+  if (sketchTarget?.kind !== "sketch")
+    throw new Error("Expected the consumed primary sketch target.");
 
   const sketchKey = getPrimitiveRefKey(sketchTarget);
   const autoHiddenSketchTargetKeys = getAutoHiddenSketchTargetKeys(snapshot);

@@ -1,5 +1,5 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import { test, expect } from "vitest";
+import { test, expect, assert } from "vitest";
 import {
   getEditorHistoryAvailability,
   getEditorViewState,
@@ -30,6 +30,7 @@ import {
 } from "@/core/editor/schema";
 import type { ToolId } from "@/core/tools/tool-registry";
 import type { ImportProvider } from "@/contracts/import/provider";
+import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import type {
   WorkspaceSnapshot,
   ModelingDiagnostic,
@@ -95,6 +96,18 @@ import {
   withSketchSnapScale,
 } from "@/domain/editor/sketch-session/test-snap-scale";
 
+const unusedSketchPorts: Pick<
+  EditorEffectRuntime,
+  "commitSketchPlane" | "projectSketchReferences"
+> = {
+  async commitSketchPlane() {
+    throw new Error("Unexpected sketch-plane commit.");
+  },
+  async projectSketchReferences() {
+    throw new Error("Unexpected sketch projection.");
+  },
+};
+
 test("src/contracts/editor/state-machine.spec.ts", async () => {
   function createSelectionCatalog(): SelectionTargetCatalog {
     return {
@@ -150,57 +163,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     return {
       ...base,
-      sketches: [
-        {
-          ownerDocumentId: "doc_workspace",
-          ownerRevisionId: "rev_1",
-          ownerFeatureId: null,
-          ownerSketchId: "sketch_a",
-          ownerBodyId: null,
-          sketchId: "sketch_a",
-          label: "Sketch A",
-          plane,
-          planeTarget: plane.support,
-          planeKey: plane.key,
-          sketch: {
-            ownerDocumentId: "doc_workspace",
-            ownerRevisionId: "rev_1",
-            ownerFeatureId: null,
-            ownerSketchId: "sketch_a",
-            ownerBodyId: null,
-            sketchId: "sketch_a",
-            label: "Sketch A",
-            planeSupport: plane.support,
-            definition: {
-              schemaVersion: "sketch-definition/v1alpha2",
-              referenceIds: [],
-              references: [],
-              pointIds: [],
-              points: [],
-              entityIds: [],
-              entities: [],
-              constraintIds: [],
-              constraints: [],
-              dimensionIds: [],
-              dimensions: [],
-            },
-            solvedSnapshot: {
-              schemaVersion: "solved-sketch/v1alpha2",
-              status: {
-                solveState: "solved",
-                constraintState: "underConstrained",
-              },
-              solvedEntities: [],
-              solvedPoints: [],
-              constraintStatuses: [],
-              dimensionStatuses: [],
-              diagnostics: [],
-            },
-            derivedValidity: { state: "current", diagnostics: [] },
-            regions: [],
-          },
-        },
-      ],
       document: {
         ...base.document,
         sketches: [
@@ -213,8 +175,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
             sketchId: "sketch_a",
             label: "Sketch A",
             plane,
-            planeTarget: plane.support,
-            planeKey: plane.key,
             sketch: {
               ownerDocumentId: "doc_workspace",
               ownerRevisionId: "rev_1",
@@ -286,7 +246,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
             relatedTargets: [],
             contributingFeatureIds: [],
             consumedByFeatureIds: [],
-            selectionSemantics: ["regionProfile"],
+            selectionSemantics: [],
           },
         ],
         render: {
@@ -356,7 +316,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
             relatedTargets: [],
             contributingFeatureIds: [],
             consumedByFeatureIds: [],
-            selectionSemantics: ["regionProfile"],
+            selectionSemantics: [],
           },
         ],
       },
@@ -365,76 +325,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
   function createSnapshot(): WorkspaceSnapshot {
     return {
-      contractVersion: "modeling-contract/v1alpha1",
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      documentId: "doc_workspace",
-      revisionId: "rev_1",
-      settings: {
-        linearUnit: "millimeter",
-        modelingTolerance: 0.001,
-        angularToleranceRadians: 0.0001,
-      },
-      capabilities: {
-        supportedFeatureKinds: ["extrude"],
-        previewableFeatureKinds: ["extrude"],
-        supportedProfileKinds: ["region", "face"],
-        supportsFaceBackedSketchPlanes: true,
-        supportsDurableTopologyNaming: false,
-      },
-      featureTree: [],
-      objects: [],
-      documentHistory: [],
-      references: [],
-      render: {
-        schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
-        records: [],
-      },
-      sketches: [],
-      features: [],
-      cursor: { kind: "empty" },
-      bodies: [],
-      constructions: [
-        {
-          ownerDocumentId: "doc_workspace",
-          ownerRevisionId: "rev_1",
-          ownerFeatureId: null,
-          ownerSketchId: null,
-          ownerBodyId: null,
-          constructionId: "construction_plane-xy" as ConstructionId,
-          label: "Top Plane",
-          constructionType: "plane",
-          plane: createStandardPlaneDefinition("xy"),
-          target: {
-            kind: "construction",
-            constructionId: "construction_plane-xy" as ConstructionId,
-          },
-        },
-      ],
-      variables: [],
-      entities: [
-        {
-          ownerDocumentId: "doc_workspace",
-          ownerRevisionId: "rev_1",
-          ownerFeatureId: null,
-          ownerSketchId: null,
-          ownerBodyId: null,
-          id: "snapshot_entity_plane_xy" as SnapshotEntityId,
-          label: "Top Plane",
-          target: {
-            kind: "construction",
-            constructionId: "construction_plane-xy" as ConstructionId,
-          },
-          relatedTargets: [],
-          contributingFeatureIds: [],
-          consumedByFeatureIds: [],
-          selectionSemantics: ["constructionPlane", "planarReference"],
-        },
-      ],
-      diagnostics: [],
+      provenance: null,
       document: {
         contractVersion: CONTRACT_VERSION,
         schemaVersion: SNAPSHOT_SCHEMA_VERSION,
         documentId: "doc_workspace",
+        name: "Workspace",
         revisionId: "rev_1",
         settings: {
           linearUnit: "millimeter",
@@ -534,7 +430,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         plane: SketchPlaneDefinition | null;
         planeTarget: PrimitiveRef | null;
         planeKey: "xy" | "yz" | "xz" | null;
-      }
+      },
+      FeatureEditorFormSchema
     > = {
       id: "test-image-import",
       label: "Test Image Import",
@@ -663,6 +560,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           neutralCurveQueries:
             createCertifiedNeutralCurveQueryCapabilityForTest(),
           modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+          angularToleranceRadians: OCC_KERNEL_SETTINGS.angularToleranceRadians,
         },
         sketch: {
           async convertVectorToSketch() {
@@ -730,8 +628,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   ): WorkspaceSnapshot {
     return {
       ...snapshot,
-      revisionId,
-      cursor: structuredClone(cursor),
       document: {
         ...snapshot.document,
         revisionId,
@@ -784,6 +680,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const sketchCommitCalls: RevisionId[] = [];
 
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => {
         snapshotReadCount += 1;
         return snapshot;
@@ -906,20 +803,20 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           (feature) => feature.featureId === "feature_extrude-1",
         )!,
       ),
-      featureId: "feature_revolve-1",
-      ownerFeatureId: "feature_revolve-1",
+      featureId: "feature_revolve-1" as const,
+      ownerFeatureId: "feature_revolve-1" as const,
       label: "Revolve 1",
     };
     const sketch2Item = {
       ...structuredClone(sketchItem),
-      id: "document_history_item_sketch_sketch_second",
+      id: "document_history_item_sketch_sketch_second" as const,
       label: "Sketch 2",
       target: { kind: "sketch" as const, sketchId: sketch2.sketchId },
       sketchId: sketch2.sketchId,
     };
     const revolveItem = {
       ...structuredClone(extrudeItem),
-      id: "document_history_item_feature_feature_revolve-1",
+      id: "document_history_item_feature_feature_revolve-1" as const,
       label: "Revolve 1",
       target: { kind: "feature" as const, featureId: revolve.featureId },
       featureId: revolve.featureId,
@@ -934,15 +831,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     return {
       ...snapshot,
-      cursor,
-      documentHistory,
-      sketches: [...snapshot.document.sketches, sketch2],
-      features: [
-        ...snapshot.document.features.filter(
-          (feature) => feature.featureId === "feature_extrude-1",
-        ),
-        revolve,
-      ],
       document: {
         ...snapshot.document,
         cursor,
@@ -991,6 +879,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Sketch activation should arm a selection command.",
     ).toBe("selectionCommand");
+    assert(result.state.kind === "selectionCommand");
     expect(
       result.state.command.commandSessionId,
       "Sketch command session ID should be deterministic.",
@@ -1021,6 +910,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       openResult.effects[0]?.type,
       "The emitted effect should be sketch.openSession.",
     ).toBe("sketch.openSession");
+    assert(openResult.effects[0]?.type === "sketch.openSession");
     expect(
       openResult.effects[0]?.commandSessionId,
       "The open-session effect must preserve the originating command session ID.",
@@ -1084,6 +974,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       reused.state.kind,
       "Sketch activation should still route through the sketch selection command.",
     ).toBe("selectionCommand");
+    assert(reused.state.kind === "selectionCommand");
     expect(
       reused.state.selection.length,
       "Sketch activation should preserve one compatible preselected sketch target.",
@@ -1117,6 +1008,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cleared.state.kind,
       "Sketch activation should remain in selection mode after clearing incompatible preselection.",
     ).toBe("selectionCommand");
+    assert(cleared.state.kind === "selectionCommand");
     expect(
       cleared.state.selection.length,
       "Sketch activation should clear incompatible multi-target preselection.",
@@ -1180,6 +1072,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activated.state.kind,
       "Section View activation should arm a selection command.",
     ).toBe("selectionCommand");
+    assert(activated.state.kind === "selectionCommand");
     expect(
       activated.state.command.toolId,
       "Section View activation should preserve the tool id.",
@@ -1208,6 +1101,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         selected.state.kind,
         `Section View should accept ${target.kind} seeds.`,
       ).toBe("inspectingSection");
+      assert(selected.state.kind === "inspectingSection");
       expect(
         selected.state.section.seed.kind,
         `Section View should store the ${target.kind} seed.`,
@@ -1251,6 +1145,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       invalidTarget.state.kind,
       "Unsupported section seeds should keep the editor in seed-collection mode.",
     ).toBe("selectionCommand");
+    assert(invalidTarget.state.kind === "selectionCommand");
 
     const missingCamera = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
@@ -1261,6 +1156,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       missingCamera.state.kind,
       "Section View should require viewport camera context before accepting a seed.",
     ).toBe("selectionCommand");
+    assert(missingCamera.state.kind === "selectionCommand");
     expect(
       missingCamera.state.preview?.label.includes("viewport-picked"),
       "Camera-less section seed attempts should explain that viewport selection context is required.",
@@ -1294,6 +1190,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Accepted section seeds should enter active section inspection.",
     ).toBe("inspectingSection");
+    assert(selected.state.kind === "inspectingSection");
     const moved = transitionEditorState(selected.state, {
       type: "section.offsetUpdated",
       commandSessionId: selected.state.command.commandSessionId,
@@ -1310,6 +1207,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     expect(flipped.state.kind, "Flipping should keep the section active.").toBe(
       "inspectingSection",
     );
+    assert(flipped.state.kind === "inspectingSection");
     expect(
       flipped.state.section.offset,
       "Flipping should preserve the current plane position.",
@@ -1328,6 +1226,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cleared.state.kind,
       "Clearing an active section should exit the command session.",
     ).toBe("idle");
+    assert(cleared.state.kind === "idle");
   }
 
   async function testMeasureActivationPairsSelectionsAndCleansUp() {
@@ -1352,12 +1251,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activated.state.kind,
       "Measure activation should start a transient selection command.",
     ).toBe("selectionCommand");
+    assert(activated.state.kind === "selectionCommand");
     expect(
       activated.state.mode,
       "Measure activation should force the workbench into part mode.",
     ).toBe("part");
     expect(
-      activated.state.selectionFilter.label,
+      activated.state.selectionFilter?.label,
       "Measure activation should install the measurement selection filter.",
     ).toBe("Measurement targets");
 
@@ -1397,6 +1297,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         clearedSelection.state.selection.length === 0,
       "Selection clearing should remove active measurement targets without exiting the command.",
     ).toBeTruthy();
+    assert(clearedSelection.state.kind === "selectionCommand");
 
     const cancelled = transitionEditorState(clearedSelection.state, {
       type: "command.cancelled",
@@ -1406,6 +1307,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cancelled.state.kind,
       "Measure cancellation should return the editor to idle.",
     ).toBe("idle");
+    assert(cancelled.state.kind === "idle");
   }
 
   function testSketchSessionPreservesStoredPlaneDefinition() {
@@ -1436,8 +1338,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           sketchId: "sketch_yz",
           label: "Sketch YZ",
           plane: yzPlane,
-          planeTarget: yzPlane.support,
-          planeKey: "yz",
           sketch: {
             ownerDocumentId: "doc_workspace",
             ownerRevisionId: "rev_1",
@@ -1520,8 +1420,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       sketchId: yzSketchId,
       label: "Sketch YZ",
       plane: yzPlane,
-      planeTarget: yzPlane.support,
-      planeKey: "yz" as const,
       sketch: {
         ownerDocumentId: "doc_workspace",
         ownerRevisionId: "rev_1",
@@ -1576,7 +1474,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectionSemantics: ["existingSketch"] as const,
     };
     const yzHistoryItem = {
-      id: "document_history_item_sketch_sketch_yz",
+      id: "document_history_item_sketch_sketch_yz" as const,
       label: "Sketch YZ",
       description: "Authored sketch",
       kind: "sketch" as const,
@@ -1589,16 +1487,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     return {
       ...baseSnapshot,
-      cursor: { kind: "sketch", sketchId: yzSketchId },
-      documentHistory: [yzHistoryItem],
-      sketches: [...baseSnapshot.document.sketches, yzSketch],
       document: {
         ...baseSnapshot.document,
         cursor: { kind: "sketch", sketchId: yzSketchId },
         sketches: [...baseSnapshot.document.sketches, yzSketch],
         entities: [...baseSnapshot.document.entities, yzSketchEntity],
       },
-      entities: [...baseSnapshot.presentation.entities, yzSketchEntity],
       presentation: {
         ...baseSnapshot.presentation,
         documentHistory: [yzHistoryItem],
@@ -1634,6 +1528,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Extrude activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
     expect(
       activation.effects.length,
       "Extrude activation should emit a preview effect.",
@@ -1688,10 +1583,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Revolve activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
     expect(
       activation.state.session.featureType,
       "Revolve activation should create a revolve session.",
     ).toBe("revolve");
+    assert(activation.state.session.featureType === "revolve");
     expect(
       activation.effects.length,
       "Revolve activation without an axis should stay local until the draft is complete.",
@@ -1706,6 +1603,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       completed.state.kind,
       "Revolve selection updates should remain in feature editing.",
     ).toBe("editingFeature");
+    assert(completed.state.kind === "editingFeature");
     expect(
       completed.effects.length,
       "Selecting the missing revolve axis should emit one preview effect.",
@@ -1744,10 +1642,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Face-selected revolve activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
     expect(
       activation.state.session.featureType,
       "Face-selected revolve activation should create a revolve session.",
     ).toBe("revolve");
+    assert(activation.state.session.featureType === "revolve");
     expect(
       activation.state.session.draft.profileTargets[0]?.kind,
       "Face-selected revolve activation should keep the selected face as the revolve profile.",
@@ -1766,10 +1666,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       completed.state.kind,
       "Revolve face-then-edge flow should remain in feature editing.",
     ).toBe("editingFeature");
+    assert(completed.state.kind === "editingFeature");
     expect(
       completed.state.session.featureType,
       "Revolve face-then-edge flow should preserve the revolve session kind.",
     ).toBe("revolve");
+    assert(completed.state.session.featureType === "revolve");
     expect(
       completed.state.session.draft.axisTarget?.kind,
       "Revolve face-then-edge flow should preserve the selected edge as the axis target.",
@@ -1805,10 +1707,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Shell activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
     expect(
       activation.state.session.featureType,
       "Shell activation should create a shell session.",
     ).toBe("shell");
+    assert(activation.state.session.featureType === "shell");
     expect(
       activation.state.session.draft.bodyTarget?.bodyId,
       "Shell activation should infer the source body from a selected face.",
@@ -1844,10 +1748,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Thicken activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
     expect(
       activation.state.session.featureType,
       "Thicken activation should create a thicken session.",
     ).toBe("thicken");
+    assert(activation.state.session.featureType === "thicken");
     expect(
       activation.state.session.draft.faceTargets[0]?.faceId,
       "Thicken activation should seed the selected face into the draft.",
@@ -1890,10 +1796,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       combineActivation.state.kind,
       "Combine activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(combineActivation.state.kind === "editingFeature");
     expect(
       combineActivation.state.session.featureType,
       "Combine activation should create a combine session.",
     ).toBe("combine");
+    assert(combineActivation.state.session.featureType === "combine");
     expect(
       combineActivation.state.session.draft.targetBodyTargets[0]?.bodyId,
       "Combine activation should seed the selected body as a target body.",
@@ -1943,10 +1851,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       splitActivation.state.kind,
       "Split activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(splitActivation.state.kind === "editingFeature");
     expect(
       splitActivation.state.session.featureType,
       "Split activation should create a split session.",
     ).toBe("split");
+    assert(splitActivation.state.session.featureType === "split");
     expect(
       splitActivation.state.session.draft.targetBodyTarget?.bodyId,
       "Split activation should seed the selected body as the target body.",
@@ -1976,10 +1886,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       deleteSolidActivation.state.kind,
       "Delete-solid activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(deleteSolidActivation.state.kind === "editingFeature");
     expect(
       deleteSolidActivation.state.session.featureType,
       "Delete-solid activation should create a delete-solid session.",
     ).toBe("deleteSolid");
+    assert(deleteSolidActivation.state.session.featureType === "deleteSolid");
     expect(
       deleteSolidActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Delete-solid activation should seed the selected body into the delete list.",
@@ -2029,6 +1941,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       reused.state.kind,
       "Compatible feature preselection should enter feature editing.",
     ).toBe("editingFeature");
+    assert(reused.state.kind === "editingFeature");
+    assert(reused.state.session.featureType === "combine");
     expect(
       reused.state.selection.length,
       "Compatible feature activation should preserve the adopted selection.",
@@ -2054,6 +1968,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cleared.state.kind,
       "Incompatible feature preselection should still enter the feature create flow.",
     ).toBe("editingFeature");
+    assert(cleared.state.kind === "editingFeature");
+    assert(cleared.state.session.featureType === "extrude");
     expect(
       cleared.state.selection.length,
       "Incompatible feature preselection should be cleared during activation.",
@@ -2085,10 +2001,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       mirrorActivation.state.kind,
       "Mirror activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(mirrorActivation.state.kind === "editingFeature");
     expect(
       mirrorActivation.state.session.featureType,
       "Mirror activation should create a mirror session.",
     ).toBe("mirror");
+    assert(mirrorActivation.state.session.featureType === "mirror");
     expect(
       mirrorActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Mirror activation should seed the selected body as a mirror target.",
@@ -2118,10 +2036,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       transformActivation.state.kind,
       "Transform activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(transformActivation.state.kind === "editingFeature");
     expect(
       transformActivation.state.session.featureType,
       "Transform activation should create a transform session.",
     ).toBe("transform");
+    assert(transformActivation.state.session.featureType === "transform");
     expect(
       transformActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Transform activation should seed the selected body as a transform target.",
@@ -2151,10 +2071,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       linearPatternActivation.state.kind,
       "Linear pattern activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(linearPatternActivation.state.kind === "editingFeature");
     expect(
       linearPatternActivation.state.session.featureType,
       "Linear pattern activation should create a linear pattern session.",
     ).toBe("linearPattern");
+    assert(linearPatternActivation.state.session.featureType === "linearPattern");
     expect(
       linearPatternActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Linear pattern activation should seed the selected body as a seed target.",
@@ -2184,10 +2106,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       circularPatternActivation.state.kind,
       "Circular pattern activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(circularPatternActivation.state.kind === "editingFeature");
     expect(
       circularPatternActivation.state.session.featureType,
       "Circular pattern activation should create a circular pattern session.",
     ).toBe("circularPattern");
+    assert(circularPatternActivation.state.session.featureType === "circularPattern");
     expect(
       circularPatternActivation.state.session.draft.bodyTargets[0]?.bodyId,
       "Circular pattern activation should seed the selected body as a seed target.",
@@ -2227,6 +2151,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Shell activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
 
     const facesActive = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
@@ -2237,6 +2162,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       facesActive.state.kind,
       "Reference picker activation should stay in feature editing.",
     ).toBe("editingFeature");
+    assert(facesActive.state.kind === "editingFeature");
     expect(
       facesActive.state.activeReferencePickerFieldId,
       "Reference picker activation should track the active form field id.",
@@ -2255,6 +2181,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       faceAppended.state.kind,
       "Multi-reference selection should stay in feature editing.",
     ).toBe("editingFeature");
+    assert(faceAppended.state.kind === "editingFeature");
     expect(
       faceAppended.state.session.featureType === "shell" &&
         faceAppended.state.session.draft.faceTargets.length === 2,
@@ -2270,6 +2197,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       bodyActive.state.kind,
       "Switching active picker fields should stay in feature editing.",
     ).toBe("editingFeature");
+    assert(bodyActive.state.kind === "editingFeature");
     expect(
       bodyActive.state.activeReferencePickerFieldId,
       "Switching active picker fields should update the active field id.",
@@ -2288,6 +2216,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       bodySelected.state.kind,
       "Single-reference selection should stay in feature editing.",
     ).toBe("editingFeature");
+    assert(bodySelected.state.kind === "editingFeature");
     expect(
       bodySelected.state.session.featureType === "shell" &&
         bodySelected.state.session.draft.bodyTarget?.bodyId === "body_b",
@@ -2316,6 +2245,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       activation.state.kind,
       "Shell activation should enter feature editing.",
     ).toBe("editingFeature");
+    assert(activation.state.kind === "editingFeature");
 
     const active = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
@@ -2326,6 +2256,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       active.state.kind,
       "Reference picker activation should stay in feature editing.",
     ).toBe("editingFeature");
+    assert(active.state.kind === "editingFeature");
 
     const escaped = transitionEditorState(active.state, {
       type: "form.referencePickerCancelled",
@@ -2335,6 +2266,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       escaped.state.kind,
       "Escape cancellation should not cancel the whole feature session.",
     ).toBe("editingFeature");
+    assert(escaped.state.kind === "editingFeature");
     expect(
       escaped.state.activeReferencePickerFieldId,
       "Escape cancellation should clear the active picker field.",
@@ -2357,6 +2289,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cancelled.state.kind,
       "Feature session cancellation should leave feature editing.",
     ).toBe("idle");
+    assert(cancelled.state.kind === "idle");
 
     const switched = transitionEditorState(active.state, {
       type: "tool.activated",
@@ -2367,6 +2300,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       switched.state.kind,
       "Switching to another feature tool should enter the new feature session.",
     ).toBe("editingFeature");
+    assert(switched.state.kind === "editingFeature");
     expect(
       switched.state.activeReferencePickerFieldId,
       "Switching to another feature session should clear active picker state.",
@@ -2396,6 +2330,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Import file selection should enter the importing state.",
     ).toBe("importing");
+    assert(result.state.kind === "importing");
     expect(
       result.state.activeReferencePickerFieldId,
       "A single import plane picker should arm automatically when the import session opens.",
@@ -2433,6 +2368,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       opened.state.kind,
       "Import file selection should enter the importing state.",
     ).toBe("importing");
+    assert(opened.state.kind === "importing");
 
     const selected = transitionEditorState(
       opened.state,
@@ -2450,9 +2386,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Plane selection should keep the editor inside the import session.",
     ).toBe("importing");
+    assert(selected.state.kind === "importing");
+    const selections = selected.state.session.selections;
+    assert(selections !== null && typeof selections === "object" && "planeTarget" in selections);
+    const planeTarget = selections.planeTarget;
+    assert(planeTarget !== null && typeof planeTarget === "object" && "kind" in planeTarget);
     expect(
-      selected.state.session.selections.planeTarget?.kind === "construction" &&
-        selected.state.session.selections.planeTarget.constructionId ===
+      planeTarget.kind === "construction" &&
+        "constructionId" in planeTarget && planeTarget.constructionId ===
           "construction_plane-xy",
       "Import plane selection should patch the selected construction plane into import selections.",
     ).toBeTruthy();
@@ -2497,6 +2438,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       idleCleared.state.kind,
       "Selection clearing should keep idle state idle.",
     ).toBe("idle");
+    assert(idleCleared.state.kind === "idle");
     expect(
       idleCleared.state.selection.length,
       "Selection clearing should remove idle selection.",
@@ -2515,6 +2457,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       commandStarted.state.kind,
       "Sketch activation should create a selection command.",
     ).toBe("selectionCommand");
+    assert(commandStarted.state.kind === "selectionCommand");
 
     const commandCleared = transitionEditorState(commandStarted.state, {
       type: "selection.cleared",
@@ -2524,6 +2467,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       commandCleared.state.kind,
       "Selection clearing should preserve active command state.",
     ).toBe("selectionCommand");
+    assert(commandCleared.state.kind === "selectionCommand");
     expect(
       commandCleared.state.command.commandSessionId,
       "Selection clearing should preserve the active command session.",
@@ -2562,6 +2506,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session: sketchSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const sketchCleared = transitionEditorState(sketchState, {
@@ -2572,6 +2517,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       sketchCleared.state.kind,
       "Selection clearing should preserve sketch editing state.",
     ).toBe("editingSketch");
+    assert(sketchCleared.state.kind === "editingSketch");
     expect(
       sketchCleared.state.command.commandSessionId,
       "Selection clearing should preserve the sketch command session.",
@@ -2669,6 +2615,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   async function testRuntimeLoopProcessesSketchOpen() {
     const runtimeSnapshot: WorkspaceSnapshot = createSnapshot();
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -2714,6 +2661,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Runtime loop should enter sketch editing after opening a sketch session.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.planeTarget.kind,
       "Opened sketch session should preserve the selected construction plane.",
@@ -2735,8 +2683,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       planarFace?.kind,
       "Mock runtime snapshot should expose a planar face render target.",
     ).toBe("face");
+    assert(planarFace?.kind === "face");
 
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -2779,6 +2729,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Runtime loop should enter sketch editing after selecting a planar face.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.planeTarget.kind,
       "Face-backed sketch session should preserve the selected face support.",
@@ -2796,23 +2747,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   async function testRuntimeLoopOpensSketchFromNonXYConstruction() {
     const runtimeSnapshot: WorkspaceSnapshot = {
       ...createSnapshot(),
-      constructions: [
-        {
-          ownerDocumentId: "doc_workspace",
-          ownerRevisionId: "rev_1",
-          ownerFeatureId: null,
-          ownerSketchId: null,
-          ownerBodyId: null,
-          constructionId: "construction_plane-yz" as ConstructionId,
-          label: "Right Plane",
-          constructionType: "plane",
-          plane: createStandardPlaneDefinition("yz"),
-          target: {
-            kind: "construction",
-            constructionId: "construction_plane-yz" as ConstructionId,
-          },
-        },
-      ],
       document: {
         ...createSnapshot().document,
         constructions: [
@@ -2852,25 +2786,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           },
         ],
       },
-      entities: [
-        {
-          ownerDocumentId: "doc_workspace",
-          ownerRevisionId: "rev_1",
-          ownerFeatureId: null,
-          ownerSketchId: null,
-          ownerBodyId: null,
-          id: "snapshot_entity_plane_yz" as SnapshotEntityId,
-          label: "Right Plane",
-          target: {
-            kind: "construction",
-            constructionId: "construction_plane-yz" as ConstructionId,
-          },
-          relatedTargets: [],
-          contributingFeatureIds: [],
-          consumedByFeatureIds: [],
-          selectionSemantics: ["constructionPlane", "planarReference"],
-        },
-      ],
       presentation: {
         ...createSnapshot().presentation,
         entities: [
@@ -2895,6 +2810,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
     };
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -2940,6 +2856,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "YZ construction plane should also open a sketch session.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.plane.key,
       "Sketch session should preserve the selected YZ plane definition.",
@@ -2949,6 +2866,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   async function testRuntimeLoopReopensStoredSketchPlane() {
     const runtimeSnapshot = createReopenableYzSketchSnapshot();
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -2998,6 +2916,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Existing sketches should reopen into the sketch editor.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.sketchId,
       "Reopened sketch sessions should preserve the sketch identity.",
@@ -3011,6 +2930,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   async function testRuntimeLoopReopensCommittedFeatureFromExplicitIntent() {
     const runtimeSnapshot = await createMockWorkspaceSnapshot();
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -3058,6 +2978,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Committed feature reopen should enter feature editing.",
     ).toBe("editingFeature");
+    assert(result.state.kind === "editingFeature");
     expect(
       result.state.session.mode,
       "Committed feature reopen should hydrate an edit session.",
@@ -3071,6 +2992,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
   async function testRuntimeLoopReopensSketchFromExplicitIntent() {
     const runtimeSnapshot = createReopenableYzSketchSnapshot();
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => runtimeSnapshot,
       commitSketch: async () => null,
       evaluatePreview: async () => ({
@@ -3125,6 +3047,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Committed sketch reopen should enter sketch editing.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.sketchId,
       "Committed sketch reopen should preserve the sketch identity.",
@@ -3156,6 +3079,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Feature reopen should enter editing after rollback.",
     ).toBe("editingFeature");
+    assert(result.state.kind === "editingFeature");
     expect(
       cursorMoves.length,
       "Feature reopen should move the document cursor before hydration.",
@@ -3203,6 +3127,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Committed sketch reopen should enter sketch editing.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       cursorMoves.length,
       "Sketch reopen should move the document cursor before opening.",
@@ -3248,6 +3173,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Tail sketch reopen should enter sketch editing immediately.",
     ).toBe("editingSketch");
+    assert(result.state.kind === "editingSketch");
     expect(
       result.state.session.sketchId,
       "Tail sketch reopen should preserve the committed sketch id.",
@@ -3286,6 +3212,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Feature edit cancel should return to idle.",
     ).toBe("idle");
+    assert(result.state.kind === "idle");
     expect(
       cursorMoves.length,
       "Feature edit cancel should restore the captured entry cursor.",
@@ -3331,6 +3258,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Feature edit commit should return to idle after restore.",
     ).toBe("idle");
+    assert(result.state.kind === "idle");
     expect(
       featureCommitCalls.length,
       "Feature edit commit should submit the hydrated edit session.",
@@ -3369,6 +3297,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     expect(result.state.kind, "Sketch abort should return to idle.").toBe(
       "idle",
     );
+    assert(result.state.kind === "idle");
     expect(
       cursorMoves.length,
       "Sketch abort should restore the captured entry cursor.",
@@ -3413,6 +3342,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Finish sketch should return to idle after commit.",
     ).toBe("idle");
+    assert(result.state.kind === "idle");
     expect(
       cursorMoves.length,
       "Finish sketch should not restore the document cursor when the reopened sketch is already current.",
@@ -3458,6 +3388,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       result.state.kind,
       "Repository-backed feature edit commit should exit after cursor restore.",
     ).toBe("idle");
+    assert(result.state.kind === "idle");
     expect(
       result.state.snapshot?.document.cursor.kind === "feature" &&
         result.state.snapshot.document.cursor.featureId === "feature_fillet-1",
@@ -3482,6 +3413,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       previousCursor,
       "Repository cursor fixture should expose a previous cursor.",
     ).toBeTruthy();
+    assert(previousCursor);
 
     const boot = transitionEditorState(initialEditorState, {
       type: "session.started",
@@ -3510,6 +3442,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cursorEffect?.type,
       "Timeline cursor requests should emit the document cursor effect.",
     ).toBe("document.moveHistoryCursor");
+    assert(cursorEffect?.type === "document.moveHistoryCursor");
     expect(
       cursorEffect.mutationBasis.baseRevisionId ===
         snapshot.document.revisionId &&
@@ -3561,7 +3494,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const featureId = "feature_broken" as FeatureId;
     const previousRender = createRenderRecord("render_previous", featureId);
     previous.document.render.records = [previousRender];
-    previous.render = previous.document.render;
 
     const loaded = transitionEditorState(initialEditorState, {
       type: "document.snapshotLoaded",
@@ -3576,13 +3508,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     );
 
     const next = structuredClone(previous);
-    next.revisionId = "rev_2";
     next.document.revisionId = "rev_2";
     next.document.render = {
       ...next.document.render,
       records: [createRenderRecord("render_failed_rebuild", featureId)],
     };
-    next.render = next.document.render;
     next.document.diagnostics = [
       {
         code: "occ-missing-reference",
@@ -3600,14 +3530,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         detail: null,
       },
     ];
-    next.diagnostics = next.document.diagnostics;
 
     const failedRefresh = transitionEditorState(refresh.state, {
       type: "effect.snapshotLoaded",
       payload: {
         requestId: effect.requestId,
-        documentId: next.documentId,
-        revisionId: next.revisionId,
+        documentId: next.document.documentId,
+        revisionId: next.document.revisionId,
         snapshot: next,
         selectionCatalog: buildSelectionTargetCatalog(next),
         preserveRenderRecordsOnFeatureDiagnostics: true,
@@ -3623,20 +3552,17 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Feature-scoped failed refreshes should still expose the new repair diagnostic.",
     ).toBe(featureId);
     expect(
-      failedRefresh.state.snapshot?.revisionId,
+      failedRefresh.state.snapshot?.document.revisionId,
       "Render preservation should not roll back the authored snapshot revision.",
     ).toBe("rev_2");
 
     const fixed = structuredClone(next);
-    fixed.revisionId = "rev_3";
     fixed.document.revisionId = "rev_3";
     fixed.document.diagnostics = [];
-    fixed.diagnostics = [];
     fixed.document.render = {
       ...fixed.document.render,
       records: [createRenderRecord("render_fixed", featureId)],
     };
-    fixed.render = fixed.document.render;
     const secondRefresh = transitionEditorState(failedRefresh.state, {
       type: "document.refreshRequested",
     });
@@ -3649,8 +3575,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "effect.snapshotLoaded",
       payload: {
         requestId: secondEffect.requestId,
-        documentId: fixed.documentId,
-        revisionId: fixed.revisionId,
+        documentId: fixed.document.documentId,
+        revisionId: fixed.document.revisionId,
         snapshot: fixed,
         selectionCatalog: buildSelectionTargetCatalog(fixed),
         preserveRenderRecordsOnFeatureDiagnostics: true,
@@ -3677,7 +3603,6 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       toolId: "sketch",
     });
     const replacement = createSnapshot();
-    replacement.revisionId = "rev_replaced";
     replacement.document.revisionId = "rev_replaced";
 
     const replaced = transitionEditorState(sketchCommand.state, {
@@ -3689,6 +3614,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       replaced.state.kind,
       "Whole-document replacement should reset the editor into idle mode.",
     ).toBe("idle");
+    assert(replaced.state.kind === "idle");
     expect(
       replaced.state.mode,
       "Whole-document replacement should return the editor to part mode.",
@@ -3698,7 +3624,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Whole-document replacement should clear the prior selection.",
     ).toBe(0);
     expect(
-      replaced.state.snapshot?.revisionId,
+      replaced.state.snapshot?.document.revisionId,
       "Whole-document replacement should load the replacement snapshot.",
     ).toBe("rev_replaced");
   }
@@ -3707,6 +3633,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const snapshot = createSnapshot();
     let snapshotCallCount = 0;
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: async () => {
         snapshotCallCount += 1;
         return snapshot;
@@ -3746,7 +3673,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       "Bootstrap should hydrate the revision id.",
     ).toBe(snapshot.document.revisionId);
     expect(
-      machineState.snapshot?.revisionId,
+      machineState.snapshot?.document.revisionId,
       "Bootstrap should store the loaded snapshot.",
     ).toBe(snapshot.document.revisionId);
     actor.stop();
@@ -3758,6 +3685,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     let resolveOpenSnapshot: ((value: WorkspaceSnapshot) => void) | null = null;
 
     const runtime: EditorEffectRuntime = {
+      ...unusedSketchPorts,
       getCurrentDocumentSnapshot: () => {
         snapshotCallCount += 1;
 
@@ -3800,6 +3728,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectionState.kind,
       "Sketch activation should reach the selection workflow before opening.",
     ).toBe("selectionCommand");
+    assert(selectionState.kind === "selectionCommand");
 
     actor.dispatch({
       type: "command.cancelled",
@@ -3821,6 +3750,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cancelledState.kind,
       "Cancelling sketch selection should return the runtime to idle.",
     ).toBe("idle");
+    assert(cancelledState.kind === "idle");
     actor.stop();
   }
 
@@ -3852,6 +3782,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
     ).toBe("sketch.openSession");
+    assert(openEffect?.type === "sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -3872,6 +3803,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       opened.state.kind,
       "Sketch open fixture should enter sketch editing.",
     ).toBe("editingSketch");
+    assert(opened.state.kind === "editingSketch");
 
     const withTool = transitionEditorState(opened.state, {
       type: "tool.activated",
@@ -3882,6 +3814,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       withTool.state.kind,
       "Sketch tool activation should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(withTool.state.kind === "editingSketch");
     expect(
       withTool.state.session.activeTool,
       "Sketch tool activation should mark the active tool.",
@@ -3895,6 +3828,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cleared.state.kind,
       "Clearing an active sketch tool should keep the sketch session open.",
     ).toBe("editingSketch");
+    assert(cleared.state.kind === "editingSketch");
     expect(
       cleared.state.session.activeTool,
       "Clearing an active sketch tool should remove the active tool.",
@@ -3932,6 +3866,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
     ).toBe("sketch.openSession");
+    assert(openEffect?.type === "sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -3956,6 +3891,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       withTool.state.kind,
       "Sketch tool fixture should enter sketch editing.",
     ).toBe("editingSketch");
+    assert(withTool.state.kind === "editingSketch");
 
     const activeSketchToolIds = [
       ["spline", "spline"],
@@ -3979,6 +3915,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         result.state.kind,
         `${toolId} should keep the editor in sketch editing.`,
       ).toBe("editingSketch");
+      assert(result.state.kind === "editingSketch");
       expect(
         result.state.mode,
         `${toolId} should keep sketch toolbar mode.`,
@@ -4069,6 +4006,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const reused = transitionEditorState(baseState, {
@@ -4080,6 +4018,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       reused.state.kind,
       "Sketch edit-tool activation should remain in sketch editing.",
     ).toBe("editingSketch");
+    assert(reused.state.kind === "editingSketch");
     expect(
       reused.state.selection.length,
       "Compatible sketch edit-tool activation should preserve current selection.",
@@ -4111,6 +4050,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       cleared.state.kind,
       "Invalid sketch edit-tool activation should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(cleared.state.kind === "editingSketch");
     expect(
       cleared.state.selection.length,
       "Invalid sketch edit-tool activation should clear incompatible selection.",
@@ -4148,6 +4088,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       openEffect?.type,
       "Sketch fixture should emit an open-session effect.",
     ).toBe("sketch.openSession");
+    assert(openEffect?.type === "sketch.openSession");
 
     const opened = transitionEditorState(openRequested.state, {
       type: "effect.sketchSessionOpened",
@@ -4172,6 +4113,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       withTool.state.kind,
       "Sketch tool fixture should enter sketch editing.",
     ).toBe("editingSketch");
+    assert(withTool.state.kind === "editingSketch");
 
     const passiveSketchToolIds = [
       "fill",
@@ -4223,6 +4165,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         result.state.kind,
         `${toolId} should keep the editor in sketch editing.`,
       ).toBe("editingSketch");
+      assert(result.state.kind === "editingSketch");
       expect(
         result.state.mode,
         `${toolId} should keep sketch toolbar mode.`,
@@ -4246,6 +4189,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         result.state.session.activeStyleFocus?.toolId,
         `${toolId} should open style focus state.`,
       ).toBe(toolId);
+      assert(result.state.session.activeStyleFocus);
       expect(
         result.state.session.activeStyleFocus.target,
         `${toolId} should show target guidance without a selection.`,
@@ -4309,6 +4253,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session: styledSession,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     for (const toolId of passiveSketchToolIds) {
@@ -4321,10 +4266,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         result.state.kind,
         `${toolId} with a target should keep sketch editing.`,
       ).toBe("editingSketch");
+      assert(result.state.kind === "editingSketch");
       expect(
         result.state.session.activeStyleFocus?.toolId,
         `${toolId} should become the active style focus.`,
       ).toBe(toolId);
+      assert(result.state.session.activeStyleFocus);
       if (toolId === "stroke") {
         expect(
           result.state.session.activeStyleFocus.target?.kind,
@@ -4365,6 +4312,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       pointSelected.state.kind,
       "Sketch point selection should keep sketch editing active.",
     ).toBe("editingSketch");
+    assert(pointSelected.state.kind === "editingSketch");
     expect(
       pointSelected.state.session.activeEditTarget?.pointId,
       "Sketch point selection should select the point edit target.",
@@ -4445,6 +4393,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         },
         session,
         pendingCommitRequestId: null,
+        pendingProjectionRequestId: null,
+        pendingRegionRequest: null,
       },
     };
   }
@@ -4461,6 +4411,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       hovered.state.kind,
       "Hover fixture should remain in sketch editing.",
     ).toBe("editingSketch");
+    assert(hovered.state.kind === "editingSketch");
     expect(
       hovered.state.session.constraintAuthoring?.hoverTarget?.target &&
         primitiveRefEquals(
@@ -4479,6 +4430,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Selection fixture should remain in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     expect(
       selected.state.session.constraintAuthoring?.selectedTargets.length ===
         1 &&
@@ -4502,6 +4454,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectedFirst.state.kind,
       "First dimension target selection should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(selectedFirst.state.kind === "editingSketch");
 
     const selectedSecond = transitionEditorState(selectedFirst.state, {
       type: "viewport.selectionRequested",
@@ -4511,16 +4464,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectedSecond.state.kind,
       "Second dimension target selection should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(selectedSecond.state.kind === "editingSketch");
 
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-      point: mapSketchPointToWorld(selectedSecond.state.session.plane, [5, 3]),
+      point: [5, 3],
     });
     expect(
       moved.state.kind,
       "Pointer movement over ready dimension preview should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(moved.state.kind === "editingSketch");
 
     const clickedGeometry = transitionEditorState(moved.state, {
       type: "viewport.selectionRequested",
@@ -4531,6 +4486,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       clickedGeometry.state.kind,
       "Dimension placement click fixture should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(clickedGeometry.state.kind === "editingSketch");
     expect(
       clickedGeometry.state.session.constraintAuthoring?.isPreviewPinned ===
         true &&
@@ -4598,6 +4554,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const selectedFirst = transitionEditorState(state, {
@@ -4608,17 +4565,19 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectedFirst.state.kind,
       "First line selection should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(selectedFirst.state.kind === "editingSketch");
 
     const releaseOverSecond = transitionEditorState(selectedFirst.state, {
       type: "sketch.pointerReleased",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-      point: mapSketchPointToWorld(selectedFirst.state.session.plane, [5, 0]),
+      point: [5, 0],
       target: secondLineTarget,
     });
     expect(
       releaseOverSecond.state.kind,
       "Release over second line should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(releaseOverSecond.state.kind === "editingSketch");
     expect(
       releaseOverSecond.state.session.constraintAuthoring?.isPreviewPinned ===
         false &&
@@ -4635,6 +4594,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selectedSecond.state.kind,
       "Second line selection should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(selectedSecond.state.kind === "editingSketch");
 
     let anglePreview = getSketchToolPresentation(
       selectedSecond.state.session,
@@ -4648,12 +4608,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const moved = transitionEditorState(selectedSecond.state, {
       type: "sketch.pointerMoved",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-      point: mapSketchPointToWorld(selectedSecond.state.session.plane, [8, 3]),
+      point: [8, 3],
     });
     expect(
       moved.state.kind,
       "Pointer movement after angle selection should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(moved.state.kind === "editingSketch");
     anglePreview = getSketchToolPresentation(
       moved.state.session,
     )?.overlays?.find((overlay) => overlay.kind === "angleArc");
@@ -4672,13 +4633,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const placed = transitionEditorState(moved.state, {
       type: "sketch.pointerReleased",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-      point: mapSketchPointToWorld(moved.state.session.plane, [4, -1]),
+      point: [4, -1],
       target: null,
     });
     expect(
       placed.state.kind,
       "Angle placement click should keep sketch editing.",
     ).toBe("editingSketch");
+    assert(placed.state.kind === "editingSketch");
     expect(
       placed.state.session.constraintAuthoring?.isPreviewPinned === true &&
         getSketchToolPresentation(placed.state.session)?.floatingInput
@@ -4701,6 +4663,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Invalid constraint selection fixture should remain in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     expect(
       selected.state.session.constraintAuthoring?.selectedTargets.length,
       "Dimension point authoring should ignore viewport clicks on rejected sketch entity targets.",
@@ -4820,6 +4783,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         session,
         pendingCommitRequestId: null,
         pendingProjectionRequestId: null,
+        pendingRegionRequest: null,
       },
     };
   }
@@ -4835,6 +4799,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Connected selection should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     expect(
       selected.state.selection.length === 2 &&
         selected.state.selection.every(
@@ -4890,6 +4855,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         session,
         pendingCommitRequestId: null,
         pendingProjectionRequestId: null,
+        pendingRegionRequest: null,
       },
       {
         type: "sketch.connectedSelectionRequested",
@@ -4901,6 +4867,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Connected rectangle selection should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     expect(
       selected.state.selection.length === 4 &&
         selected.state.selection.every(
@@ -4921,6 +4888,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Unsupported connected selection should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     expect(
       selected.state.selection.length,
       "Projected reference geometry should not expand through the connected selection event.",
@@ -4991,6 +4959,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         },
         session,
         pendingCommitRequestId: null,
+        pendingProjectionRequestId: null,
+        pendingRegionRequest: null,
       },
       {
         type: "viewport.selectionRequested",
@@ -5002,6 +4972,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Selecting an annotation should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(selected.state.kind === "editingSketch");
     // T14c: the editor selection is the only annotation selection; the
     // lifecycle context remembers it as the last selected annotation.
     expect(
@@ -5027,6 +4998,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       deleted.state.kind,
       "Deleting an annotation should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(deleted.state.kind === "editingSketch");
     expect(
       deleted.state.session.definition.constraintIds.length,
       "Annotation deletion should remove the durable constraint record from sketch state.",
@@ -5066,6 +5038,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       operationId,
       "History-delete fixture should create a committed reference-image operation.",
     ).toBeTruthy();
+    assert(operationId);
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -5102,6 +5075,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
       session: baseSession,
       pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const liveDelete = transitionEditorState(baseState, {
@@ -5111,6 +5086,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       liveDelete.state.kind,
       "Live selection deletion should keep the sketch editor active.",
     ).toBe("editingSketch");
+    assert(liveDelete.state.kind === "editingSketch");
     expect(
       liveDelete.state.session.definition.referenceImages?.length,
       "Live selection deletion removes the explicit authored image record.",
@@ -5163,6 +5139,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       annotation?.target.kind,
       "Annotation edit fixture should create a committed dimension annotation.",
     ).toBe("dimension");
+    assert(annotation?.target.kind === "dimension");
 
     const baseState: SketchEditorState = {
       ...initialEditorState,
@@ -5189,6 +5166,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
       session,
       pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const opened = transitionEditorState(baseState, {
@@ -5200,6 +5179,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       opened.state.kind,
       "Annotation edit request should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(opened.state.kind === "editingSketch");
     expect(
       opened.state.session.activeAnnotationEdit?.target.kind,
       "Annotation edit request should open a committed dimension edit session.",
@@ -5222,11 +5202,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       committed.state.kind,
       "Committed dimension edit should stay in sketch editing.",
     ).toBe("editingSketch");
+    assert(committed.state.kind === "editingSketch");
+    const dimension = committed.state.session.definition.dimensions[0];
     expect(
-      committed.state.session.definition.dimensions[0]?.kind === "distance" &&
-        committed.state.session.definition.dimensions[0].value.source ===
-          "literal" &&
-        committed.state.session.definition.dimensions[0].value.value === 33,
+      dimension?.kind === "distance" &&
+        dimension.value?.source === "literal" &&
+        dimension.value.value === 33,
       "Committed dimension edit should update the existing durable dimension record.",
     ).toBeTruthy();
   }
@@ -5276,6 +5257,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
       session,
       pendingCommitRequestId: null,
+      pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const patched = transitionEditorState(baseState, {
@@ -5291,6 +5274,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       patched.state.kind,
       "Sketch style patch event should remain in sketch editing.",
     ).toBe("editingSketch");
+    assert(patched.state.kind === "editingSketch");
     expect(
       patched.state.session.definition.entities[0]?.style?.strokeColor,
       "Sketch style patch should update the selected local entity style via sketch.toolPatched routing.",
@@ -5342,6 +5326,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
       session,
       pendingCommitRequestId: "request_sketch-commit-1",
+      pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const rejected = transitionEditorState(state, {
@@ -5359,6 +5345,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       rejected.state.kind,
       "Rejected sketch commit should keep the sketch open.",
     ).toBe("editingSketch");
+    assert(rejected.state.kind === "editingSketch");
     expect(
       rejected.state.session.validationMessage,
       "Rejected sketch commit diagnostics should surface in the visible sketch validation message.",
@@ -5423,6 +5410,8 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       },
       session,
       pendingCommitRequestId: "request_sketch-commit-1",
+      pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const conflicted = transitionEditorState(state, {
@@ -5446,6 +5435,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       conflicted.state.kind,
       "Sketch commit conflicts should keep the sketch open.",
     ).toBe("editingSketch");
+    assert(conflicted.state.kind === "editingSketch");
     expect(
       conflicted.state.document.revisionId,
       "Sketch commit conflicts should advance the editor revision.",
@@ -5478,6 +5468,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       retryEffect?.type,
       "Retrying Finish Sketch should emit another sketch commit.",
     ).toBe("sketch.commit");
+    assert(retryEffect?.type === "sketch.commit");
     expect(
       retryEffect.baseRevisionId,
       "Sketch commit retries should use the refreshed revision.",
@@ -5532,6 +5523,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       runtime.setDocumentCursor,
       "Modeling service runtime should expose document cursor mutation.",
     ).toBeTruthy();
+    assert(runtime.setDocumentCursor);
     const rejected = await runtime.setDocumentCursor({
       baseRevisionId: "rev_1",
       cursor: { kind: "feature", featureId: "feature_a" },
@@ -5620,6 +5612,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       session,
       pendingCommitRequestId: null,
       pendingProjectionRequestId: null,
+      pendingRegionRequest: null,
     };
 
     const importing = transitionEditorState(sketchState, {
@@ -5636,6 +5629,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       importing.state.kind,
       "Import Image should preserve sketch editing state while awaiting file selection.",
     ).toBe("editingSketch");
+    assert(importing.state.kind === "editingSketch");
 
     const selected = transitionEditorState(importing.state, {
       type: "sketch.referenceImagePayloadsPicked",
@@ -5733,6 +5727,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       commandState.state.kind,
       "Sketch activation should arm the sketch selection command.",
     ).toBe("selectionCommand");
+    assert(commandState.state.kind === "selectionCommand");
 
     const selected = transitionEditorState(commandState.state, {
       type: "viewport.selectionRequested",
@@ -5743,6 +5738,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       selected.state.kind,
       "Selecting the sketch plane should keep the sketch command active until the draft opens.",
     ).toBe("selectionCommand");
+    assert(selected.state.kind === "selectionCommand");
 
     const importing = transitionEditorState(selected.state, {
       type: "tool.activated",
@@ -5772,6 +5768,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       payloadSelected.state.kind,
       "Picking reference-image payloads should open a draft sketch session.",
     ).toBe("editingSketch");
+    assert(payloadSelected.state.kind === "editingSketch");
     expect(
       payloadSelected.state.kind === "editingSketch" &&
         payloadSelected.state.session.definition.referenceImages?.length,
@@ -5808,7 +5805,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         } as PrimitiveRef,
       },
       command: {
-        commandSessionId: "command_import-image-1",
+        commandSessionId: "command_import-image-1" as const,
         toolId: "importImage" as const,
         phase: "collecting" as const,
       },
@@ -5832,6 +5829,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       payloadSelected.state.kind,
       "Import-image-owned sketch selection commands should open a draft sketch session when payloads are picked.",
     ).toBe("editingSketch");
+    assert(payloadSelected.state.kind === "editingSketch");
     expect(
       payloadSelected.state.kind === "editingSketch" &&
         payloadSelected.state.session.definition.referenceImages?.length,
