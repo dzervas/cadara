@@ -252,6 +252,7 @@ function projectCompositeOperands(
       shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
     ): InstanceType<OpenCascadeInstance["TopTools_ListOfShape"]>;
   }[],
+  ownedShapes: Set<InstanceType<OpenCascadeInstance["TopoDS_Shape"]>>,
 ) {
   let projected = operands.map((operand) => ({
     shape: operand.shape,
@@ -264,6 +265,7 @@ function projectCompositeOperands(
         ...listOccShapes(oc, historySource.Modified(operand.shape)),
         ...listOccShapes(oc, historySource.Generated(operand.shape)),
       ];
+      for (const shape of successors) ownedShapes.add(shape);
       for (const shape of successors.length > 0 ? successors : [operand.shape]) {
         const existing = evolved.find((candidate) => candidate.shape.IsSame(shape));
         if (existing) {
@@ -1001,16 +1003,18 @@ function registerSurfaceExtrudeProvenance(
   return { sourceShapes, unsupportedSourceKeys };
 }
 
+function builtExtrudeShapeObjects(shapes: readonly BuiltExtrudeShape[]) {
+  return shapes.flatMap((built) => [
+    built.shape,
+    ...[...built.sourceShapes.values()].flat(),
+    ...[...built.compositeSourceShapes.values()].flat(),
+    ...built.compositeOperands.map((operand) => operand.shape),
+  ]);
+}
+
 /** Completed local prisms have no authoring-state owner until assembly succeeds. */
 function releaseBuiltExtrudeShapes(shapes: readonly BuiltExtrudeShape[]) {
-  releaseOccObjects(
-    shapes.flatMap((built) => [
-      built.shape,
-      ...[...built.sourceShapes.values()].flat(),
-      ...[...built.compositeSourceShapes.values()].flat(),
-      ...built.compositeOperands.map((operand) => operand.shape),
-    ]),
-  );
+  releaseOccObjects(builtExtrudeShapeObjects(shapes));
 }
 
 function buildExtrudeProfileShapes(
@@ -1841,6 +1845,7 @@ function fuseExtrudedShapes(
   extrudedShapes: readonly BuiltExtrudeShape[],
 ): BuiltExtrudeShape {
   const first = extrudedShapes[0]!;
+  const ownedShapes = new Set(builtExtrudeShapeObjects(extrudedShapes));
   let shape = first.shape;
   let sourceShapes = new Map<
     OccTopologySourceKey,
@@ -1855,40 +1860,58 @@ function fuseExtrudedShapes(
 
   for (const next of extrudedShapes.slice(1)) {
     const result = runBoolean(context.oc, "join", shape, next.shape);
-    for (const [sourceKey, shapes] of next.sourceShapes) {
-      registerSourceShapes(sourceShapes, sourceKey, shapes);
+    ownedShapes.add(result.shape);
+    try {
+      for (const [sourceKey, shapes] of next.sourceShapes) {
+        registerSourceShapes(sourceShapes, sourceKey, shapes);
+      }
+      sourceShapes = projectFeatureSourceShapes(
+        context.oc,
+        sourceShapes,
+        result.historySources,
+        ownedShapes,
+      );
+      // Every seed is a real prism FirstShape/LastShape or prism Generated
+      // subshape. Projecting all of them through every Fuse and same-domain
+      // history source yields the exact complete input set for a newly fused
+      // face; no geometric comparison participates.
+      compositeOperands = projectCompositeOperands(
+        context.oc,
+        [...compositeOperands, ...next.compositeOperands],
+        result.historySources,
+        ownedShapes,
+      );
+      compositeSourceShapes = collectCompositeSourceShapes(
+        sourceShapes,
+        compositeOperands,
+      );
+      for (const sourceKey of next.unsupportedSourceKeys) {
+        unsupportedSourceKeys.add(sourceKey);
+      }
+      shape = result.shape;
+    } catch (error) {
+      try {
+        result.dispose();
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
     }
-    sourceShapes = projectFeatureSourceShapes(
-      context.oc,
-      sourceShapes,
-      result.historySources,
-    );
-    // Every seed is a real prism FirstShape/LastShape or prism Generated
-    // subshape. Projecting all of them through every Fuse and same-domain
-    // history source yields the exact complete input set for a newly fused
-    // face; no geometric comparison participates.
-    compositeOperands = projectCompositeOperands(
-      context.oc,
-      [...compositeOperands, ...next.compositeOperands],
-      result.historySources,
-    );
-    compositeSourceShapes = collectCompositeSourceShapes(
-      sourceShapes,
-      compositeOperands,
-    );
-    for (const sourceKey of next.unsupportedSourceKeys) {
-      unsupportedSourceKeys.add(sourceKey);
-    }
-    shape = result.shape;
+    // Both semantic projections above must finish before their history owners
+    // are released. Later topology naming consumes only the projected maps.
+    result.dispose();
   }
 
-  return {
+  const built = {
     shape,
     sourceShapes,
     compositeSourceShapes,
     compositeOperands,
     unsupportedSourceKeys,
   };
+  const retained = new Set(builtExtrudeShapeObjects([built]));
+  releaseOccObjects([...ownedShapes].filter((object) => !retained.has(object)));
+  return built;
 }
 
 export function executeExtrudeFeature(
@@ -2043,6 +2066,22 @@ export function executeExtrudeFeature(
       ),
     });
   }
+
+  // Naming has now consumed the direct and composite maps. Retain only wrapper
+  // identities actually transferred to returned bodies, not merely IsSame shapes.
+  const retained = new Set(
+    result.bodies.flatMap((body) => [
+      body.shape,
+      ...body.facesById.values(),
+      ...body.edgesById.values(),
+      ...body.verticesById.values(),
+    ]),
+  );
+  releaseOccObjects(
+    builtExtrudeShapeObjects([featureShape]).filter(
+      (object) => !retained.has(object),
+    ),
+  );
 
   return {
     bodies: result.bodies,

@@ -96,6 +96,7 @@ export function makeOccWrapperTracker(oc: OC) {
   result(proto("TColgp_Array1OfPnt"), "Value", "gp_Pnt(polygon)");
   const live = (w: W) => !w.isDeleted?.();
   return {
+    ctor,
     patch,
     proto,
     result,

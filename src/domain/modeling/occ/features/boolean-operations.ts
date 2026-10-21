@@ -45,6 +45,7 @@ import {
   type OccTopologyHistorySource,
 } from "@/domain/modeling/occ/topology-naming";
 import { formatGeneratedProducerTopologySourceKey } from "@/domain/modeling/occ/topology-stage";
+import { releaseOccObjects } from "@/domain/modeling/occ/memory";
 import {
   requireSolidBody,
   trackNewBodyResults,
@@ -93,6 +94,7 @@ export function projectFeatureSourceShapes(
   oc: OpenCascadeInstance,
   sourceShapes: OccFeatureSourceShapeMap,
   historySources: readonly OccTopologyHistorySource[],
+  ownedShapes?: Set<InstanceType<OpenCascadeInstance["TopoDS_Shape"]>>,
 ) {
   const projected = new Map<
     string,
@@ -115,6 +117,9 @@ export function projectFeatureSourceShapes(
           ...listHistoryShapes(oc, historySource.Modified(candidate)),
           ...listHistoryShapes(oc, historySource.Generated(candidate)),
         ];
+        // A caller assembling several history hops must also own successors
+        // superseded or deduplicated before the final projected map is returned.
+        for (const shape of evolved) ownedShapes?.add(shape);
 
         if (evolved.length === 0) {
           appendUniqueShape(successors, candidate);
@@ -369,14 +374,22 @@ export function runBoolean(
 
   if (!selected.usesUnifiedResult) {
     refined.historySource.delete();
-    // `Shape()` may alias the raw result when Unify makes no topological change.
-    if (!refined.shape.IsSame(rawShape)) refined.shape.delete();
+    // Equal OCC shapes can still be distinct owning embind wrappers.
+    if (refined.shape !== rawShape) refined.shape.delete();
   }
 
   return {
     shape: selected.shape,
     builder,
     historySources: selected.historySources,
+    // History is borrowed until projection/naming completes. The selected
+    // result transfers to the caller; all other boolean owners stay local.
+    dispose: () =>
+      releaseOccObjects([
+        builder,
+        ...(selected.usesUnifiedResult ? [refined.historySource] : []),
+        ...(rawShape !== selected.shape ? [rawShape] : []),
+      ]),
   };
 }
 

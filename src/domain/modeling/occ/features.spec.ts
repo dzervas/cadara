@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { makeOccWrapperTracker } from "../../../../test/helpers/occ-wrapper-tracker";
-import { releaseOccObjects } from "@/domain/modeling/occ/memory";
+import {
+  releaseOccAuthoringStateObjects,
+  releaseOccObjects,
+} from "@/domain/modeling/occ/memory";
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
@@ -5588,6 +5591,146 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       "Repeated rebuilds with the same feature list should not duplicate render artifacts.",
     ).toBe(second.renderRecords.length);
   }
+
+  test("cadara-n7f: successful multi-profile fuses retain only returned body wrappers", async () => {
+    const plane = createStandardPlaneDefinition("xy");
+    const profiles = [0, 2, 4].map((x, index) =>
+      createRectangleSketch(`sketch_fuse_release_${index}` as SketchId, plane, {
+        origin: [x, 0],
+        width: 4,
+        height: 3,
+      }),
+    );
+    const [firstProfile, ...otherProfiles] = profiles.map(
+      ({ sketch, region }) => ({
+        kind: "region" as const,
+        sketchId: sketch.sketchId,
+        regionId: region.regionId,
+      }),
+    );
+    const context: OccFeatureExecutionContext = {
+      ...(await createContext({
+        sketches: profiles.map(({ sketch }) => sketch),
+      })()),
+      assets: { records: [] },
+      assetBlobs: new Map(),
+      resolvedGeometryAssets: new Map(),
+      bakedShapeCache: new Map(),
+      previousTopologyStage: null,
+      topologyProvenanceIndex: createOccTopologyProvenanceIndex({
+        stages: new Map(),
+        previousLineage: new Map(),
+        historyOrder: [],
+      }),
+    };
+    const tracker = makeOccWrapperTracker(context.oc);
+    const kinds = [
+      "prism result",
+      "fuse result",
+      "fuse builder",
+      "fuse history",
+      "history successor",
+    ];
+    for (const method of [
+      "Shape",
+      "FirstShape_1",
+      "LastShape_1",
+      "FirstShape_2",
+      "LastShape_2",
+    ]) {
+      tracker.result(
+        tracker.proto("BRepPrimAPI_MakePrism"),
+        method,
+        "prism result",
+      );
+    }
+    tracker.result(tracker.proto("BRepAlgoAPI_Fuse"), "Shape", "fuse result");
+    tracker.result(
+      tracker.proto("ShapeUpgrade_UnifySameDomain"),
+      "Shape",
+      "fuse result",
+    );
+    tracker.ctor("BRepAlgoAPI_Fuse_1", "fuse builder");
+    tracker.ctor("BRepTools_History", "fuse history");
+    tracker.result(
+      tracker.proto("TopTools_ListOfShape"),
+      "First_1",
+      "history successor",
+    );
+    let result: ReturnType<typeof executeOccFeature> | undefined;
+    try {
+      result = await tracker.record(() =>
+        executeOccFeature(context, "feature_fuse_release" as FeatureId, {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "solid",
+            profiles: [firstProfile!, ...otherProfiles],
+            startExtent: { kind: "profilePlane" },
+            extent: {
+              mode: "oneSide",
+              end: {
+                kind: "blind",
+                direction: "positive",
+                distance: { source: "literal", value: 2 },
+              },
+            },
+            operation: { source: "literal", value: "newBody" },
+            booleanScope: { kind: "standalone" },
+          },
+        }),
+      );
+      expect(result.bodies).toHaveLength(1);
+      const body = result.bodies[0]!;
+      assertClose(
+        await bodyVolume(context.oc, body.shape),
+        48,
+        1e-6,
+        "Fused prism volume",
+      );
+      const sourceTargets = result.topologyStage!.outputs.get(body.bodyId)!.sourceTargets;
+      expect(
+        [...sourceTargets.keys()].some((key) =>
+          key.startsWith("extrude-composite:"),
+        ),
+      ).toBe(true);
+      const returnedWrappers = new Set<object>([
+        body.shape,
+        ...body.facesById.values(),
+        ...body.edgesById.values(),
+        ...body.verticesById.values(),
+      ]);
+      for (const kind of kinds) {
+        // Other boolean-certification traversal handles are outside this seam;
+        // include every successor allocated by prism and fuse source projection.
+        const wrappers = tracker.of(kind).filter(
+          (wrapper) =>
+            kind !== "history successor" ||
+            /buildExtrudeEndShape|projectFeatureSourceShapes|projectCompositeOperands/.test(
+              tracker.stack(wrapper),
+            ),
+        );
+        expect(
+          wrappers.length,
+          `${kind} must exercise the native fuse path`,
+        ).toBeGreaterThan(0);
+        expect(
+          wrappers.filter(
+            (wrapper) => !wrapper.isDeleted?.() && !returnedWrappers.has(wrapper),
+          ),
+          `${kind} must not outlive extrusion naming unless owned by the returned body`,
+        ).toHaveLength(0);
+      }
+      expect(body.shape.IsNull()).toBe(false);
+    } finally {
+      try {
+        if (result) releaseOccAuthoringStateObjects(result);
+      } finally {
+        tracker.leftovers();
+        tracker.restore();
+      }
+    }
+  });
 
   test("cadara-0c6: vertex reads and refused assemblies retain no local handles", async () => {
     const oc = await getDefaultOpenCascadeInstance();
