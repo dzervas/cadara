@@ -65,6 +65,7 @@ import {
   applySemanticStageTopologyIds,
   createOccReferenceState,
   getOccDurableRefKey,
+  renameOccReferenceStateBody,
   type OccReferenceInvalidationRecord,
   type OccReferenceState,
   type OccTrackedBody,
@@ -171,6 +172,62 @@ function generatedBodyLabel(
     ? label.slice(featureId.length + 1)
     : "";
   return /^[0-9]+$/.test(index) ? { index } : null;
+}
+
+/**
+ * A body rename changes only labels, so no feature runs again: topology,
+ * lineage, naming and reference identities are kept and every record carrying
+ * the body's label is renamed in place. Labels a feature derives from a body's
+ * label (a severing cut's `‹label›_‹n›` pieces) need no recomputation: each
+ * body's label entered `bodyLabels` when it was first evaluated
+ * (applyFeatureResult), and a rebuild or reopen applies those entries over the
+ * derived ones, so the pieces keep their names, as they would after a rebuild.
+ */
+export function renameOccAuthoringStateBody(
+  state: OccAuthoringState,
+  input: { bodyId: BodyId; label: string; revisionId: OccAuthoringState["revisionId"] },
+): OccAuthoringState {
+  // One renamed record per tracked body record, so a body a topology stage
+  // shares with `bodies` stays one object.
+  const renamed = new Map<OccTrackedBody, OccTrackedBody>();
+  const rename = (body: OccTrackedBody) => {
+    if (body.bodyId !== input.bodyId) return body;
+    const existing = renamed.get(body);
+    if (existing) return existing;
+    const next = { ...body, label: input.label };
+    renamed.set(body, next);
+    return next;
+  };
+  const renameStages = (stages: OccFeatureTopologyStageMap) =>
+    new Map(
+      [...stages].map(([featureId, stage]) => [
+        featureId,
+        {
+          ...stage,
+          outputs: new Map(
+            [...stage.outputs].map(([slot, output]) => [
+              slot,
+              { ...output, body: rename(output.body) },
+            ]),
+          ),
+        },
+      ]),
+    );
+  const bodyLabels = new Map(state.bodyLabels);
+  bodyLabels.set(input.bodyId, input.label);
+
+  return {
+    ...state,
+    revisionId: input.revisionId,
+    bodyLabels,
+    bodies: state.bodies.map(rename),
+    baseBodies: state.baseBodies.map(rename),
+    featureTopologyStages: renameStages(state.featureTopologyStages),
+    previousFeatureTopologyStages: renameStages(
+      state.previousFeatureTopologyStages,
+    ),
+    referenceState: renameOccReferenceStateBody(state.referenceState, input),
+  };
 }
 
 function mergeGeometryAssetRecords(

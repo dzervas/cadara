@@ -1793,6 +1793,27 @@ export function createBodySnapshotRecord(
   };
 }
 
+/** The reference label of a body (or one of its faces, edges or vertices). */
+function getBodyReferenceLabel(
+  bodyLabel: string,
+  target:
+    | { kind: "body" }
+    | { kind: "face"; faceId: FaceId }
+    | { kind: "edge"; edgeId: EdgeId }
+    | { kind: "vertex"; vertexId: VertexId },
+) {
+  switch (target.kind) {
+    case "body":
+      return bodyLabel;
+    case "face":
+      return `${bodyLabel} Face ${target.faceId}`;
+    case "edge":
+      return `${bodyLabel} Edge ${target.edgeId}`;
+    case "vertex":
+      return `${bodyLabel} Vertex ${target.vertexId}`;
+  }
+}
+
 function buildLiveReferenceMap(input: {
   documentId: DocumentId;
   revisionId: RevisionId;
@@ -1823,7 +1844,7 @@ function buildLiveReferenceMap(input: {
 
     for (const faceId of body.topology.faceIds) {
       addReference({
-        label: `${body.label} Face ${faceId}`,
+        label: getBodyReferenceLabel(body.label, { kind: "face", faceId }),
         target: { kind: "face", bodyId: body.bodyId, faceId },
         ownerDocumentId: input.documentId,
         ownerRevisionId: input.revisionId,
@@ -1835,7 +1856,7 @@ function buildLiveReferenceMap(input: {
 
     for (const edgeId of body.topology.edgeIds) {
       addReference({
-        label: `${body.label} Edge ${edgeId}`,
+        label: getBodyReferenceLabel(body.label, { kind: "edge", edgeId }),
         target: { kind: "edge", bodyId: body.bodyId, edgeId },
         ownerDocumentId: input.documentId,
         ownerRevisionId: input.revisionId,
@@ -1847,7 +1868,7 @@ function buildLiveReferenceMap(input: {
 
     for (const vertexId of body.topology.vertexIds) {
       addReference({
-        label: `${body.label} Vertex ${vertexId}`,
+        label: getBodyReferenceLabel(body.label, { kind: "vertex", vertexId }),
         target: { kind: "vertex", bodyId: body.bodyId, vertexId },
         ownerDocumentId: input.documentId,
         ownerRevisionId: input.revisionId,
@@ -2064,6 +2085,47 @@ export function createOccReferenceState(input: {
     ),
     liveReferencesByKey,
     invalidatedReferencesByKey,
+  };
+}
+
+/**
+ * Renames `bodyId` in place: its body snapshot and every live or invalidated
+ * reference to the body or its topology take the new label (as a rebuild or a
+ * reopen labels them) and `revisionId`; target identities are unchanged.
+ */
+export function renameOccReferenceStateBody(
+  state: OccReferenceState,
+  input: { bodyId: BodyId; label: string; revisionId: RevisionId },
+): OccReferenceState {
+  const rename = (references: ReadonlyMap<string, ResolvedReferenceRecord>) =>
+    new Map(
+      [...references].map(([key, reference]) => {
+        const { target } = reference;
+        return [
+          key,
+          (target.kind === "body" ||
+            target.kind === "face" ||
+            target.kind === "edge" ||
+            target.kind === "vertex") &&
+          target.bodyId === input.bodyId
+            ? {
+                ...reference,
+                label: getBodyReferenceLabel(input.label, target),
+                ownerRevisionId: input.revisionId,
+              }
+            : reference,
+        ] as const;
+      }),
+    );
+
+  return {
+    bodySnapshots: state.bodySnapshots.map((body) =>
+      body.bodyId === input.bodyId
+        ? { ...body, label: input.label, ownerRevisionId: input.revisionId }
+        : body,
+    ),
+    liveReferencesByKey: rename(state.liveReferencesByKey),
+    invalidatedReferencesByKey: rename(state.invalidatedReferencesByKey),
   };
 }
 

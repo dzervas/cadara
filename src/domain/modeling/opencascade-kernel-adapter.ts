@@ -122,6 +122,7 @@ import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   applyOccFeatureToAuthoringState,
   createOccAuthoringState,
+  renameOccAuthoringStateBody,
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
@@ -3318,7 +3319,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     input: {
       revisionId: RevisionId;
       sketches?: readonly SketchSnapshotRecord[];
-      bodyLabels?: ReadonlyMap<BodyId, string>;
       variables?: OccAuthoringState["variables"];
       features?: readonly OccAuthoringFeatureRecord[];
       historyOrder?: OccAuthoringState["historyOrder"];
@@ -3340,7 +3340,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       sketches: input.sketches ?? runtimeState.authoringState.sketches,
       variables: input.variables ?? runtimeState.authoringState.variables,
       bodies: runtimeState.authoringState.baseBodies,
-      bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
+      bodyLabels: runtimeState.authoringState.bodyLabels,
       bodyAppearances: runtimeState.authoringState.bodyAppearances,
       assets: runtimeState.authoringState.assets,
       assetBlobs: runtimeState.authoringState.assetBlobs,
@@ -5256,25 +5256,26 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     const nextSequence = runtimeState.revisionSequence + 1;
-    const nextRevisionId = createRevisionId(nextSequence);
-    const nextBodyLabels = new Map(runtimeState.authoringState.bodyLabels);
-    nextBodyLabels.set(request.bodyId, request.bodyLabel);
-    const nextAuthoringState = this.tryBuildNextAuthoringState(runtimeState, {
-      revisionId: nextRevisionId,
-      bodyLabels: nextBodyLabels,
-    });
+    // Like a colour change, a rename re-runs no feature (cadara-49h).
+    const nextAuthoringState = renameOccAuthoringStateBody(
+      runtimeState.authoringState,
+      {
+        bodyId: request.bodyId,
+        label: request.bodyLabel,
+        revisionId: createRevisionId(nextSequence),
+      },
+    );
 
     this.replaceRuntimeState({
-      authoringState: nextAuthoringState.state,
+      authoringState: nextAuthoringState,
       revisionSequence: nextSequence,
     });
 
     const bodyTarget = { kind: "body" as const, bodyId: request.bodyId };
     const accepted = this.buildAcceptedResult(
       runtimeState.authoringState,
-      nextAuthoringState.state,
+      nextAuthoringState,
       [],
-      nextAuthoringState.partial,
     );
 
     return this.withOperationEnvelope({
@@ -5335,7 +5336,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     const nextSequence = runtimeState.revisionSequence + 1;
     // Colour is display data: no feature is re-run, so topology, lineage and
-    // reference state are reused unchanged (unlike a body rename's rebuild).
+    // reference state are reused unchanged.
     const nextBodyAppearances = new Map(
       runtimeState.authoringState.bodyAppearances,
     );
