@@ -44,6 +44,8 @@ interface WorkbenchContextMenuProps {
   items: WorkbenchContextMenuEntry[];
   label: string;
   withinPortal?: boolean;
+  /** Inline editors take focus themselves when a menu action starts editing. */
+  returnFocus?: boolean;
 }
 
 export interface MenuAnchor {
@@ -66,6 +68,7 @@ export function WorkbenchContextMenu({
   items,
   label,
   withinPortal = true,
+  returnFocus = true,
 }: WorkbenchContextMenuProps) {
   const menuId = useId();
   const [opened, setOpened] = useState(defaultOpened);
@@ -156,6 +159,7 @@ export function WorkbenchContextMenu({
       {trigger}
       <Menu
         opened={opened}
+        returnFocus={returnFocus}
         onChange={setOpened}
         position="bottom-start"
         closeOnItemClick

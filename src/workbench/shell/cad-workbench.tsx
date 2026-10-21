@@ -1096,12 +1096,32 @@ export function CadWorkbench({
     handleDeleteTarget(item.target, item.label);
   };
 
+  const [renameInProgress, setRenameInProgress] = useState<{
+    target: PrimitiveRef;
+    label: string;
+    surface: "parts" | "history";
+  } | null>(null);
+  const inlineRenameSession = renameInProgress
+    ? {
+        targetKey: getPrimitiveRefKey(renameInProgress.target),
+        onCancel: () => setRenameInProgress(null),
+        onCommit: (requestedLabel: string) => {
+          setRenameInProgress(null);
+          renameWorkbenchTarget({
+            ...objectActionContext,
+            target: renameInProgress.target,
+            label: renameInProgress.label,
+            requestedLabel,
+            setObjectLabelOverrides,
+          });
+        },
+      }
+    : undefined;
   const handleDocumentHistoryRename = (item: DocumentHistoryItemRecord) => {
-    renameWorkbenchTarget({
-      ...objectActionContext,
+    setRenameInProgress({
       target: item.target,
       label: item.label,
-      setObjectLabelOverrides,
+      surface: "history",
     });
   };
 
@@ -1128,12 +1148,7 @@ export function CadWorkbench({
   };
 
   const handleTargetRename = (target: PrimitiveRef, label: string) => {
-    renameWorkbenchTarget({
-      ...objectActionContext,
-      target,
-      label,
-      setObjectLabelOverrides,
-    });
+    setRenameInProgress({ target, label, surface: "parts" });
   };
 
   const handleTimelineCursorRequested = (cursor: DocumentFeatureCursor) => {
@@ -1833,6 +1848,11 @@ export function CadWorkbench({
                 onObjectDelete={handleDeleteTarget}
                 onObjectExport={handleObjectExport}
                 onRenameTarget={handleTargetRename}
+                renameSession={
+                  renameInProgress?.surface === "parts"
+                    ? inlineRenameSession
+                    : undefined
+                }
                 onToggleTargetVisibility={handleTargetVisibilityToggle}
                 onBodyAppearanceChange={handleBodyAppearanceChange}
                 onBodyColorPreview={handleBodyColorPreview}
@@ -1886,6 +1906,11 @@ export function CadWorkbench({
                     onDeleteDocumentItem={handleDocumentHistoryDelete}
                     onExportDocumentItem={handleDocumentHistoryExport}
                     onRenameDocumentItem={handleDocumentHistoryRename}
+                    renameSession={
+                      renameInProgress?.surface === "history"
+                        ? inlineRenameSession
+                        : undefined
+                    }
                     onSuppressFeature={handleFeatureSuppressionRequested}
                     actionHistory={contextualActionHistory}
                     actionHistoryDisabled={isUndoRedoRunning}

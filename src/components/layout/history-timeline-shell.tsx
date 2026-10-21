@@ -11,6 +11,7 @@ import {
   writeHistoryTimelineCollapsedPreference,
 } from "@/components/layout/history-timeline-shell-state";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import type { InlineRenameSession } from "@/components/layout/inline-rename";
 import {
   HistoryActionStrip,
   type HistoryActionStripEntry,
@@ -43,6 +44,7 @@ interface HistoryTimelineShellProps {
     item: Extract<DocumentHistoryItemRecord, { kind: "sketch" }>,
   ) => void;
   onRenameDocumentItem: (item: DocumentHistoryItemRecord) => void;
+  renameSession?: InlineRenameSession;
   onChangeSketchPlaneTarget?: (
     target: Extract<PrimitiveRef, { kind: "sketch" }>,
   ) => void;
@@ -72,6 +74,7 @@ export function HistoryTimelineShell({
   onDeleteDocumentItem,
   onExportDocumentItem,
   onRenameDocumentItem,
+  renameSession,
   onChangeSketchPlaneTarget,
   onSuppressFeature,
   visibleSelection,
@@ -187,6 +190,7 @@ export function HistoryTimelineShell({
             onDeleteItem={onDeleteDocumentItem}
             onExportItem={onExportDocumentItem}
             onRenameItem={onRenameDocumentItem}
+            renameSession={renameSession}
             onChangeSketchPlaneTarget={onChangeSketchPlaneTarget}
             onSuppressFeature={onSuppressFeature}
           />
