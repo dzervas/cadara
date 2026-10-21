@@ -3327,6 +3327,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     },
   ): RebuildAttempt {
     const features = input.features ?? runtimeState.authoringState.features;
+    const featureIds = new Set(features.map((feature) => feature.featureId));
     const cursor = input.cursor ?? runtimeState.authoringState.cursor;
     const deferredFeatureIds = input.deferredFeatureIds;
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
@@ -3353,8 +3354,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder:
         input.historyOrder ?? runtimeState.authoringState.historyOrder,
       previousReferenceState: runtimeState.authoringState.referenceState,
-      previousFeatureTopologyStages:
-        runtimeState.authoringState.featureTopologyStages,
+      // Cursor rollback leaves later stages unapplied, not forgotten. Reuse
+      // their last evaluation on return just as a current-cursor rebuild does;
+      // otherwise fresh native hashes can claim non-replayable fallback inputs.
+      previousFeatureTopologyStages: new Map(
+        [...mergeOccFeatureTopologyStageMaps(
+          runtimeState.authoringState.previousFeatureTopologyStages,
+          runtimeState.authoringState.featureTopologyStages,
+        )].filter(([featureId]) => featureIds.has(featureId)),
+      ),
       previousFeatureTopologyLineage:
         runtimeState.authoringState.previousFeatureTopologyLineage,
       diagnostics: getPersistentAuthoringDiagnostics(
