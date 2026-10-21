@@ -75,6 +75,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     message: string,
   ) {
     expect(actual, `${message} Missing point.`).toBeTruthy();
+    if (!actual) throw new Error(`${message} Missing point.`);
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
@@ -542,8 +543,6 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         sketchId: "sketch_primary",
         label: "Sketch",
         plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
         sketch: {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
@@ -665,10 +664,12 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (renderable) => renderable.target?.kind === "region",
     );
     expect(regionRenderable, "Expected live region renderable.").toBeTruthy();
+    if (!regionRenderable) throw new Error("Expected live region renderable.");
     expect(
       regionRenderable.geometry.kind,
       "Live region renderable should use mesh geometry.",
     ).toBe("mesh");
+    if (regionRenderable.geometry.kind !== "mesh") throw new Error("Expected region mesh.");
 
     const xs = regionRenderable.geometry.vertexPositions.map(
       (point) => point[0],
@@ -691,15 +692,17 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (renderable) => renderable.target?.kind === "region",
     );
     expect(regionRenderable, "Expected live region renderable.").toBeTruthy();
+    if (!regionRenderable) throw new Error("Expected live region renderable.");
     expect(
       regionRenderable.geometry.kind,
       "Live region renderable should use mesh geometry.",
     ).toBe("mesh");
+    if (regionRenderable.geometry.kind !== "mesh") throw new Error("Expected region mesh.");
     return regionRenderable.geometry;
   }
 
   function getTriangleArea(
-    points: readonly [number, number, number][],
+    points: readonly (readonly [number, number, number])[],
     triangle: readonly [number, number, number],
   ) {
     const a = points[triangle[0]]!;
@@ -726,7 +729,10 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       kind: "sketchEntity",
       sketchId: "sketch_primary",
       entityId: entityId as `sketch_entity_${string}`,
-    }).map((target) => target.entityId);
+    }).map((target) => {
+      if (target.kind !== "sketchEntity") throw new Error("Expected connected entity target.");
+      return target.entityId;
+    });
   }
 
   function testConnectedSketchSelectionSelectsTwoConnectedLines() {
@@ -789,7 +795,10 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         sketchId: "sketch_primary",
         entityId: "sketch_entity_ab",
       },
-    ).map((selectedTarget) => selectedTarget.entityId);
+    ).map((selectedTarget) => {
+      if (selectedTarget.kind !== "sketchEntity") throw new Error("Expected connected entity target.");
+      return selectedTarget.entityId;
+    });
 
     expect(
       selectedEntityIds.join(","),
@@ -932,6 +941,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       movedDisplayLine?.kind,
       "Edited line should remain visible as a display line.",
     ).toBe("line");
+    if (!movedDisplayLine) throw new Error("Expected moved display line.");
     const movedDisplayEndpoint = [
       movedDisplayLine.start,
       movedDisplayLine.end,
@@ -962,6 +972,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_b",
     )?.target;
     expect(target, "Expected square vertex B.").toBeTruthy();
+    if (!target) throw new Error("Expected square vertex B.");
 
     session = beginSketchGeometryDrag(session, target, [1, 0]);
     expect(
@@ -1014,6 +1025,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         point.pointId.startsWith("sketch_point_5_line-end_"),
     )?.target;
     expect(target, "Expected logo-like free endpoint.").toBeTruthy();
+    if (!target) throw new Error("Expected logo-like free endpoint.");
 
     session = beginSketchGeometryDrag(
       session,
@@ -1054,6 +1066,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_tip",
     )?.target;
     expect(target, "Expected anchored branch tip.").toBeTruthy();
+    if (!target) throw new Error("Expected anchored branch tip.");
 
     session = beginSketchGeometryDrag(session, target, [0, -20]);
     expect(
@@ -1088,6 +1101,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_b",
     )?.target;
     expect(target, "Expected square vertex B.").toBeTruthy();
+    if (!target) throw new Error("Expected square vertex B.");
 
     const initialBounds = getRegionRenderableBounds(session);
     const initialRegionId = session.liveRegions.regions[0]?.regionId;
@@ -1264,6 +1278,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_b",
     )?.target;
     expect(target, "Expected open segment endpoint.").toBeTruthy();
+    if (!target) throw new Error("Expected open segment endpoint.");
     session = beginSketchGeometryDrag(session, target, [2, 0]);
     session = updateSketchGeometryDrag(session, [2.25, 0]);
 
@@ -1293,6 +1308,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_b",
     )?.target;
     expect(target, "Expected square vertex B.").toBeTruthy();
+    if (!target) throw new Error("Expected square vertex B.");
 
     session = beginSketchGeometryDrag(session, target, [1, 0]);
     const frameCount = 30;
@@ -1352,6 +1368,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         point.pointId.startsWith("sketch_point_1_rect-bottom-left_"),
     )?.target;
     expect(target, "Expected rectangle bottom-left vertex.").toBeTruthy();
+    if (!target) throw new Error("Expected rectangle bottom-left vertex.");
 
     session = beginSketchGeometryDrag(session, target, [0, 0]);
     session = finishSketchGeometryDrag(session, [2, 2]);
@@ -1414,6 +1431,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_a",
     )?.target;
     expect(target, "Expected fixed square vertex A.").toBeTruthy();
+    if (!target) throw new Error("Expected fixed square vertex A.");
 
     session = beginSketchGeometryDrag(session, target, [0, 0]);
     session = finishSketchGeometryDrag(session, [2, 2]);
@@ -1454,6 +1472,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         point.pointId.startsWith("sketch_point_5_line-end_"),
     )?.target;
     expect(target, "Expected fixed logo-like endpoint.").toBeTruthy();
+    if (!target) throw new Error("Expected fixed logo-like endpoint.");
 
     session = beginSketchGeometryDrag(
       session,
@@ -1525,6 +1544,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_slide",
     )?.target;
     expect(target, "Expected slider endpoint.").toBeTruthy();
+    if (!target) throw new Error("Expected slider endpoint.");
 
     session = beginSketchGeometryDrag(session, target, [2, 0]);
     session = finishSketchGeometryDrag(session, [2, 6]);
@@ -1552,6 +1572,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.position[0] === 4 && p.position[1] === 0,
     );
     expect(point, "Expected the line endpoint at [4, 0].").toBeTruthy();
+    if (!point) throw new Error("Expected line endpoint at [4, 0].");
 
     // Press near the point (offset of [0.5, 0.3]).
     const pointerDown: readonly [number, number] = [3.5, -0.3];
@@ -1651,11 +1672,12 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     const datumTarget = {
       kind: "sketchDatumReference" as const,
       sketchId: "sketch_primary" as `sketch_${string}`,
-      datumId: "datum_xy" as `datum_${string}`,
+      datumId: "origin" as const,
+      geometryKind: "point" as const,
     };
     const result = beginSketchGeometryDrag(
       session,
-      datumTarget as import("@/core/editor/schema").PrimitiveRef,
+      datumTarget,
       [2, 0],
     );
     expect(result.activeDrag, "D9: datum target must not start a drag.").toBe(
@@ -2075,6 +2097,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       reconstruction.validity,
       "Spline reconstruction should be valid.",
     ).toBe("valid");
+    if (reconstruction.validity !== "valid") throw new Error("Expected valid spline reconstruction.");
     const visibleVector = reconstruction.handles[1]!;
 
     // The handle tip is at fitPoint + visibleVector.
@@ -2273,6 +2296,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       session.definition.points.map((p) => [p.pointId, p.position]),
     ) as Record<string, readonly [number, number]>;
     const reconstruction = reconstructSplineAggregate(spline, positions);
+    if (reconstruction.validity !== "valid") throw new Error("Expected valid spline reconstruction.");
     const visibleVector = reconstruction.handles[1]!;
     const handleTip: readonly [number, number] = [
       fitPoint.position[0] + visibleVector[0],
@@ -2325,6 +2349,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       session.definition.points.map((p) => [p.pointId, p.position]),
     ) as Record<string, readonly [number, number]>;
     const reconstruction = reconstructSplineAggregate(spline, positions);
+    if (reconstruction.validity !== "valid") throw new Error("Expected valid spline reconstruction.");
     const visibleVector = reconstruction.handles[1]!;
     const handleTip: readonly [number, number] = [
       fitPoint.position[0] + visibleVector[0],
@@ -2371,15 +2396,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           ),
         ],
       }),
-      dimensionIds: ["dim_radius"],
+      dimensionIds: ["dimension_radius"],
       dimensions: [
         {
-          dimensionId: "dim_radius" as `sketch_dimension_${string}`,
+          dimensionId: "dimension_radius",
           kind: "circleRadius" as const,
           label: "R3",
           entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
           value: createLiteralAuthoredValue(3),
-          display: { position: [3, 0] as const },
         },
       ],
     });
@@ -2695,6 +2719,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === "sketch_point_a",
     )?.target;
     expect(target).toBeTruthy();
+    if (!target) throw new Error("Expected drag target.");
     session = beginSketchGeometryDrag(session, target, [0, 0]);
     expect(session.activeDrag).not.toBeNull();
     session = updateSketchGeometryDrag(session, [3, 3]);
@@ -2773,15 +2798,14 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           makeCircle("sketch_entity_circle", "Circle", "sketch_point_center", 3),
         ],
       }),
-      dimensionIds: ["dim_radius"],
+      dimensionIds: ["dimension_radius"],
       dimensions: [
         {
-          dimensionId: "dim_radius" as `sketch_dimension_${string}`,
+          dimensionId: "dimension_radius",
           kind: "circleRadius" as const,
           label: "R3",
           entityId: "sketch_entity_circle" as `sketch_entity_${string}`,
           value: createLiteralAuthoredValue(3),
-          display: { position: [3, 0] as const },
         },
       ],
     };
@@ -2854,6 +2878,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === "sketch_point_a",
     )?.target;
     expect(target).toBeTruthy();
+    if (!target) throw new Error("Expected drag target.");
     const after = beginSketchGeometryDrag(session, target, [1, 0]);
     expect(
       after.activeDrag,
@@ -2909,6 +2934,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === "sketch_point_slide",
     )?.target;
     expect(target).toBeTruthy();
+    if (!target) throw new Error("Expected drag target.");
     session = beginSketchGeometryDrag(session, target, [2, 0]);
     session = updateSketchGeometryDrag(session, [5, 0]);
     expect(
@@ -2991,6 +3017,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === "sketch_point_a",
     )?.target;
     expect(target).toBeTruthy();
+    if (!target) throw new Error("Expected drag target.");
     session = beginSketchGeometryDrag(session, target, [0, 0]);
     session = updateSketchGeometryDrag(session, [3, 3]);
     expect(session.activeDrag?.feedback?.kind).toBe("constrained");
@@ -3043,6 +3070,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (p) => p.pointId === "sketch_point_a",
     )?.target;
     expect(target).toBeTruthy();
+    if (!target) throw new Error("Expected drag target.");
     session = beginSketchGeometryDrag(session, target, [0, 0]);
     session = updateSketchGeometryDrag(session, [3, 3]);
     expect(
@@ -3156,11 +3184,13 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
         },
       ],
     };
-    const session = createSessionFromDefinition(definition);
-    // Confirm the solve is not acceptable (conflicting constraints).
+    const session = openSessionFromDefinition(definition);
+    // Confirm the actual live solve is not acceptable (conflicting constraints).
+    expect(session.liveSolve, "Fixture must have a live solve.").toBeDefined();
+    if (!session.liveSolve) throw new Error("Expected live solve.");
     expect(
-      session.solvedSnapshot?.status.solveState === "solved" ||
-        session.solvedSnapshot?.status.solveState === "notEvaluated",
+      session.liveSolve.solvedSnapshot.status.solveState === "solved" ||
+        session.liveSolve.solvedSnapshot.status.solveState === "notEvaluated",
       "Fixture must produce a non-acceptable solve (partiallySolved or failed).",
     ).toBe(false);
 
@@ -3168,6 +3198,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       (point) => point.pointId === "sketch_point_a",
     )?.target;
     expect(target, "Expected point A.").toBeTruthy();
+    if (!target) throw new Error("Expected point A.");
 
     // B14: this must not throw.
     const afterDrag = beginSketchGeometryDrag(session, target, [1, 0]);
@@ -3320,7 +3351,8 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
                 ? remainingPointIds.has(entity.centerPointId) &&
                   remainingPointIds.has(entity.startPointId) &&
                   remainingPointIds.has(entity.endPointId)
-                : remainingPointIds.has(entity.startPointId) &&
+                : entity.kind === "lineSegment" &&
+                  remainingPointIds.has(entity.startPointId) &&
                   remainingPointIds.has(entity.endPointId),
       ),
       "Point deletion should not leave entities with dangling point references.",
@@ -4959,6 +4991,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
       mirrorRelationship?.kind,
       "Sketch mirror should persist a mirror relationship.",
     ).toBe("mirror");
+    if (!mirrorRelationship) throw new Error("Expected mirror relationship.");
     expect(
       mirrorRelationship.seedEntityIds[0],
       "Mirror relationship should keep the selected seed entity.",
@@ -5376,8 +5409,6 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
           sketchId: sketch.sketchId,
           label: sketch.label,
           plane: sketch.plane,
-          planeTarget: sketch.plane.support,
-          planeKey: sketch.plane.key,
           sketch: {
             ownerDocumentId: parsed.document.documentId,
             ownerRevisionId: parsed.document.revisionId,
@@ -5778,7 +5809,7 @@ test("T13a Q2: a Dimension-tool diameter blocks a rim drag as a constrained fram
   expect(
     dimensioned.definition.dimensions.map((dimension) => [
       dimension.kind,
-      dimension.value,
+      "value" in dimension ? dimension.value : null,
     ]),
     "premise: an authored-value diameter",
   ).toEqual([["diameter", { source: "literal", value: 4 }]]);
@@ -5821,7 +5852,7 @@ test("T13a Q2: an expression-valued dimension stays byte-identical through a dra
   session = beginSketchTool(session, "line");
   const dimensionsBefore = JSON.stringify(session.definition.dimensions);
   expect(
-    session.definition.dimensions.map((dimension) => dimension.value),
+    session.definition.dimensions.map((dimension) => "value" in dimension ? dimension.value : null),
     "premise: the expression is authored",
   ).toEqual([{ source: "expression", valueText: "d" }]);
   const end = session.definition.points.find(

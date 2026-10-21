@@ -31,54 +31,54 @@ test("src/domain/editor/sketch-drag-intent.spec.ts", () => {
     schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
-    pointIds: ["p_start", "p_end", "p_center", "p_arc_center"],
+    pointIds: ["sketch_point_start", "sketch_point_end", "sketch_point_center", "sketch_point_arc_center"],
     points: [
-      point("p_start", 0, 0),
-      point("p_end", 4, 0),
-      point("p_center", 2, 2),
-      point("p_arc_center", 2, 0),
+      point("sketch_point_start", 0, 0),
+      point("sketch_point_end", 4, 0),
+      point("sketch_point_center", 2, 2),
+      point("sketch_point_arc_center", 2, 0),
     ],
-    entityIds: ["e_line", "e_circle", "e_arc"],
+    entityIds: ["sketch_entity_line", "sketch_entity_circle", "sketch_entity_arc"],
     entities: [
       {
         kind: "lineSegment",
-        entityId: "e_line" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_line",
         label: "Line",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_primary",
-          entityId: "e_line" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_line",
         } as const,
         isConstruction: false,
-        startPointId: "p_start" as `sketch_point_${string}`,
-        endPointId: "p_end" as `sketch_point_${string}`,
+        startPointId: "sketch_point_start",
+        endPointId: "sketch_point_end",
       },
       {
         kind: "circle",
-        entityId: "e_circle" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_circle",
         label: "Circle",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_primary",
-          entityId: "e_circle" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_circle",
         } as const,
         isConstruction: false,
-        centerPointId: "p_center" as `sketch_point_${string}`,
+        centerPointId: "sketch_point_center",
         radius: 3,
       },
       {
         kind: "arc",
-        entityId: "e_arc" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_arc",
         label: "Arc",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_primary",
-          entityId: "e_arc" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_arc",
         } as const,
         isConstruction: false,
-        centerPointId: "p_arc_center" as `sketch_point_${string}`,
-        startPointId: "p_start" as `sketch_point_${string}`,
-        endPointId: "p_end" as `sketch_point_${string}`,
+        centerPointId: "sketch_point_arc_center",
+        startPointId: "sketch_point_start",
+        endPointId: "sketch_point_end",
         sweepDirection: "counterClockwise",
       },
     ],
@@ -91,18 +91,18 @@ test("src/domain/editor/sketch-drag-intent.spec.ts", () => {
   function testPointHandleTargetsOnlyThatPoint() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "point",
-      pointId: "p_end" as `sketch_point_${string}`,
+      pointId: "sketch_point_end",
     });
     expect(intent, "Point handle should resolve an intent.").toEqual({
       kind: "point",
-      pointId: "p_end",
+      pointId: "sketch_point_end",
     });
   }
 
   function testEntityBodyHandleTranslatesAllDefiningPoints() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "entityBody",
-      entityId: "e_line" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_line",
     });
     expect(
       intent?.kind,
@@ -111,46 +111,46 @@ test("src/domain/editor/sketch-drag-intent.spec.ts", () => {
     expect(
       intent?.kind === "translate" ? [...intent.pointIds] : [],
       "Entity-body drag should translate every defining point of the line.",
-    ).toEqual(["p_start", "p_end"]);
+    ).toEqual(["sketch_point_start", "sketch_point_end"]);
   }
 
   function testCircleRimHandleTargetsRadiusNotCenter() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "rim",
-      entityId: "e_circle" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_circle",
     });
     expect(intent, "Circle rim handle should resolve a radius intent.").toEqual({
       kind: "radius",
-      entityId: "e_circle",
+      entityId: "sketch_entity_circle",
     });
   }
 
   function testCircleCenterHandleTranslatesCenter() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "center",
-      entityId: "e_circle" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_circle",
     });
     expect(
       intent?.kind === "translate" ? [...intent.pointIds] : null,
       "Circle center handle should translate the center point.",
-    ).toEqual(["p_center"]);
+    ).toEqual(["sketch_point_center"]);
   }
 
   function testArcCenterHandleTranslatesWholeArc() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "center",
-      entityId: "e_arc" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_arc",
     });
     expect(
       intent?.kind === "translate" ? [...intent.pointIds] : null,
       "Arc center handle must translate every defining point of the arc (center alone would deform it).",
-    ).toEqual(["p_arc_center", "p_start", "p_end"]);
+    ).toEqual(["sketch_point_arc_center", "sketch_point_start", "sketch_point_end"]);
   }
 
   function testRimHandleOnNonRadialEntityIsRejected() {
     const intent = resolveSketchDragIntent(definition, {
       kind: "rim",
-      entityId: "e_line" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_line",
     });
     expect(
       intent,
@@ -186,18 +186,18 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
     schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
-    pointIds: ["sp_a", "sp_b", "sp_c"],
-    points: [point("sp_a", 0, 0), point("sp_b", 2, 3), point("sp_c", 5, 0)],
-    entityIds: ["e_spline", "e_derived"],
+    pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
+    points: [point("sketch_point_a", 0, 0), point("sketch_point_b", 2, 3), point("sketch_point_c", 5, 0)],
+    entityIds: ["sketch_entity_spline", "sketch_entity_derived"],
     entities: [
       {
         kind: "spline",
-        entityId: "e_spline" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_spline",
         label: "Spline",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_primary",
-          entityId: "e_spline" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_spline",
         } as const,
         isConstruction: false,
         closure: "open",
@@ -206,33 +206,33 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
         pointOccurrences: [
           {
             occurrenceId: "occ_a",
-            pointId: "sp_a" as `sketch_point_${string}`,
+            pointId: "sketch_point_a",
             tangent: { kind: "authored" as const, vector: [1, 0] as const },
           },
           {
             occurrenceId: "occ_b",
-            pointId: "sp_b" as `sketch_point_${string}`,
+            pointId: "sketch_point_b",
             tangent: { kind: "automatic" as const },
           },
           {
             occurrenceId: "occ_c",
-            pointId: "sp_c" as `sketch_point_${string}`,
+            pointId: "sketch_point_c",
             tangent: { kind: "authored" as const, vector: [0, -1] as const },
           },
         ],
-      } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+      },
       {
         kind: "derivedPiecewiseCubic",
-        entityId: "e_derived" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_derived",
         label: "Derived",
         target: {
           kind: "sketchEntity",
           sketchId: "sketch_primary",
-          entityId: "e_derived" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_derived",
         } as const,
         isConstruction: false,
-        relationshipId: "rel_offset" as `derived_relationship_${string}`,
-      } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        derivationId: "rel_offset",
+      },
     ],
     constraintIds: [],
     constraints: [],
@@ -243,18 +243,18 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
   function testTangentHandleOnAuthoredTangentResolvesToTangentVectorIntent() {
     const intent = resolveSketchDragIntent(splineDefinition, {
       kind: "tangentHandle",
-      entityId: "e_spline" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_a",
-      pointId: "sp_a" as `sketch_point_${string}`,
+      pointId: "sketch_point_a",
     });
     expect(
       intent,
       "Tangent handle on authored tangent should resolve a tangentVector intent.",
     ).toEqual({
       kind: "tangentVector",
-      entityId: "e_spline",
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_a",
-      pointId: "sp_a",
+      pointId: "sketch_point_a",
     });
   }
 
@@ -263,27 +263,27 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
     // the conversion to authored happens at drag start.
     const intent = resolveSketchDragIntent(splineDefinition, {
       kind: "tangentHandle",
-      entityId: "e_spline" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_b",
-      pointId: "sp_b" as `sketch_point_${string}`,
+      pointId: "sketch_point_b",
     });
     expect(
       intent,
       "Tangent handle on automatic tangent should still resolve a tangentVector intent.",
     ).toEqual({
       kind: "tangentVector",
-      entityId: "e_spline",
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_b",
-      pointId: "sp_b",
+      pointId: "sketch_point_b",
     });
   }
 
   function testTangentHandleOnNonSplineEntityIsRejected() {
     const intent = resolveSketchDragIntent(splineDefinition, {
       kind: "tangentHandle",
-      entityId: "e_derived" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_derived",
       occurrenceId: "occ_a",
-      pointId: "sp_a" as `sketch_point_${string}`,
+      pointId: "sketch_point_a",
     });
     expect(
       intent,
@@ -294,7 +294,7 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
   function testSplineBodyHandleTranslatesAllFitPoints() {
     const intent = resolveSketchDragIntent(splineDefinition, {
       kind: "entityBody",
-      entityId: "e_spline" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_spline",
     });
     expect(
       intent?.kind,
@@ -303,13 +303,13 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
     expect(
       intent?.kind === "translate" ? [...intent.pointIds] : [],
       "Spline body drag should translate every fit point.",
-    ).toEqual(["sp_a", "sp_b", "sp_c"]);
+    ).toEqual(["sketch_point_a", "sketch_point_b", "sketch_point_c"]);
   }
 
   function testDerivedEntityBodyReturnsNull() {
     const intent = resolveSketchDragIntent(splineDefinition, {
       kind: "entityBody",
-      entityId: "e_derived" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_derived",
     });
     expect(
       intent,
@@ -321,33 +321,33 @@ test("T12b: tangent handle, spline body, arc rim, and non-draggable intent mappi
     // Use the original definition which has an arc.
     const arcDef: SketchDefinition = {
       ...splineDefinition,
-      entityIds: ["e_arc"],
+      entityIds: ["sketch_entity_arc"],
       entities: [
         {
           kind: "arc",
-          entityId: "e_arc" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_arc",
           label: "Arc",
           target: {
             kind: "sketchEntity",
             sketchId: "sketch_primary",
-            entityId: "e_arc" as `sketch_entity_${string}`,
+            entityId: "sketch_entity_arc",
           } as const,
           isConstruction: false,
-          centerPointId: "sp_b" as `sketch_point_${string}`,
-          startPointId: "sp_a" as `sketch_point_${string}`,
-          endPointId: "sp_c" as `sketch_point_${string}`,
+          centerPointId: "sketch_point_b",
+          startPointId: "sketch_point_a",
+          endPointId: "sketch_point_c",
           sweepDirection: "counterClockwise",
         },
       ],
     };
     const intent = resolveSketchDragIntent(arcDef, {
       kind: "rim",
-      entityId: "e_arc" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_arc",
     });
     expect(
       intent,
       "Arc rim handle should resolve a radius intent.",
-    ).toEqual({ kind: "radius", entityId: "e_arc" });
+    ).toEqual({ kind: "radius", entityId: "sketch_entity_arc" });
   }
 
   testTangentHandleOnAuthoredTangentResolvesToTangentVectorIntent();
@@ -378,68 +378,68 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     schemaVersion: "sketch-definition/v1alpha2",
     referenceIds: [],
     references: [],
-    pointIds: ["p_start", "p_end", "p_center", "p_shared"],
+    pointIds: ["sketch_point_start", "sketch_point_end", "sketch_point_center", "sketch_point_shared"],
     points: [
-      point("p_start", 0, 0),
-      point("p_end", 4, 0),
-      point("p_center", 2, 2),
-      point("p_shared", 5, 5),
+      point("sketch_point_start", 0, 0),
+      point("sketch_point_end", 4, 0),
+      point("sketch_point_center", 2, 2),
+      point("sketch_point_shared", 5, 5),
     ],
-    entityIds: ["e_line", "e_circle", "e_arc", "e_derived"],
+    entityIds: ["sketch_entity_line", "sketch_entity_circle", "sketch_entity_arc", "sketch_entity_derived"],
     entities: [
       {
         kind: "lineSegment",
-        entityId: "e_line" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_line",
         label: "Line",
         target: {
           kind: "sketchEntity" as const,
           sketchId: "sketch_primary" as `sketch_${string}`,
-          entityId: "e_line" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_line",
         },
         isConstruction: false,
-        startPointId: "p_start" as `sketch_point_${string}`,
-        endPointId: "p_end" as `sketch_point_${string}`,
+        startPointId: "sketch_point_start",
+        endPointId: "sketch_point_end",
       },
       {
         kind: "circle",
-        entityId: "e_circle" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_circle",
         label: "Circle",
         target: {
           kind: "sketchEntity" as const,
           sketchId: "sketch_primary" as `sketch_${string}`,
-          entityId: "e_circle" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_circle",
         },
         isConstruction: false,
-        centerPointId: "p_center" as `sketch_point_${string}`,
+        centerPointId: "sketch_point_center",
         radius: 3,
       },
       {
         kind: "arc",
-        entityId: "e_arc" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_arc",
         label: "Arc",
         target: {
           kind: "sketchEntity" as const,
           sketchId: "sketch_primary" as `sketch_${string}`,
-          entityId: "e_arc" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_arc",
         },
         isConstruction: false,
-        centerPointId: "p_center" as `sketch_point_${string}`,
-        startPointId: "p_start" as `sketch_point_${string}`,
-        endPointId: "p_end" as `sketch_point_${string}`,
+        centerPointId: "sketch_point_center",
+        startPointId: "sketch_point_start",
+        endPointId: "sketch_point_end",
         sweepDirection: "counterClockwise" as const,
       },
       {
         kind: "derivedPiecewiseCubic",
-        entityId: "e_derived" as `sketch_entity_${string}`,
+        entityId: "sketch_entity_derived",
         label: "Derived",
         target: {
           kind: "sketchEntity" as const,
           sketchId: "sketch_primary" as `sketch_${string}`,
-          entityId: "e_derived" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_derived",
         },
         isConstruction: false,
-        relationshipId: "rel_offset" as `derived_relationship_${string}`,
-      } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        derivationId: "rel_offset",
+      },
     ],
     constraintIds: [],
     constraints: [],
@@ -452,12 +452,12 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchEntity",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_line" as `sketch_entity_${string}`,
-    });
+      entityId: "sketch_entity_line",
+    }, null);
     expect(
       handle,
       "Line entity target should resolve to entityBody handle.",
-    ).toEqual({ kind: "entityBody", entityId: "e_line" });
+    ).toEqual({ kind: "entityBody", entityId: "sketch_entity_line" });
   }
 
   // Circle body → rim
@@ -465,12 +465,12 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchEntity",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_circle" as `sketch_entity_${string}`,
-    });
+      entityId: "sketch_entity_circle",
+    }, null);
     expect(
       handle,
       "Circle entity target should resolve to rim handle.",
-    ).toEqual({ kind: "rim", entityId: "e_circle" });
+    ).toEqual({ kind: "rim", entityId: "sketch_entity_circle" });
   }
 
   // Arc body → rim
@@ -478,12 +478,12 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchEntity",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_arc" as `sketch_entity_${string}`,
-    });
+      entityId: "sketch_entity_arc",
+    }, null);
     expect(
       handle,
       "Arc entity target should resolve to rim handle.",
-    ).toEqual({ kind: "rim", entityId: "e_arc" });
+    ).toEqual({ kind: "rim", entityId: "sketch_entity_arc" });
   }
 
   // Centre of exactly one circle → center
@@ -491,32 +491,32 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchPoint",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      pointId: "p_center" as `sketch_point_${string}`,
-    });
+      pointId: "sketch_point_center",
+    }, null);
     // p_center is the centre of both e_circle and e_arc, so it should NOT
     // resolve to center — it should be a plain point.
     expect(
       handle,
       "A point that is centre of two entities should be a plain point handle.",
-    ).toEqual({ kind: "point", pointId: "p_center" });
+    ).toEqual({ kind: "point", pointId: "sketch_point_center" });
   }
 
   // Centre of exactly one circle → center (test with only one)
   function testExclusiveCentreResolvesToCenter() {
     const singleCircleDef: SketchDefinition = {
       ...definition,
-      entityIds: ["e_circle"],
+      entityIds: ["sketch_entity_circle"],
       entities: [definition.entities[1]!],
     };
     const handle = resolveHandleFromTarget(singleCircleDef, {
       kind: "sketchPoint",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      pointId: "p_center" as `sketch_point_${string}`,
-    });
+      pointId: "sketch_point_center",
+    }, null);
     expect(
       handle,
       "Centre of exactly one circle should resolve to center handle.",
-    ).toEqual({ kind: "center", entityId: "e_circle" });
+    ).toEqual({ kind: "center", entityId: "sketch_entity_circle" });
   }
 
   // Non-centre sketch point → point
@@ -524,12 +524,12 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchPoint",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      pointId: "p_start" as `sketch_point_${string}`,
-    });
+      pointId: "sketch_point_start",
+    }, null);
     expect(
       handle,
       "Non-centre sketch point should resolve to point handle.",
-    ).toEqual({ kind: "point", pointId: "p_start" });
+    ).toEqual({ kind: "point", pointId: "sketch_point_start" });
   }
 
   // Derived entity → null (D9 refusal)
@@ -537,8 +537,8 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     const handle = resolveHandleFromTarget(definition, {
       kind: "sketchEntity",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_derived" as `sketch_entity_${string}`,
-    });
+      entityId: "sketch_entity_derived",
+    }, null);
     expect(
       handle,
       "Derived entity (offset output) should not be draggable.",
@@ -549,8 +549,8 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
   function testNonSketchTargetReturnsNull() {
     const handle = resolveHandleFromTarget(definition, {
       kind: "feature",
-      featureId: "feat_1" as `feature_${string}`,
-    });
+      featureId: "feature_1",
+    }, null);
     expect(
       handle,
       "Non-sketch targets should not be draggable.",
@@ -561,32 +561,32 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
   function testConstructionCurveIsDraggable() {
     const constructionDef: SketchDefinition = {
       ...definition,
-      entityIds: ["e_construction_line"],
+      entityIds: ["sketch_entity_construction_line"],
       entities: [
         {
           kind: "lineSegment",
-          entityId: "e_construction_line" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_construction_line",
           label: "Construction Line",
           target: {
             kind: "sketchEntity" as const,
             sketchId: "sketch_primary" as `sketch_${string}`,
-            entityId: "e_construction_line" as `sketch_entity_${string}`,
+            entityId: "sketch_entity_construction_line",
           },
           isConstruction: true,
-          startPointId: "p_start" as `sketch_point_${string}`,
-          endPointId: "p_end" as `sketch_point_${string}`,
+          startPointId: "sketch_point_start",
+          endPointId: "sketch_point_end",
         },
       ],
     };
     const handle = resolveHandleFromTarget(constructionDef, {
       kind: "sketchEntity",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_construction_line" as `sketch_entity_${string}`,
-    });
+      entityId: "sketch_entity_construction_line",
+    }, null);
     expect(
       handle,
       "Construction line should resolve to entityBody handle.",
-    ).toEqual({ kind: "entityBody", entityId: "e_construction_line" });
+    ).toEqual({ kind: "entityBody", entityId: "sketch_entity_construction_line" });
   }
 
   // A-2: D9 refusal rows for every non-draggable PrimitiveRef kind.
@@ -616,7 +616,7 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
         kind: "sketchOperation",
         sketchId: "sketch_1" as `sketch_${string}`,
         operationId:
-          "op_1" as `sketch_operation_${string}`,
+          "sketch_operation_1",
       },
       {
         kind: "constraint",
@@ -641,7 +641,7 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
       {
         kind: "projectedReferenceGeometry",
         referenceId: "ref_1" as `ref_${string}`,
-        geometryId: "geo_1" as `projected_geometry_${string}`,
+        geometryId: "projected_geometry_1",
         geometryKind: "lineSegment" as const,
       },
       {
@@ -656,7 +656,7 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
       },
     ];
     for (const target of nonDraggableTargets) {
-      const handle = resolveHandleFromTarget(definition, target);
+      const handle = resolveHandleFromTarget(definition, target, null);
       expect(
         handle,
         `D9: ${target.kind} target should not be draggable.`,
@@ -669,54 +669,54 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
     // Add a spline entity to the definition.
     const splineDef: SketchDefinition = {
       ...definition,
-      pointIds: [...definition.pointIds, "sp_0", "sp_1", "sp_2"],
+      pointIds: [...definition.pointIds, "sketch_point_0", "sketch_point_1", "sketch_point_2"],
       points: [
         ...definition.points,
         {
-          pointId: "sp_0" as `sketch_point_${string}`,
+          pointId: "sketch_point_0",
           label: "sp_0",
           target: {
             kind: "sketchPoint" as const,
             sketchId: "sketch_primary" as `sketch_${string}`,
-            pointId: "sp_0" as `sketch_point_${string}`,
+            pointId: "sketch_point_0",
           },
           position: [0, 3] as const,
           isConstruction: false,
         },
         {
-          pointId: "sp_1" as `sketch_point_${string}`,
+          pointId: "sketch_point_1",
           label: "sp_1",
           target: {
             kind: "sketchPoint" as const,
             sketchId: "sketch_primary" as `sketch_${string}`,
-            pointId: "sp_1" as `sketch_point_${string}`,
+            pointId: "sketch_point_1",
           },
           position: [2, 6] as const,
           isConstruction: false,
         },
         {
-          pointId: "sp_2" as `sketch_point_${string}`,
+          pointId: "sketch_point_2",
           label: "sp_2",
           target: {
             kind: "sketchPoint" as const,
             sketchId: "sketch_primary" as `sketch_${string}`,
-            pointId: "sp_2" as `sketch_point_${string}`,
+            pointId: "sketch_point_2",
           },
           position: [5, 3] as const,
           isConstruction: false,
         },
       ],
-      entityIds: [...definition.entityIds, "e_spline"],
+      entityIds: [...definition.entityIds, "sketch_entity_spline"],
       entities: [
         ...definition.entities,
         {
           kind: "spline",
-          entityId: "e_spline" as `sketch_entity_${string}`,
+          entityId: "sketch_entity_spline",
           label: "Spline",
           target: {
             kind: "sketchEntity" as const,
             sketchId: "sketch_primary" as `sketch_${string}`,
-            entityId: "e_spline" as `sketch_entity_${string}`,
+            entityId: "sketch_entity_spline",
           },
           isConstruction: false,
           closure: "open",
@@ -725,12 +725,12 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
           pointOccurrences: [
             {
               occurrenceId: "occ_0",
-              pointId: "sp_0" as `sketch_point_${string}`,
+              pointId: "sketch_point_0",
               tangent: { kind: "automatic" as const },
             },
             {
               occurrenceId: "occ_1",
-              pointId: "sp_1" as `sketch_point_${string}`,
+              pointId: "sketch_point_1",
               tangent: {
                 kind: "authored" as const,
                 vector: [1, 0] as const,
@@ -738,28 +738,28 @@ test("T12c D10: resolveHandleFromTarget maps PrimitiveRef to the correct handle"
             },
             {
               occurrenceId: "occ_2",
-              pointId: "sp_2" as `sketch_point_${string}`,
+              pointId: "sketch_point_2",
               tangent: { kind: "automatic" as const },
             },
           ],
-        } as import("@/contracts/sketch/schema").SketchEntityDefinition,
+        },
       ],
     };
     const handle = resolveHandleFromTarget(splineDef, {
       kind: "sketchTangentHandle",
       sketchId: "sketch_primary" as `sketch_${string}`,
-      entityId: "e_spline" as `sketch_entity_${string}`,
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_1",
-      pointId: "sp_1" as `sketch_point_${string}`,
-    });
+      pointId: "sketch_point_1",
+    }, null);
     expect(
       handle,
       "T12d: sketchTangentHandle PrimitiveRef should resolve to tangentHandle.",
     ).toEqual({
       kind: "tangentHandle",
-      entityId: "e_spline",
+      entityId: "sketch_entity_spline",
       occurrenceId: "occ_1",
-      pointId: "sp_1",
+      pointId: "sketch_point_1",
     });
   }
 

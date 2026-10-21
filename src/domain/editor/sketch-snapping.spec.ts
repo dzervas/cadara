@@ -3,7 +3,10 @@ import { test, expect } from "vitest";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchReferenceDefinition,
+} from "@/contracts/sketch/schema";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -41,6 +44,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     message: string,
   ) {
     expect(actual, `${message} Missing point.`).toBeTruthy();
+    if (!actual) throw new Error(`${message} Missing point.`);
     const distance = Math.hypot(
       actual[0] - expected[0],
       actual[1] - expected[1],
@@ -74,8 +78,8 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
   function addProjectedLineReference(
     session: ReturnType<typeof createNewSketchSessionFromSupport>,
     projectedReferences: ProjectedSketchReferenceRecord[],
-  ) {
-    const referenceRecord = {
+  ): ReturnType<typeof createNewSketchSessionFromSupport> {
+    const referenceRecord: SketchReferenceDefinition = {
       referenceId: projectedReferences[0]!.referenceId,
       kind: "modelReference" as const,
       label: "Projected reference",
@@ -134,6 +138,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       (entity) => entity.status === "preview",
     );
     expect(preview?.kind, "Expected a transient preview line.").toBe("line");
+    if (preview?.kind !== "line") throw new Error("Expected a preview line.");
     assertClosePoint(
       preview.start,
       [1, 1],
@@ -151,6 +156,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       committed?.kind,
       "Snapped commit should author the normal line entity.",
     ).toBe("lineSegment");
+    if (committed?.kind !== "lineSegment") throw new Error("Expected committed line.");
     const start = session.definition.points.find(
       (point) => point.pointId === committed.startPointId,
     );
@@ -193,6 +199,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
     expect(baseLine?.kind, "Expected a committed baseline line.").toBe(
       "lineSegment",
     );
+    if (!baseLine) throw new Error("Expected baseline line.");
 
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [2.04, 0.02]);
@@ -208,6 +215,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
       committed?.kind,
       "Snapped endpoint commit should author a line entity.",
     ).toBe("lineSegment");
+    if (committed?.kind !== "lineSegment") throw new Error("Expected committed line.");
     expect(
       committed.startPointId,
       "Snapped line start should reuse the existing endpoint point id instead of creating a duplicate point.",
@@ -302,7 +310,7 @@ test("src/domain/editor/sketch-snapping.spec.ts", () => {
         diagnostics: [],
       },
     ];
-    const referenceRecord = {
+    const referenceRecord: SketchReferenceDefinition = {
       referenceId: "ref_projected_edge",
       kind: "modelReference" as const,
       label: "Projected edge",
