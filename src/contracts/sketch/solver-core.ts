@@ -365,6 +365,9 @@ const DRAG_MINIMUM_MOTION_EPSILON = 1e-6;
 // singularity, while staying far above the minimum-motion epsilon so a reachable
 // cursor is still reached.
 const DRAG_TARGET_WEIGHT = 1e-2;
+// Condition far targets only: near-cursor frames keep their existing BFGS path.
+const DRAG_CONDITIONING_TARGET_LOSS = 1e-4;
+const DRAG_CONDITIONING_MAX_ITERATIONS = 10;
 const DRAG_MAX_SUBSTEPS = 8;
 const DRAG_SUBSTEP_LIMIT = 4;
 
@@ -7277,6 +7280,8 @@ function solveBfgsOver(
       break;
     }
 
+    if (solverWorkTrace) solverWorkTrace.bfgsIterations += 1;
+
     const searchDirection = multiplyMatrixVector(inverseHessian, gradient);
     const fullDirection = zeroVector(values.length);
     for (let index = 0; index < dimension; index += 1) {
@@ -7290,6 +7295,7 @@ function solveBfgsOver(
         break;
       }
       inverseHessian = identityMatrix(dimension);
+      if (solverWorkTrace) solverWorkTrace.bfgsResets += 1;
       recentlyReset = true;
       continue;
     }
@@ -7725,6 +7731,11 @@ let gaussNewtonFallbackTrace: SketchGaussNewtonFallbackTrace[] | null = null;
  * candidates), never one per BFGS iteration.
  */
 export interface SketchSolverWorkTrace {
+  bfgsIterations: number;
+  bfgsResets: number;
+  dragConditioningIterations: number;
+  /** Raw constraint-block evaluations, including every finite-difference probe. */
+  dragConditioningResidualEvaluations: number;
   lossEvaluations: number;
   lineSearches: number;
   lineSearchTrials: number;
@@ -7748,6 +7759,10 @@ export function traceSketchSolverForTest<T>(run: () => T): {
   const previousWork = solverWorkTrace;
   const trace: SketchGaussNewtonFallbackTrace[] = [];
   const work: SketchSolverWorkTrace = {
+    bfgsIterations: 0,
+    bfgsResets: 0,
+    dragConditioningIterations: 0,
+    dragConditioningResidualEvaluations: 0,
     lossEvaluations: 0,
     lineSearches: 0,
     lineSearchTrials: 0,
@@ -11066,13 +11081,26 @@ function solveDragFrameStage(
   let curvature: SketchDragCurvature | undefined;
   let solvedA: Float64Array;
   if (bfgs) {
+    const start = input.startValues ?? session.values;
+    // A recovery gesture starts outside the spline's regular domain (two fit
+    // points coincide). Keep its existing BFGS/minimum-motion trajectory for
+    // the whole gesture, including after the first separating frame: numerical
+    // conditioning there changes untouched join residuals and downstream
+    // topology/projection behavior. This optimization is for regular drags.
+    const condition =
+      program.degenerateSplineSpanRecovery.splineIds.size === 0 &&
+      evaluateLoss(start, input.dragConstraints).loss >
+      DRAG_CONDITIONING_TARGET_LOSS;
+    const conditionedStart = condition
+      ? conditionDragStart(start, phaseAConstraints, solvedVariables)
+      : start;
     const solved = solveBfgsOver(
-      cloneValues(input.startValues ?? session.values),
+      cloneValues(conditionedStart),
       phaseAConstraints,
       {
         variableIndices: solvedVariables,
         initialInverseHessian:
-          reuse && session.dragCurvature?.key === curvatureKey
+          reuse && !condition && session.dragCurvature?.key === curvatureKey
             ? session.dragCurvature.inverseHessian
             : null,
       },
@@ -11103,6 +11131,76 @@ function solveDragFrameStage(
     program.strategy,
   );
   return exactReach({ ...judge(candidateOf(solvedB.values)), curvature });
+}
+
+/**
+ * cadara-b3k.35: the hard rows, soft target and minimum-motion anchor span very
+ * different scales. A few Gauss–Newton steps on their RAW residual components
+ * condition the far part of a move before BFGS polishes the same objective.
+ * Differentiating the squared losses instead would lose rank near satisfaction.
+ *
+ * Only the stage's solved variables move (including its frozen-axis policy).
+ * Wolfe requires a decrease in the existing objective; failure keeps the last
+ * iterate. This is not acceptance: the normal hard-row judge, phase B and exact
+ * release still run. The anchor remains the previous ACCEPTED frame throughout.
+ * Every finite-difference block evaluation is traced, not hidden behind the
+ * reduced BFGS iteration count. Small targets never enter this path.
+ */
+function conditionDragStart(
+  values: Float64Array,
+  constraints: ScalarConstraintRecord[],
+  indices: readonly number[],
+) {
+  const evaluate = (at: Float64Array) =>
+    constraints.flatMap((constraint) => {
+      if (solverWorkTrace)
+        solverWorkTrace.dragConditioningResidualEvaluations += 1;
+      return constraint.evaluateComponents(at);
+    });
+  let current = cloneValues(values);
+  let state = evaluateLoss(current, constraints);
+  for (
+    let iteration = 0;
+    iteration < DRAG_CONDITIONING_MAX_ITERATIONS;
+    iteration += 1
+  ) {
+    // Do not borrow BFGS's loose absolute loss/gradient stop: on a soft target
+    // it can leave cursor lag (mirror previews pin this). Failed Wolfe progress
+    // or the short iteration bound ends conditioning; BFGS still polishes.
+    if (solverWorkTrace) solverWorkTrace.dragConditioningIterations += 1;
+    const residuals = evaluate(current);
+    const jacobian = residuals.map(() => zeroVector(indices.length));
+    for (let column = 0; column < indices.length; column += 1) {
+      const index = indices[column]!;
+      const plus = cloneValues(current);
+      const minus = cloneValues(current);
+      const step =
+        Math.cbrt(Number.EPSILON) * Math.max(1, Math.abs(current[index]!));
+      plus[index] += step;
+      minus[index] -= step;
+      const next = evaluate(plus);
+      const previous = evaluate(minus);
+      for (let row = 0; row < residuals.length; row += 1)
+        jacobian[row]![column] = (next[row]! - previous[row]!) / (2 * step);
+    }
+    const normal = addDiagonal(
+      sparseNormalMatrix(jacobian, indices.length),
+      1e-8,
+    );
+    const rhs = multiplyMatrixVector(
+      transpose(jacobian),
+      Float64Array.from(residuals),
+    );
+    const delta = solvePivotedCholesky(normal, rhs, 1e-12);
+    const direction = zeroVector(values.length);
+    for (let index = 0; index < indices.length; index += 1)
+      direction[indices[index]!] = -delta[index]!;
+    const next = lineSearchWolfe(current, direction, state, constraints);
+    if (!next) break;
+    current = next.nextValues;
+    state = next.next;
+  }
+  return current;
 }
 
 function solveDraggedPointFrame(input: {
