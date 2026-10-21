@@ -9,7 +9,7 @@ import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
 import { createSketchWorkflow } from "../../test/helpers/semantic-sketch-workflow";
 
-test("real Bun lifecycle recipes resolve feature, body and timeline aliases and retain native lifecycle state", async () => {
+test("real Bun lifecycle recipes resolve feature, body and timeline aliases and retain native lifecycle state and body colour", async () => {
   const w = await createSketchWorkflow();
   let regionLabel: string;
   let featureLabel: string;
@@ -111,8 +111,16 @@ test("real Bun lifecycle recipes resolve feature, body and timeline aliases and 
       as: "renamed",
     },
     {
-      operation: "feature.suppression.set",
+      operation: "body.color.set",
       basis: basis("renamed"),
+      bodyId: target("renamed", "Sleeve"),
+      appearance: { kind: "custom", hex: "#123abc" },
+      intent: "fulfill",
+      as: "colored",
+    },
+    {
+      operation: "feature.suppression.set",
+      basis: basis("colored"),
       featureId: target("solid", featureLabel),
       suppressed: true,
       intent: "fulfill",
@@ -231,30 +239,42 @@ test("real Bun lifecycle recipes resolve feature, body and timeline aliases and 
         true,
       );
     }
-    for (const i of [6, 8]) {
+    expect(results[5]!.discovery!.model!.bodies[0]!.appearance).toEqual({
+      kind: "palette",
+      slot: 0,
+    });
+    expect(results[6]!.discovery!.model!.bodies[0]!.appearance).toEqual({
+      kind: "custom",
+      hex: "#123abc",
+    });
+    for (const i of [7, 9]) {
       expect(results[i]!.discovery!.model!.features[0]!.suppressed).toBe(true);
       expect(results[i]!.discovery!.model!.bodies).toEqual([]);
     }
-    for (const i of [9, 13]) {
+    for (const i of [10, 14]) {
       expect(results[i]!.discovery!.model!.bodies[0]!.bounds!.max).toEqual([
         2, 2, 7,
       ]);
+      expect(
+        results[i]!.discovery!.model!.bodies[0]!.appearance,
+        "the colour survives native save and open",
+      ).toEqual({ kind: "custom", hex: "#123abc" });
       expect(
         results[i]!.discovery!.references.some(
           (r) => r.label === "Sleeve" && r.target.kind === "body",
         ),
       ).toBe(true);
     }
-    expect(results[12]!.discovery!.model!.cursor).toEqual(
-      results[10]!.discovery!.model!.cursor,
+    expect(results[13]!.discovery!.model!.cursor).toEqual(
+      results[11]!.discovery!.model!.cursor,
     );
-    expect(results[12]!.discovery!.model!.bodies).toEqual([]);
-    expect(results[12]!.discovery!.model!.features).toHaveLength(1);
-    expect(results[16]!.discovery!.model!.bodies).toEqual([]);
-    expect(results[18]!.discovery!.model!.features.map((f) => f.kind)).toEqual([
+    expect(results[13]!.discovery!.model!.bodies).toEqual([]);
+    expect(results[13]!.discovery!.model!.features).toHaveLength(1);
+    expect(results[17]!.discovery!.model!.bodies).toEqual([]);
+    expect(results[19]!.discovery!.model!.features.map((f) => f.kind)).toEqual([
       "extrude",
     ]);
-    expect(results[18]!.discovery!.model!.bodies[0]!.bounds!.max).toEqual([
+    expect(results[19]!.discovery!.model!.bodies[0]!.bounds!.max).toEqual([
       2, 2, 7,
     ]);
     const missing = await invoke(

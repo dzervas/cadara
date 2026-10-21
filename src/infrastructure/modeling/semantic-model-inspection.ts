@@ -36,7 +36,7 @@ export async function inspectSemanticModel(
         if (box) bounds = { min: box.low, max: box.high };
       }
     }
-    bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds, topology });
+    bodies.push({ bodyId: body.bodyId, kind: body.bodyKind, bounds, appearance: body.appearance, topology });
   }
   return {
     capabilities: snapshot.document.capabilities,

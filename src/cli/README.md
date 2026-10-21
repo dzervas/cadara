@@ -285,6 +285,10 @@ The following operations require a current `basis` and explicit `intent`
 - `feature.delete`: `featureId`; removes the authored feature.
 - `feature.reorder`: `featureId`, `beforeFeatureId` (null appends).
 - `body.rename`: `bodyId`, `label`; preserves body identity and geometry.
+- `body.color.set`: `bodyId`, `appearance` is `{ kind: "palette", slot }`
+  (`0`-`5`: Natural, Berry, Jade, Violet, Coral, Aqua) or
+  `{ kind: "custom", hex }` (lowercase `#rrggbb`); an undoable display-colour
+  change that preserves body identity and geometry.
 - `target.delete`: a typed durable `target`; uses production supported-target
   deletion semantics (deleting a body authors a `deleteSolid` feature).
 - `timeline.cursor.set`: `cursor` is `{ kind: "empty" }`,
@@ -293,10 +297,12 @@ The following operations require a current `basis` and explicit `intent`
 
 Discovery `model.features` includes actual suppression state and produced
 identities; `model.cursor` and `model.timeline` describe the current authored
-rollback position/order. Cursor movement changes evaluated geometry without
-removing later feature records. It is **not** author-scoped `history.undo` or
-`history.redo`, nor replay of private history. Native files retain authored
-suppression, body labels and cursor, not the process's undo stack.
+rollback position/order; `model.bodies[].appearance` is each body's persisted
+colour (new bodies get an automatic palette slot). Cursor movement changes
+evaluated geometry without removing later feature records. It is **not**
+author-scoped `history.undo` or `history.redo`, nor replay of private history.
+Native files retain authored suppression, body labels, body colours and cursor,
+not the process's undo stack.
 
 Recipes accept exact unique `{ alias, label }` references for `featureId`,
 `beforeFeatureId`, `bodyId`, `target`, `cursor`, `item` and `beforeItem`, using
