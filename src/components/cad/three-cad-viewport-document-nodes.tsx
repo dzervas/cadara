@@ -17,6 +17,7 @@ import {
   getRenderableRenderOrder,
   getVisibleMarkerRadius,
   isSeededDatumPlaneRenderable,
+  type RenderableMaterialDisplayOptions,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
@@ -85,8 +86,10 @@ export function DocumentMeshNode({
     }
     return nextGeometry;
   }, [geometryData, renderable.id]);
+  const { materialSource, materialOptions, seededDatumPlane } =
+    useDocumentMaterialInputs(entry, palette);
   const material = useMemo(() => {
-    const nextMaterial = isSeededDatumPlaneRenderable(renderable)
+    const nextMaterial = seededDatumPlane
       ? new THREE.MeshStandardMaterial({
           color: 0x9ea8b5,
           transparent: true,
@@ -101,11 +104,7 @@ export function DocumentMeshNode({
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1,
         })
-      : createRenderableMeshMaterial(
-          renderable,
-          origin,
-          getDocumentRenderableMaterialOptions(entry, palette),
-        );
+      : createRenderableMeshMaterial(materialSource, origin, materialOptions);
 
     if (clippingPlane) {
       nextMaterial.clippingPlanes = [clippingPlane];
@@ -114,7 +113,13 @@ export function DocumentMeshNode({
     }
 
     return nextMaterial;
-  }, [clippingPlane, entry, origin, palette, renderable]);
+  }, [
+    clippingPlane,
+    materialOptions,
+    materialSource,
+    origin,
+    seededDatumPlane,
+  ]);
   const facePerimeterGeometry = useMemo(() => {
     if (
       !geometryData ||
@@ -150,7 +155,7 @@ export function DocumentMeshNode({
     () => () => facePerimeterMaterial?.dispose(),
     [facePerimeterMaterial],
   );
-  const renderOrder = isSeededDatumPlaneRenderable(renderable)
+  const renderOrder = seededDatumPlane
     ? 1
     : getRenderableRenderOrder(renderable, origin);
 
@@ -206,7 +211,7 @@ export function DocumentPolylineNode({
   const { renderable, origin } = entry;
   const geometryData =
     renderable.geometry.kind === "polyline" ? renderable.geometry : null;
-  const line = useMemo(() => {
+  const geometry = useMemo(() => {
     if (!geometryData) {
       throw new Error(
         `Renderable ${renderable.id} is missing polyline geometry.`,
@@ -220,24 +225,26 @@ export function DocumentPolylineNode({
       geometryData.isClosed && points.length > 0
         ? [...points, points[0].clone()]
         : points;
-    const nextGeometry = new THREE.BufferGeometry().setFromPoints(
-      displayPoints,
-    );
-    const nextMaterial = isSeededDatumPlaneRenderable(renderable)
-      ? applyWireMaterialDepthPolicy(
-          new THREE.LineBasicMaterial({
-            color: 0x7f8a98,
-            transparent: true,
-            opacity: 0.4,
-          }),
-        )
-      : createRenderableLineMaterial(
-          renderable,
-          origin,
-          getDocumentRenderableMaterialOptions(entry, palette, diagnostic),
-        );
-    const nextLine = new THREE.Line(nextGeometry, nextMaterial);
-    nextLine.renderOrder = isSeededDatumPlaneRenderable(renderable)
+    return new THREE.BufferGeometry().setFromPoints(displayPoints);
+  }, [geometryData, renderable.id]);
+  const { materialSource, materialOptions, seededDatumPlane } =
+    useDocumentMaterialInputs(entry, palette, diagnostic);
+  const material = useMemo(
+    () =>
+      seededDatumPlane
+        ? applyWireMaterialDepthPolicy(
+            new THREE.LineBasicMaterial({
+              color: 0x7f8a98,
+              transparent: true,
+              opacity: 0.4,
+            }),
+          )
+        : createRenderableLineMaterial(materialSource, origin, materialOptions),
+    [materialOptions, materialSource, origin, seededDatumPlane],
+  );
+  const line = useMemo(() => {
+    const nextLine = new THREE.Line(geometry, material);
+    nextLine.renderOrder = seededDatumPlane
       ? 2
       : getRenderableRenderOrder(renderable, origin);
     bindRenderableObject(
@@ -249,18 +256,10 @@ export function DocumentPolylineNode({
       renderable,
     );
     return nextLine;
-  }, [diagnostic, entry, geometryData, origin, palette, renderable]);
+  }, [geometry, material, origin, renderable, seededDatumPlane]);
 
-  useEffect(() => {
-    return () => {
-      line.geometry.dispose();
-      if (Array.isArray(line.material)) {
-        line.material.forEach((material) => material.dispose());
-      } else {
-        line.material.dispose();
-      }
-    };
-  }, [line]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => material.dispose(), [material]);
 
   return <primitive object={line} />;
 }
@@ -287,14 +286,14 @@ export function DocumentMarkerNode({
     proxy.userData.highlightExcluded = true;
     return proxy;
   }, [geometryData]);
+  const { materialSource, materialOptions } = useDocumentMaterialInputs(
+    entry,
+    palette,
+  );
   const material = useMemo(
     () =>
-      createRenderableMarkerMaterial(
-        renderable,
-        origin,
-        getDocumentRenderableMaterialOptions(entry, palette),
-      ),
-    [entry, origin, palette, renderable],
+      createRenderableMarkerMaterial(materialSource, origin, materialOptions),
+    [materialOptions, materialSource, origin],
   );
 
   useEffect(() => () => material.dispose(), [material]);
@@ -335,4 +334,35 @@ export function DocumentMarkerNode({
       <primitive object={pickProxy} />
     </group>
   );
+}
+
+/**
+ * Material inputs that keep their identity while their values do. Disposing a
+ * material releases its shader program, so recreating every material for each
+ * new snapshot recompiled every program after a rename or colour change
+ * (cadara-lyi).
+ */
+function useDocumentMaterialInputs(
+  entry: ViewportRenderableRecord,
+  palette: SketchRenderingPalette,
+  diagnostic = false,
+) {
+  const semanticClass = entry.renderable.binding.semanticClass;
+  const optionsKey = JSON.stringify(
+    getDocumentRenderableMaterialOptions(entry, palette, diagnostic),
+  );
+  const materialSource = useMemo(
+    () => ({ binding: { semanticClass } }),
+    [semanticClass],
+  );
+  const materialOptions = useMemo(
+    () => JSON.parse(optionsKey) as RenderableMaterialDisplayOptions,
+    [optionsKey],
+  );
+
+  return {
+    materialSource,
+    materialOptions,
+    seededDatumPlane: isSeededDatumPlaneRenderable(entry.renderable),
+  };
 }

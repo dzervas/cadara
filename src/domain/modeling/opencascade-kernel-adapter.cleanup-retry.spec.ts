@@ -10,6 +10,7 @@ import type { FaceId, RevisionId } from "@/contracts/shared/ids";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { collectOccCleanupErrors } from "@/domain/modeling/occ/memory";
+import { resetRegionRenderRecordCacheForTest } from "@/domain/modeling/occ/snapshot";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
@@ -420,6 +421,9 @@ async function expectProjectionSnapshotVertexPointRetention(site: string) {
   try {
     // F3 variant (WARM=0): arm before service initialization's own snapshot read.
     if (process.env.F2_WARM !== "0") await service.getCurrentDocumentSnapshot();
+    // The armed read must build the region profile again, not reuse the warm
+    // snapshot's region meshes (cadara-lyi).
+    resetRegionRenderRecordCacheForTest();
     const cleanupError = new Error(
       `injected projection-snapshot vertex point release failure (${site})`,
     );

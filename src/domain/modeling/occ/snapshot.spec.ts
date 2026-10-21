@@ -1592,6 +1592,57 @@ test("src/domain/modeling/occ/snapshot.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  // cadara-lyi: a label/appearance-only revision keeps its sketch records, so
+  // its snapshot reuses their region meshes instead of re-meshing every
+  // region profile face; a new sketch record or another tier meshes again.
+  async function testUnchangedSketchRecordsReuseRegionMeshes() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const { sketch } = createRectangleSketch(
+      "sketch_region_mesh_reuse" as SketchId,
+      createStandardPlaneDefinition("xy"),
+    );
+    const state = createOccAuthoringState(oc, {
+      sketches: [sketch],
+      modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+    });
+    const regionGeometry = (
+      snapshot: ReturnType<typeof buildOccWorkspaceSnapshot>,
+    ) => {
+      const record = snapshot.document.render.records.find(
+        (entry) => entry.binding.semanticClass === "region",
+      );
+      if (!record) throw new Error("Expected a region render record.");
+      return record.geometry;
+    };
+
+    const first = regionGeometry(buildOccWorkspaceSnapshot(state));
+    const relabelled = regionGeometry(
+      buildOccWorkspaceSnapshot({ ...state, name: "Relabelled" }),
+    );
+    expect(
+      relabelled,
+      "An unchanged sketch record must reuse its region mesh.",
+    ).toBe(first);
+
+    const rebuiltSketch = regionGeometry(
+      buildOccWorkspaceSnapshot(
+        createOccAuthoringState(oc, {
+          sketches: [structuredClone(sketch)],
+          modelingTolerance: OCC_KERNEL_SETTINGS.modelingTolerance,
+        }),
+      ),
+    );
+    expect(rebuiltSketch, "A new sketch record is meshed again.").not.toBe(
+      first,
+    );
+    expect(rebuiltSketch).toEqual(first);
+    expect(
+      regionGeometry(buildOccWorkspaceSnapshot(state, [], { lodTierId: "fine" })),
+      "Another tessellation tier is meshed again.",
+    ).not.toBe(first);
+  }
+
+  await testUnchangedSketchRecordsReuseRegionMeshes();
   await testWorkspaceSnapshotBuildsContractValidRenderExport();
   await testSheetBodySnapshotExportStaysShapeAgnostic();
   await testSketchOwnedProfilesMarkConsumedSketchOwnership();

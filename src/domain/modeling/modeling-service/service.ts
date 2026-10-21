@@ -13,6 +13,7 @@ import { createExportProviderRegistry } from "@/domain/export/provider-registry"
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type {
+  GetDocumentSnapshotResponse,
   WorkspaceSnapshot,
   ModelingDiagnostic,
   ModelingOperationResult,
@@ -1798,12 +1799,19 @@ export function createModelingService(
     async getCurrentDocumentSnapshot() {
       try {
         await ensureInitialized();
+        let read: { runtime: number; response: GetDocumentSnapshotResponse } | null = null;
         for (;;) {
           const changes = repositoryChangePromise;
           await waitForRepositoryChanges(changes);
           await recoverPublishedDocument();
           const generation = stateGeneration;
-          const response = await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId));
+          // A retry caused only by repository metadata (e.g. this session's own
+          // write being acknowledged) keeps the unchanged runtime's snapshot.
+          if (read?.runtime !== runtimeGeneration) {
+            const runtime: number = runtimeGeneration;
+            read = { runtime, response: await adapter.getDocumentSnapshot(buildDocumentRequest(currentDocumentId)) };
+          }
+          const { response } = read;
           // Retry reads that raced a repository restore before publishing readiness.
           if (generation !== stateGeneration || changes !== repositoryChangePromise) continue;
           const snapshot = attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId));

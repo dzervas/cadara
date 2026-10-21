@@ -1489,94 +1489,150 @@ function regionProfileFailureDiagnostic(
   };
 }
 
+/**
+ * Region meshes per immutable sketch record. Label/appearance-only revisions
+ * keep their sketch records, so their snapshots skip re-meshing every region
+ * profile face (cadara-lyi).
+ */
+let regionRenderRecordCache = new WeakMap<
+  SketchSnapshotRecord,
+  {
+    oc: OccAuthoringState["oc"];
+    modelingTolerance: number;
+    tierId: string;
+    records: readonly RenderableEntityRecord[];
+    diagnostics: readonly ModelingDiagnostic[];
+  }
+>();
+
+/** Makes the next snapshots mesh their region profile faces again. */
+export function resetRegionRenderRecordCacheForTest() {
+  regionRenderRecordCache = new WeakMap();
+}
+
 function buildRegionRenderRecords(
   state: OccAuthoringState,
   sketches: readonly SketchSnapshotRecord[],
   options: OccSnapshotBuildOptions,
   diagnostics: ModelingDiagnostic[],
 ) {
-  const records: RenderableEntityRecord[] = [];
   const tessellationTier = getOccTessellationTier(options.lodTierId);
 
-  for (const sketch of sketches) {
-    for (const region of sketch.sketch.derivedValidity.state === "current"
-      ? sketch.sketch.regions
-      : []) {
-      let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null;
+  return sketches.flatMap((sketch) => {
+    const cached = regionRenderRecordCache.get(sketch);
+    if (
+      cached?.oc === state.oc &&
+      cached.modelingTolerance === state.modelingTolerance &&
+      cached.tierId === tessellationTier.id
+    ) {
+      diagnostics.push(...cached.diagnostics);
+      return cached.records;
+    }
 
-      try {
-        profileFace = buildRegionProfileFace(
-          state.oc,
-          {
-            plane: sketch.plane,
-            sketch: sketch.sketch,
-            modelingTolerance: state.modelingTolerance,
-          },
-          region,
-        );
-      } catch (error) {
-        if (collectOccCleanupErrors(error).length > 0) {
-          throw error;
-        }
-        if (!isProjectedRegionContractGap(error)) {
-          const diagnostic = regionProfileFailureDiagnostic(region, error);
-          if (diagnostic === null) throw error;
-          diagnostics.push(diagnostic);
-        }
-        continue;
-      }
+    const sketchDiagnostics: ModelingDiagnostic[] = [];
+    const records = buildSketchRegionRenderRecords(
+      state,
+      sketch,
+      tessellationTier,
+      sketchDiagnostics,
+    );
+    regionRenderRecordCache.set(sketch, {
+      oc: state.oc,
+      modelingTolerance: state.modelingTolerance,
+      tierId: tessellationTier.id,
+      records,
+      diagnostics: sketchDiagnostics,
+    });
+    diagnostics.push(...sketchDiagnostics);
+    return records;
+  });
+}
 
-      try {
-        const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
-          profileFace.face,
-          Math.max(
-            state.modelingTolerance * 10,
-            tessellationTier.linearDeflectionModelUnits,
-          ),
-          false,
-          tessellationTier.angularDeflectionRadians,
-          false,
-        );
-        deleteOccObject(mesher);
+function buildSketchRegionRenderRecords(
+  state: OccAuthoringState,
+  sketch: SketchSnapshotRecord,
+  tessellationTier: ReturnType<typeof getOccTessellationTier>,
+  diagnostics: ModelingDiagnostic[],
+) {
+  const records: RenderableEntityRecord[] = [];
 
-        const geometry = buildMeshGeometryFromFace(state, profileFace.face);
+  for (const region of sketch.sketch.derivedValidity.state === "current"
+    ? sketch.sketch.regions
+    : []) {
+    let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null;
 
-        if (!geometry) {
-          console.warn(
-            `[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`,
-          );
-        } else {
-          const target = region.target as RegionRef;
-          records.push({
-            id: createRenderableId(target),
-            label: region.label,
-            ownerBodyId: region.ownerBodyId,
-            ownerFeatureId: region.ownerFeatureId,
-            binding: {
-              pickId: createPickId(target),
-              pickPriority: REGION_PICK_PRIORITY,
-              target,
-              topology: null,
-              semanticClass: "region",
-            },
-            geometry: {
-              kind: "mesh",
-              vertexPositions: geometry.vertexPositions,
-              vertexNormals: geometry.vertexNormals,
-              triangleIndices: geometry.triangleIndices,
-            },
-          });
-        }
-      } catch (error) {
-        try {
-          releaseBuiltSketchProfileFace(profileFace);
-        } catch (cleanupError) {
-          throw combineOccCleanupError(error, cleanupError);
-        }
+    try {
+      profileFace = buildRegionProfileFace(
+        state.oc,
+        {
+          plane: sketch.plane,
+          sketch: sketch.sketch,
+          modelingTolerance: state.modelingTolerance,
+        },
+        region,
+      );
+    } catch (error) {
+      if (collectOccCleanupErrors(error).length > 0) {
         throw error;
       }
-      releaseBuiltSketchProfileFace(profileFace);
+      if (!isProjectedRegionContractGap(error)) {
+        const diagnostic = regionProfileFailureDiagnostic(region, error);
+        if (diagnostic === null) throw error;
+        diagnostics.push(diagnostic);
+      }
+      continue;
     }
+
+    try {
+      const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
+        profileFace.face,
+        Math.max(
+          state.modelingTolerance * 10,
+          tessellationTier.linearDeflectionModelUnits,
+        ),
+        false,
+        tessellationTier.angularDeflectionRadians,
+        false,
+      );
+      deleteOccObject(mesher);
+
+      const geometry = buildMeshGeometryFromFace(state, profileFace.face);
+
+      if (!geometry) {
+        console.warn(
+          `[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`,
+        );
+      } else {
+        const target = region.target as RegionRef;
+        records.push({
+          id: createRenderableId(target),
+          label: region.label,
+          ownerBodyId: region.ownerBodyId,
+          ownerFeatureId: region.ownerFeatureId,
+          binding: {
+            pickId: createPickId(target),
+            pickPriority: REGION_PICK_PRIORITY,
+            target,
+            topology: null,
+            semanticClass: "region",
+          },
+          geometry: {
+            kind: "mesh",
+            vertexPositions: geometry.vertexPositions,
+            vertexNormals: geometry.vertexNormals,
+            triangleIndices: geometry.triangleIndices,
+          },
+        });
+      }
+    } catch (error) {
+      try {
+        releaseBuiltSketchProfileFace(profileFace);
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
+    }
+    releaseBuiltSketchProfileFace(profileFace);
   }
 
   return records;

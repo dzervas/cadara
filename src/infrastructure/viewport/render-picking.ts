@@ -61,6 +61,11 @@ export interface RenderableMaterialDisplayOptions {
   polygonOffsetUnits?: number;
 }
 
+/** The part of a renderable its material depends on. */
+export interface RenderableMaterialSource {
+  binding: Pick<RenderableEntityRecord["binding"], "semanticClass">;
+}
+
 type HighlightRole = "faceHoverPerimeter";
 
 export const MARKER_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12);
@@ -1007,7 +1012,7 @@ export function getRenderableRenderOrder(
 }
 
 export function createRenderableMeshMaterial(
-  renderable: RenderableEntityRecord,
+  renderable: RenderableMaterialSource,
   origin: ViewportRenderableOrigin,
   displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
@@ -1073,7 +1078,7 @@ function getDefaultRenderableMeshPolygonOffset(
 }
 
 export function createRenderableLineMaterial(
-  renderable: RenderableEntityRecord,
+  renderable: RenderableMaterialSource,
   origin: ViewportRenderableOrigin,
   displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
@@ -1096,7 +1101,7 @@ export function createRenderableLineMaterial(
 }
 
 export function createRenderableMarkerMaterial(
-  renderable: RenderableEntityRecord,
+  renderable: RenderableMaterialSource,
   origin: ViewportRenderableOrigin,
   displayOptions: RenderableMaterialDisplayOptions = {},
 ) {
