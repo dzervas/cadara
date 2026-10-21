@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { assert, test, expect } from "vitest";
 import * as THREE from "three";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
@@ -134,8 +134,6 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
           sketchId: "sketch_primary",
           label: "Sketch",
           plane,
-          planeTarget: plane.support,
-          planeKey: "xy",
           sketch: {
             ownerDocumentId: "doc_workspace",
             ownerRevisionId: "rev_0001",
@@ -353,6 +351,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       renderable,
       "Projected reference geometry should produce a viewport renderable.",
     ).toBeTruthy();
+    assert(renderable);
     expect(
       renderable.role,
       "Projected reference renderables should use read-only reference styling.",
@@ -409,6 +408,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       marker,
       "Failed or empty reference projections should produce a selectable reference marker.",
     ).toBeTruthy();
+    assert(marker);
     expect(
       marker.role,
       "Reference markers should use read-only reference styling.",
@@ -446,6 +446,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       bindings,
       "Reference style test should collect the bound line.",
     ).toBeTruthy();
+    assert(bindings);
 
     updateWorkspaceHighlight(bindings.targetToObjects, [], target);
     updateWorkspaceHighlight(bindings.targetToObjects, [], null);
@@ -487,6 +488,7 @@ test("src/domain/editor/sketch-reference-geometry.spec.ts", () => {
       origin && xAxis && yAxis,
       "Active sketch sessions should expose origin, X-axis, and Y-axis datum renderables.",
     ).toBeTruthy();
+    assert(origin && xAxis && yAxis);
     expect(
       origin.role === "reference" &&
         xAxis.role === "reference" &&
