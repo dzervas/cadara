@@ -2342,7 +2342,9 @@ describe("stale point maps (SM)", () => {
       name: "seed entity missing",
       mutate: (input) => ({
         ...input,
-        entities: input.entities.filter((entity) => entity.entityId !== "line"),
+        entities: input.entities.filter(
+          (entity) => entity.entityId !== eid("line"),
+        ),
       }),
     },
     {
@@ -2350,7 +2352,7 @@ describe("stale point maps (SM)", () => {
       mutate: (input) => ({
         ...input,
         entities: input.entities.filter(
-          (entity) => entity.entityId !== "line_copy",
+          (entity) => entity.entityId !== eid("line_copy"),
         ),
       }),
     },
@@ -2358,7 +2360,7 @@ describe("stale point maps (SM)", () => {
       name: "an output point record missing",
       mutate: (input) => ({
         ...input,
-        points: input.points.filter((point) => point.pointId !== "ob"),
+        points: input.points.filter((point) => point.pointId !== pid("ob")),
       }),
     },
     {
@@ -2979,7 +2981,7 @@ describe("correspondence resolver (CO)", () => {
       ...definition,
       points: [...definition.points, makePoint("b9", [9, 9])],
       entities: definition.entities.map((entity) =>
-        entity.entityId === "line" ? makeLine("line", "a", "b9") : entity,
+        entity.entityId === eid("line") ? makeLine("line", "a", "b9") : entity,
       ),
     };
     expect(
@@ -3145,7 +3147,6 @@ function correspondence(
   return correspondingMirrorDimensions(
     {
       ...definition,
-      dimensionIds: dimensions.map((entry) => entry.dimensionId),
       dimensions: [...dimensions],
     },
     candidate,
@@ -3663,13 +3664,12 @@ describe("shared driving dimensions: equivalence in the solve (SDE, T16f)", () =
       correspondingMirrorDimensions(
         {
           ...definitionOnCopy,
-          dimensionIds: ["D_seed" as never],
-          dimensions: [{ ...onSeed, dimensionId: "D_seed" } as DimensionInput],
+          dimensions: [{ ...onSeed, dimensionId: "dimension_seed" }],
         },
         onCopy,
         new Set(),
       ).map((entry) => entry.dimension.dimensionId),
-    ).toEqual(["D_seed"]);
+    ).toEqual(["dimension_seed"]);
     // … and the solve treats them as one requirement.
     const solveOf = (definition: SketchDefinition) =>
       solveSketchDefinitionCore({

@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
+import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type {
@@ -23,18 +23,8 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 // sketch solver per kernel adapter" (A10) observed through the neutral-curve
 // queries it issues across revisions.
 
-type OpenCascadeModule = new (
-  module: Record<string, unknown>,
-) => Promise<OpenCascadeInstance>;
-
 async function loadOcc() {
-  const module = (await import("../../../public/cadara-occ.js")) as {
-    default: OpenCascadeModule;
-  };
-  const wasmBinary = new Uint8Array(
-    await readFile(new URL("../../../public/cadara-occ.wasm", import.meta.url)),
-  );
-  return new module.default({ wasmBinary });
+  return (await loadFilesystemOpenCascadeFactory())();
 }
 
 function createAdapter(oc: OpenCascadeInstance) {
@@ -297,6 +287,10 @@ test("mock parity: missing region â†’ profile-region-reselect; invalid sketch â†
   const extrude = document.features.find(
     (feature) => feature.featureId === "feature_extrude-1",
   )!;
+  if (extrude.definition.kind !== "extrude") {
+    throw new Error("Expected the seed Extrude 1.");
+  }
+  const definition = extrude.definition;
   const adapter = new MockKernelAdapter();
   const base = await snapshotOf(adapter);
   const preview = (profile: typeof region) =>
@@ -306,12 +300,12 @@ test("mock parity: missing region â†’ profile-region-reselect; invalid sketch â†
       baseRevisionId: base.document.revisionId,
       previewId: "preview_reselection",
       definition: {
-        ...extrude.definition,
+        ...definition,
         parameters: {
-          ...(extrude.definition.parameters as object),
+          ...definition.parameters,
           profiles: [profile],
         },
-      } as typeof extrude.definition,
+      },
     });
 
   const missing = {

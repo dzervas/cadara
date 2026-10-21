@@ -1825,21 +1825,21 @@ test("T14e: a glyph selected from the list renders active at the place it has wh
 const T14F_POINT: PrimitiveRef = {
   kind: "sketchPoint",
   sketchId: "sketch_draft",
-  pointId: "t14f_p",
+  pointId: "sketch_point_t14f_p",
 };
 const T14F_LINE: PrimitiveRef = {
   kind: "sketchEntity",
   sketchId: "sketch_draft",
-  entityId: "t14f_line",
+  entityId: "sketch_entity_t14f_line",
 };
 /** The line through the dense endpoint, so the point's context is the line. */
 const T14F_DEFINITION = {
   entities: [
     {
-      entityId: "t14f_line",
+      entityId: "sketch_entity_t14f_line",
       kind: "lineSegment",
-      startPointId: "t14f_p",
-      endPointId: "t14f_q",
+      startPointId: "sketch_point_t14f_p",
+      endPointId: "sketch_point_t14f_q",
     },
   ],
 } as unknown as SketchSessionState["definition"];
@@ -2188,7 +2188,7 @@ test("T14f review R-3: with Show all on, a selected small entity elsewhere does 
   const shortLine: PrimitiveRef = {
     kind: "sketchEntity",
     sketchId: "sketch_draft",
-    entityId: "t14f_short",
+    entityId: "sketch_entity_t14f_short",
   };
   const extents = new Map([
     [getPrimitiveRefKey(T14F_LINE), 400],

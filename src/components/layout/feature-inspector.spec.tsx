@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { assert, test, expect } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -46,10 +46,14 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
       hoverTarget: null,
       preview: null,
       activeEditSession: input.activeEditSession,
+      activeImportSession: null,
       activeReferencePickerFieldId: input.activeReferencePickerFieldId ?? null,
       sketchSession: null,
       snapshot: input.snapshot ?? null,
       previewRenderables: null,
+      annotationContext: null,
+      showAllAnnotations: false,
+      history: { canUndo: false, canRedo: false },
     };
 
     return renderToStaticMarkup(
@@ -59,6 +63,12 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
             machineState: initialEditorState,
             state: viewState,
             dispatch: () => undefined,
+            getRuntimeTrace: () => ({
+              maxEntries: 0,
+              totalEntries: 0,
+              droppedEntries: 0,
+              entries: [],
+            }),
           }}
         >
           <FeatureInspector
@@ -257,6 +267,7 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
     thicknessField?.kind,
     "Expression editor tests need the shell thickness numeric field.",
   ).toBe("numeric");
+  assert(thicknessField?.kind === "numeric");
 
   const validPreview = previewFeatureEditorFieldExpression({
     field: thicknessField,

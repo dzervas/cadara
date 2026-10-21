@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { LocalFileSyncDocumentRepository } from "@/domain/modeling/document-repository";
+import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 import type { WorkbenchTab } from "@/domain/workspace/workbench-tabs";
 import {
@@ -32,36 +33,52 @@ function createRepository() {
   const bindings: Array<{ documentId: DocumentId; handleName: string }> = [];
   const resets: DocumentId[] = [];
 
-  const repository = {
-    async initialize(input) {
-      mutations.push({
-        documentId: input.documentId,
-        documentName: input.document.name,
-      });
-      return {
-        ok: true as const,
-        document: input.document,
-        status: { kind: "restored" as const, documentId: input.documentId },
-        metadata: {
-          actorId: "test-session",
+  const repository: LocalFileSyncDocumentRepository = Object.assign(
+    createMemoryDocumentRepository(),
+    {
+      async initialize(
+        input: Parameters<LocalFileSyncDocumentRepository["initialize"]>[0],
+      ) {
+        mutations.push({
           documentId: input.documentId,
-          heads: [],
-          source: "local" as const,
-        },
-      };
+          documentName: input.document.name,
+        });
+        return {
+          ok: true as const,
+          document: input.document,
+          status: { kind: "restored" as const, documentId: input.documentId },
+          metadata: {
+            actorId: "test-session",
+            documentId: input.documentId,
+            heads: [],
+            source: "local" as const,
+          },
+        };
+      },
+      async bindLocalFile(
+        input: Parameters<LocalFileSyncDocumentRepository["bindLocalFile"]>[0],
+      ) {
+        bindings.push({
+          documentId: input.documentId,
+          handleName: input.handle.name,
+        });
+        return { ok: true as const, metadata: input.metadata };
+      },
+      async reset(documentId: DocumentId) {
+        resets.push(documentId);
+        return { kind: "reset" as const, documentId };
+      },
+      async restoreLocalFileBinding() {
+        throw new Error("Unexpected restoreLocalFileBinding call.");
+      },
+      async getLocalFileSyncStatus() {
+        throw new Error("Unexpected getLocalFileSyncStatus call.");
+      },
+      subscribeToLocalFileSyncStatus() {
+        throw new Error("Unexpected subscribeToLocalFileSyncStatus call.");
+      },
     },
-    async bindLocalFile(input) {
-      bindings.push({
-        documentId: input.documentId,
-        handleName: input.handle.name,
-      });
-      return { ok: true as const, metadata: input.metadata };
-    },
-    async reset(documentId: DocumentId) {
-      resets.push(documentId);
-      return { kind: "reset" as const, documentId };
-    },
-  } as LocalFileSyncDocumentRepository;
+  );
 
   return { bindings, mutations, repository, resets };
 }
@@ -250,6 +267,11 @@ describe("document file actions", () => {
         currentDocumentId: "doc_workspace",
         async exportCurrentDocument() {
           return {
+            ok: true,
+            format: "cadara",
+            extension: "cadara",
+            mimeType: "application/json",
+            diagnostics: [],
             filename: "saved.cadara",
             payload: '{"documentId":"doc_workspace"}',
           };
@@ -259,9 +281,9 @@ describe("document file actions", () => {
             documentId: input.metadata.documentId,
             handleName: input.handle.name,
           });
-          return { ok: true as const, diagnostics: [] };
+          return { ok: true as const, revisionId: "rev_saved", diagnostics: [] };
         },
-      } as never,
+      },
       io: {
         async showSaveLocalDocumentPicker() {
           return { ok: true as const, handle: savedHandle };
