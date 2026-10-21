@@ -21,7 +21,7 @@ async function openDimensionInput(
   placement: { x: number; y: number },
 ) {
   const page = workbench.page;
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -50,7 +50,7 @@ test("T13e: a determined opposite width is offered as a reference; committing sh
     .click();
   await workbench.expectSketchSessionActive();
 
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 700, y: 500 });
   await workbench.clickViewportAt({ x: 900, y: 650 });

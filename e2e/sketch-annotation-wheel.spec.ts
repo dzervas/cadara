@@ -676,7 +676,7 @@ test("T14g T-6/R-9: with the wheel open the first click inside a region only col
   await workbench.expectSketchSessionActive();
   // A small rectangle (60 × 40 px): its four edge constraints link into
   // one cluster and its context is small (K = 2), so Show all gives `+2`.
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 640, y: 420 });
   await workbench.clickViewportAt({ x: 700, y: 460 });

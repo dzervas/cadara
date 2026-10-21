@@ -173,8 +173,65 @@ export class SketchWorkbenchHarness {
     return this.page.getByTestId("cad-viewport");
   }
 
-  async activateTool(name: string) {
-    await this.toolbarButton(name).click();
+  /**
+   * What shows a tool's armed state: its own button, or the collapsed island
+   * hiding it (pressed while any of its tools is armed).
+   */
+  toolbarToolControl(name: string): Locator {
+    return this.toolbarButton(name).or(this.toolbarGroupTrigger(name));
+  }
+
+  /** The collapsed toolbar island (or merged islands) that hides a tool. */
+  toolbarGroupTrigger(name: string): Locator {
+    return this.page.locator(`button[data-toolbar-group-tools*="|${name}|"]`);
+  }
+
+  /**
+   * Narrow toolbars collapse whole islands into one dropdown; a tool that is
+   * not on the bar is picked from the menu of the island that hides it.
+   */
+  async activateTool(
+    name: string,
+    press: (control: Locator) => Promise<void> = (control) => control.click(),
+  ) {
+    if (await this.openCollapsedToolbarGroup(name, press)) {
+      await press(
+        this.page.locator(
+          `[role="menuitem"][data-tool-tooltip="${name}"], [role="menuitem"][data-tool-name="${name}"]`,
+        ),
+      );
+      return;
+    }
+    await press(this.toolbarButton(name));
+  }
+
+  /**
+   * Opens the menu listing a tool family's variants: the family dropdown when
+   * it is on the bar, otherwise the collapsed island that hides it.
+   */
+  async openToolMenu(name: string) {
+    if (
+      !(await this.openCollapsedToolbarGroup(name, (control) =>
+        control.click(),
+      ))
+    ) {
+      await this.toolbarButton(name).click();
+    }
+    await expect(this.page.getByRole("menu")).toBeVisible();
+  }
+
+  private async openCollapsedToolbarGroup(
+    name: string,
+    press: (control: Locator) => Promise<void>,
+  ) {
+    const direct = this.toolbarButton(name);
+    const group = this.toolbarGroupTrigger(name);
+    await expect(direct.or(group).first()).toBeVisible();
+    if ((await direct.count()) > 0) {
+      return false;
+    }
+    await press(group);
+    return true;
   }
 
   async hoverViewportAt(point: { x: number; y: number }) {

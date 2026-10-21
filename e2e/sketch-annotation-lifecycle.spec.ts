@@ -206,7 +206,7 @@ test("T14c R-9: with a constraint active, the first interior click keeps the sib
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 640, y: 420 });
   await workbench.clickViewportAt({ x: 860, y: 580 });

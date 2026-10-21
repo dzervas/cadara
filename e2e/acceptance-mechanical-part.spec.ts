@@ -90,7 +90,7 @@ test("§1 E2E-1 second fixture: Rectangle stays armed and adds no size; its widt
     x: (RECTANGLE[0].x + RECTANGLE[1].x) / 2,
     y: RECTANGLE[1].y,
   };
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {

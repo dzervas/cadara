@@ -29,7 +29,7 @@ test("T14a review B-1: gliding the mouse to the placement point and clicking on 
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
 
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -94,7 +94,7 @@ test("committed distance annotation input keeps Backspace local and saves durabl
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
 
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -187,7 +187,7 @@ async function openDimensionInput(
   placement: { x: number; y: number },
 ) {
   const page = workbench.page;
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -215,7 +215,7 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
     .click();
   await workbench.expectSketchSessionActive();
 
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 700, y: 500 });
   await workbench.clickViewportAt({ x: 900, y: 650 });
@@ -323,7 +323,7 @@ test("T13c: measured prefill, width-only rectangle, blocked rim, retained and ex
 
   // A consistent Radius dimension (prefill untouched), then the diameter is
   // edited to a conflicting value: retained, highlighted and explained.
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", { name: /Radius Create circle radius dimensions/ })
     .click();

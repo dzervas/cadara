@@ -356,7 +356,7 @@ async function drawLine(
   to: { x: number; y: number },
 ) {
   const page = workbench.page;
-  await glidePress(page, workbench.toolbarButton("Create line geometry."));
+  await workbench.activateTool("Create line geometry.", (control) => glidePress(page, control));
   await page.keyboard.down("Shift");
   await glideClick(workbench, from);
   await glideClick(workbench, to);
@@ -511,11 +511,9 @@ test("§6 Import Image inside a sketch is a private action: the draft and the im
   const revisionA = await currentRevision(pageA);
   const chooser = pageA.waitForEvent("filechooser");
   await waitForCommittedAction(pageA, "Import Image", async () => {
-    await glidePress(
-      pageA,
-      a.toolbarButton(
-        "Import one or more reference images into the active sketch.",
-      ),
+    await a.activateTool(
+      "Import one or more reference images into the active sketch.",
+      (control) => glidePress(pageA, control),
     );
     await (
       await chooser

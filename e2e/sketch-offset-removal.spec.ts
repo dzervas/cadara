@@ -294,7 +294,7 @@ test("T17c F1: a failed offset (its joint arc deleted): its outputs are drawn wi
   // Review R-2: a driving length on the vertical output (picked by a
   // gliding hover, placed right of it).
   const dimensioned = midpointOf(created, outputOf(second!.id));
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await glidePress(
     page,
     page.getByRole("menuitem", {

@@ -56,7 +56,7 @@ async function dimensionLine(
   value?: string,
 ) {
   const page = workbench.page;
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -594,7 +594,7 @@ test("T14d review R-2: hovering an overlap shows the hint without moving any chi
   );
   await dimensionLine(workbench, { x: 640, y: 230 }, { x: 680, y: 200 }, 1);
   // A rectangle: hovering its corner stacks a point and two lines.
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 700, y: 500 });
   await workbench.clickViewportAt({ x: 900, y: 650 });

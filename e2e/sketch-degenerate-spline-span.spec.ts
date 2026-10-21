@@ -254,7 +254,7 @@ test("T17c3: Coincident on two consecutive fit points is one 'Coincident' action
 /** A Fix on fit point A (gliding press), then back to Select. */
 async function fixA(workbench: FeatureWorkbenchHarness) {
   const page = workbench.page;
-  await glidePress(page, page.getByRole("button", { name: "Fix Geometry" }));
+  await workbench.activateTool("Fix Geometry", (control) => glidePress(page, control));
   await waitForCommittedAction(page, "Fix Geometry", () =>
     glideClick(workbench, A),
   );

@@ -328,6 +328,7 @@ const toolbarSections = [
     align: "left",
     modes: ["part", "sketch"],
     toolIds: ["undo", "redo"],
+    pinned: true,
   },
   {
     id: "sketching",
@@ -335,6 +336,7 @@ const toolbarSections = [
     align: "center",
     modes: ["part", "sketch"],
     toolIds: ["sketch", "finishSketch"],
+    pinned: true,
   },
   {
     id: "drawing",

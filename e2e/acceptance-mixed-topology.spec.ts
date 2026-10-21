@@ -157,7 +157,7 @@ async function drawMixedOutline(workbench: FeatureWorkbenchHarness) {
   );
   await toSelect(page);
   // 3-Point Arc: start, through, end.
-  await workbench.activateTool(ARC_TOOL);
+  await workbench.openToolMenu(ARC_TOOL);
   await glidePress(page, page.getByRole("menuitem", { name: /3-Point Arc/ }));
   await glideClick(workbench, B);
   await glideClick(workbench, M);
@@ -867,10 +867,7 @@ test("§2 E2E-2 near gap: a Shift-placed near gap is not healed; both ends Fixed
 
   // Fix each gap end where it is (two "Fix Geometry" actions).
   for (const at of [P, GAP_END]) {
-    await glidePress(
-      page,
-      page.getByRole("button", { name: FIX_TOOL, exact: true }),
-    );
+    await workbench.activateTool(FIX_TOOL, (control) => glidePress(page, control));
     await waitForCommittedAction(page, FIX_TOOL, () =>
       glideClick(workbench, at),
     );

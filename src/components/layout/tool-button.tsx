@@ -21,7 +21,7 @@ import {
 interface ToolButtonProps {
   tool: RegisteredToolDefinition;
   inline?: boolean;
-  onTrigger?: () => void;
+  onTrigger?: (toolId: RegisteredToolDefinition["id"]) => void;
   active?: boolean;
   disabled?: boolean;
   /** Shown as the tooltip of a disabled tool. */
@@ -92,7 +92,7 @@ export const ToolButton = memo(function ToolButton({
     void activateTool(tool.id, {
       source: inline ? "search" : "toolbar",
     });
-    onTrigger?.();
+    onTrigger?.(tool.id);
   };
 
   const content = inline ? (

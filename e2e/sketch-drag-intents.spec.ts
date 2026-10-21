@@ -190,7 +190,7 @@ async function addDiameterWithDimensionTool(
   diameter: number,
 ) {
   const page = workbench.page;
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -382,7 +382,7 @@ test("T13a B-1: with a rectangle drawn first, a circle's rim drag keeps the grow
 
   // A rectangle first: its horizontal/vertical requirements put every later
   // drag on the solver path.
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await glideClick(workbench, { x: 900, y: 250 });
   await glideClick(workbench, { x: 1050, y: 350 });
@@ -601,7 +601,7 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
   await expect.poll(() => workbench.currentPhase()).toBe("editing");
 
   // Fix the centre point: activate Fix Geometry, then click the centre.
-  await page.getByRole("button", { name: "Fix Geometry" }).click();
+  await workbench.activateTool("Fix Geometry");
   await workbench.waitForAnimationFrames(2);
   const hoverBox = await workbench.viewport().boundingBox();
   if (!hoverBox) throw new Error("Viewport not visible.");
