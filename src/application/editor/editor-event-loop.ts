@@ -28,8 +28,10 @@ import {
 } from "./editor-debug-trace";
 import { runEditorEffect } from "./effect-registry";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
+import type { PersistedSketchDraft } from "@/contracts/sketch/draft-recovery";
+import { canOfferSketchDraft, restoreSketchDraftEntry } from "@/application/sketch-draft-recovery/rules";
 
-export type EditorEventLoopListener = (state: EditorState) => void;
+export type EditorEventLoopListener = (state: EditorState, event: EditorEvent) => void;
 
 /**
  * [TECH] T17-11: a failed snap query only removes an inference hint (nothing
@@ -55,8 +57,18 @@ export class EditorEventLoop {
   private readonly sketchActions: SketchAuthoredActions;
   private cursorRecovery: { requestId: string; state: EditorState } | null = null;
   private readonly interactionQueries = new Map<EditorEffect, AbortController>();
+  private recoveryDraft: PersistedSketchDraft | null = null;
 
   private transition(event: EditorEvent) {
+    if (event.type === "sketch.draftRecoveryRequested") {
+      if (this.state.kind !== "idle" || !this.state.snapshot || !canOfferSketchDraft(event.draft, this.state.snapshot))
+        return { state: this.state, effects: [] };
+      this.recoveryDraft = event.draft;
+      event = { type: "sketch.beginRequested", target: event.draft.published
+        ? { kind: "sketch", sketchId: event.draft.sketchId } : event.draft.plane.support };
+    } else if (event.type === "effect.sketchSessionOpenFailed" || event.type === "document.replaced" || event.type === "command.cancelled" || event.type === "tool.activated" || event.type === "sketch.beginRequested" || event.type === "authoring.reopenRequested") {
+      this.recoveryDraft = null;
+    }
     if (
       (event.type === "effect.documentCursorMoveFailed" ||
         event.type === "effect.documentCursorMoved") &&
@@ -90,9 +102,17 @@ export class EditorEventLoop {
       emitPendingSketchEditQuery(
         emitPendingSketchOffsetPreviewPublication(
           emitPendingSketchRegionDerivation(
-            this.sketchActions.transition(this.state, event, (state) =>
-              transitionEditorState(state, event, this.dependencies),
-            ),
+            this.sketchActions.transition(this.state, event, (state) => {
+              const result = transitionEditorState(state, event, this.dependencies);
+              const opened = result.state;
+              const draft = this.recoveryDraft;
+              if (!draft || state.kind === "editingSketch" || opened.kind !== "editingSketch") return result;
+              this.recoveryDraft = null;
+              // Existing sketches enter directly from the rollback snapshot;
+              // new sketches enter from sketchSessionOpened. Restore at their
+              // common entry seam, before the authored-action owner accepts it.
+              return restoreSketchDraftEntry(result, draft);
+            }),
             {
               supersede: this.runtime.supersedesSketchRegionDerivation === true,
             },
@@ -178,7 +198,7 @@ export class EditorEventLoop {
     }
 
     const result = this.transition(event);
-    this.applyTransitionResult(result);
+    this.applyTransitionResult(result, event);
     this.emitTrace(
       createEventDispatchedTraceEntry({
         sequence: this.nextTraceSequence(),
@@ -212,6 +232,10 @@ export class EditorEventLoop {
 
   getState() {
     return this.state;
+  }
+
+  getSketchDraftCheckpoint() {
+    return this.sketchActions.getDraftCheckpoint(this.state);
   }
 
   startAndSettle(commandId: string): Promise<readonly EditorEvent[]> {
@@ -255,6 +279,7 @@ export class EditorEventLoop {
     // The run token drops in-flight derivation results; release the request so
     // the post-transition hook re-derives after a restart.
     this.cursorRecovery = null;
+    this.recoveryDraft = null;
     if (this.state.kind === "editingSketch") {
       this.state = {
         ...this.state,
@@ -267,6 +292,7 @@ export class EditorEventLoop {
 
   private applyTransitionResult(
     result: ReturnType<typeof transitionEditorState>,
+    event: EditorEvent,
   ) {
     for (const effect of result.effects) {
       if (effect.type === "document.moveHistoryCursor" && effect.transient) {
@@ -314,7 +340,7 @@ export class EditorEventLoop {
     }
 
     for (const listener of this.listeners) {
-      listener(this.state);
+      listener(this.state, event);
     }
   }
 
@@ -430,7 +456,7 @@ export class EditorEventLoop {
       let result: ReturnType<typeof transitionEditorState>;
       try {
         result = this.transition(effectEvent);
-        this.applyTransitionResult(result);
+        this.applyTransitionResult(result, effectEvent);
       } finally { this.currentCorrelation = null; }
       this.emitTrace(
         createEffectCompletedTraceEntry({
@@ -471,7 +497,7 @@ export class EditorEventLoop {
       if (!this.running || runToken !== this.runToken) return false;
       this.currentCorrelation = correlation ?? null;
       const result = this.transition(failureEvent);
-      try { this.applyTransitionResult(result); } finally { this.currentCorrelation = null; }
+      try { this.applyTransitionResult(result, failureEvent); } finally { this.currentCorrelation = null; }
       this.emitTrace(
         createEffectFailedTraceEntry({
           sequence: this.nextTraceSequence(),

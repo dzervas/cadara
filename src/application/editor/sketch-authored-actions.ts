@@ -3,6 +3,8 @@ import type {
   AuthoredActionState,
 } from "@/contracts/modeling/authored-actions";
 import type { DocumentId, SketchId } from "@/contracts/shared/ids";
+import type { SketchDraftCheckpoint } from "@/contracts/sketch/draft-recovery";
+import { publishedSketchRevision } from "@/application/sketch-draft-recovery/rules";
 import type {
   EditorEvent,
   EditorState,
@@ -385,6 +387,30 @@ export class SketchAuthoredActions {
     Extract<AuthoredActionState, { context: { kind: "sketch" } }>["data"]
   >();
   private readonly annotationGestures = new Map<string, AnnotationGesture>();
+  private completedActions = 0;
+
+  /** Accepted authored state, not the live pointer/label gesture preview. */
+  getDraftCheckpoint(state: EditorState): SketchDraftCheckpoint | null {
+    if (state.kind !== "editingSketch" || !state.snapshot) return null;
+    const documentId = state.snapshot.document.documentId;
+    const key = JSON.stringify({
+      actorId: state.snapshot.provenance?.actorId ?? this.localActorId,
+      documentId,
+      context: { kind: "sketch", sketchId: state.session.actionContextId },
+    });
+    const accepted = this.accepted.get(key);
+    if (!accepted?.data || !("definition" in accepted.data)) return null;
+    const base = this.publicationBases.get(key);
+    return {
+      documentId, sketchId: state.session.actionContextId,
+      published: base != null,
+      publishedRevision: base ? publishedSketchRevision(base) : null,
+      label: accepted.data.label, plane: accepted.data.plane,
+      definition: accepted.data.definition,
+      sequence: state.session.sequence,
+      completedActions: this.completedActions,
+    };
+  }
 
   reset() {
     this.history = new AuthoredActionHistory();
@@ -698,7 +724,10 @@ export class SketchAuthoredActions {
         };
       }
       const restored = action.status === "applied" ? action.state : expected;
-      if (action.status === "applied") this.accepted.set(key, restored);
+      if (action.status === "applied") {
+        this.accepted.set(key, restored);
+        this.completedActions += 1;
+      }
       if (
         restored.context.kind === "sketch" &&
         restored.data &&
@@ -775,7 +804,10 @@ export class SketchAuthoredActions {
     );
     if (action.status === "blocked")
       throw new Error(`Sketch action rejected: ${action.reason}`);
-    if (action.status === "applied") this.accepted.set(key, action.state);
+    if (action.status === "applied") {
+      this.accepted.set(key, action.state);
+      this.completedActions += 1;
+    }
     return this.withAvailability(result, identity);
   }
 

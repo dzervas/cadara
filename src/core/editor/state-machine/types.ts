@@ -725,6 +725,7 @@ export interface SnapshotFailedEvent {
  * through `effect.*` result events.
  */
 export type EditorEvent =
+  | { type: "sketch.draftRecoveryRequested"; draft: import("@/contracts/sketch/draft-recovery").PersistedSketchDraft }
   | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
   | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }

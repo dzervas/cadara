@@ -113,6 +113,7 @@ export function useEditorEventLoop(
   );
 
   return {
+    eventLoop,
     eventLoopRef,
     machineState,
     dispatch,

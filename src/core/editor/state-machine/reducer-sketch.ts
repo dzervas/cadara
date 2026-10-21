@@ -229,6 +229,7 @@ export function reduceSketchWorkflow(
 ): EditorTransitionResult | null {
   switch (event.type) {
     case "sketch.beginRequested":
+    case "sketch.draftRecoveryRequested":
       return { state, effects: [] };
     case "sketch.imageEdited":
       return { state: createSketchPreviewState(state, editReferenceImage(state.session, event.target.operationId, event.edit)), effects: [] };

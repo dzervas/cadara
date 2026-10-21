@@ -92,6 +92,8 @@ import { useWorkbenchHistory } from "@/workbench/adapters/use-workbench-history"
 import { useWorkbenchDocumentPresentation } from "@/workbench/adapters/use-workbench-document-presentation";
 import { useWorkbenchLocalFileSync } from "@/workbench/adapters/use-workbench-local-file-sync";
 import { useWorkbenchNotifications } from "@/workbench/adapters/use-workbench-notifications";
+import { useWorkbenchSketchDraftRecovery } from "@/workbench/adapters/use-workbench-sketch-draft-recovery";
+import { SketchDraftRecoveryNotification } from "@/workbench/adapters/sketch-draft-recovery-notification";
 import { useWorkbenchPartImport } from "@/workbench/adapters/use-workbench-part-import";
 import { useWorkbenchViewportEvents } from "@/workbench/adapters/use-workbench-viewport-events";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
@@ -248,6 +250,7 @@ export function CadWorkbench({
     },
     dispatch,
     getRuntimeTrace,
+    draftRecovery,
   } = useEditorState();
   const snapshot = machineState.snapshot;
   // T17-20 (T17k2): the edited sketch was deleted by another session.
@@ -309,6 +312,7 @@ export function CadWorkbench({
     errorReporter,
     modelingService,
   });
+  const draftRecoveryNotification = useWorkbenchSketchDraftRecovery(draftRecovery, reportDocumentFileActionFailure);
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -1688,6 +1692,7 @@ export function CadWorkbench({
                       onDismiss={() => setRestoreMessage(null)}
                     />
                   ) : null}
+                  {draftRecoveryNotification ? <SketchDraftRecoveryNotification {...draftRecoveryNotification} /> : null}
                   {workbenchStatusNotification ? (
                     <WorkbenchNotification
                       {...workbenchStatusNotification}
