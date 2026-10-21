@@ -13,7 +13,7 @@ import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 const root = resolve(import.meta.dirname, "../..");
 const bracketSource = resolve(root, "landing/examples/bracket/model.cadara");
 const BRACKET_SHA256 =
-  "b488811453816ff6fe2187140cef043b8dde0b3b520cbebe41154ac031a2f827";
+  "0db9966c73601e0376a94455ca8131e77e6aaece6b3b99aae2315de73115d792";
 /** Revision-sensitive fallback edge/vertex ids are renumbered by every rebuild. */
 const FALLBACK_TOPOLOGY_ID = /_t\d{4}_\d+$/;
 

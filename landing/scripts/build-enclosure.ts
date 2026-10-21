@@ -3,6 +3,7 @@
 // bun landing/scripts/build-enclosure.ts /tmp/cadara-cli
 // Only the built production CLI authors native data and tessellates exports.
 import { buildExample } from "./build-example";
+import { finishBodyAppearance, type Finish } from "../finishes";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -378,7 +379,7 @@ await buildExample("enclosure", async (dir, repoRoot) => {
       });
     }
     const shell = "Graphite enclosure shell",
-      lid = "Amber orange lid";
+      lid = "Gold lid";
     for (const sketch of sketches) {
       const { id } = sketch;
       command(`${id}-begin`, "sketch.begin", { plane: sketch.plane });
@@ -540,8 +541,23 @@ await buildExample("enclosure", async (dir, repoRoot) => {
         }
       }
     }
-    if (pass === "model")
+    if (pass === "model") {
+      const finishByLabel: [string, Finish][] = [
+        [shell, "graphite"],
+        [lid, "gold"],
+        ...corners.map((_, i): [string, Finish] => [
+          `Black socket-head screw ${i + 1}`,
+          "black",
+        ]),
+      ];
+      for (const [i, [label, finish]] of finishByLabel.entries())
+        command(`color-${i}`, "body.color.set", {
+          bodyId: ref(current, label),
+          appearance: finishBodyAppearance(finish),
+          intent: "fulfill",
+        });
       command("save", "document.save", { path: `${dir}/enclosure.cadara` });
+    }
     const results = await run(pass);
     if (pass === "discover") {
       seeds = results;
@@ -646,8 +662,8 @@ await buildExample("enclosure", async (dir, repoRoot) => {
     },
     {
       file: "enclosure-lid.stl",
-      label: "Amber orange lid",
-      finish: "orange",
+      label: "Gold lid",
+      finish: "gold",
       explode: [0, 0, 25],
     },
     ...corners.map((_, i) => ({
