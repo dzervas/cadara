@@ -728,9 +728,9 @@ export function emitPendingSketchSnapQuery(
   if (!stage) {
     // A basis with nothing (more) to ask forgets the older request.
     const forget =
-      session !== state.session &&
-      session.snapIntersections?.status !== "pending";
-    return session === state.session
+      state.pendingSnapQueryRequest != null &&
+      getSketchSnapIntersectionQueryToIssue(session, null) === null;
+    return session === state.session && !forget
       ? result
       : {
           ...result,
