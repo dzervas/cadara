@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
 
-import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
+import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type {
   CommitSketchRequest,
   CommitSketchResponse,
   CreateFeatureRequest,
   CreateFeatureResponse,
+  ModelingOperationResult,
 } from "@/contracts/modeling/schema";
 import type { ModelingOperationHistoryEntry } from "@/contracts/modeling/operation-history";
 import {
@@ -18,20 +20,21 @@ const recordedSketchId =
 const recordedRegionId =
   "region_12345678-1234-4234-8234-123456789abc-profile" as const;
 
-function acceptedResponse(revisionId: `rev_${string}`) {
+function acceptedResponse(revisionId: `rev_${string}`): ModelingOperationResult {
   return {
     contractVersion: "modeling-contract/v1alpha1",
     documentId: "doc_workspace",
     revisionId,
     revisionState: { kind: "accepted", baseRevisionId: "rev_0001" },
     rebuildResult: {
-      kind: "succeeded",
+      kind: "rebuilt",
+      revisionId,
       invalidatedTargets: [],
       diagnostics: [],
     },
     changedTargets: [],
     diagnostics: [],
-  } as const;
+  };
 }
 
 function commitEntry(): Extract<
@@ -60,10 +63,10 @@ function commitEntry(): Extract<
       },
       definition: {
         schemaVersion: "sketch-definition/v1alpha2",
-        referenceIds: ["reference_recorded"],
+        referenceIds: ["ref_recorded"],
         references: [
           {
-            referenceId: "reference_recorded",
+            referenceId: "ref_recorded",
             kind: "modelReference",
             label: "Recorded vertex",
             source: {
@@ -96,7 +99,7 @@ function featureEntry(): Extract<
     payload: {
       definition: {
         kind: "extrude",
-        featureTypeVersion: "extrude-feature/v1alpha1",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
         parameters: {
           resultBodyType: "solid",
           profiles: [
@@ -109,9 +112,13 @@ function featureEntry(): Extract<
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 10 },
+            end: {
+              kind: "blind",
+              direction: "positive",
+              distance: { source: "literal", value: 10 },
+            },
           },
-          operation: "newBody",
+          operation: { source: "literal", value: "newBody" },
           booleanScope: { kind: "standalone" },
         },
       },
@@ -120,21 +127,31 @@ function featureEntry(): Extract<
 }
 
 test("history replay restores recorded UUID identities without rewriting dependent references", async () => {
-  let capturedCommit: CommitSketchRequest | null = null;
-  let capturedFeature: CreateFeatureRequest | null = null;
-  const adapter = {
-    async commitSketch(request: CommitSketchRequest) {
-      capturedCommit = structuredClone(request);
+  const captured: {
+    commit?: CommitSketchRequest;
+    feature?: CreateFeatureRequest;
+  } = {};
+  class RecordingAdapter extends MockKernelAdapter {
+    override async commitSketch(
+      request: CommitSketchRequest,
+    ): Promise<CommitSketchResponse> {
+      captured.commit = structuredClone(request);
+      if (!request.sketchId) {
+        throw new Error("Replay must provide a recorded sketch ID.");
+      }
       return {
         ...acceptedResponse("rev_0002"),
         sketchId: request.sketchId,
-      } as unknown as CommitSketchResponse;
-    },
-    async createFeature(request: CreateFeatureRequest) {
-      capturedFeature = structuredClone(request);
-      return acceptedResponse("rev_0003") as unknown as CreateFeatureResponse;
-    },
-  } as unknown as ModelingKernelAdapter;
+      };
+    }
+    override async createFeature(
+      request: CreateFeatureRequest,
+    ): Promise<CreateFeatureResponse> {
+      captured.feature = structuredClone(request);
+      return { ...acceptedResponse("rev_0003"), featureId: "feature_recorded" };
+    }
+  }
+  const adapter = new RecordingAdapter();
   const initialCursor: HistoryReplayCursor = {
     revisionId: "rev_0001",
     sketchIds: new Set(),
@@ -155,28 +172,36 @@ test("history replay restores recorded UUID identities without rewriting depende
     cursor: committed.cursor,
   });
 
-  expect(capturedCommit?.sketchId).toBe(recordedSketchId);
-  expect(capturedCommit?.restoreRecordedSketchId).toBe(true);
-  expect(capturedCommit?.definition.references[0]?.source).toEqual({
+  expect(captured.commit?.sketchId).toBe(recordedSketchId);
+  expect(captured.commit?.restoreRecordedSketchId).toBe(true);
+  expect(captured.commit?.definition.references[0]?.source).toEqual({
     kind: "vertex",
     bodyId: "body_recorded",
     vertexId: "vertex_recorded",
   });
-  expect(capturedFeature?.definition).toEqual(featureEntry().payload.definition);
+  expect(captured.feature?.definition).toEqual(
+    featureEntry().payload.definition,
+  );
   expect(committed.cursor.sketchIds).toEqual(new Set([recordedSketchId]));
 });
 
 test("history replay updates an already restored sketch without restore-create intent", async () => {
-  let capturedCommit: CommitSketchRequest | null = null;
-  const adapter = {
-    async commitSketch(request: CommitSketchRequest) {
-      capturedCommit = structuredClone(request);
+  const captured: { commit?: CommitSketchRequest } = {};
+  class RecordingAdapter extends MockKernelAdapter {
+    override async commitSketch(
+      request: CommitSketchRequest,
+    ): Promise<CommitSketchResponse> {
+      captured.commit = structuredClone(request);
+      if (!request.sketchId) {
+        throw new Error("Replay must provide a recorded sketch ID.");
+      }
       return {
         ...acceptedResponse("rev_0002"),
         sketchId: request.sketchId,
-      } as unknown as CommitSketchResponse;
-    },
-  } as unknown as ModelingKernelAdapter;
+      };
+    }
+  }
+  const adapter = new RecordingAdapter();
 
   await replayHistoryEntry({
     adapter,
@@ -189,6 +214,6 @@ test("history replay updates an already restored sketch without restore-create i
     },
   });
 
-  expect(capturedCommit?.sketchId).toBe(recordedSketchId);
-  expect(capturedCommit?.restoreRecordedSketchId).toBe(false);
+  expect(captured.commit?.sketchId).toBe(recordedSketchId);
+  expect(captured.commit?.restoreRecordedSketchId).toBe(false);
 });

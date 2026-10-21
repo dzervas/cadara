@@ -54,6 +54,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         ? resolved.error.message
         : "Modeling result should be ok.",
     ).toBeTruthy();
+    if (resolved.isErr()) throw new Error(resolved.error.message);
     return resolved.value;
   }
 
@@ -63,6 +64,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       resolved.isErr(),
       "Modeling result should be an error.",
     ).toBeTruthy();
+    if (resolved.isOk()) throw new Error("Modeling result should be an error.");
     return resolved.error;
   }
 
@@ -99,7 +101,11 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 7 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: { source: "literal", value: 7 },
+          },
         },
       },
     };
@@ -314,6 +320,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       persisted,
       "Accepted cursor rollback should persist an authored document.",
     ).toBeTruthy();
+    if (!persisted) throw new Error("Cursor rollback document was not persisted.");
     expect(
       persisted.sketches.some((sketch) => sketch.sketchId === secondSketchId),
       "Persisted authored document should include future sketches after the cursor.",
@@ -387,10 +394,10 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       documentRepository.savedDocuments.length,
       "Each accepted cursor move should persist the authored document.",
     ).toBe(3);
+    const persistedCursor = documentRepository.savedDocuments.at(-1)?.cursor;
     expect(
-      documentRepository.savedDocuments.at(-1)?.cursor.kind === "feature" &&
-        documentRepository.savedDocuments.at(-1)?.cursor.featureId ===
-          "feature_extrude-1",
+      persistedCursor?.kind === "feature" &&
+        persistedCursor.featureId === "feature_extrude-1",
       "The final persisted cursor should match the last requested rollback target.",
     ).toBeTruthy();
   }
@@ -499,6 +506,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       brokenExtrude?.definition.kind,
       "Repository restore fixture should include an extrude feature.",
     ).toBe("extrude");
+    if (!brokenExtrude) {
+      throw new Error("Repository restore fixture has no extrude feature.");
+    }
     repositoryDocument.features = repositoryDocument.features.map((feature) =>
       feature.featureId === brokenExtrude.featureId &&
       feature.definition.kind === "extrude"
@@ -871,7 +881,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
   async function testBackgroundRepositoryPersistenceDoesNotBlockAcceptedMutation() {
     const documentRepository = createMemoryDocumentRepository();
     const mutate = documentRepository.mutate.bind(documentRepository);
-    let releaseMutate: (() => void) | null = null;
+    const gate: { release?: () => void } = {};
     let resolveMutateComplete: (() => void) | null = null;
     const mutateComplete = new Promise<void>((resolve) => {
       resolveMutateComplete = resolve;
@@ -883,7 +893,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     documentRepository.mutate = async (input) => {
       mutateStarted = true;
       await new Promise<void>((resolve) => {
-        releaseMutate = resolve;
+        gate.release = resolve;
       });
       const result = await mutate(input);
       resolveMutateComplete?.();
@@ -918,6 +928,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       pendingHistory.ok && pendingHistory.payload,
       "Background persistence should keep a browser fallback until the repository write finishes.",
     ).toBeTruthy();
+    if (!pendingHistory.ok || !pendingHistory.payload) {
+      throw new Error("Background persistence must keep a valid fallback payload.");
+    }
     expect(
       pendingHistory.payload.baseRepositoryHeads?.join("|"),
       "Background persistence fallback should record the repository heads it extends.",
@@ -928,7 +941,8 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       mutateStarted,
       "Background persistence should enqueue the repository write after accepting the mutation.",
     ).toBeTruthy();
-    releaseMutate?.();
+    if (!gate.release) throw new Error("Background persistence did not start.");
+    gate.release();
     await mutateComplete;
     await Promise.resolve();
     expect(
@@ -945,13 +959,13 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
   async function testBackgroundSketchCommitCompactsFallbackAuthoringOperations() {
     const documentRepository = createMemoryDocumentRepository();
     const mutate = documentRepository.mutate.bind(documentRepository);
-    let releaseMutate: (() => void) | null = null;
+    const gate: { release?: () => void } = {};
     const historyStore = createMemoryOperationHistoryStore(
       createEmptyOperationHistory("doc_workspace"),
     );
     documentRepository.mutate = async (input) => {
       await new Promise<void>((resolve) => {
-        releaseMutate = resolve;
+        gate.release = resolve;
       });
       return mutate(input);
     };
@@ -1003,13 +1017,22 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         pendingHistory.payload?.entries[0]?.kind === "commitSketch",
       "Background sketch commits should persist a fallback entry.",
     ).toBeTruthy();
+    if (
+      !pendingHistory.ok ||
+      pendingHistory.payload?.entries[0]?.kind !== "commitSketch"
+    ) {
+      throw new Error("Background sketch commit must keep its fallback entry.");
+    }
     expect(pendingHistory.payload.entries[0].payload.definition.points).toEqual(
       sourceSketch.sketch.definition.points,
     );
     expect(
       pendingHistory.payload.entries[0].payload.definition,
     ).not.toHaveProperty("referenceImages");
-    releaseMutate?.();
+    if (!gate.release) {
+      throw new Error("Background sketch persistence did not start.");
+    }
+    gate.release();
   }
 
   async function testReferenceImageOperationsPersistAcrossRepositoryRestore() {
@@ -1121,6 +1144,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       persistedSketch,
       "Persisted authored documents should include committed reference-image sketches.",
     ).toBeTruthy();
+    if (!persistedSketch) {
+      throw new Error("Persisted reference-image sketch is missing.");
+    }
     expect(
       persistedSketch.definition.points.length,
       "Persisted reference-image sketches should not materialize sketch points.",
@@ -1151,6 +1177,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       restoredSketch,
       "Repository restore should reopen committed reference-image sketches.",
     ).toBeTruthy();
+    if (!restoredSketch) {
+      throw new Error("Restored reference-image sketch is missing.");
+    }
     expect(
       restoredSketch.sketch.definition.points.length,
       "Restored reference-image sketches should still avoid local points.",
@@ -1251,6 +1280,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       pendingHistory.ok && pendingHistory.payload,
       "Partial background writes should keep the unpersisted fallback tail.",
     ).toBeTruthy();
+    if (!pendingHistory.ok || !pendingHistory.payload) {
+      throw new Error("Partial background writes must keep a valid fallback payload.");
+    }
     expect(
       pendingHistory.payload.entries.length,
       "Partial background writes should trim only the persisted prefix.",
@@ -1571,16 +1603,16 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         : label,
     );
 
-    let emitRepositoryEvent:
-      | ((event: DocumentRepositoryChangeEvent) => void)
-      | null = null;
-    let resolveLoad:
-      | ((result: Awaited<ReturnType<DocumentRepository["load"]>>) => void)
-      | null = null;
+    const callbacks: {
+      emitRepositoryEvent?: (event: DocumentRepositoryChangeEvent) => void;
+      resolveLoad?: (
+        result: Awaited<ReturnType<DocumentRepository["load"]>>,
+      ) => void;
+    } = {};
     const pendingLoad = new Promise<
       Awaited<ReturnType<DocumentRepository["load"]>>
     >((resolve) => {
-      resolveLoad = resolve;
+      callbacks.resolveLoad = resolve;
     });
     const seedStatus: DocumentRepositoryRestoreStatus = {
       kind: "seeded",
@@ -1590,6 +1622,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       documentId: "doc_workspace",
       heads: ["head_seed"],
       source: "seed",
+      actorId: "actor_seed",
     };
     const peerStatus: DocumentRepositoryRestoreStatus = {
       kind: "restored",
@@ -1599,8 +1632,21 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       documentId: "doc_workspace",
       heads: ["head_peer"],
       source: "peer",
+      actorId: "actor_peer",
     };
     const documentRepository: DocumentRepository = {
+      async initialize() {
+        throw new Error("Unexpected initialize call in queued peer restore test.");
+      },
+      async getDurableHistoryAvailability() {
+        throw new Error("Unexpected history query in queued peer restore test.");
+      },
+      async undoDurableHistory() {
+        throw new Error("Unexpected undo call in queued peer restore test.");
+      },
+      async redoDurableHistory() {
+        throw new Error("Unexpected redo call in queued peer restore test.");
+      },
       async load() {
         return pendingLoad;
       },
@@ -1608,9 +1654,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         throw new Error("Unexpected mutate call in queued peer restore test.");
       },
       subscribe(_documentId, listener) {
-        emitRepositoryEvent = listener;
+        callbacks.emitRepositoryEvent = listener;
         return () => {
-          emitRepositoryEvent = null;
+          callbacks.emitRepositoryEvent = undefined;
         };
       },
       async reset(documentId) {
@@ -1620,7 +1666,12 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
         return { kind: "pending", documentId };
       },
       getMetadata(documentId) {
-        return { documentId, heads: [], source: "restore" };
+        return {
+          documentId,
+          heads: [],
+          source: "restore",
+          actorId: "actor_restore",
+        };
       },
     };
 
@@ -1636,14 +1687,17 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       }
     });
 
-    emitRepositoryEvent?.({
+    if (!callbacks.emitRepositoryEvent || !callbacks.resolveLoad) {
+      throw new Error("Initial restore must subscribe and start loading.");
+    }
+    callbacks.emitRepositoryEvent({
       document: peerDocument,
       status: peerStatus,
       metadata: peerMetadata,
       diagnostics: [],
       assetAvailability: [],
     });
-    resolveLoad?.({
+    callbacks.resolveLoad({
       ok: true,
       document: seedDocument,
       status: seedStatus,
@@ -1809,7 +1863,7 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       ) {
         const asset = document.assets.records[0];
         if (asset) {
-          const bytes = await assetResolver?.getGeometryAssetBytes(asset.hash);
+          const bytes = await assetResolver?.getGeometryAssetBytes?.(asset.hash);
           this.sawAssetBytes = bytes?.byteLength === asset.byteLength;
         }
 
@@ -1855,6 +1909,9 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       typeof exportResult.payload,
       "Current document export should serialize documents with geometry assets as JSON.",
     ).toBe("string");
+    if (typeof exportResult.payload !== "string") {
+      throw new Error("Current document export must be JSON text.");
+    }
     expect(
       (JSON.parse(exportResult.payload) as AuthoredModelDocument).assets
         .records[0]?.data?.kind,
@@ -1927,11 +1984,14 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
       suppressedFeature?.producedTargets.length,
       "Suppressed feature snapshots should not expose bypassed produced targets.",
     ).toBe(0);
-    expect(
+    const suppressedHistoryItem =
       suppressedSnapshot.presentation.documentHistory.find(
         (item) =>
           item.kind === "feature" && item.featureId === "feature_extrude-1",
-      )?.suppressed,
+      );
+    expect(
+      suppressedHistoryItem?.kind === "feature" &&
+        suppressedHistoryItem.suppressed,
       "Document history rows should expose suppressed feature state for presentation.",
     ).toBeTruthy();
     expect(

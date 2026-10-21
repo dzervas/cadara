@@ -883,27 +883,27 @@ test("T11c review A-1/R-3: screen-space sketch point markers are not also ray-pi
     makeAxisLineSession({ fromOrigin: true });
 
   expect(
-    [
+    ([
       startPointTarget,
       originTarget,
       xAxisTarget,
       {
         kind: "projectedReferenceGeometry",
-        referenceId: "reference_a",
-        geometryId: "geometry_a",
+        referenceId: "ref_a",
+        geometryId: "projected_geometry_a",
         geometryKind: "point",
-      } as PrimitiveRef,
+      },
       {
         kind: "projectedReferenceGeometry",
-        referenceId: "reference_a",
-        geometryId: "geometry_b",
+        referenceId: "ref_a",
+        geometryId: "projected_geometry_b",
         geometryKind: "lineSegment",
-      } as PrimitiveRef,
+      },
       {
         kind: "sketchExternalReference",
-        referenceId: "reference_b",
-      } as PrimitiveRef,
-    ].map(isProjectedSketchDisplayPointTarget),
+        referenceId: "ref_b",
+      },
+    ] satisfies PrimitiveRef[]).map(isProjectedSketchDisplayPointTarget),
     "Exactly the targets the projected point collector covers lose their ray-picked marker binding (projected reference points and unresolved markers too since T11d, review ADV-4).",
   ).toEqual([true, true, false, true, false, true]);
 
@@ -1321,6 +1321,13 @@ function perspectiveCamera(position: [number, number, number]) {
   return camera;
 }
 
+function curveScreenDistance(candidate: { screenDistance: number | null }): number {
+  if (candidate.screenDistance === null) {
+    throw new Error("Projected curve candidates must have a screen distance.");
+  }
+  return candidate.screenDistance;
+}
+
 test("a spline's pick distance is the exact metric, not its display polyline's", () => {
   const { session, spans } = waveSession();
   const camera = topCamera();
@@ -1341,7 +1348,7 @@ test("a spline's pick distance is the exact metric, not its display polyline's",
   const expected = screenOf(camera, oracleClosestPoint(spans, probe));
   const metric = Math.hypot(expected.x - pointer.x, expected.y - pointer.y);
   expect(
-    Math.abs(candidates[0]!.screenDistance - metric),
+    Math.abs(curveScreenDistance(candidates[0]!) - metric),
     "The candidate distance is the exact closest point's screen distance.",
   ).toBeLessThan(1e-6);
   expect(Math.abs(metric - 3.75)).toBeLessThan(1e-6);
@@ -1395,7 +1402,7 @@ test("at an oblique perspective view the spline picks exactly; below 1° grazing
   expect(candidates).toHaveLength(1);
   const exact = screenOracle(spans, camera, PICK_RECT, pointer);
   expect(
-    Math.abs(candidates[0]!.screenDistance - exact.distance),
+    Math.abs(curveScreenDistance(candidates[0]!) - exact.distance),
     "The candidate distance is the exact screen distance (T11b).",
   ).toBeLessThan(1e-6);
   const planeMetric = screenOf(
@@ -1461,7 +1468,7 @@ test("at an oblique perspective view the spline picks exactly; below 1° grazing
   );
   expect(
     Math.abs(
-      fallback[0]!.screenDistance -
+      curveScreenDistance(fallback[0]!) -
         Math.hypot(
           fallbackExpected.x - shallowPointer.x,
           fallbackExpected.y - shallowPointer.y,
@@ -1500,7 +1507,7 @@ test("display, pick, snap, measure and vector export (model and SVG) of one spli
   // plane's exact closest point (equal up to rounding).
   expect(
     Math.abs(
-      pick[0]!.screenDistance -
+      curveScreenDistance(pick[0]!) -
         Math.hypot(pickedAt.x - pointer.x, pickedAt.y - pointer.y),
     ),
   ).toBeLessThan(1e-9);
@@ -1721,7 +1728,7 @@ test("at oblique orthographic views lines and splines pick by their exact screen
             within += 1;
             expect(candidate, `${at}: within the radius picks`).toBeDefined();
             expect(
-              Math.abs(candidate!.screenDistance - expected),
+              Math.abs(curveScreenDistance(candidate!) - expected),
               `${at}: exact screen-space distance`,
             ).toBeLessThan(1e-3);
           } else if (expected > 10.01) {
@@ -1905,7 +1912,7 @@ test("arcs, circles, lines and splines pick exactly at oblique orthographic and 
               exactWithin += 1;
               expect(candidate, `${at}: within the radius picks`).toBeDefined();
               expect(
-                Math.abs(candidate!.screenDistance - expected),
+                Math.abs(curveScreenDistance(candidate!) - expected),
                 `${at}: exact screen-space distance`,
               ).toBeLessThan(1e-3);
             } else if (expected > 10.01) {
@@ -1979,7 +1986,7 @@ test("perspective views at 5°, 10°, 45° and 90° pick a spline span by its ex
           within += 1;
           expect(candidate, `${at}: within the radius picks`).toBeDefined();
           expect(
-            Math.abs(candidate!.screenDistance - expected.distance),
+            Math.abs(curveScreenDistance(candidate!) - expected.distance),
             `${at}: exact screen-space distance`,
           ).toBeLessThan(1e-6);
           expect(
@@ -2095,7 +2102,7 @@ test("a perspective spline partly beyond the far plane still picks its in-range 
     candidate,
     "The in-range span near the out-of-range knot picks.",
   ).toBeDefined();
-  expect(Math.abs(candidate!.screenDistance - expected)).toBeLessThan(1e-6);
+  expect(Math.abs(curveScreenDistance(candidate!) - expected)).toBeLessThan(1e-6);
   expect(Math.abs(candidate!.depth - endOnScreen.depth)).toBeLessThan(1e-9);
 });
 
@@ -2786,14 +2793,9 @@ describe("T16f: linked mirror highlights in the annotation highlight list", () =
       keys([
         entityRef(
           session,
-          (
-            session.definition.derivedRelationships![0] as {
-              outputs: {
-                seedEntityId: string;
-                outputEntityId: SketchEntityId;
-              }[];
-            }
-          ).outputs.find((output) => output.seedEntityId === eid("ab"))!
+          session.definition.derivedRelationships![0]!.outputs.find(
+            (output) => output.seedEntityId === eid("ab"),
+          )!
             .outputEntityId,
         ),
       ]),
