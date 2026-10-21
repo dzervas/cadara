@@ -53,3 +53,16 @@ export function startConditioningReplay(row: CapturedDragCase) {
   started.session.values.set(dragConditioningFixture.initialValues);
   return started.session;
 }
+
+// Uninterrupted GN10 preview, then the real zero-delta/unchanged-goal release
+// protocol. Recorded before the continuation port (not recomputed by the test).
+export const uninterruptedFarDragDigests = {
+  "drag-large": {
+    preview: "dffe51dd7afa6434507bda5145ce75a10109a93f3cb8ae8e44bde8e99a524c51",
+    release: "86abce3941277cf6aa0356e0be173d920d5ce02630542d378cb024a981eeea58",
+  },
+  "drag-corner": {
+    preview: "aac4200b99063feac2ad43038235dd046bca06a596920b64208af869625b0d09",
+    release: "aac4200b99063feac2ad43038235dd046bca06a596920b64208af869625b0d09",
+  },
+};
