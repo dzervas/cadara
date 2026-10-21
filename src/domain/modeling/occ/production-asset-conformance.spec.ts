@@ -151,7 +151,7 @@ async function sketchSnapshot(
     definition: input.definition,
     solvedSnapshot: input.solvedSnapshot,
     derivedValidity: { state: "current", diagnostics: [] },
-    projectedReferences: input.projectedReferences,
+    projectedReferences: [...input.projectedReferences],
     regions: regions as RegionRecord[],
   };
   return { ...ownership, sketchId, label: sketchId, plane, sketch };

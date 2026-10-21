@@ -165,7 +165,7 @@ for (const [name, make] of [
       repository = make();
     const plane = createStandardPlaneDefinition("xy");
     const sketch = {
-      sketchId: "sketch_provenance",
+      sketchId: "sketch_provenance" as const,
       label: "Retained provenance",
       plane,
       definition: createNewSketchSession(plane, OCC_KERNEL_SETTINGS).definition,
@@ -728,7 +728,11 @@ test("Automerge flush failure returns the merged live document as transaction-sp
   await pending;
   const peerTolerance = seed.settings.modelingTolerance * 2;
   peer.change((storage) => {
-    storage.authored.settings.modelingTolerance = peerTolerance;
+    const settings = storage.authored.settings;
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      throw new Error("Expected authored document settings to be an object.");
+    }
+    settings.modelingTolerance = peerTolerance;
   });
   handle.merge(peer);
   release();

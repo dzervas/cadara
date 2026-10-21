@@ -1,6 +1,8 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import { readFile } from "node:fs/promises";
-import { expect, test } from "vitest";
+import { assert, expect, test } from "vitest";
+import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import type { RevisionId } from "@/contracts/shared/ids";
 
 import type { CommitSketchRequest } from "@/contracts/modeling/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
@@ -23,22 +25,12 @@ import {
 import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
-type OpenCascadeModule = new (
-  module: Record<string, unknown>,
-) => Promise<OpenCascadeInstance>;
-
 async function loadOcc() {
-  const module = (await import("../../../public/cadara-occ.js")) as {
-    default: OpenCascadeModule;
-  };
-  const wasmBinary = new Uint8Array(
-    await readFile(new URL("../../../public/cadara-occ.wasm", import.meta.url)),
-  );
-  return new module.default({ wasmBinary });
+  return (await loadFilesystemOpenCascadeFactory())();
 }
 
 function createAdapter(oc: OpenCascadeInstance) {
-  const createSolver = (revisionId: string | null) =>
+  const createSolver = (revisionId: RevisionId | null) =>
     new SketchConstraintSolverAdapter({
       neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),
       revisionId,
@@ -324,6 +316,8 @@ test("OCC retains nonconverged and degenerate known geometry but rejects every f
   const profileEntities = conflicting.sketch.definition.entities
     .filter((entity) => entity.kind === "lineSegment")
     .slice(0, 2);
+  const [firstProfile, secondProfile] = profileEntities;
+  assert(firstProfile && secondProfile, "Expected two seed profile lines.");
   const rejectedOpenProfile = await adapter.createFeature({
     contractVersion: "modeling-contract/v1alpha1",
     documentId: "doc_workspace",
@@ -333,15 +327,26 @@ test("OCC retains nonconverged and degenerate known geometry but rejects every f
       featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
       parameters: {
         resultBodyType: "surface",
-        profiles: profileEntities.map((entity) => ({
-          kind: "sketchEntity" as const,
-          sketchId: conflicting.sketchId,
-          entityId: entity.entityId,
-        })),
+        profiles: [
+          {
+            kind: "sketchEntity",
+            sketchId: conflicting.sketchId,
+            entityId: firstProfile.entityId,
+          },
+          {
+            kind: "sketchEntity",
+            sketchId: conflicting.sketchId,
+            entityId: secondProfile.entityId,
+          },
+        ],
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 2 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: createLiteralAuthoredValue(2),
+          },
         },
       },
     },
@@ -368,9 +373,13 @@ test("OCC retains nonconverged and degenerate known geometry but rejects every f
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 2 },
+          end: {
+            kind: "blind",
+            direction: "positive",
+            distance: createLiteralAuthoredValue(2),
+          },
         },
-        operation: "newBody",
+        operation: createLiteralAuthoredValue("newBody"),
         booleanScope: { kind: "standalone" },
       },
     },
