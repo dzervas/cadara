@@ -1,7 +1,11 @@
 import { test, expect } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 
-import type { SketchDefinition } from "@/contracts/sketch/schema";
+import type {
+  SketchDefinition,
+  SketchEntityDefinition,
+  SketchStyleRecord,
+} from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
@@ -86,12 +90,16 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         isConstruction: false,
         startPointId: "sketch_point_a",
         endPointId: "sketch_point_b",
-        styleId: "style_primary",
+        styleId: "sketch_style_primary",
       },
     ],
+    styleIds: ["sketch_style_primary"],
     styles: [
       {
-        styleId: "style_primary",
+        styleId: "sketch_style_primary",
+        label: "Primary style",
+        target: { kind: "entity", entityId: "sketch_entity_ab" },
+        fill: { kind: "solid", color: "#3366ff", opacity: 0.42 },
         paint: { color: "#3366ff", opacity: 0.42 },
         stroke: {
           color: "#ff8844",
@@ -110,21 +118,10 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     dimensionIds: [],
     dimensions: [],
     svgRenderingEnabled: true,
-  } as SketchDefinition & {
-    styles: Array<{
-      styleId: string;
-      paint: { color: string; opacity: number };
-      stroke: {
-        color: string;
-        opacity: number;
-        width: number;
-        lineCap: "butt";
-        lineJoin: "bevel";
-        miterLimit: number;
-        dashSize: number;
-        gapSize: number;
-      };
-    }>;
+  } satisfies SketchDefinition & {
+    // Persisted legacy display fields remain part of this compatibility fixture.
+    entities: (SketchEntityDefinition & { styleId: string })[];
+    styles: (SketchStyleRecord & { paint: { color: string; opacity: number } })[];
   };
 
   const solved = solveSketchDefinitionCore({
@@ -149,8 +146,6 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         sketchId: "sketch_primary",
         label: "Sketch",
         plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
         sketch: {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
@@ -177,6 +172,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     lineRenderable,
     "Sketch line display renderable should exist.",
   ).toBeTruthy();
+  if (!lineRenderable) throw new Error("Expected styled line renderable.");
   expect(
     lineRenderable.target?.kind,
     "Styled renderables should preserve selection/picking target bindings.",
@@ -249,8 +245,8 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     ],
     styleIds: [],
     styles: [],
-  } as SketchDefinition & {
-    styles: [];
+  } satisfies SketchDefinition & {
+    entities: (SketchEntityDefinition & { styleId: undefined })[];
   };
   const localSolved = solveSketchDefinitionCore({
     definition: localDefinition,
@@ -273,8 +269,6 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         sketchId: "sketch_primary",
         label: "Sketch",
         plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
         sketch: {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
@@ -301,6 +295,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     localLineRenderable?.paintStyle?.color,
     "Local gradient fill should render with the documented fill-color fallback.",
   ).toBe(0x111111);
+  if (!localLineRenderable) throw new Error("Expected local styled line.");
   expect(
     localLineRenderable.strokeStyle?.color,
     "Local stroke color should render from inline style metadata.",
@@ -326,7 +321,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     "Local stroke gap size should render from inline style metadata.",
   ).toBe(0.15);
 
-  const regionDefinition = {
+  const regionDefinition: SketchDefinition = {
     ...definition,
     pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
     points: [
@@ -362,9 +357,10 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
       startPointId,
       endPointId,
     })),
+    styleIds: ["sketch_style_region_gradient"],
     styles: [
       {
-        styleId: "style_region_gradient",
+        styleId: "sketch_style_region_gradient",
         label: "Region gradient",
         target: { kind: "region", regionId: "region_primary" },
         fill: {
@@ -390,7 +386,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         },
       },
     ],
-  } as SketchDefinition;
+  };
   const regionSolved = solveSketchDefinitionCore({
     definition: regionDefinition,
     tolerances: {
@@ -413,8 +409,6 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
           sketchId: "sketch_primary",
           label: "Sketch",
           plane,
-          planeTarget: plane.support,
-          planeKey: "xy",
           sketch: {
             ownerDocumentId: "doc_workspace",
             ownerRevisionId: "rev_0001",
@@ -435,6 +429,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
                 ownerSketchId: "sketch_primary",
                 ownerBodyId: null,
                 regionId: "region_primary",
+                signature: "region_primary",
                 label: "Primary region",
                 target: {
                   kind: "region",
@@ -444,18 +439,20 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
                 sourceSketch: { kind: "sketch", sketchId: "sketch_primary" },
                 loops: [
                   {
+                    loopId: "region_loop_primary",
                     role: "outer",
+                    orientation: "counterClockwise",
                     segments: lineLoopSegmentsForTest(
                       [
                         { pointId: "sketch_point_a", position: [0, 0] },
                         { pointId: "sketch_point_b", position: [4, 0] },
                         { pointId: "sketch_point_c", position: [0, 4] },
-                      ] as never,
+                      ],
                       [
                         "sketch_entity_ab",
                         "sketch_entity_bc",
                         "sketch_entity_ca",
-                      ] as never,
+                      ],
                     ),
                     isClosed: true,
                   },
@@ -477,6 +474,9 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     regionRenderable?.paintStyle?.kind,
     "Region style records should preserve gradient fill metadata through display renderables.",
   ).toBe("linearGradient");
+  if (regionRenderable?.paintStyle?.kind !== "linearGradient") {
+    throw new Error("Expected region gradient fill.");
+  }
   expect(
     regionRenderable.paintStyle.startColor === 0x2266ff &&
       regionRenderable.paintStyle.startOpacity === 0.21 &&
@@ -489,6 +489,7 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
     regionRenderable.strokeStyle?.lineCap,
     "Region style record stroke cap should reach display renderables.",
   ).toBe("square");
+  if (!regionRenderable.strokeStyle) throw new Error("Expected region stroke.");
   expect(
     regionRenderable.strokeStyle.lineJoin,
     "Region style record stroke join should reach display renderables.",
@@ -536,8 +537,6 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         sketchId: "sketch_primary",
         label: "Sketch",
         plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
         sketch: {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",
@@ -599,8 +598,6 @@ test("src/domain/editor/sketch-session-style.spec.ts", () => {
         sketchId: "sketch_primary",
         label: "Sketch",
         plane,
-        planeTarget: plane.support,
-        planeKey: "xy",
         sketch: {
           ownerDocumentId: "doc_workspace",
           ownerRevisionId: "rev_0001",

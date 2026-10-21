@@ -151,8 +151,6 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
             sketchId: "sketch_primary",
             label: "Sketch",
             plane,
-            planeTarget: plane.support,
-            planeKey: "xy",
             sketch: {
               ownerDocumentId: "doc_workspace",
               ownerRevisionId: "rev_0001",
@@ -378,6 +376,8 @@ test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
       constructionRenderable?.linePattern,
       "O1: construction sketch edges should use dash-dot edit feedback.",
     ).toBe("dash-dot");
+    expect(constructionRenderable).toBeDefined();
+    if (!constructionRenderable) throw new Error("Expected construction edge.");
     expect(
       constructionRenderable.target?.kind,
       "Construction sketch edges should remain bound for picking.",

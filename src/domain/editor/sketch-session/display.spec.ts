@@ -617,7 +617,7 @@ function handleSession() {
   sketch.point("h1", 3, 5);
   sketch.point("h2", 6, 1);
   sketch.spline("hspline", ["h0", "h1", "h2"], "open", [
-    undefined,
+    null,
     [1, 0] as readonly [number, number],
     [0, 0] as readonly [number, number],
   ]);
@@ -674,7 +674,8 @@ describe("T12d: tangent handle geometry (tip = fit point + visible vector)", () 
       (e) => e.kind === "spline" && e.entityId === entityId("hspline"),
     );
     expect(splineEntity).toBeTruthy();
-    const occs = orderedSplineOccurrences(splineEntity!);
+    if (splineEntity?.kind !== "spline") throw new Error("Expected hspline.");
+    const occs = orderedSplineOccurrences(splineEntity);
     expect(occs).toBeTruthy();
     const solved = session.liveSolve!.solvedSnapshot.solvedPoints;
     const positions: Record<string, readonly [number, number]> = {};
@@ -682,7 +683,7 @@ describe("T12d: tangent handle geometry (tip = fit point + visible vector)", () 
       const sp = solved.find((s) => s.pointId === occ.pointId);
       if (sp) positions[occ.pointId] = sp.solvedPosition;
     }
-    const reconstruction = reconstructSplineAggregate(splineEntity!, positions);
+    const reconstruction = reconstructSplineAggregate(splineEntity, positions);
     expect(reconstruction.validity).toBe("valid");
     if (reconstruction.validity !== "valid") return;
 

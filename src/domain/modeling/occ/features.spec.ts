@@ -1,5 +1,6 @@
 import { describe, test, expect, onTestFinished } from "vitest";
 import { makeOccWrapperTracker } from "../../../../test/helpers/occ-wrapper-tracker";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   releaseOccAuthoringStateObjects,
   releaseOccObjects,
@@ -7,11 +8,13 @@ import {
 import type {
   ConstructionSnapshotRecord,
   ExtrudeFeatureParameters,
+  ExtrudeSolidFeatureParameters,
+  RevolveSolidFeatureParameters,
   SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
 import {
   createConstructionPresentationArtifacts,
-  executeOccFeature,
+  executeOccFeature as executeResolvedOccFeature,
   type OccFeatureExecutionContext,
 } from "@/domain/modeling/occ/features";
 import { requireRegion } from "@/domain/modeling/occ/features/shared";
@@ -19,6 +22,7 @@ import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtur
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
+  type OccAuthoringFeatureRecord,
 } from "@/domain/modeling/occ/authoring-state";
 import {
   buildConstructionPlaneFromPlanarFace,
@@ -82,6 +86,16 @@ import type { FeatureEditorFormField, FeatureEditorFormSchema } from "@/core/fea
 import type { LoftFeatureParameterDraft } from "@/core/feature-authoring/definition";
 
 describe("src/domain/modeling/occ/features.spec.ts", () => {
+  // Author fixtures at the contract seam, then resolve values just as rebuild does
+  // before handing them to the native executor (which consumes scalar values).
+  function executeOccFeature(
+    ...[context, featureId, definition]: Parameters<typeof executeResolvedOccFeature>
+  ) {
+    const resolved = resolveFeatureDefinitionValues({ definition, variables: [] });
+    if (!resolved.ok) throw new Error(JSON.stringify(resolved.diagnostics));
+    return executeResolvedOccFeature(context, featureId, resolved.definition);
+  }
+
   function assertClose(
     actual: number,
     expected: number,
@@ -211,8 +225,6 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       sketchId,
       label: sketchId,
       plane,
-      planeTarget: plane.support,
-      planeKey: plane.key,
       sketch,
     };
   }
@@ -487,6 +499,18 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           ...Array.from(input?.constructionPlanes ?? new Map()),
         ]),
         bodies: input?.bodies ?? [],
+        assets: input?.assets ?? { records: [] },
+        assetBlobs: input?.assetBlobs ?? new Map(),
+        resolvedGeometryAssets: input?.resolvedGeometryAssets ?? new Map(),
+        bakedShapeCache: input?.bakedShapeCache ?? new Map(),
+        previousTopologyStage: input?.previousTopologyStage ?? null,
+        topologyProvenanceIndex:
+          input?.topologyProvenanceIndex ??
+          createOccTopologyProvenanceIndex({
+            stages: new Map(),
+            previousLineage: new Map(),
+            historyOrder: [],
+          }),
       } satisfies OccFeatureExecutionContext;
     };
   }
@@ -524,6 +548,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         body != null,
         "Produced body target should resolve to a tracked body.",
       ).toBeTruthy();
+      if (!body) throw new Error("Expected produced body.");
       total += await bodyVolume(context.oc, body.shape);
     }
 
@@ -600,6 +625,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       target?.kind,
       "Plane feature must produce a construction durable ref.",
     ).toBe("construction");
+    if (target?.kind !== "construction") throw new Error("Expected construction target.");
     const duplicatedPlane = result.constructionPlanes.get(
       target.constructionId,
     );
@@ -607,6 +633,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       duplicatedPlane != null,
       "Plane feature must store an internal construction plane definition.",
     ).toBeTruthy();
+    if (!duplicatedPlane) throw new Error("Expected duplicated plane.");
     assertClose(
       duplicatedPlane.frame.origin[2],
       0,
@@ -629,6 +656,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       construction != null,
       "Plane feature must append a public construction snapshot row.",
     ).toBeTruthy();
+    if (!construction) throw new Error("Expected construction snapshot.");
     const artifacts = createConstructionPresentationArtifacts(
       context,
       construction,
@@ -659,6 +687,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       faceId != null,
       "Expected tracked solid body to expose a YZ-aligned planar face.",
     ).toBeTruthy();
+    if (!faceId) throw new Error("Expected YZ-aligned face.");
 
     const makeContext = createContext({ bodies: [sourceBody] });
     const context = await makeContext();
@@ -682,11 +711,13 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       target?.kind,
       "Face-backed plane feature must produce a construction target.",
     ).toBe("construction");
+    if (target?.kind !== "construction") throw new Error("Expected construction target.");
     const plane = result.constructionPlanes.get(target.constructionId);
     expect(
       plane != null,
       "Face-backed plane should expose internal plane geometry.",
     ).toBeTruthy();
+    if (!plane) throw new Error("Expected face-backed plane.");
     assertClose(
       Math.abs(plane.frame.normal[0]),
       1,
@@ -720,11 +751,13 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       target?.kind,
       "Explicit-frame plane feature must produce a construction target.",
     ).toBe("construction");
+    if (target?.kind !== "construction") throw new Error("Expected construction target.");
     const plane = result.constructionPlanes.get(target.constructionId);
     expect(
       plane != null,
       "Explicit-frame plane must be resolvable in the OCC construction-plane map so sketch supports resolve.",
     ).toBeTruthy();
+    if (!plane) throw new Error("Expected explicit-frame plane.");
     assertClose(
       plane.frame.origin[2],
       5,
@@ -749,6 +782,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
         featureId,
+        suppressed: false,
         definition: {
           kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -816,9 +850,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       startExtent: { kind: "profilePlane" },
       extent: {
         mode: "oneSide",
-        end: { kind: "blind", direction: "positive", distance: 5 },
+        end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(5) },
       },
-      operation: "newBody",
+      operation: createLiteralAuthoredValue("newBody" as const),
       booleanScope: { kind: "standalone" },
     };
 
@@ -832,6 +866,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       bodyTarget?.kind,
       "Standalone extrude must produce a new body target.",
     ).toBe("body");
+    if (bodyTarget?.kind !== "body") throw new Error("Expected body target.");
     const producedBody = result.bodies.find(
       (entry) => entry.bodyId === bodyTarget.bodyId,
     );
@@ -839,6 +874,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       producedBody != null,
       "Standalone extrude must append the produced body.",
     ).toBeTruthy();
+    if (!producedBody) throw new Error("Expected extruded body.");
     assertClose(
       await bodyVolume(context.oc, producedBody.shape),
       60,
@@ -893,7 +929,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 2 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(2) },
             },
           },
         },
@@ -918,9 +954,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 2 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(2) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -950,7 +986,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 2 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(2) },
           },
         },
       },
@@ -991,7 +1027,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
                 edgeId: sheet.topology.edgeIds[0]!,
               },
             ],
-            radius: 0.1,
+            radius: createLiteralAuthoredValue(0.1),
           },
         },
       ),
@@ -1016,9 +1052,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 1 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
             },
-            operation: "join",
+            operation: createLiteralAuthoredValue("join" as const),
             booleanScope: { kind: "targetBody", bodyId: sheet.bodyId },
           },
         },
@@ -1045,7 +1081,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             sketchId: sketch.sketchId,
             entityId: bottom.entityId,
           },
-          startAngle: 0,
+          startAngle: createLiteralAuthoredValue(0),
           extent: { mode: "oneSide", end: { kind: "full" } },
         },
       },
@@ -1066,7 +1102,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "thicken",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "face",
@@ -1074,7 +1110,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             },
           ],
           options: {
-            thickness: 0.25,
+            thickness: createLiteralAuthoredValue(0.25),
             side: "oneSide",
             direction: "positive",
           },
@@ -1098,7 +1134,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "thicken",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "face",
@@ -1112,7 +1148,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             },
           ],
           options: {
-            thickness: 0.1,
+            thickness: createLiteralAuthoredValue(0.1),
             side: "symmetric",
             direction: "positive",
           },
@@ -1160,9 +1196,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 5 },
+          end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(5) },
         },
-        operation: "newBody",
+        operation: createLiteralAuthoredValue("newBody" as const),
         booleanScope: { kind: "standalone" },
       },
     });
@@ -1239,15 +1275,15 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             firstEnd: {
               kind: "blind",
               direction: "positive",
-              distance: 2,
+              distance: createLiteralAuthoredValue(2),
             },
             secondEnd: {
               kind: "blind",
               direction: "negative",
-              distance: 1,
+              distance: createLiteralAuthoredValue(1),
             },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -1300,11 +1336,11 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind",
               direction: "positive",
-              distance: 3,
-              draftAngle: 0.03,
+              distance: createLiteralAuthoredValue(3),
+              draftAngle: createLiteralAuthoredValue(0.03),
             },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -1349,9 +1385,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 5 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(5) },
           },
-          operation: "join",
+          operation: createLiteralAuthoredValue("join" as const),
           booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
         },
       },
@@ -1378,6 +1414,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       "feature_extrude_provenance_multi_result_rebuild" as FeatureId;
     const multiResultFeature = {
       featureId: multiResultFeatureId,
+      suppressed: false,
       definition: {
         kind: "extrude" as const,
         featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -1401,14 +1438,14 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind" as const,
               direction: "positive" as const,
-              distance: 2,
+              distance: createLiteralAuthoredValue(2),
             },
           },
-          operation: "newBody" as const,
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" as const },
         },
       },
-    };
+    } satisfies OccAuthoringFeatureRecord;
     const authoredMultiResult = rebuildOccAuthoringState(
       createOccAuthoringState(context.oc, {
         sketches: [primary.sketch, secondary.sketch],
@@ -1485,13 +1522,13 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" as const },
           extent: {
             mode: "oneSide" as const,
-            end: { kind: "blind" as const, direction: "positive" as const, distance: 3 },
+            end: { kind: "blind" as const, direction: "positive" as const, distance: createLiteralAuthoredValue(3) },
           },
-          operation: "newBody" as const,
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" as const },
         },
       },
-    };
+    } satisfies OccAuthoringFeatureRecord;
     const initial = rebuildOccAuthoringState(
       createOccAuthoringState(oc, { sketches: [first.sketch, second.sketch] }),
       [feature],
@@ -1578,6 +1615,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       startFaceId != null,
       "Expected the source box to expose a lower face whose positive normal points into the body.",
     ).toBeTruthy();
+    if (!startFaceId) throw new Error("Expected source start face.");
     const context = await createContext({ bodies: [sourceBody] })();
 
     const result = executeOccFeature(
@@ -1596,7 +1634,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             mode: "oneSide",
             end: { kind: "upToNext", direction: "positive" },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -1606,6 +1644,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       producedTarget?.kind,
       "Up-to-next extrude from a face should produce a body.",
     ).toBe("body");
+    if (producedTarget?.kind !== "body") throw new Error("Expected body target.");
     const producedBody = result.bodies.find(
       (body) => body.bodyId === producedTarget.bodyId,
     );
@@ -1613,6 +1652,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       producedBody != null,
       "Up-to-next extrude should append the produced body.",
     ).toBeTruthy();
+    if (!producedBody) throw new Error("Expected up-to-next body.");
     assertClose(
       await bodyVolume(context.oc, producedBody.shape),
       60,
@@ -2263,12 +2303,12 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         end: {
           kind: "blind" as const,
           direction: "positive" as const,
-          distance: 2,
+          distance: createLiteralAuthoredValue(2),
         },
       },
-      operation: "newBody" as const,
+      operation: createLiteralAuthoredValue("newBody" as const),
       booleanScope: { kind: "standalone" as const },
-    };
+    } satisfies Omit<ExtrudeSolidFeatureParameters, "startExtent">;
 
     for (const [label, target] of [
       [
@@ -2293,6 +2333,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         },
       );
       const producedTarget = result.producedTargets[0];
+      if (producedTarget?.kind !== "body") throw new Error("Expected body target.");
       const producedBody = result.bodies.find(
         (body) => body.bodyId === producedTarget?.bodyId,
       );
@@ -2388,20 +2429,22 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             ],
             startExtent: {
               kind: "blindOffset",
-              distance: 3,
+              distance: createLiteralAuthoredValue(3),
               direction: startDirection,
             },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: endDirection, distance: 2 },
+              end: { kind: "blind", direction: endDirection, distance: createLiteralAuthoredValue(2) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
       );
+      const producedTarget = result.producedTargets[0];
+      if (producedTarget?.kind !== "body") throw new Error("Expected body target.");
       const producedBody = result.bodies.find(
-        (body) => body.bodyId === result.producedTargets[0]?.bodyId,
+        (body) => body.bodyId === producedTarget.bodyId,
       );
       expect(
         producedBody != null,
@@ -2449,9 +2492,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         },
       ],
       startExtent: { kind: "profilePlane" as const },
-      operation: "newBody" as const,
+      operation: createLiteralAuthoredValue("newBody" as const),
       booleanScope: { kind: "standalone" as const },
-    };
+    } satisfies Omit<ExtrudeSolidFeatureParameters, "extent">;
 
     const oneSide = executeOccFeature(
       context,
@@ -2466,8 +2509,8 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind",
               direction: "positive",
-              distance: 3,
-              draftAngle: 0.05,
+              distance: createLiteralAuthoredValue(3),
+              draftAngle: createLiteralAuthoredValue(0.05),
             },
           },
         },
@@ -2486,8 +2529,8 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind",
               direction: "positive",
-              distance: 2,
-              draftAngle: 0.04,
+              distance: createLiteralAuthoredValue(2),
+              draftAngle: createLiteralAuthoredValue(0.04),
             },
           },
         },
@@ -2506,14 +2549,14 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             firstEnd: {
               kind: "blind",
               direction: "positive",
-              distance: 2,
-              draftAngle: 0.03,
+              distance: createLiteralAuthoredValue(2),
+              draftAngle: createLiteralAuthoredValue(0.03),
             },
             secondEnd: {
               kind: "blind",
               direction: "negative",
-              distance: 1,
-              draftAngle: -0.02,
+              distance: createLiteralAuthoredValue(1),
+              draftAngle: createLiteralAuthoredValue(-0.02),
             },
           },
         },
@@ -2576,9 +2619,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 5 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(5) },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -2658,9 +2701,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 1 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
           },
-          operation: "join",
+          operation: createLiteralAuthoredValue("join" as const),
           booleanScope: {
             kind: "targetBodies",
             bodyIds: [bodyA.bodyId, bodyB.bodyId],
@@ -2723,9 +2766,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 8 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(8) },
           },
-          operation: "join",
+          operation: createLiteralAuthoredValue("join" as const),
           booleanScope: { kind: "targetBody", bodyId: baseBody.bodyId },
         },
       },
@@ -2794,9 +2837,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         startExtent: { kind: "profilePlane" },
         extent: {
           mode: "oneSide",
-          end: { kind: "blind", direction: "positive", distance: 6 },
+          end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(6) },
         },
-        operation: "cut",
+        operation: createLiteralAuthoredValue("cut" as const),
         booleanScope: { kind: "targetBody", bodyId: bar.bodyId },
       },
     });
@@ -2914,9 +2957,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 1 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
           },
-          operation: "join",
+          operation: createLiteralAuthoredValue("join" as const),
           booleanScope: {
             kind: "targetBodies",
             bodyIds: [bodyA.bodyId, bodyB.bodyId],
@@ -2944,7 +2987,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
 
     let invalidDistance: string | null = null;
     try {
-      executeOccFeature(
+      // Intentionally bypass authored-value validation: this row pins the
+      // native executor's own non-positive-distance refusal, not the resolver.
+      executeResolvedOccFeature(
         context,
         "feature_phase4_extrude_invalid_distance" as FeatureId,
         {
@@ -2962,9 +3007,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 0 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(0) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -2993,9 +3038,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 1 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
             },
-            operation: "join",
+            operation: createLiteralAuthoredValue("join" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -3024,9 +3069,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 1 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: {
               kind: "targetBody",
               bodyId: "body_invalid_scope" as BodyId,
@@ -3093,9 +3138,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         },
       ],
       startExtent: { kind: "profilePlane" as const },
-      operation: "newBody" as const,
+      operation: createLiteralAuthoredValue("newBody" as const),
       booleanScope: { kind: "standalone" as const },
-    };
+    } satisfies Omit<ExtrudeSolidFeatureParameters, "extent">;
 
     // Partial coverage: box A covers only a 1x1 corner of the 4x3 profile at
     // z=2 and box B only touches the profile's x=4 boundary edge. The old
@@ -3215,9 +3260,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 1 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
           },
-          operation: "cut",
+          operation: createLiteralAuthoredValue("cut" as const),
           booleanScope: {
             kind: "targetBodies",
             bodyIds: [bodyA.bodyId, bodyB.bodyId],
@@ -3257,9 +3302,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           startExtent: { kind: "profilePlane" },
           extent: {
             mode: "oneSide",
-            end: { kind: "blind", direction: "positive", distance: 1 },
+            end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
           },
-          operation: "intersect",
+          operation: createLiteralAuthoredValue("intersect" as const),
           booleanScope: {
             kind: "targetBodies",
             bodyIds: [bodyA.bodyId, bodyB.bodyId],
@@ -3311,7 +3356,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "combine",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "add",
+          operationIntent: createLiteralAuthoredValue("add"),
           participants: [
             {
               role: "targetBody",
@@ -3336,6 +3381,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       addBody != null,
       "Combine add should preserve the primary target body identity.",
     ).toBeTruthy();
+    if (!addBody) throw new Error("Expected combined body.");
     assertClose(
       await bodyVolume(add.context.oc, addBody.shape),
       96,
@@ -3356,7 +3402,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "combine",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "subtract",
+          operationIntent: createLiteralAuthoredValue("subtract"),
           participants: [
             {
               role: "targetBody",
@@ -3381,6 +3427,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       subtractBody != null,
       "Combine subtract should preserve the target body identity.",
     ).toBeTruthy();
+    if (!subtractBody) throw new Error("Expected subtracted body.");
     assertClose(
       await bodyVolume(subtract.context.oc, subtractBody.shape),
       32,
@@ -3400,7 +3447,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "combine",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "intersect",
+          operationIntent: createLiteralAuthoredValue("intersect"),
           participants: [
             {
               role: "targetBody",
@@ -3425,6 +3472,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       intersectBody != null,
       "Combine intersect should preserve the target body identity for non-empty common volume.",
     ).toBeTruthy();
+    if (!intersectBody) throw new Error("Expected intersected body.");
     assertClose(
       await bodyVolume(intersect.context.oc, intersectBody.shape),
       32,
@@ -3460,7 +3508,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "combine",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "intersect",
+          operationIntent: createLiteralAuthoredValue("intersect"),
           participants: [
             {
               role: "targetBody",
@@ -3487,7 +3535,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "combine",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "subtract",
+            operationIntent: createLiteralAuthoredValue("subtract"),
             participants: [
               {
                 role: "targetBody",
@@ -3534,11 +3582,13 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       axisFaceId != null,
       "Expected tracked axis body to expose a planar face id.",
     ).toBeTruthy();
+    if (!axisFaceId) throw new Error("Expected axis face id.");
     const axisFace = axisBody.facesById.get(axisFaceId);
     expect(
       axisFace != null,
       "Expected tracked axis body to expose a planar face shape.",
     ).toBeTruthy();
+    if (!axisFace) throw new Error("Expected axis face shape.");
     const axisPlane = buildConstructionPlaneFromPlanarFace(
       oc,
       axisFace,
@@ -3587,16 +3637,16 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
               kind: "construction",
               constructionId: axisConstruction.constructionId,
             },
-            startAngle: 0,
+            startAngle: createLiteralAuthoredValue(0),
             extent: {
               mode: "oneSide",
               end: {
                 kind: "blind",
                 direction: "counterClockwise",
-                angle: Math.PI,
+                angle: createLiteralAuthoredValue(Math.PI),
               },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -3626,16 +3676,16 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             bodyId: axisBody.bodyId,
             edgeId: axisEdgeId as EdgeId,
           },
-          startAngle: Math.PI / 4,
+          startAngle: createLiteralAuthoredValue(Math.PI / 4),
           extent: {
             mode: "oneSide",
             end: {
               kind: "blind",
               direction: "counterClockwise",
-              angle: Math.PI,
+              angle: createLiteralAuthoredValue(Math.PI),
             },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -3665,16 +3715,16 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             sketchId: sketch.sketchId,
             entityId: sketchAxisEntity!.entityId,
           },
-          startAngle: 0,
+          startAngle: createLiteralAuthoredValue(0),
           extent: {
             mode: "oneSide",
             end: {
               kind: "blind",
               direction: "counterClockwise",
-              angle: Math.PI,
+              angle: createLiteralAuthoredValue(Math.PI),
             },
           },
-          operation: "newBody",
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -3762,10 +3812,10 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         bodyId: axisBody.bodyId,
         edgeId: axisEdgeId as EdgeId,
       },
-      startAngle: 0,
-      operation: "newBody" as const,
+      startAngle: createLiteralAuthoredValue(0),
+      operation: createLiteralAuthoredValue("newBody" as const),
       booleanScope: { kind: "standalone" as const },
-    };
+    } satisfies Omit<RevolveSolidFeatureParameters, "extent">;
 
     const full = executeOccFeature(
       context,
@@ -3812,7 +3862,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
               kind: "upToPart",
               direction: "counterClockwise",
               target: { kind: "body", bodyId: targetBody.bodyId },
-              offset: { angle: 0.2, direction: "shorten" },
+              offset: { angle: createLiteralAuthoredValue(0.2), direction: "shorten" },
             },
           },
         },
@@ -3855,6 +3905,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       "feature_phase4_revolve_semantic_rebuild" as FeatureId;
     const semanticRevolveFeature = {
       featureId: semanticRevolveFeatureId,
+      suppressed: false,
       definition: {
         kind: "revolve" as const,
         featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
@@ -3865,12 +3916,12 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind" as const,
               direction: "counterClockwise" as const,
-              angle: Math.PI,
+              angle: createLiteralAuthoredValue(Math.PI),
             },
           },
         },
       },
-    };
+    } satisfies OccAuthoringFeatureRecord;
     const semanticAuthored = rebuildOccAuthoringState(
       createOccAuthoringState(context.oc, {
         sketches: [sketch],
@@ -3983,17 +4034,17 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
               bodyId: axisBody.bodyId,
               edgeId: axisEdgeId as EdgeId,
             },
-            startAngle: 0,
+            startAngle: createLiteralAuthoredValue(0),
             extent: {
               mode: "oneSide",
               end: {
                 kind: "upToPart",
                 direction: "counterClockwise",
                 target: { kind: "body", bodyId: targetBody.bodyId },
-                offset: { angle: Math.PI, direction: "shorten" },
+                offset: { angle: createLiteralAuthoredValue(Math.PI), direction: "shorten" },
               },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -4043,6 +4094,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       nonPlanarFaceId != null,
       "Expected cylindrical body to expose a non-planar face.",
     ).toBeTruthy();
+    if (!nonPlanarFaceId) throw new Error("Expected non-planar face.");
     const axisBody = await makeBoxBody(
       oc,
       "body_phase4_revolve_axis_planar_check" as BodyId,
@@ -4076,16 +4128,16 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
               bodyId: axisBody.bodyId,
               edgeId: axisEdgeId as EdgeId,
             },
-            startAngle: 0,
+            startAngle: createLiteralAuthoredValue(0),
             extent: {
               mode: "oneSide",
               end: {
                 kind: "blind",
                 direction: "counterClockwise",
-                angle: Math.PI / 2,
+                angle: createLiteralAuthoredValue(Math.PI / 2),
               },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -4138,7 +4190,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "sweep",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "profile",
@@ -4169,6 +4221,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       bodyTarget?.kind,
       "Standalone sweep must produce a new body target.",
     ).toBe("body");
+    if (bodyTarget?.kind !== "body") throw new Error("Expected body target.");
     const producedBody = result.bodies.find(
       (body) => body.bodyId === bodyTarget.bodyId,
     );
@@ -4176,6 +4229,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       producedBody != null,
       "Standalone sweep must append the produced body.",
     ).toBeTruthy();
+    if (!producedBody) throw new Error("Expected swept body.");
     expect(
       (await bodyVolume(context.oc, producedBody.shape)) > 0,
       "Standalone sweep should produce non-empty solid geometry.",
@@ -4246,7 +4300,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "sweep",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "profile",
@@ -4461,6 +4515,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       lockFaceId != null,
       "Expected path body to expose a planar face for lock-profile-faces coverage.",
     ).toBeTruthy();
+    if (!lockFaceId) throw new Error("Expected lock-profile face.");
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
       "sketch_phase4_sweep_advanced" as SketchId,
@@ -4624,7 +4679,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "sweep",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "create",
+            operationIntent: createLiteralAuthoredValue("create"),
             participants: sweepCase.participants,
             options: sweepCase.options,
           },
@@ -4635,6 +4690,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         bodyTarget?.kind,
         `Advanced sweep ${sweepCase.suffix} must produce a new body target.`,
       ).toBe("body");
+      if (bodyTarget?.kind !== "body") throw new Error("Expected body target.");
       const producedBody = result.bodies.find(
         (body) => body.bodyId === bodyTarget.bodyId,
       );
@@ -4642,6 +4698,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         producedBody != null,
         `Advanced sweep ${sweepCase.suffix} must append a body.`,
       ).toBeTruthy();
+      if (!producedBody) throw new Error("Expected advanced swept body.");
       expect(
         (await bodyVolume(context.oc, producedBody.shape)) > 0,
         `Advanced sweep ${sweepCase.suffix} should produce non-empty solid geometry.`,
@@ -4657,7 +4714,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "sweep",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "create",
+            operationIntent: createLiteralAuthoredValue("create"),
             participants: [
               ...baseParticipants,
               {
@@ -4710,6 +4767,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       guideEdgeId != null,
       "Expected path body to expose a second edge for guide curve coverage.",
     ).toBeTruthy();
+    if (!guideEdgeId) throw new Error("Expected guide edge.");
     const plane = createStandardPlaneDefinition("xy");
     const { sketch, region } = createRectangleSketch(
       "sketch_phase4_sweep_reject" as SketchId,
@@ -4756,7 +4814,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "sweep",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "create",
+            operationIntent: createLiteralAuthoredValue("create"),
             participants: [
               ...baseParticipants,
               {
@@ -4786,7 +4844,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "sweep",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "subtract",
+            operationIntent: createLiteralAuthoredValue("subtract"),
             participants: [
               ...baseParticipants,
               {
@@ -4838,10 +4896,12 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       topFaceId != null,
       "Expected loft support body to expose an upward planar face.",
     ).toBeTruthy();
+    if (!topFaceId) throw new Error("Expected loft profile face.");
     expect(
       pathEdgeId != null,
       "Expected loft support body to expose a linear path edge.",
     ).toBeTruthy();
+    if (!pathEdgeId) throw new Error("Expected loft path edge.");
     const context = await createContext({
       sketches: [sketch],
       bodies: [faceBody],
@@ -4854,7 +4914,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "loft",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "profile",
@@ -4876,6 +4936,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       bodyTarget?.kind,
       "Standalone loft must produce a new body target.",
     ).toBe("body");
+    if (bodyTarget?.kind !== "body") throw new Error("Expected body target.");
     const producedBody = result.bodies.find(
       (body) => body.bodyId === bodyTarget.bodyId,
     );
@@ -4883,6 +4944,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       producedBody != null,
       "Standalone loft must append the produced body.",
     ).toBeTruthy();
+    if (!producedBody) throw new Error("Expected lofted body.");
     expect(
       (await bodyVolume(context.oc, producedBody.shape)) > 0,
       "Standalone loft should produce non-empty solid geometry.",
@@ -4895,7 +4957,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "loft",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "profile",
@@ -4924,6 +4986,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       pathBodyTarget?.kind,
       "Path loft must produce a new body target.",
     ).toBe("body");
+    if (pathBodyTarget?.kind !== "body") throw new Error("Expected path body target.");
     const pathBody = pathResult.bodies.find(
       (body) => body.bodyId === pathBodyTarget.bodyId,
     );
@@ -4931,6 +4994,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       pathBody != null && (await bodyVolume(context.oc, pathBody.shape)) > 0,
       "Path loft should produce non-empty solid geometry.",
     ).toBeTruthy();
+    if (!pathBody) throw new Error("Expected path lofted body.");
     expect(
       result.topologyStage?.outputs.get(producedBody.bodyId)?.sourceTargets
         .size,
@@ -5195,6 +5259,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       topFaceId != null,
       "Expected loft support body to expose an upward planar face.",
     ).toBeTruthy();
+    if (!topFaceId) throw new Error("Expected loft profile face.");
     expect(
       guideEdgeId != null,
       "Expected loft support body to expose a durable guide edge.",
@@ -5211,7 +5276,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "loft",
         featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
         parameters: {
-          operationIntent: "create",
+          operationIntent: createLiteralAuthoredValue("create"),
           participants: [
             {
               role: "profile",
@@ -5267,7 +5332,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "loft",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "create",
+            operationIntent: createLiteralAuthoredValue("create"),
             participants: [
               {
                 role: "profile",
@@ -5318,7 +5383,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           kind: "loft",
           featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
           parameters: {
-            operationIntent: "subtract",
+            operationIntent: createLiteralAuthoredValue("subtract"),
             participants: [
               {
                 role: "profile",
@@ -5377,7 +5442,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "fillet",
         featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
         parameters: {
-          radius: 0.2,
+          radius: createLiteralAuthoredValue(0.2),
           edgeTargets: [{ kind: "edge", bodyId: boxBody.bodyId, edgeId }],
         },
       },
@@ -5406,7 +5471,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
         kind: "fillet",
         featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
         parameters: {
-          radius: 0.2,
+          radius: createLiteralAuthoredValue(0.2),
           edgeTargets: [],
         },
       });
@@ -5662,6 +5727,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       removableFaceId != null,
       "Expected box body to expose a removable top face for shell.",
     ).toBeTruthy();
+    if (!removableFaceId) throw new Error("Expected removable shell face.");
     const context = await createContext({ bodies: [boxBody] })();
 
     const result = executeOccFeature(
@@ -5675,8 +5741,8 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           faceTargets: [
             { kind: "face", bodyId: boxBody.bodyId, faceId: removableFaceId },
           ],
-          thickness: 0.4,
-          operation: "newBody",
+          thickness: createLiteralAuthoredValue(0.4),
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" },
         },
       },
@@ -5704,6 +5770,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     const rebuilt = rebuildOccAuthoringState(initialState, [
       {
         featureId: "feature_phase4_rebuild_plane" as FeatureId,
+        suppressed: false,
         definition: {
           kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -5720,6 +5787,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       },
       {
         featureId: "feature_phase4_rebuild_extrude" as FeatureId,
+        suppressed: false,
         definition: {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -5735,9 +5803,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 2 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(2) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
@@ -5810,14 +5878,14 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             end: {
               kind: "blind" as const,
               direction: "positive" as const,
-              distance: 1,
+              distance: createLiteralAuthoredValue(1),
             },
           },
-          operation: "newBody" as const,
+          operation: createLiteralAuthoredValue("newBody" as const),
           booleanScope: { kind: "standalone" as const },
         },
       },
-    };
+    } satisfies OccAuthoringFeatureRecord;
     const secondFeature = {
       featureId: secondFeatureId,
       suppressed: false,
@@ -5834,7 +5902,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
           ],
         },
       },
-    };
+    } satisfies OccAuthoringFeatureRecord;
     const initial = createOccAuthoringState(oc, {
       sketches: [firstSketch.sketch, secondSketch.sketch],
     });
@@ -5910,6 +5978,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     const features = [
       {
         featureId: "feature_phase4_rebuild_repeat_plane" as FeatureId,
+        suppressed: false,
         definition: {
           kind: "plane",
           featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
@@ -5926,6 +5995,7 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
       },
       {
         featureId: "feature_phase4_rebuild_repeat_extrude" as FeatureId,
+        suppressed: false,
         definition: {
           kind: "extrude",
           featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -5941,9 +6011,9 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
             startExtent: { kind: "profilePlane" },
             extent: {
               mode: "oneSide",
-              end: { kind: "blind", direction: "positive", distance: 1 },
+              end: { kind: "blind", direction: "positive", distance: createLiteralAuthoredValue(1) },
             },
-            operation: "newBody",
+            operation: createLiteralAuthoredValue("newBody" as const),
             booleanScope: { kind: "standalone" },
           },
         },
