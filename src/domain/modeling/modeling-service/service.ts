@@ -1423,13 +1423,16 @@ export function createModelingService(
         canPersistOperationHistory = false;
         canPersistAuthoredDocument = false;
         historyRestoreState = createRestoreFailure(
-          "replay-exception",
+          "initialization-exception",
           error instanceof Error
             ? error.message
-            : "Operation history replay failed unexpectedly.",
-          historyRestoreState.entriesReplayed,
+            : "Modeling service initialization failed unexpectedly.",
+          null,
           historyRestoreState.entriesReplayed,
         );
+        // Recoverable history failures return diagnostics; thrown failures may
+        // be kernel/cleanup errors whose identity and retry ownership matter.
+        throw error;
       })
       .finally(() => {
         isRestoringRepositoryDocument = false;

@@ -236,7 +236,7 @@ it("settles partial startup failure and reports failed resource release instead 
   expect(releases).toBe(1);
 });
 
-it("fails startup when real native assets are missing instead of accepting an empty lazy snapshot", async () => {
+it("reports failed native initialization once and releases the owner without a spurious flush failure", async () => {
   const opened = await createHeadlessSessionFactory({
     assetDirectory: "/nonexistent-cadara-assets",
   }).open();
@@ -245,7 +245,12 @@ it("fails startup when real native assets are missing instead of accepting an em
     cleanup: { kind: "closed", resourcesReleased: true },
   });
   if (opened.kind === "ready") throw new Error("Unexpected ready");
-  expect(opened.diagnostics.length).toBeGreaterThan(0);
+  expect(opened.diagnostics).toHaveLength(1);
+  expect(opened.cleanup).toEqual({
+    kind: "closed",
+    settled: [],
+    resourcesReleased: true,
+  });
 });
 
 it("close cancels queued work but drains accepted work and retains late persistence/handoff failure after abort", async () => {

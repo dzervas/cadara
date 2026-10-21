@@ -110,10 +110,12 @@ export function createSemanticDocumentPort(input: {
   }
   const sketches = createSemanticSketchPort({ loop, inspect, service, publications: input.sketchPublications, referenceImageFiles: input.referenceImageFiles });
   let released = false;
+  let serviceInitialized = false;
   return {
     async initialize() {
       // This existing observation is an initialization judgment, never a write receipt.
       const initialized = await service.getHistoryRestoreState();
+      serviceInitialized = true;
       if (initialized.kind === "failed")
         return {
           kind: "failed",
@@ -214,7 +216,10 @@ export function createSemanticDocumentPort(input: {
     export: createSemanticExportPort({ service, files: input.nativeFileIO, inspect }),
     async drain() {
       await loop.drain();
-      await service.waitForPersistence();
+      // Before service initialization completes no editor work can be accepted.
+      // Its rejection is reported by open(), not again as a flush failure;
+      // release() still disposes the service and its owned native resources.
+      if (serviceInitialized) await service.waitForPersistence();
     },
     async release() {
       if (released) return;
