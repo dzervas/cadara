@@ -298,7 +298,96 @@ for (const [name, make] of [
       "source:fallback:g9": ["edge_fallback_g9"],
     });
   });
+  test(`${name}: a rebuilt lineage sequence is stored exactly`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
+    const lineage = createRebuiltTopologyLineage(seed);
+    const original = { ...seed, topologyLineage: lineage.original };
+    expect(
+      (await repository.initialize({ documentId: seed.documentId, document: original })).ok,
+    ).toBe(true);
+    const rebuilt = structuredClone(lineage.original);
+    const topology = rebuilt[0]!.outputs[0]!.topology;
+    const edgeIds = topology.edgeIds;
+    topology.edgeIds = [...edgeIds.slice(1), edgeIds[0]!];
+    const written = await repository.mutate({
+      documentId: seed.documentId,
+      expected: original,
+      document: { ...original, revisionId: "rev_0002" as RevisionId, topologyLineage: rebuilt },
+    });
+    if (!written.ok) throw new Error(JSON.stringify(written.status));
+    expect(
+      written.document.topologyLineage?.find(
+        (record) => record.featureId === rebuilt[0]!.featureId,
+      )?.outputs[0]?.topology.edgeIds,
+    ).toEqual(topology.edgeIds);
+  });
 }
+
+// cadara-yrt. Seam: the Automerge repository's transaction over the
+// AutomergeHandleLike port. Reading a value through Automerge's change proxy
+// materializes it field by field (seconds for a mid-size document); the
+// transaction must check the immutable document and only write through the
+// proxy. Counting proxy reads tells written paths (tens of reads) from a
+// whole-document read (hundreds, even on this small seed).
+test("Automerge: a write and its undo check the immutable document, reading only written paths through the change proxy", async () => {
+  let reads = 0;
+  const counting = <T extends object>(value: T): T =>
+    new Proxy(value, {
+      get(target, key) {
+        const entry = Reflect.get(target, key) as unknown;
+        if (typeof entry === "function") return entry.bind(target) as unknown;
+        reads++;
+        // Wrapping an Automerge list proxy breaks its own proxy invariants;
+        // map reads are enough to show a whole-document read.
+        return entry !== null && typeof entry === "object" && !Array.isArray(entry)
+          ? counting(entry)
+          : entry;
+      },
+    });
+  class CountingHandle<T> extends RealAutomergeHandle<T> {
+    override change(callback: (document: T) => void) {
+      super.change((document) => callback(counting(document as object) as T));
+    }
+  }
+  class CountingRepo extends RealAutomergeRepo {
+    override create<T>(initialValue?: T) {
+      const handle = new CountingHandle(
+        Automerge.from(initialValue as Record<string, unknown>) as Automerge.Doc<T>,
+      );
+      this.handles.set(handle.url, handle as RealAutomergeHandle<unknown>);
+      return handle;
+    }
+  }
+  const seed = await createSeedAuthoredModelDocument(),
+    repository = persistent(new CountingRepo());
+  const lineage = createRebuiltTopologyLineage(seed);
+  const original = { ...seed, topologyLineage: lineage.original };
+  expect(
+    (await repository.initialize({ documentId: seed.documentId, document: original })).ok,
+  ).toBe(true);
+  // A body rename whose rebuild also rewrote keyed lineage (provenance writes).
+  const written = await repository.mutate({
+    documentId: seed.documentId,
+    expected: original,
+    document: {
+      ...original,
+      revisionId: "rev_0002" as RevisionId,
+      bodyLabels: [{ ...seed.bodyLabels[0]!, label: "Renamed body" }],
+      topologyLineage: lineage.rebuilt,
+    },
+  });
+  if (!written.ok) throw new Error(JSON.stringify(written.status));
+  expect(written.document.bodyLabels[0]?.label).toBe("Renamed body");
+  expect(
+    written.document.topologyLineage?.map((record) => record.featureId).sort(),
+  ).toEqual(lineage.rebuilt.map((record) => record.featureId).sort());
+  const undone = await repository.undoDurableHistory(seed.documentId);
+  expect(undone?.ok && undone.document.bodyLabels[0]?.label).toBe(
+    seed.bodyLabels[0]!.label,
+  );
+  expect(reads, "the change proxy is read only along written paths").toBeLessThan(100);
+});
 
 test("real Automerge peer merge preserves unrelated fields and history, blocks atomic compensation conflicts", async () => {
   const seed = await createSeedAuthoredModelDocument(),

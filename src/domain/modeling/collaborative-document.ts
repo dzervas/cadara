@@ -113,8 +113,11 @@ export function materializeCollaborativeDocument(
 /** LCS edit script preserves every unchanged interior list element, not just prefix/suffix.
  * Deleting/reinserting equal elements would resurrect a concurrent peer deletion on merge.
  */
-function updateSequence(list: AuthoredValue[], next: AuthoredValue[]) {
-  const before = plain(list);
+function updateSequence(
+  list: AuthoredValue[],
+  next: AuthoredValue[],
+  before: readonly AuthoredValue[] = plain(list),
+) {
   const lengths = Array.from(
     { length: before.length + 1 },
     () => new Uint32Array(next.length + 1),
@@ -175,16 +178,24 @@ export class DocumentProvenanceConflict extends Error {
 /** Three-way field/record writes, checked completely before any metadata write.
  * Conflicting witnesses/replay sequences block the transaction and require recomputation;
  * they are neither silently overwritten nor guessed to correspond to a peer's geometry.
+ *
+ * `read` is a plain copy of `storage` from before this transaction's
+ * `applyCollaborativeWrites` (which only removes top-level lineage records
+ * outside `authored`). An Automerge change proxy materializes every value it
+ * compares, so checks read `read` and only writes go through `storage`
+ * (cadara-yrt).
  */
 export function updateDocumentProvenance(
   storage: CollaborativeDocument,
   document: AuthoredModelDocument,
   expected: AuthoredModelDocument,
+  read: CollaborativeDocument = storage,
 ) {
   const before = provenance(expected),
     after = provenance(document);
   const changes: Array<() => void> = [];
   function plan(
+    target: Fields,
     current: Fields,
     base: Fields,
     candidate: Fields,
@@ -197,25 +208,33 @@ export function updateDocumentProvenance(
       const left = base[key],
         right = candidate[key];
       if (equal(left, right)) continue;
+      // A record removed by this transaction's writes is absent in `target`.
+      const value = target[key] === undefined ? undefined : current[key];
       if (object(left) && object(right)) {
-        if (!object(current[key]))
+        if (!object(value))
           throw new DocumentProvenanceConflict(`${path}.${key}`);
-        plan(current[key] as Fields, left, right, `${path}.${key}`);
+        plan(target[key] as Fields, value, left, right, `${path}.${key}`);
       } else {
-        if (!equal(current[key], left) && !equal(current[key], right))
+        if (!equal(value, left) && !equal(value, right))
           throw new DocumentProvenanceConflict(`${path}.${key}`);
-        if (equal(current[key], right)) continue;
+        if (equal(value, right)) continue;
         changes.push(() => {
-          if (right === undefined) delete current[key];
-          else if (Array.isArray(current[key]) && Array.isArray(right))
-            updateSequence(current[key] as AuthoredValue[], right);
-          else current[key] = plain(right);
+          if (right === undefined) delete target[key];
+          else if (Array.isArray(value) && Array.isArray(right))
+            updateSequence(
+              target[key] as AuthoredValue[],
+              right,
+              // In place (`read` is `storage`), the list is its own baseline.
+              target === current ? undefined : value,
+            );
+          else target[key] = plain(right);
         });
       }
     }
   }
   plan(
     storage.topologyLineage,
+    read.topologyLineage,
     before.topologyLineage,
     after.topologyLineage,
     "topologyLineage",
@@ -223,8 +242,8 @@ export function updateDocumentProvenance(
   for (const [id, candidate] of Object.entries(after.sketches)) {
     const base = before.sketches[id] ?? {};
     // Keep deleted sketches' stable provenance for compensation, outside authored history.
-    const current = storage.provenance[id];
-    if (current) plan(current, base, candidate, `sketches.${id}`);
+    const current = read.provenance[id];
+    if (current) plan(storage.provenance[id]!, current, base, candidate, `sketches.${id}`);
     else {
       if (Object.keys(base).length)
         throw new DocumentProvenanceConflict(`sketches.${id}`);
