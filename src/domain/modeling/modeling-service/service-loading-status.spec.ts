@@ -1,6 +1,7 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
+import { OccCleanupError } from "@/domain/modeling/occ/memory";
 import { noopPerformanceTelemetry } from "@/contracts/performance/telemetry";
 import { createInstrumentedModelingService } from "./instrumented-service";
 import { createModelingService } from "./service";
@@ -79,6 +80,69 @@ test("snapshot failure terminates loading without swallowing the original error"
   await expect(service.getCurrentDocumentSnapshot()).rejects.toBe(error);
   expect(service.initialLoadingStatus.getSnapshot()).toBe("failed");
   service.dispose();
+});
+
+test.each(["snapshot", "cleanup"] as const)(
+  "%s failure during seed initialization rejects reads and retains disposal ownership",
+  async (kind) => {
+    const original = new Error("seed snapshot initialization failed");
+    const retry = vi.fn();
+    const error =
+      kind === "cleanup" ? new OccCleanupError([original], retry) : original;
+    class FailingSeedAdapter extends MockKernelAdapter {
+      // The adapter owns cleanup retries, as in OpenCascadeKernelAdapter.
+      dispose = vi.fn(() => {
+        if (error instanceof OccCleanupError) error.retry();
+      });
+    }
+    const adapter = new FailingSeedAdapter();
+    const snapshot = vi.spyOn(adapter, "getDocumentSnapshot");
+    snapshot.mockRejectedValueOnce(error);
+    const service = createModelingService(adapter, {
+      currentDocumentId: "doc_workspace",
+      documentRepository: new MemoryDocumentRepository(),
+    });
+    try {
+      await expect(service.getCurrentDocumentSnapshot()).rejects.toBe(error);
+      expect(service.initialLoadingStatus.getSnapshot()).toBe("failed");
+      // Initialization must not silently recover on a later read either.
+      await expect(service.getHistoryRestoreState()).rejects.toBe(error);
+      await expect(service.getCurrentDocumentSnapshot()).rejects.toBe(error);
+      expect(snapshot).toHaveBeenCalledTimes(1);
+      expect(adapter.dispose).not.toHaveBeenCalled();
+      if (error instanceof OccCleanupError) {
+        expect(error.errors).toEqual([original]);
+      }
+    } finally {
+      service.dispose();
+    }
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(kind === "cleanup" ? 1 : 0);
+  },
+);
+
+test("disposal during failed initialization still drains adapter-owned cleanup", async () => {
+  const gate = deferred();
+  const retry = vi.fn();
+  const error = new OccCleanupError([new Error("seed cleanup failed")], retry);
+  class PausedFailingAdapter extends MockKernelAdapter {
+    dispose = vi.fn(() => error.retry());
+  }
+  const adapter = new PausedFailingAdapter();
+  vi.spyOn(adapter, "getDocumentSnapshot").mockImplementationOnce(async () => {
+    await gate.promise;
+    throw error;
+  });
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+  });
+  const rejected = expect(service.getHistoryRestoreState()).rejects.toBe(error);
+  service.dispose();
+  expect(adapter.dispose).not.toHaveBeenCalled();
+  gate.resolve();
+  await rejected;
+  expect(adapter.dispose).toHaveBeenCalledTimes(1);
+  expect(retry).toHaveBeenCalledTimes(1);
 });
 
 test("a disposed old tab cannot update listeners or the new tab while its snapshot settles", async () => {

@@ -134,6 +134,27 @@ export function useWorkbenchNotifications({
         },
         reportability: "reportable",
       });
+    }, (error: unknown) => {
+      if (disposed) return;
+      const message = error instanceof Error
+        ? error.message
+        : "Modeling service initialization failed unexpectedly.";
+      setRestoreMessage(message);
+      handleWorkbenchFailure({
+        appError: createAppError({
+          code: "workbench/action-failed",
+          message,
+          cause: error,
+          context: [{ key: "documentId", value: modelingService.currentDocumentId }],
+        }),
+        reporter: errorReporter,
+        metadata: {
+          source: "workbench.modeling.initialize",
+          visibility: "user",
+          dedupeKey: `modeling-initialize:${modelingService.currentDocumentId}:${message}`,
+        },
+        reportability: "reportable",
+      });
     });
 
     return () => {

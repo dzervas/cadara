@@ -157,11 +157,12 @@ it.each(["unsupported", "failed"] as const)(
       revisionId: "rev_0042" as const,
     };
     const boundary: ModelingKernelAdapter = adapter;
+    const error = new Error("Repository restore failed deliberately.");
     boundary.restoreAuthoredModelDocument =
       kind === "unsupported"
         ? undefined
         : async () => {
-            throw new Error("Repository restore failed deliberately.");
+            throw error;
           };
     const repository = new MemoryDocumentRepository([foreign]);
     const service = createModelingService(boundary, {
@@ -169,24 +170,15 @@ it.each(["unsupported", "failed"] as const)(
       documentRepository: repository,
     });
     try {
-      const status = await service.getHistoryRestoreState();
-      expect(status.kind).toBe("failed");
-      expect(status.diagnostics.some((d) => /restore/i.test(d.message))).toBe(
-        true,
+      // An infrastructure failure cannot expose or certify a fallback runtime
+      // as though initialization succeeded, including through later exports.
+      const failure = service.getHistoryRestoreState();
+      if (kind === "failed") await expect(failure).rejects.toBe(error);
+      else await expect(failure).rejects.toThrow(/cannot restore/i);
+      await expect(service.getCurrentDocumentSnapshot()).rejects.toThrow(
+        /restore/i,
       );
-      const snapshot = await service.getCurrentDocumentSnapshot();
-      expect(snapshot.document.name).not.toBe("Foreign state");
-      expect(snapshot.provenance).toBeNull();
-      expect(
-        snapshotRepresentsRepositoryDocument(snapshot, {
-          document: foreign,
-          metadata: repository.getMetadata("doc_workspace"),
-        }),
-      ).toBe(false);
-      const exported = await service.exportCurrentDocument();
-      expect(JSON.parse(exported.payload as string).name).not.toBe(
-        "Foreign state",
-      );
+      await expect(service.exportCurrentDocument()).rejects.toThrow(/restore/i);
     } finally {
       service.dispose();
     }
