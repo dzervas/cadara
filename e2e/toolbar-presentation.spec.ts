@@ -44,28 +44,93 @@ test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, 
   ).toBeVisible();
 });
 
-test("toolbar spills whole tool groups into a second row at narrow desktop widths", async ({
+test("toolbar progressively collapses tool families, then islands, then merges islands as the window narrows", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1000, height: 900 });
+  const toolbar = page.getByRole("toolbar", { name: "CAD tools" });
+  await page.setViewportSize({ width: 2600, height: 900 });
   await page.goto("/app");
 
-  const toolbar = page.getByRole("toolbar", { name: "CAD tools" });
-  await expect(toolbar).toHaveAttribute("data-toolbar-responsive-rows", "2");
-  await expectToolbarToUseAtMostTwoToolRows(page);
+  await expect(toolbar).toHaveAttribute("data-toolbar-compaction", "expanded");
+  await expect(
+    page.locator(
+      'button[data-tool-source="toolbar"][data-tool-id="circularPattern"]',
+    ),
+    "Wide toolbars show family variants inline instead of a dropdown.",
+  ).toBeVisible();
+  await expect(page.locator("[data-toolbar-collapsed]")).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(toolbar).toHaveAttribute("data-toolbar-compaction", "islands");
+  await expect(
+    page.locator('button[data-tool-dropdown-trigger="pattern"]'),
+  ).toBeVisible();
+  await expect(
+    page.locator('button[data-tool-id="extrude"]'),
+    "The first islands stay expanded the longest.",
+  ).toBeVisible();
+  await expect(
+    page.locator('button[data-toolbar-group-trigger="inspect"]'),
+    "The last island collapses first.",
+  ).toBeVisible();
+  await expectToolbarToUseOneToolRow(page);
   await expectToolbarToolsToAvoidSearch(page);
   await expectToolbarPillShadowsToHaveBreathingRoom(page);
 
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect(toolbar).toHaveAttribute("data-toolbar-compaction", "merged");
+  await expect(
+    page.locator('button[data-tool-id="undo"]'),
+    "Pinned islands never collapse.",
+  ).toBeVisible();
+  await expectToolbarToUseOneToolRow(page);
+  await expectToolbarToolsToAvoidSearch(page);
+
+  await page.setViewportSize({ width: 1000, height: 900 });
   await page.locator('button[data-tool-id="sketch"]').click();
   await page.getByText("Top Plane", { exact: true }).click();
-
-  await expect(toolbar).toHaveAttribute("data-toolbar-responsive-rows", "2");
-  await expectToolbarToUseAtMostTwoToolRows(page);
+  await expect(
+    page.locator('button[data-tool-id="finishSketch"]'),
+  ).toBeVisible();
+  await expectToolbarToUseOneToolRow(page);
   await expectToolbarToolsToAvoidSearch(page);
   await expectToolbarPillShadowsToHaveBreathingRoom(page);
 });
 
-async function expectToolbarToUseAtMostTwoToolRows(page: Page) {
+test("a tool picked from a collapsed island becomes its face and stays first after a reload", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/app");
+
+  const transforms = page.locator(
+    'button[data-toolbar-group-trigger="transforms"]',
+  );
+  await expect(
+    transforms.locator('img[src="/icons/move-face.svg"]'),
+  ).toBeVisible();
+  await transforms.click();
+  await page.locator('[role="menuitem"][data-tool-id="mirror"]').click();
+  await expect(page.getByRole("menu")).toBeHidden();
+  await expect(transforms).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    transforms.locator('img[src="/icons/mirror.svg"]'),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(transforms).toHaveAttribute("aria-pressed", "false");
+
+  await page.reload();
+  await expect(
+    transforms.locator('img[src="/icons/mirror.svg"]'),
+  ).toBeVisible();
+  await transforms.click();
+  await expect(
+    page.getByRole("menuitem").first(),
+    "The last used tool is listed first.",
+  ).toHaveAttribute("data-tool-id", "mirror");
+});
+
+async function expectToolbarToUseOneToolRow(page: Page) {
   const rowTops = await page.evaluate(() => {
     const toolbar = document.querySelector(
       '[role="toolbar"][aria-label="CAD tools"]',
@@ -76,18 +141,17 @@ async function expectToolbarToUseAtMostTwoToolRows(page: Page) {
 
     const buttons = Array.from(
       toolbar.querySelectorAll<HTMLButtonElement>(
-        'button[data-tool-source="toolbar"], button[data-tool-dropdown-trigger]',
+        'button[data-tool-source="toolbar"], button[data-tool-dropdown-trigger], button[data-toolbar-group-trigger]',
       ),
     );
     return [
       ...new Set(
         buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
       ),
-    ].sort((a, b) => a - b);
+    ];
   });
 
-  expect(rowTops.length).toBeGreaterThanOrEqual(2);
-  expect(rowTops.length).toBeLessThanOrEqual(2);
+  expect(rowTops).toHaveLength(1);
 }
 
 async function expectToolbarToolsToAvoidSearch(page: Page) {
@@ -108,7 +172,7 @@ async function expectToolbarToolsToAvoidSearch(page: Page) {
 
     const buttons = Array.from(
       toolbar.querySelectorAll<HTMLButtonElement>(
-        'button[data-tool-source="toolbar"], button[data-tool-dropdown-trigger]',
+        'button[data-tool-source="toolbar"], button[data-tool-dropdown-trigger], button[data-toolbar-group-trigger]',
       ),
     );
     const searchRect = search.getBoundingClientRect();
@@ -125,7 +189,8 @@ async function expectToolbarToolsToAvoidSearch(page: Page) {
       .map(
         (button) =>
           button.getAttribute("data-tool-id") ??
-          button.getAttribute("data-tool-dropdown-trigger"),
+          button.getAttribute("data-tool-dropdown-trigger") ??
+          button.getAttribute("data-toolbar-group-trigger"),
       );
   });
 

@@ -55,7 +55,7 @@ test("a snapped rectangle closes through its declared closing corner after a dim
       .toContain(`${index + 1} entities staged`);
   }
 
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,

@@ -65,7 +65,7 @@ test("T17f: after moving a dimension label, Trim applies at once (one 'Trim' act
   }
   await expectStaged(workbench, 3);
   // An aligned distance on the horizontal line.
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,

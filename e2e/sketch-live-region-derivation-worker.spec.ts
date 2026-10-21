@@ -30,7 +30,7 @@ test("live region derivation of a closed sketch runs in the dedicated sketch-der
   ).toEqual([]);
 
   const canvas = page.locator("main canvas").first();
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await canvas.click({ position: { x: 700, y: 500 }, force: true });
   await canvas.click({ position: { x: 900, y: 650 }, force: true });

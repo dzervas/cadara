@@ -23,7 +23,7 @@ test("Circle stays armed: two circles in a row, then a cancelled draft, then Esc
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
-  const circleButton = workbench.toolbarButton(circleTool);
+  const circleButton = workbench.toolbarToolControl(circleTool);
 
   await workbench.activateTool(circleTool);
   await workbench.clickViewportAt({ x: 600, y: 400 });
@@ -86,7 +86,7 @@ test("Point places one point per click", async ({ page }) => {
   await expectStaged(workbench, 2);
   await workbench.clickViewportAt({ x: 1000, y: 300 });
   await expectStaged(workbench, 3);
-  await expect(workbench.toolbarButton(pointTool)).toHaveAttribute(
+  await expect(workbench.toolbarToolControl(pointTool)).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -99,7 +99,7 @@ test("Line chain: three segments, Undo twice, Redo, continue, Escape ends the ch
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
-  const lineButton = workbench.toolbarButton(lineTool);
+  const lineButton = workbench.toolbarToolControl(lineTool);
 
   await workbench.activateTool(lineTool);
   await workbench.clickViewportAt({ x: 500, y: 300 });
@@ -191,7 +191,7 @@ test("closing a Line chain onto its first point ends the chain and keeps Line ar
     })
     .toBe("collecting");
   await expect.poll(() => command(workbench)).toBe("line");
-  await expect(workbench.toolbarButton(lineTool)).toHaveAttribute(
+  await expect(workbench.toolbarToolControl(lineTool)).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -265,7 +265,7 @@ test("Spline: 4 points finalized by a double-click onto a committed line, then E
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
-  const splineButton = workbench.toolbarButton(splineTool);
+  const splineButton = workbench.toolbarToolControl(splineTool);
 
   // A committed line under the final double-click (review A-2): the
   // double-click finalizes the spline and is not a connected selection of

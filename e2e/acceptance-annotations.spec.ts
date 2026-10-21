@@ -248,7 +248,7 @@ async function addDistance(
       elements.map((element) => element.getAttribute("aria-label")),
     );
   const before = await labels();
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {
@@ -315,7 +315,7 @@ test("§3 E2E-3: dense constraints at a rectangle corner; hover preview, pinned 
 
   // Step 1: a rectangle and three lines from its bottom-left corner C,
   // each starting on C (the point is shared).
-  await workbench.activateTool(RECTANGLE_TOOL);
+  await workbench.openToolMenu(RECTANGLE_TOOL);
   await glidePress(
     page,
     page.locator('[role="menuitem"][data-tool-id="rectangle"]'),
@@ -1284,7 +1284,7 @@ test("§3 E2E-3 tool switch: switching tools during an unfinished Circle or Rect
   const box = await canvasBox(page);
   /** Glides onto a toolbar control and presses it (a tool switch). */
   const switchTo = async (tool: string) =>
-    glidePress(page, workbench.toolbarButton(tool));
+    workbench.activateTool(tool, (control) => glidePress(page, control));
 
   const drafts = [
     {
@@ -1298,7 +1298,7 @@ test("§3 E2E-3 tool switch: switching tools during an unfinished Circle or Rect
     {
       name: "Rectangle",
       arm: async () => {
-        await workbench.activateTool(RECTANGLE_TOOL);
+        await workbench.openToolMenu(RECTANGLE_TOOL);
         await glidePress(
           page,
           page.locator('[role="menuitem"][data-tool-id="rectangle"]'),

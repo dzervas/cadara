@@ -25,7 +25,16 @@ import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 import { ShortcutSettingsButton } from "@/components/shortcuts/shortcut-settings";
 import { DocumentFileMenu } from "@/components/layout/document-file-menu";
 import { ToolButton } from "@/components/layout/tool-button";
-import { ToolDropdownButton } from "@/components/layout/tool-dropdown-button";
+import {
+  ToolbarDropdownChevron,
+  ToolDropdownButton,
+} from "@/components/layout/tool-dropdown-button";
+import { ToolbarGroupDropdownButton } from "@/components/layout/toolbar-group-dropdown-button";
+import {
+  readToolbarRecentTools,
+  writeToolbarRecentTools,
+} from "@/components/layout/toolbar-recent-tools-storage";
+import { ToolbarToolIcon } from "@/components/layout/toolbar-tool-icon";
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
 import { getNextToolSearchHighlightIndex } from "@/components/layout/workspace-toolbar.a11y";
 import { toolLeavesSketch } from "@/core/tools/activation-policy";
@@ -35,7 +44,16 @@ import {
   isDropdownTool,
   type RegisteredToolDefinition,
   searchToolDefinitions,
+  type ToolId,
 } from "@/core/tools/tool-registry";
+import {
+  chooseToolbarCompactionLevel,
+  getUnmeasuredToolbarCompactionLevel,
+  listToolbarCompactionLevels,
+  type ToolbarCompactionMetrics,
+  type ToolbarCompactionSection,
+} from "@/core/tools/toolbar-compaction";
+import { recordRecentToolbarTool } from "@/core/tools/toolbar-recency";
 import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,
@@ -47,6 +65,7 @@ import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handl
 import type { EditorHistoryAvailability } from "@/domain/editor/state-machine";
 import {
   getToolbarActionIconStyle,
+  getToolbarDropdownTriggerStyle,
   sparkLogoClassName,
   toolbarActionIconClassName,
 } from "@/theme/workbench-toolbar-styles";
@@ -54,6 +73,7 @@ import {
 const REPOSITORY_URL = "https://github.com/dzervas/cadara";
 const DISCORD_URL = "https://discord.gg/T2dBRp4SAQ";
 const TOOLBAR_GAP_PX = 8;
+const TOOLBAR_PILL_GAP_PX = 2;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;
 const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32;
 const PART_TOOL_DURING_SKETCH_REASON =
@@ -61,9 +81,9 @@ const PART_TOOL_DURING_SKETCH_REASON =
 type VisibleToolbarSection = ReturnType<
   typeof getToolbarSectionsForMode
 >[number];
-interface ResponsiveToolbarSectionState {
-  sectionKey: string;
-  primarySectionIds: readonly string[];
+interface ToolbarMeasurement {
+  availableWidth: number;
+  metrics: ToolbarCompactionMetrics;
 }
 
 interface WorkspaceToolbarProps {
@@ -98,12 +118,15 @@ export function WorkspaceToolbar({
   const [searchPopoverOpen, setSearchPopoverOpen] = useState(false);
   const [highlightedSearchResultIndex, setHighlightedSearchResultIndex] =
     useState(-1);
-  const [responsiveSectionState, setResponsiveSectionState] =
-    useState<ResponsiveToolbarSectionState | null>(null);
+  const [toolbarMeasurement, setToolbarMeasurement] =
+    useState<ToolbarMeasurement | null>(null);
+  const [recentToolIds, setRecentToolIds] = useState(readToolbarRecentTools);
   const searchListboxId = useId();
   const primaryRailRef = useRef<HTMLDivElement | null>(null);
   const searchRootRef = useRef<HTMLDivElement | null>(null);
-  const toolbarSectionElementsRef = useRef(new Map<string, HTMLDivElement>());
+  const probePillRef = useRef<HTMLDivElement | null>(null);
+  const probeToolRef = useRef<HTMLSpanElement | null>(null);
+  const probeDropdownRef = useRef<HTMLSpanElement | null>(null);
   const {
     state: {
       activeCommand,
@@ -121,11 +144,6 @@ export function WorkspaceToolbar({
     () => getToolbarSectionsForMode(mode),
     [mode],
   );
-  const visibleSectionIds = useMemo(
-    () => visibleSections.map((section) => section.id),
-    [visibleSections],
-  );
-  const visibleSectionKey = visibleSectionIds.join("|");
   const searchResults = useMemo(
     () => searchToolDefinitions(searchQuery),
     [searchQuery],
@@ -243,43 +261,62 @@ export function WorkspaceToolbar({
   const activeSearchResultId = activeSearchResult
     ? `${searchListboxId}-option-${activeSearchResult.id}`
     : undefined;
-  const activePrimarySectionIds = useMemo(() => {
-    const visibleIdSet = new Set<string>(visibleSectionIds);
-    const measuredPrimaryIds =
-      responsiveSectionState?.sectionKey === visibleSectionKey
-        ? responsiveSectionState.primarySectionIds.filter((sectionId) =>
-            visibleIdSet.has(sectionId),
+  const isToolShown = (toolId: ToolId) =>
+    isToolShownInToolbar(toolId, hasActiveSketchSession);
+  const compactionSections = useMemo(
+    (): ToolbarCompactionSection[] =>
+      visibleSections.map((section) => ({
+        id: section.id,
+        pinned: "pinned" in section && section.pinned,
+        tools: section.toolIds
+          .filter((toolId) =>
+            isToolShownInToolbar(toolId, hasActiveSketchSession),
           )
-        : [];
-    return measuredPrimaryIds.length > 0
-      ? measuredPrimaryIds
-      : visibleSectionIds;
-  }, [responsiveSectionState, visibleSectionIds, visibleSectionKey]);
-  const activePrimarySectionIdSet = useMemo(
-    () => new Set(activePrimarySectionIds),
-    [activePrimarySectionIds],
+          .map((toolId) => {
+            const tool = getToolById(toolId);
+            return {
+              id: toolId,
+              variantCount: isDropdownTool(tool)
+                ? tool.dropdown.variantIds.length
+                : null,
+            };
+          }),
+      })),
+    [visibleSections, hasActiveSketchSession],
   );
-  const primarySections = visibleSections.filter((section) =>
-    activePrimarySectionIdSet.has(section.id),
+  const compactionLevels = useMemo(
+    () => listToolbarCompactionLevels(compactionSections),
+    [compactionSections],
   );
-  const overflowSections = visibleSections.filter(
-    (section) => !activePrimarySectionIdSet.has(section.id),
-  );
+  const compactionLevel = toolbarMeasurement
+    ? chooseToolbarCompactionLevel(
+        compactionSections,
+        compactionLevels,
+        toolbarMeasurement.availableWidth,
+        toolbarMeasurement.metrics,
+      )
+    : getUnmeasuredToolbarCompactionLevel(compactionLevels);
 
-  const setToolbarSectionRef = useCallback(
-    (sectionId: string) => (node: HTMLDivElement | null) => {
-      if (node) {
-        toolbarSectionElementsRef.current.set(sectionId, node);
-        return;
-      }
-      toolbarSectionElementsRef.current.delete(sectionId);
-    },
-    [],
-  );
+  const recordToolUse = useCallback((toolId: ToolId) => {
+    setRecentToolIds((current) =>
+      current[0] === toolId
+        ? current
+        : recordRecentToolbarTool(current, toolId),
+    );
+  }, []);
 
-  const updateResponsiveSections = useCallback(() => {
+  useEffect(() => {
+    writeToolbarRecentTools(recentToolIds);
+  }, [recentToolIds]);
+
+  // Widths come from a hidden probe rather than the live layout, so the chosen
+  // level never feeds back into its own measurement.
+  const updateToolbarMeasurement = useCallback(() => {
     const primaryRail = primaryRailRef.current;
-    if (!primaryRail) {
+    const probePill = probePillRef.current;
+    const probeTool = probeToolRef.current;
+    const probeDropdown = probeDropdownRef.current;
+    if (!primaryRail || !probePill || !probeTool || !probeDropdown) {
       return;
     }
 
@@ -287,128 +324,165 @@ export function WorkspaceToolbar({
       primaryRail.clientWidth -
       TOOLBAR_SHADOW_GUTTER_PX * 2 -
       TOOLBAR_SEARCH_SHADOW_RESERVE_PX;
-    if (availableWidth <= 0) {
+    const toolWidth = probeTool.getBoundingClientRect().width;
+    const dropdownWidth = probeDropdown.getBoundingClientRect().width;
+    const pillWidth = probePill.getBoundingClientRect().width;
+    if (availableWidth <= 0 || toolWidth <= 0 || dropdownWidth <= 0) {
       return;
     }
 
-    const widths = visibleSections.map((section) => ({
-      section,
-      width:
-        toolbarSectionElementsRef.current
-          .get(section.id)
-          ?.getBoundingClientRect().width ?? 0,
-    }));
-    if (widths.some(({ width }) => width <= 0)) {
-      return;
-    }
-
-    const nextPrimarySectionIds: string[] = [];
-    let occupiedWidth = 0;
-
-    for (const { section, width } of widths) {
-      const nextWidth =
-        occupiedWidth +
-        (nextPrimarySectionIds.length > 0 ? TOOLBAR_GAP_PX : 0) +
-        width;
-      if (nextWidth <= availableWidth || nextPrimarySectionIds.length === 0) {
-        nextPrimarySectionIds.push(section.id);
-        occupiedWidth = nextWidth;
-        continue;
-      }
-
-      break;
-    }
-
-    setResponsiveSectionState((current) => {
-      if (
-        current?.sectionKey === visibleSectionKey &&
-        current.primarySectionIds.length === nextPrimarySectionIds.length &&
-        current.primarySectionIds.every(
-          (sectionId, index) => sectionId === nextPrimarySectionIds[index],
-        )
-      ) {
-        return current;
-      }
-      return {
-        sectionKey: visibleSectionKey,
-        primarySectionIds: nextPrimarySectionIds,
-      };
-    });
-  }, [visibleSections, visibleSectionKey]);
+    const next: ToolbarMeasurement = {
+      availableWidth,
+      metrics: {
+        toolWidth,
+        dropdownWidth,
+        pillChromeWidth:
+          pillWidth - toolWidth - dropdownWidth - TOOLBAR_PILL_GAP_PX,
+        pillGap: TOOLBAR_PILL_GAP_PX,
+        railGap: TOOLBAR_GAP_PX,
+      },
+    };
+    setToolbarMeasurement((current) =>
+      current &&
+      current.availableWidth === next.availableWidth &&
+      current.metrics.toolWidth === next.metrics.toolWidth &&
+      current.metrics.dropdownWidth === next.metrics.dropdownWidth &&
+      current.metrics.pillChromeWidth === next.metrics.pillChromeWidth
+        ? current
+        : next,
+    );
+  }, []);
 
   useEffect(() => {
     const primaryRail = primaryRailRef.current;
-    if (!primaryRail) {
+    const probePill = probePillRef.current;
+    if (!primaryRail || !probePill) {
       return;
     }
 
-    let frameId = window.requestAnimationFrame(updateResponsiveSections);
+    let frameId = window.requestAnimationFrame(updateToolbarMeasurement);
     const resizeObserver = new ResizeObserver(() => {
       window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(updateResponsiveSections);
+      frameId = window.requestAnimationFrame(updateToolbarMeasurement);
     });
 
     resizeObserver.observe(primaryRail);
+    resizeObserver.observe(probePill);
     return () => {
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
     };
-  }, [updateResponsiveSections]);
+  }, [updateToolbarMeasurement]);
+
+  const isToolActive = (toolId: ToolId) =>
+    (toolId === "construction" &&
+      sketchSession !== null &&
+      isSketchConstructionSelected(sketchSession)) ||
+    (toolId === "svgRendering" && svgRenderingEnabled) ||
+    activeSketchStyleToolId === toolId ||
+    activeCommand?.toolId === toolId;
+
+  const renderPlainTool = (tool: RegisteredToolDefinition) => (
+    <ToolButton
+      key={tool.id}
+      tool={tool}
+      active={isToolActive(tool.id)}
+      disabled={isToolDisabled(tool)}
+      onTrigger={recordToolUse}
+    />
+  );
 
   const renderTool = (tool: RegisteredToolDefinition) => {
-    if (tool.id === "sketch" && hasActiveSketchSession) {
-      return null;
+    if (!isDropdownTool(tool)) {
+      return renderPlainTool(tool);
     }
 
-    if (tool.id === "finishSketch" && !hasActiveSketchSession) {
-      return null;
-    }
-
-    const isActive =
-      (tool.id === "construction" &&
-        sketchSession !== null &&
-        isSketchConstructionSelected(sketchSession)) ||
-      (tool.id === "svgRendering" && svgRenderingEnabled) ||
-      activeSketchStyleToolId === tool.id ||
-      activeCommand?.toolId === tool.id ||
-      (isDropdownTool(tool) &&
-        tool.dropdown.variantIds.some(
-          (variantId) => variantId === activeCommand?.toolId,
-        ));
-
-    const disabled = isToolDisabled(tool);
-
-    if (isDropdownTool(tool)) {
-      return (
-        <ToolDropdownButton
-          key={tool.id}
-          tool={tool}
-          active={isActive}
-          disabled={disabled}
-        />
+    if (!compactionLevel.collapsedFamilyIds.has(tool.id)) {
+      return tool.dropdown.variantIds.map((variantId) =>
+        renderPlainTool(getToolById(variantId)),
       );
     }
 
     return (
-      <ToolButton
+      <ToolDropdownButton
         key={tool.id}
         tool={tool}
-        active={isActive}
-        disabled={disabled}
+        active={
+          isToolActive(tool.id) ||
+          tool.dropdown.variantIds.some((variantId) => isToolActive(variantId))
+        }
+        disabled={isToolDisabled(tool)}
+        activeToolId={activeCommand?.toolId ?? null}
+        recentToolIds={recentToolIds}
+        onToolUsed={recordToolUse}
       />
     );
   };
 
+  const getShownTools = (section: VisibleToolbarSection) =>
+    section.toolIds.filter(isToolShown).map((toolId) => getToolById(toolId));
+
   const renderSection = (section: VisibleToolbarSection) => (
     <ToolbarPill
       key={section.id}
-      ref={setToolbarSectionRef(section.id)}
       sectionId={section.id}
       style={pillCommonStyle}
     >
-      {section.toolIds.map((toolId) => renderTool(getToolById(toolId)))}
+      {getShownTools(section).map(renderTool)}
     </ToolbarPill>
   );
+
+  const renderCollapsedGroup = (sections: readonly VisibleToolbarSection[]) => (
+    <ToolbarPill
+      key={sections.map((section) => section.id).join("+")}
+      sectionId={sections.map((section) => section.id).join(" ")}
+      collapsed
+      style={pillCommonStyle}
+    >
+      <ToolbarGroupDropdownButton
+        sections={sections.map((section) => {
+          const shownTools = getShownTools(section);
+          const tools = shownTools.flatMap(
+            (tool): RegisteredToolDefinition[] =>
+              isDropdownTool(tool)
+                ? tool.dropdown.variantIds.map((variantId) =>
+                    getToolById(variantId),
+                  )
+                : [tool],
+          );
+          return {
+            id: section.id,
+            label: section.label,
+            tools,
+            toolLabels: [
+              ...new Set(
+                [...shownTools, ...tools].flatMap((tool) => [
+                  tool.name,
+                  tool.tooltip,
+                ]),
+              ),
+            ],
+          };
+        })}
+        isToolActive={isToolActive}
+        isToolDisabled={isToolDisabled}
+        recentToolIds={recentToolIds}
+        onToolUsed={recordToolUse}
+      />
+    </ToolbarPill>
+  );
+
+  const sectionById = new Map<string, VisibleToolbarSection>(
+    visibleSections.map((section) => [section.id, section]),
+  );
+  const renderedGroups = compactionLevel.groups.map((group) => {
+    const sections = group.sectionIds.map(
+      (sectionId) => sectionById.get(sectionId)!,
+    );
+    return group.collapsed
+      ? renderCollapsedGroup(sections)
+      : renderSection(sections[0]!);
+  });
 
   // No Tooltip.Group: its shared delay-group context re-renders every toolbar
   // tooltip whenever the open tooltip changes, which made mode switches (e.g.
@@ -423,7 +497,7 @@ export function WorkspaceToolbar({
       }}
       role="toolbar"
       aria-label="CAD tools"
-      data-toolbar-responsive-rows={overflowSections.length > 0 ? "2" : "1"}
+      data-toolbar-compaction={compactionLevel.stage}
     >
       <DocumentFileMenu
         showBrowserStorageWarning={showBrowserStorageWarning}
@@ -434,10 +508,9 @@ export function WorkspaceToolbar({
       />
 
       {/*
-        Whole tool groups progressively spill into a second rail before they
-        can collide with search or utilities. The second rail scrolls
-        horizontally if a dense mode still exceeds the viewport, so the toolbar
-        never creates a third row.
+        Tool families, then whole islands, progressively collapse into
+        dropdowns (and finally merge) before they can collide with search or
+        utilities; see core/tools/toolbar-compaction.
        */}
       <div
         ref={primaryRailRef}
@@ -460,7 +533,42 @@ export function WorkspaceToolbar({
           scrollbarWidth: "none",
         }}
       >
-        {primarySections.map(renderSection)}
+        {renderedGroups}
+        <div
+          ref={probePillRef}
+          aria-hidden="true"
+          inert
+          style={{
+            ...pillCommonStyle,
+            pointerEvents: "none",
+            position: "absolute",
+            visibility: "hidden",
+          }}
+        >
+          <ActionIcon
+            ref={probeToolRef}
+            component="span"
+            variant="subtle"
+            color="workbench"
+            className={toolbarActionIconClassName}
+          >
+            <ToolbarToolIcon icon={getToolById("undo").icon} />
+          </ActionIcon>
+          <ActionIcon
+            ref={probeDropdownRef}
+            component="span"
+            variant="subtle"
+            color="workbench"
+            className={toolbarActionIconClassName}
+            style={getToolbarDropdownTriggerStyle({
+              active: false,
+              disabled: false,
+            })}
+          >
+            <ToolbarToolIcon icon={getToolById("undo").icon} />
+            <ToolbarDropdownChevron disabled={false} />
+          </ActionIcon>
+        </div>
       </div>
 
       <div
@@ -665,39 +773,20 @@ export function WorkspaceToolbar({
           </ActionIcon>
         </Tooltip>
       </ToolbarPill>
-      {overflowSections.length > 0 ? (
-        <div
-          data-toolbar-overflow-rail=""
-          className="flex min-w-0 items-center gap-2"
-          style={{
-            boxSizing: "border-box",
-            gridColumn: "2 / -1",
-            gridRow: "2",
-            maxWidth: "100%",
-            overflowX: "auto",
-            overflowY: "hidden",
-            paddingTop: 36,
-            paddingRight: TOOLBAR_SHADOW_GUTTER_PX,
-            paddingBottom: 36,
-            paddingLeft: TOOLBAR_SHADOW_GUTTER_PX,
-            marginTop: -36,
-            marginRight: -TOOLBAR_SHADOW_GUTTER_PX,
-            marginBottom: -36,
-            marginLeft: -TOOLBAR_SHADOW_GUTTER_PX,
-            scrollbarWidth: "none",
-          }}
-        >
-          {overflowSections.map(renderSection)}
-        </div>
-      ) : null}
     </div>
   );
+}
+
+function isToolShownInToolbar(toolId: ToolId, hasActiveSketchSession: boolean) {
+  return hasActiveSketchSession
+    ? toolId !== "sketch"
+    : toolId !== "finishSketch";
 }
 
 const pillCommonStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 2,
+  gap: TOOLBAR_PILL_GAP_PX,
   borderRadius: 12,
   backgroundColor: "var(--workbench-glass-fill)",
   backdropFilter: "var(--workbench-glass-blur)",
@@ -714,19 +803,27 @@ const utilityPillStyle: CSSProperties = {
 
 interface ToolbarPillProps {
   sectionId?: string;
+  collapsed?: boolean;
   style: CSSProperties;
   children: ReactNode;
 }
 
-const ToolbarPill = forwardRef<HTMLDivElement, ToolbarPillProps>(
-  function ToolbarPill({ sectionId, style, children }, ref) {
-    return (
-      <div ref={ref} data-toolbar-section={sectionId} style={style}>
-        {children}
-      </div>
-    );
-  },
-);
+function ToolbarPill({
+  sectionId,
+  collapsed,
+  style,
+  children,
+}: ToolbarPillProps) {
+  return (
+    <div
+      data-toolbar-section={sectionId}
+      data-toolbar-collapsed={collapsed || undefined}
+      style={style}
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
  * The brand mark — the first of the three Spark Affordances. Identity, not ornament.

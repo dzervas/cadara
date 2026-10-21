@@ -126,7 +126,7 @@ test("T13m: Split an arc by a line: one 'Split' action, two selectable arcs; Und
   const workbench = await newSketch(page);
   // A 3-point arc (start, through, end) (640,520) → (750,430) → (860,520):
   // centre ≈ (750, 542.2), radius ≈ 112.2.
-  await workbench.activateTool(
+  await workbench.openToolMenu(
     "Create an arc from center, start, and end points.",
   );
   await page.getByRole("menuitem", { name: /3-Point Arc/ }).click();

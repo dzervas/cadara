@@ -315,7 +315,7 @@ async function mirrorFourSeeds(workbench: SketchWorkbenchHarness) {
   await workbench.activateTool("Create circular geometry.");
   await placeFreely(workbench, [CIRCLE.centre, CIRCLE.rim]);
   await expectStaged(workbench, 2);
-  await workbench.activateTool(
+  await workbench.openToolMenu(
     "Create an arc from center, start, and end points.",
   );
   await page.getByRole("menuitem", { name: /3-Point Arc/ }).click();

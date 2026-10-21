@@ -243,7 +243,7 @@ test("§5 E2E-5 history: create, drag, dimension, construction, style, label mov
 
   // Step 3, dimension: the circle's diameter with the Dimension tool (rim,
   // label spot, type, Enter) is one "Commit Constraint Value".
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {
@@ -528,7 +528,7 @@ test("§5 E2E-5 invalid by merge, workbench surface: after an endpoint merge ret
   const workbench = new FeatureWorkbenchHarness(page);
   await workbench.openWithRepository();
   await openTopSketch(workbench);
-  await workbench.activateTool(RECTANGLE_TOOL);
+  await workbench.openToolMenu(RECTANGLE_TOOL);
   await glidePress(
     page,
     page.locator('[role="menuitem"][data-tool-id="rectangle"]'),
@@ -551,10 +551,7 @@ test("§5 E2E-5 invalid by merge, workbench surface: after an endpoint merge ret
   const source = (gapB as { startPointId: string }).startPointId;
   // Each gap end Fixed where it is.
   for (const at of [GAP_LINES[0][1], GAP_LINES[1][0]]) {
-    await glidePress(
-      page,
-      page.getByRole("button", { name: FIX_TOOL, exact: true }),
-    );
+    await workbench.activateTool(FIX_TOOL, (control) => glidePress(page, control));
     await waitForCommittedAction(page, FIX_TOOL, () =>
       glideClick(workbench, at),
     );

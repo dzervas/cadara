@@ -114,6 +114,8 @@ export interface ToolbarSection<TToolId extends string = string> {
   align: "left" | "center";
   modes: readonly ToolbarMode[];
   toolIds: readonly TToolId[];
+  /** Never compacted into a dropdown as the toolbar narrows. */
+  pinned?: boolean;
 }
 
 export interface ToolTriggerMetadata {

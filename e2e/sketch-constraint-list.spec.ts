@@ -143,7 +143,7 @@ test("T14e T-17: a conflicting dimension stays visible with Show all off and not
 
   const floatingInput = page.locator("[data-sketch-viewport-floating-input]");
   // A driving diameter, then a driving radius at the same size.
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -158,7 +158,7 @@ test("T14e T-17: a conflicting dimension stays visible with Show all off and not
   await floatingInput.getByRole("button", { name: "Commit" }).click();
   await expect(floatingInput).toBeHidden();
   await leaveTool(workbench);
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", { name: /Radius Create circle radius dimensions/ })
     .click();
@@ -410,7 +410,7 @@ test("T14e T-12: the panel overlaps neither the view cube, a notification nor an
     { x: 1380, y: 420 },
     "1 entities",
   );
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -568,7 +568,7 @@ async function denseSketch(
   width: number,
 ) {
   const page = workbench.page;
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt(origin);
   await workbench.clickViewportAt({ x: origin.x + width, y: origin.y + 50 });

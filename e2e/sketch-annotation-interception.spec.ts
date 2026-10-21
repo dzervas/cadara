@@ -125,7 +125,7 @@ async function addCircleWithDiameterChip(workbench: SketchWorkbenchHarness) {
     .poll(() => workbench.currentSketchSession(), { timeout: 10_000 })
     .toContain("1 entities staged");
   await leaveTool(workbench);
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
@@ -152,7 +152,7 @@ test("T14b R-1(i): a line under an arc's end-binding position is dragged by a pr
   // A three-point arc: centre ≈ (750, 542). Base rendered its start binding
   // as an always-visible 110 px "Coincident" chip centred ≈ (713, 513)
   // (mid-radius + (18, −18), T14 plan review §1).
-  await workbench.activateTool(
+  await workbench.openToolMenu(
     "Create an arc from center, start, and end points.",
   );
   await page.getByRole("menuitem", { name: /3-Point Arc/ }).click();

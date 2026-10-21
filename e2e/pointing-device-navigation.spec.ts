@@ -89,7 +89,7 @@ test("Touchpad horizontal/line/page scroll and pinch reach the camera through a 
   await expect.poll(() => workbench.currentSketchSession()).toContain("1 entities staged");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page.getByRole("menuitem", { name: /Distance Create aligned distance dimensions/ }).click();
   await workbench.clickViewportAt({ x: 600, y: 380 });
   await workbench.clickViewportAt({ x: 630, y: 420 });

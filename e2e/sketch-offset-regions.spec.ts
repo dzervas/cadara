@@ -126,7 +126,7 @@ test("an inward offset of a line rectangle commits certified trimmed line output
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
 
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 640, y: 420 });
   await workbench.clickViewportAt({ x: 860, y: 580 });
@@ -267,7 +267,7 @@ test("T11a: a reopened sketch's certified offset output is snapped to with no pr
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 640, y: 420 });
   await workbench.clickViewportAt({ x: 860, y: 580 });
@@ -377,7 +377,7 @@ test("T13b A6: a distance typed into the Offset floating input (not the tool pan
 }) => {
   const workbench = new FeatureWorkbenchHarness(page);
   await startTopPlaneSketch(page, workbench);
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 640, y: 420 });
   await workbench.clickViewportAt({ x: 860, y: 580 });

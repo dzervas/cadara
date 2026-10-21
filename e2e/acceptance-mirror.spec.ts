@@ -281,7 +281,7 @@ test("§4 E2E-4: a circle mirrored about the Y datum, then an arc + spline + con
   await workbench.activateTool("Create circular geometry.");
   await placeFreely(workbench, [CIRCLE.centre, CIRCLE.rim]);
   await expectStaged(workbench, 1);
-  await workbench.activateTool(
+  await workbench.openToolMenu(
     "Create an arc from center, start, and end points.",
   );
   await glidePress(page, page.getByRole("menuitem", { name: /3-Point Arc/ }));
@@ -325,7 +325,7 @@ test("§4 E2E-4: a circle mirrored about the Y datum, then an arc + spline + con
   )!.id;
 
   // The constrained line: its Length with the Dimension tool (one action).
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {
@@ -527,7 +527,7 @@ test("§4 E2E-4: a circle mirrored about the Y datum, then an arc + spline + con
   // the preview no longer swallows that pick). Not routed: no shared
   // readout; its own requirement (one more dimension).
   const dimensionsBefore = axisDragged.dimensions!.length;
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {

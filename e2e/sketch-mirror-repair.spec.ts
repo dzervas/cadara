@@ -165,7 +165,7 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
     (await sketchSnapshot(page)).dimensions!.length;
   const popup = floatingInput(page);
   const pickCopyWithRadiusTool = async () => {
-    await workbench.activateTool("Create point-to-point distance dimensions.");
+    await workbench.openToolMenu("Create point-to-point distance dimensions.");
     await glidePress(
       page,
       page.getByRole("menuitem", {
@@ -235,7 +235,7 @@ test("T16g row 2: the Dimension tool on a mirrored copy opens the original's dri
   expect(await dimensionCount(), "control: no dimension").toBe(0);
 
   // The original's driving radius (Radius tool, measured value committed).
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await glidePress(
     page,
     page.getByRole("menuitem", {

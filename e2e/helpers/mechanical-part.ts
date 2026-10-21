@@ -79,7 +79,7 @@ export async function expectSelect(
   await expect
     .poll(() => command(page), { message: "Select", timeout: 10_000 })
     .toBe("sketch");
-  await expect(workbench.toolbarButton(tool)).toHaveAttribute(
+  await expect(workbench.toolbarToolControl(tool)).toHaveAttribute(
     "aria-pressed",
     "false",
     { timeout: 10_000 },
@@ -94,7 +94,7 @@ export async function leaveArmedDimension(
   await expect
     .poll(() => command(page), { timeout: 10_000 })
     .toBe("dimensionDistance");
-  await expect(workbench.toolbarButton(DIMENSION_TOOL)).toHaveAttribute(
+  await expect(workbench.toolbarToolControl(DIMENSION_TOOL)).toHaveAttribute(
     "aria-pressed",
     "true",
   );
@@ -193,7 +193,7 @@ export async function runMechanicalPartFlow(
 ) {
   const page = workbench.page;
   await openTopSketch(workbench);
-  const lineButton = workbench.toolbarButton(LINE_TOOL);
+  const lineButton = workbench.toolbarToolControl(LINE_TOOL);
 
   // Step 2: a connected outline. Line chains its sides; Escape ends the
   // chain and Line stays armed; the closing side is a new chain from the
@@ -252,7 +252,7 @@ export async function runMechanicalPartFlow(
 
   // A circle inside: Circle stays armed after it; one Escape (no draft)
   // returns to Select.
-  const circleButton = workbench.toolbarButton(CIRCLE_TOOL);
+  const circleButton = workbench.toolbarToolControl(CIRCLE_TOOL);
   await workbench.activateTool(CIRCLE_TOOL);
   await glideClick(workbench, CIRCLE.centre);
   await waitForCommittedAction(page, "Create Sketch Geometry", () =>
@@ -291,7 +291,7 @@ export async function runMechanicalPartFlow(
 
   // Step 3: the circle's diameter with the Dimension tool: glide to the
   // rim, place the label, type, Enter: one action.
-  await workbench.activateTool(DIMENSION_TOOL);
+  await workbench.openToolMenu(DIMENSION_TOOL);
   await glidePress(
     page,
     page.getByRole("menuitem", {
@@ -571,7 +571,7 @@ export const RECTANGLE = [
  */
 export async function drawRectangle(workbench: FeatureWorkbenchHarness) {
   const page = workbench.page;
-  await workbench.activateTool(RECTANGLE_TOOL);
+  await workbench.openToolMenu(RECTANGLE_TOOL);
   await glidePress(
     page,
     page.locator('[role="menuitem"][data-tool-id="rectangle"]'),

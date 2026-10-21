@@ -132,8 +132,9 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     "Toolbar tool cluster row should be allowed to shrink so the absolute floating bar does not widen the workbench shell.",
   ).toBeTruthy();
   expect(
-    toolbarMarkup.includes('data-toolbar-responsive-rows="1"'),
-    "Toolbar should advertise its measured responsive row count so browser coverage can guard narrow-width spillover.",
+    toolbarMarkup.includes('data-toolbar-compaction="families"') &&
+      !toolbarMarkup.includes("data-toolbar-collapsed"),
+    "Before it can measure, the toolbar should show every island with its tool families collapsed into dropdowns.",
   ).toBeTruthy();
   expect(
     toolbarMarkup.includes('role="toolbar"') &&

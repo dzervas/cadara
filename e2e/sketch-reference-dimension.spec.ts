@@ -31,7 +31,7 @@ test("T13d: Make reference frees the rim and its measured label follows; Make dr
   await workbench.expectSketchSessionActive();
 
   // A rectangle (so the sketch has several entities) and a circle.
-  await workbench.activateTool("Create rectangle geometry.");
+  await workbench.openToolMenu("Create rectangle geometry.");
   await page.locator('[role="menuitem"][data-tool-id="rectangle"]').click();
   await workbench.clickViewportAt({ x: 700, y: 500 });
   await workbench.clickViewportAt({ x: 900, y: 650 });
@@ -48,7 +48,7 @@ test("T13d: Make reference frees the rim and its measured label follows; Make dr
   const scale = Math.abs(centre.position[0] / (400 - 720));
 
   // A driving diameter, committed at its measured value.
-  await workbench.activateTool("Create point-to-point distance dimensions.");
+  await workbench.openToolMenu("Create point-to-point distance dimensions.");
   await page
     .getByRole("menuitem", {
       name: /Distance Create aligned distance dimensions/,
