@@ -1165,8 +1165,7 @@ Session notes for the next orchestrator: subagent model routing —
 `openai-codex/gpt-5.6-sol` quota was reset 2026-07-18, Claude models work as
 fallback; always pass fully-qualified model names to workflow agents (fuzzy
 resolution picked a keyless openrouter provider once). Curated real bundles are tracked in
-`test/fixtures/onshape-captures`; raw recaptures and the root `.cadara` file remain ignored. jj commits with
-`--config signing.behavior=drop` while the 1Password SSH agent is down.
+`test/fixtures/onshape-captures`; raw recaptures and the root `.cadara` file remain ignored.
 
 ## Execution notes for the orchestrator
 
