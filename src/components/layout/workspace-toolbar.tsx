@@ -50,6 +50,7 @@ import {
   chooseToolbarCompactionLevel,
   getUnmeasuredToolbarCompactionLevel,
   listToolbarCompactionLevels,
+  type ToolbarCompactionGroup,
   type ToolbarCompactionMetrics,
   type ToolbarCompactionSection,
 } from "@/core/tools/toolbar-compaction";
@@ -422,67 +423,69 @@ export function WorkspaceToolbar({
   const getShownTools = (section: VisibleToolbarSection) =>
     section.toolIds.filter(isToolShown).map((toolId) => getToolById(toolId));
 
-  const renderSection = (section: VisibleToolbarSection) => (
-    <ToolbarPill
-      key={section.id}
-      sectionId={section.id}
-      style={pillCommonStyle}
-    >
-      {getShownTools(section).map(renderTool)}
-    </ToolbarPill>
-  );
-
-  const renderCollapsedGroup = (sections: readonly VisibleToolbarSection[]) => (
-    <ToolbarPill
-      key={sections.map((section) => section.id).join("+")}
-      sectionId={sections.map((section) => section.id).join(" ")}
-      collapsed
-      style={pillCommonStyle}
-    >
-      <ToolbarGroupDropdownButton
-        sections={sections.map((section) => {
-          const shownTools = getShownTools(section);
-          const tools = shownTools.flatMap(
-            (tool): RegisteredToolDefinition[] =>
-              isDropdownTool(tool)
-                ? tool.dropdown.variantIds.map((variantId) =>
-                    getToolById(variantId),
-                  )
-                : [tool],
-          );
-          return {
-            id: section.id,
-            label: section.label,
-            tools,
-            toolLabels: [
-              ...new Set(
-                [...shownTools, ...tools].flatMap((tool) => [
-                  tool.name,
-                  tool.tooltip,
-                ]),
-              ),
-            ],
-          };
-        })}
-        isToolActive={isToolActive}
-        isToolDisabled={isToolDisabled}
-        recentToolIds={recentToolIds}
-        onToolUsed={recordToolUse}
-      />
-    </ToolbarPill>
-  );
-
   const sectionById = new Map<string, VisibleToolbarSection>(
     visibleSections.map((section) => [section.id, section]),
   );
-  const renderedGroups = compactionLevel.groups.map((group) => {
+
+  // A group shows its leading tools inline and tucks the rest (or, merged,
+  // everything) into one trailing dropdown.
+  const renderGroup = (group: ToolbarCompactionGroup) => {
     const sections = group.sectionIds.map(
       (sectionId) => sectionById.get(sectionId)!,
     );
-    return group.collapsed
-      ? renderCollapsedGroup(sections)
-      : renderSection(sections[0]!);
-  });
+    const merged = sections.length > 1;
+    const inlineTools = merged
+      ? []
+      : getShownTools(sections[0]!).slice(0, group.inlineCount);
+    const tuckedSections = sections
+      .map((section) => {
+        const shownTools = getShownTools(section);
+        const tuckedTools = merged
+          ? shownTools
+          : shownTools.slice(group.inlineCount);
+        const tools = tuckedTools.flatMap((tool): RegisteredToolDefinition[] =>
+          isDropdownTool(tool)
+            ? tool.dropdown.variantIds.map((variantId) =>
+                getToolById(variantId),
+              )
+            : [tool],
+        );
+        return {
+          id: section.id,
+          label: section.label,
+          tools,
+          toolLabels: [
+            ...new Set(
+              [...tuckedTools, ...tools].flatMap((tool) => [
+                tool.name,
+                tool.tooltip,
+              ]),
+            ),
+          ],
+        };
+      })
+      .filter((section) => section.tools.length > 0);
+
+    return (
+      <ToolbarPill
+        key={group.sectionIds.join("+")}
+        sectionId={group.sectionIds.join(" ")}
+        collapsed={tuckedSections.length > 0}
+        style={pillCommonStyle}
+      >
+        {inlineTools.map(renderTool)}
+        {tuckedSections.length > 0 ? (
+          <ToolbarGroupDropdownButton
+            sections={tuckedSections}
+            isToolActive={isToolActive}
+            isToolDisabled={isToolDisabled}
+            recentToolIds={recentToolIds}
+            onToolUsed={recordToolUse}
+          />
+        ) : null}
+      </ToolbarPill>
+    );
+  };
 
   // No Tooltip.Group: its shared delay-group context re-renders every toolbar
   // tooltip whenever the open tooltip changes, which made mode switches (e.g.
@@ -533,7 +536,7 @@ export function WorkspaceToolbar({
           scrollbarWidth: "none",
         }}
       >
-        {renderedGroups}
+        {compactionLevel.groups.map(renderGroup)}
         <div
           ref={probePillRef}
           aria-hidden="true"
