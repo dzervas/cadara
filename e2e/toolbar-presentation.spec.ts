@@ -67,8 +67,21 @@ test("toolbar progressively collapses tool families, then islands, then merges i
   ).toBeVisible();
   await expect(
     page.locator('button[data-tool-id="extrude"]'),
-    "The first islands stay expanded the longest.",
+    "An island keeps its leading tools and tucks only the trailing ones.",
   ).toBeVisible();
+  await expect(page.locator('button[data-tool-id="revolve"]')).toHaveCount(0);
+  const build = page.locator(
+    'button[data-toolbar-group-trigger="featuresBuild"]',
+  );
+  await expect(
+    build.locator('img[src="/icons/revolve.svg"]'),
+    "The tucked dropdown shows the first tool it hides.",
+  ).toBeVisible();
+  await build.click();
+  await expect(page.getByRole("menuitem")).toHaveCount(3);
+  await page.keyboard.press("Escape");
+  // Hovered toolbar buttons lift by a pixel; measure rows without hover.
+  await page.mouse.move(600, 600);
   await expect(
     page.locator('button[data-toolbar-group-trigger="inspect"]'),
     "The last island collapses first.",

@@ -48,65 +48,94 @@ function describeLevel(level: ToolbarCompactionLevel) {
     stage: level.stage,
     families: [...level.collapsedFamilyIds],
     groups: level.groups.map(
-      (group) => `${group.sectionIds.join("+")}${group.collapsed ? "*" : ""}`,
+      (group) => `${group.sectionIds.join("+")}:${group.inlineCount}`,
     ),
   };
 }
 
-test("toolbar compaction collapses families, then islands, then merges islands, each from the end", () => {
+test("toolbar compaction collapses families, then tucks island tools one at a time rotating from the end, then merges islands", () => {
+  const families = ["dimension", "circle", "line"];
   expect(listToolbarCompactionLevels(sections).map(describeLevel)).toEqual([
     {
       stage: "expanded",
       families: [],
-      groups: ["history", "draw", "constrain", "dimension", "edit"],
+      groups: ["history:2", "draw:3", "constrain:2", "dimension:1", "edit:2"],
     },
     {
       stage: "families",
       families: ["dimension"],
-      groups: ["history", "draw", "constrain", "dimension", "edit"],
+      groups: ["history:2", "draw:3", "constrain:2", "dimension:1", "edit:2"],
     },
     {
       stage: "families",
       families: ["dimension", "circle"],
-      groups: ["history", "draw", "constrain", "dimension", "edit"],
+      groups: ["history:2", "draw:3", "constrain:2", "dimension:1", "edit:2"],
     },
     {
       stage: "families",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw", "constrain", "dimension", "edit"],
+      families,
+      groups: ["history:2", "draw:3", "constrain:2", "dimension:1", "edit:2"],
     },
-    // The single-control dimension island never collapses on its own and
-    // pinned history never collapses at all.
+    // One island per step, last first. The first tuck takes two tools (a
+    // one-tool dropdown saves nothing); the single-control dimension island
+    // and pinned history never tuck.
     {
       stage: "islands",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw", "constrain", "dimension", "edit*"],
-    },
-    {
-      stage: "islands",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw", "constrain*", "dimension", "edit*"],
+      families,
+      groups: ["history:2", "draw:3", "constrain:2", "dimension:1", "edit:0"],
     },
     {
       stage: "islands",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw*", "constrain*", "dimension", "edit*"],
+      families,
+      groups: ["history:2", "draw:3", "constrain:0", "dimension:1", "edit:0"],
+    },
+    {
+      stage: "islands",
+      families,
+      groups: ["history:2", "draw:1", "constrain:0", "dimension:1", "edit:0"],
+    },
+    {
+      stage: "islands",
+      families,
+      groups: ["history:2", "draw:0", "constrain:0", "dimension:1", "edit:0"],
     },
     {
       stage: "merged",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw*", "constrain*", "dimension+edit*"],
+      families,
+      groups: ["history:2", "draw:0", "constrain:0", "dimension+edit:0"],
     },
     {
       stage: "merged",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw*", "constrain+dimension+edit*"],
+      families,
+      groups: ["history:2", "draw:0", "constrain+dimension+edit:0"],
     },
     {
       stage: "merged",
-      families: ["dimension", "circle", "line"],
-      groups: ["history", "draw+constrain+dimension+edit*"],
+      families,
+      groups: ["history:2", "draw+constrain+dimension+edit:0"],
     },
+  ]);
+});
+
+test("two four-tool islands shrink alternately: 1 2 3> | 1 2 3>, then 1 2> | 1 2>, then 1> | 1>", () => {
+  const four = (id: string): ToolbarCompactionSection => ({
+    id,
+    pinned: false,
+    tools: ["1", "2", "3", "4"].map((tool) => plain(`${id}${tool}`)),
+  });
+  expect(
+    listToolbarCompactionLevels([four("a"), four("b")]).map(
+      (level) => describeLevel(level).groups,
+    ),
+  ).toEqual([
+    ["a:4", "b:4"],
+    ["a:4", "b:2"],
+    ["a:2", "b:2"],
+    ["a:2", "b:1"],
+    ["a:1", "b:1"],
+    ["a:1", "b:0"],
+    ["a:0", "b:0"],
+    ["a+b:0"],
   ]);
 });
 
@@ -119,6 +148,9 @@ test("toolbar compaction picks the widest level that fits and never expands past
   // history 2+10+1+10, draw 2 + point + 2 line + 3 circle with 5 gaps,
   // constrain 2+21, dimension 2 + 4 variants with 3 gaps, edit 2+21, 4 rail gaps.
   expect(widths[0]).toBe(23 + 67 + 23 + 45 + 23 + 20);
+  // Level 6: draw keeps the point and tucks line and circle: 2 + 10 + 1 + 20,
+  // constrain and edit are one dropdown each, dimension one dropdown.
+  expect(widths[6]).toBe(23 + 33 + 22 + 22 + 22 + 20);
   for (let index = 1; index < widths.length; index += 1) {
     expect(
       widths[index],
