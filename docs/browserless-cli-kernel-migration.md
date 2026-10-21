@@ -149,7 +149,7 @@ The d3cd9 sheet-tool successor has exact native correspondence but belongs to tw
 
 The approved ignored `test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json` was absent. Copied **only that existing file** from main to the same integration test path, without displaying contents or reading authentication/secrets. `git check-ignore` confirms it remains ignored; no fixture was committed. This is an environment action, not an importer repair or a native geometry qualification claim.
 
-All checks use integration's real private `node_modules` with per-package links and private `.tmp`, `.cache`, `.vite`, `.vite-temp` directories. No install, shared dependency/cache writes, server, root command, mutating Git operation or native build was used. Jujutsu mutations use per-command `signing.behavior=drop`.
+All checks use integration's real private `node_modules` with per-package links and private `.tmp`, `.cache`, `.vite`, `.vite-temp` directories. No install, shared dependency/cache writes, server, root command, mutating Git operation or native build was used.
 
 ### Fresh integrated verification and excluded-spec gap
 
