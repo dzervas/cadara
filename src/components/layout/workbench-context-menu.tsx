@@ -1,6 +1,7 @@
 import { Menu, type MantineColor } from "@mantine/core";
 import {
   cloneElement,
+  Fragment,
   isValidElement,
   useId,
   useState,
@@ -29,6 +30,12 @@ export type WorkbenchContextMenuEntry =
   | {
       kind: "divider";
       id: string;
+    }
+  | {
+      /** Non-item menu content, e.g. a swatch row; `close` dismisses the menu. */
+      kind: "content";
+      id: string;
+      render: (context: { anchor: MenuAnchor; close: () => void }) => ReactNode;
     };
 
 interface WorkbenchContextMenuProps {
@@ -39,7 +46,7 @@ interface WorkbenchContextMenuProps {
   withinPortal?: boolean;
 }
 
-interface MenuAnchor {
+export interface MenuAnchor {
   x: number;
   y: number;
 }
@@ -195,6 +202,14 @@ export function WorkbenchContextMenu({
           {items.map((item) => {
             if (item.kind === "divider") {
               return <Menu.Divider key={item.id} />;
+            }
+
+            if (item.kind === "content") {
+              return (
+                <Fragment key={item.id}>
+                  {item.render({ anchor, close: () => setOpened(false) })}
+                </Fragment>
+              );
             }
 
             const color: MantineColor | undefined = item.danger

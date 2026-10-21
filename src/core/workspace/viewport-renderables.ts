@@ -19,4 +19,6 @@ export interface ViewportRenderableRecord {
    *   the normal colour, as a stale output does in sketch mode (U-A).
    */
   sketchGeometryValidity?: "invalid" | "stale";
+  /** Display colour (0xrrggbb) of the owning body's faces; display only. */
+  bodyColor?: number;
 }

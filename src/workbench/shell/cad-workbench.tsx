@@ -67,6 +67,7 @@ import {
 } from "@/contracts/performance/telemetry";
 import {
   composeViewportRenderables,
+  getBodyDisplayColors,
   isTargetHidden,
 } from "@/workbench/shell/viewport-renderables";
 import { createObjectExportModalState } from "@/domain/export/object-export-state";
@@ -82,7 +83,11 @@ import type {
   WorkbenchTab,
   WorkbenchTabsState,
 } from "@/domain/workspace/workbench-tabs";
-import type { DocumentId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId } from "@/contracts/shared/ids";
+import {
+  resolveBodyAppearanceHex,
+  type BodyAppearance,
+} from "@/contracts/modeling/body-appearance";
 import { useWorkbenchHistory } from "@/workbench/adapters/use-workbench-history";
 import { useWorkbenchDocumentPresentation } from "@/workbench/adapters/use-workbench-document-presentation";
 import { useWorkbenchLocalFileSync } from "@/workbench/adapters/use-workbench-local-file-sync";
@@ -148,6 +153,7 @@ import {
   addWorkbenchVariable,
   deleteWorkbenchTarget,
   renameWorkbenchTarget,
+  setWorkbenchBodyAppearance,
   setWorkbenchFeatureSuppression,
 } from "@/workbench/commands/object-actions";
 import {
@@ -713,6 +719,10 @@ export function CadWorkbench({
     modelingService,
     snapshot,
   });
+  const [bodyColorPreview, setBodyColorPreview] = useState<{
+    bodyId: BodyId;
+    hex: string;
+  } | null>(null);
   const viewportRenderables = useMemo(() => {
     return composeViewportRenderables({
       snapshotRenderables: snapshot?.document.render.records ?? [],
@@ -720,8 +730,18 @@ export function CadWorkbench({
       previewRenderables,
       sketchSession,
       hiddenTargetKeys: effectiveHiddenTargetKeys,
+      bodyColors: getBodyDisplayColors(
+        snapshot?.document.bodies ?? [],
+        bodyColorPreview,
+      ),
     });
-  }, [effectiveHiddenTargetKeys, previewRenderables, sketchSession, snapshot]);
+  }, [
+    bodyColorPreview,
+    effectiveHiddenTargetKeys,
+    previewRenderables,
+    sketchSession,
+    snapshot,
+  ]);
   const sketchToolPresentation = sketchSession
     ? getSketchToolPresentation(sketchSession)
     : null;
@@ -1079,6 +1099,28 @@ export function CadWorkbench({
       label: item.label,
       setObjectLabelOverrides,
     });
+  };
+
+  const handleBodyAppearanceChange = (
+    target: Extract<PrimitiveRef, { kind: "body" }>,
+    label: string,
+    appearance: BodyAppearance,
+  ) => {
+    // Show the chosen colour at once; the persisted action can take seconds.
+    setBodyColorPreview({
+      bodyId: target.bodyId,
+      hex: resolveBodyAppearanceHex(appearance),
+    });
+    void setWorkbenchBodyAppearance({
+      ...objectActionContext,
+      target,
+      label,
+      appearance,
+    }).finally(() => setBodyColorPreview(null));
+  };
+
+  const handleBodyColorPreview = (bodyId: BodyId, hex: string | null) => {
+    setBodyColorPreview(hex === null ? null : { bodyId, hex });
   };
 
   const handleTargetRename = (target: PrimitiveRef, label: string) => {
@@ -1781,6 +1823,8 @@ export function CadWorkbench({
                 onObjectExport={handleObjectExport}
                 onRenameTarget={handleTargetRename}
                 onToggleTargetVisibility={handleTargetVisibilityToggle}
+                onBodyAppearanceChange={handleBodyAppearanceChange}
+                onBodyColorPreview={handleBodyColorPreview}
               />
 
               <WorkbenchVariablesFab

@@ -11,6 +11,9 @@ import { mergeSketchRenderables, type MergedSketchRenderables } from "@/domain/e
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import type { BodyId } from "@/contracts/shared/ids";
+import type { BodySnapshotRecord } from "@/contracts/modeling/schema";
+import { resolveBodyAppearanceHex } from "@/contracts/modeling/body-appearance";
 
 export interface ComposeViewportRenderablesInput {
   snapshotRenderables: RenderableEntityRecord[];
@@ -18,6 +21,8 @@ export interface ComposeViewportRenderablesInput {
   previewRenderables: RenderableEntityRecord[] | null;
   sketchSession: SketchSessionState | null;
   hiddenTargetKeys: Record<string, boolean>;
+  /** Face display colour per body (0xrrggbb), including a live picker preview. */
+  bodyColors?: ReadonlyMap<BodyId, number>;
 }
 
 export interface ComposedViewportRenderables extends MergedSketchRenderables {
@@ -66,6 +71,26 @@ export function isTargetHidden(
   hiddenTargetKeys: Record<string, boolean>,
 ) {
   return getHiddenTargetKeyForTarget(target, hiddenTargetKeys) !== null;
+}
+
+/**
+ * Face display colour (0xrrggbb) per body, with an uncommitted custom colour
+ * preview (from the colour picker) taking precedence for its body.
+ */
+export function getBodyDisplayColors(
+  bodies: readonly Pick<BodySnapshotRecord, "bodyId" | "appearance">[],
+  preview: { bodyId: BodyId; hex: string } | null,
+): ReadonlyMap<BodyId, number> {
+  const colors = new Map(
+    bodies.map((body) => [
+      body.bodyId,
+      Number.parseInt(resolveBodyAppearanceHex(body.appearance).slice(1), 16),
+    ]),
+  );
+  if (preview) {
+    colors.set(preview.bodyId, Number.parseInt(preview.hex.slice(1), 16));
+  }
+  return colors;
 }
 
 export function composeViewportRenderables(
@@ -117,8 +142,14 @@ export function composeViewportRenderables(
     ...mergedRenderables,
     documentRenderables: mergedRenderables.documentRenderables.map((entry) => {
       const target = entry.renderable.binding.target;
+      const bodyColor =
+        entry.origin === "document" &&
+        (target.kind === "body" || target.kind === "face")
+          ? input.bodyColors?.get(target.bodyId)
+          : undefined;
       return {
         ...entry,
+        ...(bodyColor === undefined ? {} : { bodyColor }),
         isInactiveSketch: Boolean(
           input.sketchSession &&
             "sketchId" in target &&

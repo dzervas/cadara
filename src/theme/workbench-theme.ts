@@ -117,6 +117,16 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         "rgba(255, 255, 255, 0.08)",
       "--workbench-toolbar-button-press-shadow":
         "inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 3px 8px rgba(0, 0, 0, 0.22)",
+      // Body colour swatches and the custom colour wheel (cadara-01k).
+      "--workbench-color-swatch-shadow":
+        "inset 0 0 0 1px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25)",
+      "--workbench-color-swatch-shadow-active":
+        "inset 0 0 0 1px rgba(0, 0, 0, 0.25), 0 0 0 2px var(--workbench-shell-overlay-strong), 0 0 0 3.5px var(--workbench-shell-text)",
+      "--workbench-color-custom-swatch":
+        "conic-gradient(from 90deg, #f26b6b, #f2d36b, #8ef26b, #6bf2c8, #6b9ef2, #b36bf2, #f26b6b)",
+      "--workbench-color-picker-shade": "#000000",
+      "--workbench-color-picker-inset": "inset 0 0 0 1px rgba(255, 255, 255, 0.08)",
+      "--workbench-color-picker-handle-shadow": "0 1px 4px rgba(0, 0, 0, 0.55)",
       "--workbench-debugger-surface": "rgba(20, 20, 20, 0.85)",
       "--workbench-debugger-chevron-bg": "rgba(255, 255, 255, 0.06)",
       "--workbench-app-background": "var(--mantine-color-dark-9)",

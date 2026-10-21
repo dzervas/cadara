@@ -265,14 +265,15 @@ export function setWorkbenchBodyAppearance({
   appearance: BodyAppearance;
 }) {
   if (!snapshot) {
-    return;
+    return Promise.resolve();
   }
 
   const context = [
     { key: "baseRevisionId", value: snapshot.document.revisionId },
     { key: "bodyId", value: target.bodyId },
   ];
-  void runWorkbenchAction({
+  // Resolves once the action settles, so a live picker preview can end.
+  return runWorkbenchAction({
     operation: `Change ${label} color`,
     reporter: errorReporter,
     reporting: { mappedFailure: "expected" },
@@ -285,5 +286,5 @@ export function setWorkbenchBodyAppearance({
       }),
     mapSuccess: (result) => ok(result),
     onError: (error) => showWorkbenchError(error.message),
-  });
+  }).then(() => undefined);
 }
