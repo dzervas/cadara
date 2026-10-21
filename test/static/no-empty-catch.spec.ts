@@ -1,17 +1,19 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import ts from "typescript";
 
 const scannedDirectories = ["src", "e2e", "scripts"];
 const scannedExtensions = new Set([".ts", ".tsx"]);
 
 function collectSourceFiles(directory: string): string[] {
-  return readdirSync(directory).flatMap((entry) => {
-    const filePath = join(directory, entry);
-    const stats = statSync(filePath);
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const filePath = join(directory, entry.name);
 
-    if (stats.isDirectory()) {
+    if (
+      entry.isDirectory() ||
+      (entry.isSymbolicLink() && statSync(filePath).isDirectory())
+    ) {
       return collectSourceFiles(filePath);
     }
 
@@ -20,11 +22,15 @@ function collectSourceFiles(directory: string): string[] {
 }
 
 function findEmptyCatchBlocks(sourceText: string, filePath: string) {
+  // Skip AST work for catch-free files, not a syntax regex: comments can occur
+  // between catch tokens. Keep Unicode escapes for TS's keyword recovery too.
+  if (!sourceText.includes("catch") && !sourceText.includes("\\u")) return [];
+
   const sourceFile = ts.createSourceFile(
     filePath,
     sourceText,
     ts.ScriptTarget.Latest,
-    true,
+    false,
     ts.ScriptKind.TSX,
   );
   const violations: string[] = [];
@@ -45,6 +51,29 @@ function findEmptyCatchBlocks(sourceText: string, filePath: string) {
   visit(sourceFile);
   return violations;
 }
+
+test.each([
+  "try {} catch {}",
+  "try {} catch (error) {}",
+  "try {} catch /* comment */ {}",
+  "try {} catch /* comment */ (error) /* comment */ {}",
+  "try {} catch ({ message = (() => 1)() }) {}",
+  "try {} catch { /* not handling the error */ }",
+  "try {} c\\u0061tch {}",
+])("reports empty catch fixtures: %s", (sourceText) => {
+  expect(findEmptyCatchBlocks(sourceText, "fixture.ts")).toEqual([
+    "fixture.ts:1:8",
+  ]);
+});
+
+test.each([
+  "export const value = 1;",
+  "// try {} catch {}",
+  'const example = "try {} catch {}";',
+  "try {} catch (error) { throw error; }",
+])("ignores sources without empty catch clauses: %s", (sourceText) => {
+  expect(findEmptyCatchBlocks(sourceText, "fixture.ts")).toEqual([]);
+});
 
 test("src/contracts/errors/no-empty-catch.spec.ts", () => {
   const fixtureViolations = findEmptyCatchBlocks(
