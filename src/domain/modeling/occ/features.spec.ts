@@ -47,7 +47,10 @@ import {
   REVOLVE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
+import {
+  ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  type AdvancedSolidFeatureDefinition,
+} from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
   ConstructionId,
@@ -4275,6 +4278,163 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     ).toBeTruthy();
   }
 
+  async function testSweepFixedOrientationOnCurvedPath() {
+    const profile = createRectangleSketch(
+      "sketch_sweep_fixed_profile" as SketchId,
+      createStandardPlaneDefinition("xy"),
+      { origin: [-1, -0.5], width: 2, height: 1 },
+    );
+    const sketchId = "sketch_sweep_fixed_path" as SketchId;
+    const arcId = entityId("sweep_fixed_arc");
+    const centerPointId = pointId("sweep_fixed_center");
+    const startPointId = pointId("sweep_fixed_start");
+    const endPointId = pointId("sweep_fixed_end");
+    const path = createSketchRecord(
+      sketchId,
+      createStandardPlaneDefinition("yz"),
+      createSketchDefinition(
+        sketchId,
+        [
+          { id: centerPointId, position: [10, 0] },
+          { id: startPointId, position: [0, 0] },
+          { id: endPointId, position: [10, 10] },
+        ],
+        [{
+          kind: "arc",
+          entityId: arcId,
+          label: "Quarter circle",
+          target: { kind: "sketchEntity", sketchId, entityId: arcId },
+          isConstruction: false,
+          centerPointId,
+          startPointId,
+          endPointId,
+          sweepDirection: "clockwise",
+        }],
+      ),
+      [{
+        kind: "arc",
+        entityId: arcId,
+        centerPosition: [10, 0],
+        startPosition: [0, 0],
+        endPosition: [10, 10],
+        sweepDirection: "clockwise",
+      }],
+      [],
+    );
+    const context = createOccAuthoringState(await getDefaultOpenCascadeInstance(), {
+      sketches: [profile.sketch, path],
+    });
+    const featureId = "feature_sweep_orientation" as FeatureId;
+    let state = context;
+    for (const control of ["none", "keepProfileOrientation"] as const) {
+      const definition: AdvancedSolidFeatureDefinition & { kind: "sweep" } = {
+        kind: "sweep",
+        featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          participants: [
+            {
+              role: "profile",
+              targets: [{
+                kind: "region",
+                sketchId: profile.sketch.sketchId,
+                regionId: profile.region.regionId,
+              }],
+            },
+            {
+              role: "path",
+              targets: [{ kind: "sketchEntity", sketchId, entityId: arcId }],
+            },
+          ],
+          options: { profileControl: control, twist: { type: "none" }, endScale: 1 },
+        },
+      };
+      const result = executeOccFeature(context, featureId, definition);
+      const body = result.bodies[0]!;
+      expect(body.ownerFeatureId).toBe(featureId);
+      expect(result.producedTargets).toEqual([{ kind: "body", bodyId: body.bodyId }]);
+      expect(result.topologyStage?.outputs.get(body.bodyId)?.sourceTargets.size).toBe(0);
+      const points = getShapeVertexPoints(context.oc, body.shape);
+      expect(points).toHaveLength(8);
+      const analyzer = new context.oc.BRepCheck_Analyzer(body.shape, true, false);
+      expect(analyzer.IsValid_2(), control).toBe(true);
+      analyzer.delete();
+      const expectedPoints = [-1, 1].flatMap(x => [-0.5, 0.5].flatMap(y => [
+        [x, y, 0],
+        control === "none" ? [x, 10, 10 + y] : [x, 10 + y, 10],
+      ]));
+      for (const expected of expectedPoints)
+        expect(
+          points.some(p => expected.every((v, i) => Math.abs(p[i]! - v) < 1e-5)),
+          JSON.stringify({ control, expected, points }),
+        ).toBe(true);
+
+      // Editing the sweep must rebuild its downstream consumer, without
+      // changing the produced body identity or inventing topology history.
+      state = rebuildOccAuthoringState(state, [
+        { featureId, definition, suppressed: false },
+        {
+          featureId: "feature_sweep_translate",
+          suppressed: false,
+          definition: {
+            kind: "transform",
+            featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              participants: [
+                { role: "body", targets: [{ kind: "body", bodyId: body.bodyId }] },
+                {
+                  role: "transformReference",
+                  targets: [{ kind: "construction", constructionId: "construction_plane-xy" }],
+                },
+              ],
+              options: { distance: 3 },
+            },
+          },
+        },
+      ]);
+      expect(state.bodies).toHaveLength(1);
+      expect(state.bodies[0]!.bodyId).toBe(body.bodyId);
+      const translated = getShapeVertexPoints(context.oc, state.bodies[0]!.shape);
+      for (const expected of expectedPoints)
+        expect(translated.some(p => expected.every(
+          (v, i) => Math.abs(p[i]! - v - (i === 2 ? 3 : 0)) < 1e-5,
+        )), JSON.stringify({ control, expected, translated })).toBe(true);
+    }
+  }
+
+  async function testSweepFixedOrientationRefusesHolesWithoutDroppingThem() {
+    const oc = await getDefaultOpenCascadeInstance();
+    const plate = await makeBoxBody(oc, "body_sweep_plate", 2, 1, 1, "feature_plate", [-1, -0.5, -1]);
+    const hole = await makeBoxBody(oc, "body_sweep_hole", 0.5, 0.5, 1, "feature_hole", [-0.25, -0.25, -1]);
+    const cut = createBooleanBuilder(oc, "cut", plate.shape, hole.shape);
+    const progress = new oc.Message_ProgressRange_1();
+    cut.Build(progress);
+    const source = trackNewSolidBody(oc, {
+      bodyId: "body_sweep_profile",
+      label: "Profile with hole",
+      ownerFeatureId: "feature_sweep_profile",
+      shape: cut.Shape(),
+    });
+    releaseOccObjects([cut, progress]);
+    const faceId = [...source.facesById].find(([, face]) =>
+      getShapeVertexPoints(oc, face).every(p => Math.abs(p[2]) < 1e-5),
+    )![0];
+    const path = await makeBoxBody(oc, "body_sweep_path", 1, 1, 10, "feature_path");
+    const edgeId = findEdgeIdByDirection(oc, path, [0, 0, 1])!;
+    const context = createOccAuthoringState(oc, { bodies: [source, path] });
+    expect(() => executeOccFeature(context, "feature_sweep_holed", {
+      kind: "sweep",
+      featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+      parameters: {
+        participants: [
+          { role: "profile", targets: [{ kind: "face", bodyId: source.bodyId, faceId }] },
+          { role: "path", targets: [{ kind: "edge", bodyId: path.bodyId, edgeId }] },
+        ],
+        options: { profileControl: "keepProfileOrientation", twist: { type: "none" }, endScale: 1 },
+      },
+    })).toThrow("fixed-orientation sweep requires a single-wire profile; profiles with holes are not supported yet");
+    expect(context.bodies).toEqual([source, path]);
+  }
+
   async function testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies() {
     const oc = await getDefaultOpenCascadeInstance();
     const pathBody = await makeBoxBody(
@@ -5940,6 +6100,8 @@ describe("src/domain/modeling/occ/features.spec.ts", () => {
     testRevolveRejectsNonPlanarFaceProfilesExplicitly,
     testSweepBuildsStandaloneBodyFromRegionAndDurableEdgePath,
     testSweepAdvancedControlsMinimumMatrixBuildsStandaloneBodies,
+    testSweepFixedOrientationOnCurvedPath,
+    testSweepFixedOrientationRefusesHolesWithoutDroppingThem,
     testSweepRejectsUnsupportedGuideCurvesAndBooleanComposition,
     testLoftBuildsStandaloneBodyFromOrderedProfiles,
     testLoftAdvancedControlsAndUnsupportedCombinations,

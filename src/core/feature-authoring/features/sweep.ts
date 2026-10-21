@@ -355,9 +355,9 @@ export function prepareSweepFeatureDefinition(
   const control = getAuthoredLiteralValue(parameters.options.profileControl);
   if (!isSweepProfileControl(control) || !isSweepTwistType(parameters.options.twist.type))
     return null;
-  // Native MakePipe receives GeomFill_IsFixed for this setting, but OCC's
-  // pipe accepts only Frenet/corrected/discrete and silently defaults it.
-  // Refuse the inert control; implementing fixed orientation is a separate engine fix.
+  // The native fixed-frame pipe now honors single-wire profiles, but refuses
+  // holes. Keep semantic admission closed until that capability is qualified
+  // across the semantic contract, rather than widening the CLI implicitly.
   if (control === "keepProfileOrientation") return null;
   const intent = getAuthoredLiteralValue(parameters.operationIntent ?? "create");
   if (!isAdvancedOperationIntent(intent)) return null;

@@ -44,6 +44,7 @@ import {
 } from "@/domain/modeling/occ/features/shared";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
 import { createUnsupportedProducerTopologyStage } from "@/domain/modeling/occ/topology-stage";
+import { withOccTemporaries } from "@/domain/modeling/occ/exact-edges";
 
 type SweepProfileControl =
   | "none"
@@ -406,6 +407,43 @@ function buildLockProfileDirectionSweepPipe(input: {
   return pipe.Shape();
 }
 
+function buildFixedOrientationSweepPipe(input: {
+  context: OccFeatureExecutionContext;
+  profileShape: InstanceType<OpenCascadeInstance["TopoDS_Face"]>;
+  pathWire: InstanceType<OpenCascadeInstance["TopoDS_Wire"]>;
+}) {
+  const { oc } = input.context;
+  return withOccTemporaries((own) => {
+    const wires = own(new oc.TopExp_Explorer_2(
+      input.profileShape,
+      oc.TopAbs_ShapeEnum.TopAbs_WIRE as never,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+    ));
+    let wireCount = 0;
+    for (; wires.More(); wires.Next()) wireCount++;
+    // MakePipeShell takes section wires, not a face with inner boundaries.
+    // Never silently fill holes by sweeping just the outer wire.
+    if (wireCount !== 1) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC fixed-orientation sweep requires a single-wire profile; profiles with holes are not supported yet.",
+      );
+    }
+    const pipe = own(new oc.BRepOffsetAPI_MakePipeShell(input.pathWire));
+    // MakePipe's GeomFill_IsFixed silently falls back to corrected Frenet.
+    // A constant Ax2 on MakePipeShell keeps every section parallel instead;
+    // WithCorrection=false preserves the authored profile's orientation.
+    pipe.SetMode_2(own(new oc.gp_Ax2_1()));
+    pipe.Add_1(own(oc.BRepTools.OuterWire(input.profileShape)), false, false);
+    pipe.Build(own(new oc.Message_ProgressRange_1()));
+    if (!pipe.IsDone() || !pipe.MakeSolid()) {
+      throw new Error(
+        "advanced-feature-unsupported-kernel-case: OCC fixed-orientation sweep pipe build failed.",
+      );
+    }
+    return pipe.Shape();
+  });
+}
+
 function resolveSweepLockDirection(
   context: OccFeatureExecutionContext,
   definition: AdvancedSolidFeatureDefinition & { kind: "sweep" },
@@ -558,16 +596,11 @@ function buildSweepFeatureShape(
     });
   }
 
-  const pipe =
-    profileControl === "keepProfileOrientation" ||
-    profileControl === "lockProfileFaces"
-      ? new context.oc.BRepOffsetAPI_MakePipe_2(
-          pathWire,
-          profileShape,
-          context.oc.GeomFill_Trihedron.GeomFill_IsFixed as never,
-          false,
-        )
-      : new context.oc.BRepOffsetAPI_MakePipe_1(pathWire, profileShape);
+  if (profileControl === "keepProfileOrientation") {
+    return buildFixedOrientationSweepPipe({ context, profileShape, pathWire });
+  }
+
+  const pipe = new context.oc.BRepOffsetAPI_MakePipe_1(pathWire, profileShape);
   pipe.Build(new context.oc.Message_ProgressRange_1());
 
   if (!pipe.IsDone()) {
