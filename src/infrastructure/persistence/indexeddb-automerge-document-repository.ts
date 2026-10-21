@@ -299,9 +299,15 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
           ? entries.at(-1)
           : entries.find((candidate) => candidate.sequence === actionSequence);
       this.localChanges.add(documentId);
+      // cadara-yrt: read the current state from the immutable document, not
+      // the change proxy, which materializes every value it is asked for
+      // through Automerge (seconds on a mid-size document). change() applies
+      // synchronously to this same state, so checks stay inside the atomic
+      // boundary.
+      const snapshot = handle.doc();
+      checkedDocument = materializeCollaborativeDocument(snapshot);
+      const current = documentActionState(checkedDocument);
       handle.change((storage) => {
-        checkedDocument = materializeCollaborativeDocument(storage);
-        const current = documentActionState(checkedDocument);
         result = input
           ? staged.commit(
               identity,
@@ -319,7 +325,12 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         if (result.status === "applied")
           applyCollaborativeWrites(storage, result.writes);
         if (input)
-          updateDocumentProvenance(storage, input.document, input.expected);
+          updateDocumentProvenance(
+            storage,
+            input.document,
+            input.expected,
+            snapshot,
+          );
       });
       // DocHandle.change emits synchronously. Only suppress that local echo;
       // peer changes arriving while flush awaits must still reach subscribers.
