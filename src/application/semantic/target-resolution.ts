@@ -336,7 +336,7 @@ export function resolveSemanticCommand(
       throw new Error("Invalid feature reorder anchor.");
     command.beforeFeatureId = target.featureId;
   }
-  if (command.operation === "body.rename" && isTargetSelector(command.bodyId)) {
+  if ((command.operation === "body.rename" || command.operation === "body.color.set") && isTargetSelector(command.bodyId)) {
     const target = resolveSketchTarget(command.bodyId, ["body"]);
     if (target.kind !== "body") throw new Error("Invalid body target.");
     command.bodyId = target.bodyId;

@@ -13,6 +13,7 @@ it("semantic lifecycle commands use the shared production lifecycle and persiste
     "deleteFeature",
     "reorderFeature",
     "renameBody",
+    "setBodyAppearance",
     "deleteTarget",
     "setFeatureCursor",
     "reorderDocumentHistory",

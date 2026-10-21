@@ -28,7 +28,7 @@ export function topology(discovery: SemanticDiscovery | null | undefined, entity
 export function inspection(discovery: SemanticDiscovery | null | undefined) {
   const bodies = discovery?.model?.bodies ?? [];
   return {
-    bodies: bodies.map(({ bodyId, kind, bounds }) => ({ bodyId, kind, bounds })),
+    bodies: bodies.map(({ bodyId, kind, bounds, appearance }) => ({ bodyId, kind, bounds, appearance })),
     bounds: bodies.map((body) => body.bounds),
     topologyCounts: bodies.map((body) => {
       if (body.topology == null) return null;

@@ -194,6 +194,7 @@ export type SemanticFeatureLifecycleCommand = CommandIdentity & {
   | { operation: "timeline.cursor.set"; cursor: import("@/contracts/modeling/schema").DocumentFeatureCursor }
   | { operation: "target.delete"; target: DurableRef }
   | { operation: "body.rename"; bodyId: import("@/contracts/shared/ids").BodyId; label: string }
+  | { operation: "body.color.set"; bodyId: import("@/contracts/shared/ids").BodyId; appearance: import("@/contracts/modeling/body-appearance").BodyAppearance }
 );
 
 export type SemanticVariableCommand = CommandIdentity & {
@@ -541,7 +542,7 @@ export interface SemanticDiscovery {
     /** Current production construction frames, never inferred from display outlines. */
     constructions?: readonly { constructionId: import("@/contracts/shared/ids").ConstructionId; ownerFeatureId: import("@/contracts/shared/ids").FeatureId | null; frame: import("@/contracts/shared/sketch-plane").SketchPlaneFrame }[];
     /** Native exact B-rep inspection only; null when unavailable or invalid. */
-    bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null; /** Same exact payload as bounds; null is not empty topology. */ topology?: readonly import("@/contracts/import/capabilities").HistoryProbeTopologySignature[] | null }[];
+    bodies: readonly { bodyId: import("@/contracts/shared/ids").BodyId; kind: import("@/contracts/modeling/schema").BodyKind; bounds: { min: readonly number[]; max: readonly number[] } | null; /** Persisted display colour, as set by `body.color.set`. */ appearance?: import("@/contracts/modeling/body-appearance").BodyAppearance; /** Same exact payload as bounds; null is not empty topology. */ topology?: readonly import("@/contracts/import/capabilities").HistoryProbeTopologySignature[] | null }[];
   };
   sketch?: {
     sketchId: SketchId | null;

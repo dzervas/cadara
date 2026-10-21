@@ -45,6 +45,8 @@ export function createSemanticFeatureLifecyclePort(input: {
         ? await input.service.deleteTarget({ ...common, target: command.target })
         : command.operation === "body.rename"
         ? await input.service.renameBody({ ...common, bodyId: command.bodyId, bodyLabel: command.label })
+        : command.operation === "body.color.set"
+        ? await input.service.setBodyAppearance({ ...common, bodyId: command.bodyId, appearance: command.appearance })
         : command.operation === "feature.delete"
           ? await input.service.deleteFeature({ ...common, featureId: command.featureId })
           : await input.service.setFeatureSuppression({ ...common, featureId: command.featureId, suppressed: command.suppressed });
