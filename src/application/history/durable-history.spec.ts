@@ -1,5 +1,5 @@
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 
 import {
   createDurableHistoryService,
@@ -429,10 +429,30 @@ test("repository compensation synchronizes background document edits", async () 
     );
     await modelingService.waitForPersistence();
 
-    const undone = await durableHistory.undo({
-      documentId: initial.document.documentId,
-    });
-    expect(undone?.context).toBe("document");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const undoSettled = vi.fn();
+      const undo = durableHistory.undo({
+        documentId: initial.document.documentId,
+      });
+      void undo.then(undoSettled, undoSettled);
+
+      // Advance the notification and deadline together without wall-clock races.
+      await vi.advanceTimersByTimeAsync(14);
+      expect(undoSettled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      const undone = await undo;
+      expect(undone?.context).toBe("document");
+      expect(
+        undone?.context === "document" &&
+          undone.snapshot.document.variables.find(
+            (variable) => variable.variableId === added.variableId,
+          )?.valueText,
+      ).toBe("1");
+    } finally {
+      vi.useRealTimers();
+    }
     expect(DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS).toBeGreaterThan(
       65_000,
     );
