@@ -13,6 +13,11 @@ import { references, topology, inspection, sketchFrame, type Inspection } from "
 import type { DurableRef } from "@/contracts/shared/references";
 import type { SemanticReferenceOwner } from "@/contracts/semantic/schema";
 import type { ModelingFeatureKind } from "@/contracts/modeling/schema";
+import type { RecipeCommand } from "@/contracts/semantic/recipe";
+import { validateRecipe } from "@/contracts/semantic/recipe.runtime-schema";
+import { advanceSemanticCreations, semanticCreationOutputs, type SemanticCreationOutput } from "@/contracts/semantic/creation-outputs";
+import { ContractValidationError } from "@/contracts/shared/validation";
+import { firstCreationReference, RecipeReferenceError } from "./target-creation-references";
 
 export type OperationAttempt = { ok: true; handle: SemanticHandle } | { ok: false; error: SemanticOperationError | SelectionError };
 export type ProbeEdit = { operation: "variable.update"; fields: OperationFields<"variable.update"> } | { operation: "sketch.dimension.update"; fields: OperationFields<"sketch.dimension.update"> };
@@ -92,6 +97,8 @@ export class SemanticDocument {
   private readonly commandIds = new Set<string>();
   private readonly handleAliases = new Map<string, NonNullable<SemanticResult["discovery"]>>();
   private replayAliases = new Map<string, NonNullable<SemanticResult["discovery"]>>();
+  private replayCreations = new Map<string, readonly SemanticCreationOutput[]>();
+  private lastCreationOutputs: readonly SemanticCreationOutput[] = [];
   private tail: Promise<unknown> = Promise.resolve();
   private latest: SemanticHandle | undefined;
   private closing = false;
@@ -141,10 +148,15 @@ export class SemanticDocument {
     return next;
   }
   /** Adapter seam: explicit recipe authority and alias context, same validation and state tracking as op(). */
-  async execute(input: SelectableCommand, context: TargetResolutionContext = {}, options?: OperationOptions): Promise<SemanticResult> {
-    const command = resolveSemanticCommand(input, { discovery: this.current?.discovery ?? undefined, aliases: new Map([...this.handleAliases, ...this.replayAliases]), ...context });
+  async execute(input: RecipeCommand, context: TargetResolutionContext = {}, options?: OperationOptions): Promise<SemanticResult> {
+    const before = this.current?.discovery ?? undefined;
+    const command = resolveSemanticCommand(input, { discovery: before, aliases: new Map([...this.handleAliases, ...this.replayAliases]), creations: this.replayCreations, ...context });
     const checked = validateSemanticCommand(command);
-    if (!checked.success) throw new Error(`Invalid semantic command: ${JSON.stringify(checked.issues)}`);
+    if (!checked.success) {
+      const ref = firstCreationReference(input);
+      if (ref) throw new RecipeReferenceError(ref.reference, ref.path, `creation output kind is incompatible with command field: ${JSON.stringify(checked.issues)}`);
+      throw new Error(`Invalid semantic command: ${JSON.stringify(checked.issues)}`);
+    }
     this.commandIds.add(checked.data.commandId);
     const result = await this.session.execute(checked.data, options);
     const validated = validateSemanticResult(semanticCommandCorrelation(checked.data), result);
@@ -153,10 +165,12 @@ export class SemanticDocument {
     this.state = result.completion.live.state ?? this.state;
     const selectorAlias = `handle${this.terminals.length}`;
     this.latest = new SemanticHandle(this, result, selectorAlias);
+    this.lastCreationOutputs = semanticCreationOutputs(checked.data, before, result.discovery);
+    advanceSemanticCreations(this.replayCreations, checked.data, before, result.discovery);
     // A failed edit that committed live state is still document history.
     if (result.outcome.kind === "completed" || (result.outcome.kind === "accepted-invalid" && "intent" in checked.data && checked.data.intent === "author-invalid") || result.completion.live.kind === "applied") {
       const alias = this.recorder.record(checked.data);
-      this.recorder.publish(alias, result.discovery);
+      this.recorder.publish(alias, result.discovery, this.lastCreationOutputs, checked.data, before);
     }
     if (result.discovery) this.handleAliases.set(selectorAlias, result.discovery);
     return result;
@@ -164,11 +178,21 @@ export class SemanticDocument {
   results(): readonly SemanticResult[] { return [...this.terminals]; }
   commands() { return this.recorder.executed(); }
   trace(): RecipeTrace { return this.recorder.recipe(); }
+  /** Publish the just-executed semantic creation result under a recipe's alias. */
+  publishRecipeAlias(alias: string) {
+    if (this.current?.discovery) {
+      this.replayAliases.set(alias, this.current.discovery);
+      this.replayCreations.set(alias, this.lastCreationOutputs);
+    }
+  }
   /** Same stop-first-failure policy as CLI recipes, including failed-but-applied history. */
   async replay(recipe: RecipeTrace, options: { omitFileWrites?: boolean } = {}): Promise<SemanticResult[]> {
-    if (recipe.version !== 1) throw new Error("Unsupported recipe trace version.");
+    const checked = await validateRecipe(recipe);
+    if (!checked.success) throw new ContractValidationError(`Invalid recipe trace (supported envelope versions: 1, 2): ${JSON.stringify(checked.issues)}`, recipe, checked.issues);
     const aliases = new Map<string, NonNullable<SemanticResult["discovery"]>>();
     this.replayAliases = aliases;
+    const creations = new Map<string, readonly SemanticCreationOutput[]>();
+    this.replayCreations = creations;
     const results: SemanticResult[] = [];
     for (const operation of recipe.operations) {
       const { as: alias, ...input } = operation;
@@ -176,10 +200,10 @@ export class SemanticDocument {
         if (alias && this.current?.discovery) aliases.set(alias, this.current.discovery);
         continue;
       }
-      const result = await this.execute(input as SelectableCommand, { aliases });
+      const result = await this.execute(input, { aliases, creations });
       results.push(result);
       if (result.outcome.kind !== "completed" && result.outcome.kind !== "accepted-invalid") break;
-      if (alias && result.discovery) aliases.set(alias, result.discovery);
+      if (alias && result.discovery) this.publishRecipeAlias(alias);
     }
     return results;
   }

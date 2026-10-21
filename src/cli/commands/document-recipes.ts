@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { CommandModule } from "@/cli/types";
 import type {
-  SemanticDiscovery,
   SemanticResult,
 } from "@/contracts/semantic/schema";
 import {
@@ -12,8 +11,10 @@ import { SemanticDocument } from "@/application/semantic/sdk";
 import { mapProfileExtentTargets } from "@/application/semantic/target-resolution";
 import {
   isDiscoveryAlias as isAlias,
-  type SelectableCommand as RecipeCommand,
 } from "@/application/semantic/target-inputs";
+import type { RecipeCommand } from "@/contracts/semantic/recipe";
+import { validateRecipe, recipeReferenceJsonSchemas } from "@/contracts/semantic/recipe.runtime-schema";
+import { isRecipeReference, type RecipeReference } from "@/contracts/semantic/recipe-references";
 import { SelectionError } from "@/application/semantic/selection-error";
 import {
   contractSchemaAt,
@@ -124,7 +125,7 @@ const example = {
   ],
 };
 /** `position.index` tracks the operation being parsed, to locate preflight errors. */
-function parseRecipe(input: unknown, position: { index: number }): RecipeOperation[] {
+function parseLegacyRecipe(input: unknown, position: { index: number }): RecipeOperation[] {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw invalidRecipe("Recipe must be an object.", { path: "" });
   const recipe = input as Record<string, unknown>;
@@ -136,7 +137,7 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
     !Array.isArray(recipe.operations) ||
     !recipe.operations.length
   )
-    throw invalidRecipe("Expected version:1 and nonempty operations.", { path: "" });
+    throw invalidRecipe("Unsupported recipe envelope or shape: supported versions are 1 and 2 with nonempty operations (old readers refuse v2).", { path: "" });
   const ids = new Set<string>();
   const aliases = new Set<string>();
   return recipe.operations.map((value: unknown, index: number) => {
@@ -381,6 +382,34 @@ function parseRecipe(input: unknown, position: { index: number }): RecipeOperati
     };
   });
 }
+
+async function parseRecipe(input: unknown, position: { index: number }): Promise<RecipeOperation[]> {
+  if (!input || typeof input !== "object" || !("version" in input) || input.version !== 2)
+    return parseLegacyRecipe(input, position);
+  const checked = await validateRecipe(input);
+  if (!checked.success) throw invalidRecipe("Invalid recipe v2 transport.", { issues: checked.issues, path: checked.issues[0]?.path ?? "" });
+  const placeholder = (ref: RecipeReference, key: string): unknown => {
+    const sketchId = "sketch_validation";
+    const target = ref.output.kind === "sketch" ? { kind: "sketch", sketchId }
+      : ref.output.kind === "sketchPoint" ? { kind: "sketchPoint", sketchId, pointId: "sketch_point_validation" }
+      : ref.output.kind === "sketchEntity" ? { kind: "sketchEntity", sketchId, entityId: "sketch_entity_validation" }
+      : ref.output.kind === "dimension" ? { kind: "dimension", sketchId, dimensionId: "dimension_validation" }
+      : { kind: "sketchTangentHandle", sketchId, entityId: "sketch_entity_validation", pointId: "sketch_point_validation", occurrenceId: "occurrence_validation" };
+    return key === "points" ? "sketch_point_validation" : key === "sketchId" ? sketchId : key === "dimensionId" ? "dimension_validation" : target;
+  };
+  const visit = (value: unknown, key = ""): unknown => {
+    if (isRecipeReference(value)) return placeholder(value, key);
+    if (Array.isArray(value)) return value.map(v => visit(v, key));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visit(v, k)]));
+    return value;
+  };
+  const legacy = parseLegacyRecipe({ version: 1, operations: visit(checked.data.operations) }, position);
+  return legacy.map((operation, i) => {
+    const command = { ...checked.data.operations[i]! };
+    delete command.as;
+    return { ...operation, command };
+  });
+}
 const usage = "Usage: cadara document recipe [--output detailed|compact] <recipe.json>";
 
 function help() {
@@ -407,7 +436,8 @@ function help() {
     "",
     "Recipe extras: `as` names an operation's discovery; `basis`/`draft` accept an object with `alias`; typed",
     "targets accept `alias` + `label` (the unique eligible discovered label), optionally `sketch` (an earlier alias",
-    "naming the owning sketch). Lengths are " + `${recipeLengthUnit}s; every`,
+     "naming the owning sketch). Envelope v2 also accepts versioned recipeRef creation outputs; v1 stays readable.",
+     "SDK traces always emit v2; old binaries explicitly refuse v2. Lengths are " + `${recipeLengthUnit}s; every`,
     "angle field states its unit (radian or degree) in the schema `x-unit` and the operation's `units`; a `value`",
     "whose unit depends on the dimension or derivation kind states its units in its schema `description`.",
     "",
@@ -460,7 +490,11 @@ export const documentRecipesCommand: CommandModule = {
       return { ok: true };
     }
     if (argv[0] === "--schema" && argv.length <= 2) {
-      const output = argv.length === 1 ? recipeCatalog() : recipeOperationCatalog(argv[1]!);
+      const catalog = argv.length === 1 ? recipeCatalog() : recipeOperationCatalog(argv[1]!);
+      const output = catalog && { ...catalog, recipeVersions: { readable: [1, 2], emitted: 2, oldReader: "v1-only binaries refuse v2" }, recipeTransport: { creationReference: recipeReferenceJsonSchemas.schemas[0] },
+        components: { ...catalog.components, ...recipeReferenceJsonSchemas.components.schemas },
+        ...("recipe" in catalog ? { recipe: { ...catalog.recipe, document: { ...catalog.recipe.document, properties: { ...catalog.recipe.document.properties, version: { enum: [1, 2] } } } } } : {}),
+      };
       if (!output)
         return refuse(io, recipeError("unknown-operation", "preflight", `Unknown operation ${JSON.stringify(argv[1])}.`, {
           suggestions: suggestOperations(argv[1]!),
@@ -496,7 +530,7 @@ export const documentRecipesCommand: CommandModule = {
     let operations: RecipeOperation[];
     const position = { index: -1 };
     try {
-      operations = parseRecipe(input, position);
+      operations = await parseRecipe(input, position);
     } catch (error) {
       if (!(error instanceof RecipeError)) throw error;
       const operation = position.index < 0 ? undefined : (input as { operations: unknown[] }).operations[position.index];
@@ -520,13 +554,12 @@ export const documentRecipesCommand: CommandModule = {
     }
     const sdk = new SemanticDocument(opened.session, opened.initialization.state);
     const results: SemanticResult[] = [];
-    const snapshots = new Map<string, SemanticDiscovery>();
     let succeeded = true;
     let stopped: RecipeCliError | undefined;
     let failure: { error: unknown } | undefined;
     try {
       for (const [index, operation] of operations.entries()) try {
-        const terminal = await sdk.execute(operation.command, { aliases: snapshots });
+        const terminal = await sdk.execute(operation.command, {});
         results.push(terminal);
         if (
           terminal.outcome.kind !== "completed" &&
@@ -536,7 +569,7 @@ export const documentRecipesCommand: CommandModule = {
           break;
         }
         if (operation.alias && terminal.discovery) {
-          snapshots.set(operation.alias, terminal.discovery);
+          sdk.publishRecipeAlias(operation.alias);
         }
       } catch (error) {
         // A selection that cannot resolve stops the recipe before this command

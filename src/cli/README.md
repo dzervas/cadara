@@ -120,6 +120,20 @@ selection still refuses; existing saved labels are not rewritten.
 
 Extrude/revolve `booleanScope.targetBodies.bodyIds`, extrude `startExtent.target`, and reference-bound `extent.end` / `firstEnd` / `secondEnd` targets accept the same labelled selectors as other target fields. Each reference is resolved using its bounded kind (body, face, vertex, sketch point or start edge); native extent semantics are unchanged.
 
+### Recipe versions and creation-output references
+
+Readers accept envelope versions **1 and 2**. The SDK always emits **v2**, including traces that need only legacy selectors. Old v1-only binaries explicitly refuse v2; backward-read compatibility does not make new traces readable by old binaries. Per-operation semantic `version:1`, output envelopes and the native file format are unchanged; no minted IDs are persisted. `--schema` includes `recipeVersions`, the envelope shape and the generated `recipeTransport.creationReference` schema.
+
+V2 target fields additionally accept a creation reference, for example:
+
+```json
+{"kind":"recipeRef","version":1,"createdBy":"point-created","owner":{"alias":"sketch-begun"},"output":{"kind":"sketchPoint","role":"authoredPoint","index":0}}
+```
+
+`createdBy` and `owner.alias` refer backward to executed producers and the owning sketch. Output roles are semantic authored slots, never discovery-list ordinals: `sketch.begin` → `sketch:0`; single-entity `sketch.author` → `authoredEntity:0` and semantic-entity-ordered `authoredPoint` slots; spline authoring → ordered `fitPoint` slots; `sketch.dimension.add` → `dimension:0`. A spline tangent uses `output:{kind:"sketchTangentHandle",role:"splineOccurrence",index:N}` on its spline producer. The occurrence slot distinguishes repeated fit-point IDs and rebinds to live handles after publication/reopening; changed/deleted geometry or expired slots refuse. These references survive relabeling, unrelated creation and reordered discovery.
+
+Unique owner-qualified labels remain valid, including pre-existing assets and producer families without authored output slots (multi-entity rectangles/polygons, derived outputs, profiles and native topology). Ambiguous same-owner asset references without creation provenance cannot be exported portably; no asset fingerprint or raw-ID workaround is implied. Exact Typia validation rejects unknown versions/tags, extra keys, malformed slots and unknown/forward producers before modelling. Owner/kind/output availability errors stop before the affected command with structured selection diagnostics. See [SDK trace and replay](SDK.md#trace-and-replay) for limits, probe bindings and typed export errors.
+
 ### Sketch-owner-qualified target selectors
 
 Generated labels are local to a sketch: two sketches each have an `Outer region`,

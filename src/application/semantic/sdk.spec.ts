@@ -5,7 +5,7 @@ import { createSemanticSessionFactory } from "./session";
 import { semanticCommandCorrelation } from "@/contracts/semantic/correlation";
 import type { SemanticOutcome, SemanticState, SemanticResult } from "@/contracts/semantic/schema";
 import { SelectionError } from "./selection-error";
-import { SemanticTraceError } from "./sdk-trace";
+import { validateRecipeOperation } from "@/contracts/semantic/recipe-command.runtime-schema";
 test("SDK handles chain private drafts and retain stale basis conflicts", async () => {
   const workflow = await createSemanticSessionWorkflow("sdk");
   const doc = new SemanticDocument(workflow.session);
@@ -194,7 +194,8 @@ test("SDK trace omits caught failures and replays the final model; probes edit o
     expect(JSON.stringify(doc.commands())).toBe(sourceCommands);
     const features = doc.inspect(["features"]).features.map((f) => [f.kind, f.label]);
     const trace = doc.trace();
-    expect(trace.version).toBe(1);
+    expect(trace.operations.every(operation => validateRecipeOperation(operation).success)).toBe(true);
+    expect(trace.version).toBe(2);
     expect(trace.operations.some((operation) => operation.operation === "sketch.open")).toBe(false);
     expect(trace.operations.at(-1)!.operation).toBe("document.rename");
     const results = await replay.replay(trace);
@@ -207,7 +208,7 @@ test("SDK trace omits caught failures and replays the final model; probes edit o
 });
 
 
-test("trace export refuses a same-owner ambiguous typed reference without dropping its executed step", async () => {
+test("trace round-trips both same-owner duplicate points with distinct edits", async () => {
   const workflow = await createSemanticSessionWorkflow("sdk-trace-ambiguity");
   const doc = new SemanticDocument(workflow.session);
   try {
@@ -221,14 +222,22 @@ test("trace export refuses a same-owner ambiguous typed reference without droppi
     await doc.ops.sketch.construction.set({ target: points[0]!.target as Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchPoint" }>, construction: true });
     expect(doc.current!.result.outcome.kind).toBe("completed");
     expect(doc.commands().at(-1)?.operation).toBe("sketch.construction.set");
-    expect(() => doc.trace()).toThrow(SemanticTraceError);
-    try { doc.trace(); } catch (error) {
-      expect(error).toMatchObject({ operation: "sketch.construction.set", commandId: doc.current!.result.correlation.commandId, reference: points[0]!.target });
-    }
+    await doc.ops.sketch.geometry.update({ edit: { kind: "point", target: points[1]!.target as Extract<typeof points[number]["target"], { kind: "sketchPoint" }>, position: [7, 9] } });
+    const trace = JSON.parse(JSON.stringify(doc.trace()));
+    expect(trace.version).toBe(2);
+    const copyWorkflow = await createSemanticSessionWorkflow("sdk-duplicate-copy");
+    const copy = new SemanticDocument(copyWorkflow.session);
+    try {
+      expect((await copy.replay(trace)).every(r => r.outcome.kind === "completed")).toBe(true);
+      const actual = copy.current!.discovery!.sketch!.points;
+      expect(actual.map(p => [p.position, p.construction])).toEqual([[[0, 0], true], [[7, 9], false]]);
+      expect(copy.references({ kind: "sketchPoint" }).map(r => r.label)).toEqual(["duplicate", "duplicate"]);
+      expect(actual[0]!.pointId).not.toBe(doc.current!.discovery!.sketch!.points[0]!.pointId);
+    } finally { await copy.close(); }
   } finally { await doc.close(); }
 });
 
-test("trace export names an executed session-scoped tangent handle instead of emitting random IDs", async () => {
+test("trace round-trips a tangent through its spline fit-point occurrence", async () => {
   const workflow = await createSemanticSessionWorkflow("sdk-tangent");
   const doc = new SemanticDocument(workflow.session);
   try {
@@ -240,11 +249,28 @@ test("trace export names an executed session-scoped tangent handle instead of em
     const tangent = entity.tangents![0]!;
     const target = { kind: "sketchTangentHandle", sketchId: sketch.sketchId!, entityId: entity.entityId, pointId: tangent.pointId, occurrenceId: tangent.occurrenceId } as const;
     await doc.ops.sketch.geometry.update({ edit: { kind: "tangent", target, vector: [2, 0] } });
+    expect(doc.current!.discovery!.sketch!.entities.find(e => e.kind === "spline")!.tangents!.map(t => t.vector)).toEqual([[2, 0], null, null]);
+    const last = doc.current!.discovery!.sketch!.entities.find(e => e.kind === "spline")!.tangents![2]!;
+    await doc.ops.sketch.geometry.update({ edit: { kind: "tangent", target: { ...target, pointId: last.pointId, occurrenceId: last.occurrenceId }, vector: [0, -3] } });
+    expect(doc.current!.discovery!.sketch!.entities.find(e => e.kind === "spline")!.tangents!.map(t => t.vector)).toEqual([[2, 0], null, [0, -3]]);
+    const published = await doc.ops.sketch.publish({ requireProfiles: false });
+    await doc.ops.sketch.open({ sketchId: published.discovery!.sketch!.sketchId! });
+    const reopened = doc.current!.discovery!.sketch!;
+    const liveEntity = reopened.entities.find(e => e.kind === "spline")!;
+    const middle = liveEntity.tangents![1]!;
+    await doc.ops.sketch.geometry.update({ edit: { kind: "tangent", target: { kind: "sketchTangentHandle", sketchId: reopened.sketchId!, entityId: liveEntity.entityId, pointId: middle.pointId, occurrenceId: middle.occurrenceId }, vector: [4, 1] } });
     expect(doc.commands().at(-1)?.operation).toBe("sketch.geometry.update");
-    expect(() => doc.trace()).toThrow(SemanticTraceError);
-    try { doc.trace(); } catch (error) {
-      expect(error).toMatchObject({ operation: "sketch.geometry.update", reference: target });
-    }
+    const trace = JSON.parse(JSON.stringify(doc.trace()));
+    expect(trace.operations.at(-1).edit.target).toMatchObject({ kind: "recipeRef", version: 1 });
+    expect(JSON.stringify(trace)).not.toContain(tangent.occurrenceId);
+    const copyWorkflow = await createSemanticSessionWorkflow("sdk-tangent-copy");
+    const copy = new SemanticDocument(copyWorkflow.session);
+    try {
+      expect((await copy.replay(trace)).every(r => r.outcome.kind === "completed")).toBe(true);
+      const actual = copy.current!.discovery!.sketch!.entities.find(e => e.kind === "spline")!;
+      expect(actual.tangents!.map(t => t.vector)).toEqual([[2, 0], [4, 1], [0, -3]]);
+      expect(actual.tangents![0]!.occurrenceId).not.toBe(tangent.occurrenceId);
+    } finally { await copy.close(); }
   } finally { await doc.close(); }
 });
 

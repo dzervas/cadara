@@ -9,12 +9,15 @@ import {
   type TargetSelector,
 } from "./target-inputs";
 import { selectionError } from "./selection-error";
+import type { RecipeCommand } from "@/contracts/semantic/recipe";
+import { mapCreationReferences, type CreationBindings } from "./target-creation-references";
 
 export interface TargetResolutionContext {
   /** Live callers supply current discovery; no history is retained by the resolver. */
   discovery?: SemanticDiscovery;
   /** Recipe adapters supply their immutable historical discovery snapshots. */
   aliases?: ReadonlyMap<string, SemanticDiscovery>;
+  creations?: CreationBindings;
 }
 
 /** The canonical identity used by the alias snapshot's own sketch references. */
@@ -86,10 +89,12 @@ export function mapProfileExtentTargets<T extends { startExtent?: unknown; exten
 
 /** Resolve all command selectors using only discovery supplied for this call. */
 export function resolveSemanticCommand(
-  input: SelectableCommand,
+  input: RecipeCommand,
   context: TargetResolutionContext,
 ): SemanticCommand {
-  const command = copyInput(input);
+  const command = context.creations
+    ? mapCreationReferences(input, context) as SelectableCommand
+    : copyInput(input) as SelectableCommand;
   const aliases = context.aliases ?? new Map<string, SemanticDiscovery>();
   function discoveryFor(
     selector: TargetSelector,
