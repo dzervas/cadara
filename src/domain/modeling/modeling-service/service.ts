@@ -1704,6 +1704,41 @@ export function createModelingService(
     if (observe) await repositoryPersistencePromise;
   }
 
+  async function exportCurrentDocumentNow(
+    input: Parameters<ModelingService["exportCurrentDocument"]>[0],
+  ): ReturnType<ModelingService["exportCurrentDocument"]> {
+    // Saving is not a new authored mutation. A rebuilt restore may carry
+    // different native witnesses and a fresh live id; synchronize and export
+    // the exact stored basis it still represents, not a phantom new action.
+    const document = await getMutationPredecessor();
+    if (input && documentRepository) {
+      // Explicit native save observes its own synchronization transaction;
+      // a fulfilled global persistence tail cannot certify durability.
+      const receipt = await documentRepository.mutate({
+        documentId: currentDocumentId,
+        document,
+        expected: document,
+      });
+      input.observe(receipt);
+      if (!receipt.ok) throw new Error(receipt.status.diagnostic.message);
+      const liveRevisionId = restoredMutationPredecessor && authoredDocumentsEqual(restoredMutationPredecessor.document, document)
+        ? restoredMutationPredecessor.runtimeRevisionId : document.revisionId;
+      markRepositorySnapshotFresh(receipt.metadata,
+        authoredDocumentsEqual(document, receipt.document) ? receipt.document : undefined,
+        liveRevisionId);
+    }
+
+    return {
+      ok: true,
+      format: "cadara",
+      filename: "document.cadara",
+      extension: "cadara",
+      mimeType: "application/vnd.cadara+json",
+      payload: createLocalAuthoredDocumentPayload(document),
+      diagnostics: [],
+    };
+  }
+
   return {
     initialLoadingStatus,
     currentDocumentId,
@@ -1957,39 +1992,11 @@ export function createModelingService(
         }
       });
     },
-    async exportCurrentDocument(input) {
-      await ensureInitialized();
-      await waitForRepositoryChanges();
-      // Saving is not a new authored mutation. A rebuilt restore may carry
-      // different native witnesses and a fresh live id; synchronize and export
-      // the exact stored basis it still represents, not a phantom new action.
-      const document = await getMutationPredecessor();
-      if (input && documentRepository) {
-        // Explicit native save observes its own synchronization transaction;
-        // a fulfilled global persistence tail cannot certify durability.
-        const receipt = await documentRepository.mutate({
-          documentId: currentDocumentId,
-          document,
-          expected: document,
-        });
-        input.observe(receipt);
-        if (!receipt.ok) throw new Error(receipt.status.diagnostic.message);
-        const liveRevisionId = restoredMutationPredecessor && authoredDocumentsEqual(restoredMutationPredecessor.document, document)
-          ? restoredMutationPredecessor.runtimeRevisionId : document.revisionId;
-        markRepositorySnapshotFresh(receipt.metadata,
-          authoredDocumentsEqual(document, receipt.document) ? receipt.document : undefined,
-          liveRevisionId);
-      }
-
-      return {
-        ok: true,
-        format: "cadara",
-        filename: "document.cadara",
-        extension: "cadara",
-        mimeType: "application/vnd.cadara+json",
-        payload: createLocalAuthoredDocumentPayload(document),
-        diagnostics: [],
-      };
+    exportCurrentDocument(input) {
+      // cadara-qj6: a save follows every local mutation requested before it,
+      // and an explicit native save also follows their queued repository
+      // writes, so its receipt cannot precede (and conflict with) them.
+      return runLocalDocumentChange(() => exportCurrentDocumentNow(input), input !== undefined);
     },
     commitSketch(input) {
       return runLocalMutation({
