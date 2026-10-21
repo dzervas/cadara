@@ -3,6 +3,7 @@ import { test, expect } from "vitest";
 import type {
   WorkspaceSnapshot,
   SnapshotEntityRecord,
+  SketchSnapshotRecord,
 } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -21,10 +22,18 @@ import {
   lineLoopSegmentsForTest,
   sketchSnapshotRecordForTest,
 } from "@/contracts/sketch/region-record.fixtures";
-import type { FaceId, SketchPointId } from "@/contracts/shared/ids";
+import type {
+  EdgeId,
+  FaceId,
+  SketchEntityId,
+  SketchPointId,
+  VertexId,
+} from "@/contracts/shared/ids";
 import type {
   SketchEntityDefinition,
   SketchPoint2D,
+  SketchPointDefinition,
+  SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import {
   reconstructSplineAggregate,
@@ -42,29 +51,29 @@ import {
 const MEASUREMENT_SPLINE: Extract<SketchEntityDefinition, { kind: "spline" }> =
   {
     kind: "spline",
-    entityId: "spline_primary",
+    entityId: "sketch_entity_spline_primary",
     label: "Spline 1",
     target: {
       kind: "sketchEntity",
       sketchId: "sketch_measure",
-      entityId: "spline_primary",
+      entityId: "sketch_entity_spline_primary",
     },
     isConstruction: false,
     pointOccurrenceIds: ["occ-a", "occ-b", "occ-c"],
     pointOccurrences: [
       {
         occurrenceId: "occ-a",
-        pointId: "point_spline_a",
+        pointId: "sketch_point_spline_a",
         tangent: { kind: "automatic" },
       },
       {
         occurrenceId: "occ-b",
-        pointId: "point_spline_b",
+        pointId: "sketch_point_spline_b",
         tangent: { kind: "automatic" },
       },
       {
         occurrenceId: "occ-c",
-        pointId: "point_spline_c",
+        pointId: "sketch_point_spline_c",
         tangent: { kind: "automatic" },
       },
     ],
@@ -74,10 +83,10 @@ const MEASUREMENT_SPLINE: Extract<SketchEntityDefinition, { kind: "spline" }> =
 
 /** The fixture spline's authored fit points. */
 const MEASUREMENT_SPLINE_POINTS = {
-  point_spline_a: [16, 0],
-  point_spline_b: [17.5, 2],
-  point_spline_c: [19, 0],
-} as Record<SketchPointId, SketchPoint2D>;
+  sketch_point_spline_a: [16, 0],
+  sketch_point_spline_b: [17.5, 2],
+  sketch_point_spline_c: [19, 0],
+} satisfies Record<SketchPointId, SketchPoint2D>;
 
 test("src/domain/measure/measurement.spec.ts", () => {
   function createMeasurementSnapshot(): WorkspaceSnapshot {
@@ -140,55 +149,44 @@ test("src/domain/measure/measurement.spec.ts", () => {
         ["face"],
       ),
       createEntity(
-        "line_bottom",
+        "sketch_entity_line_bottom",
         "Rectangle bottom",
         {
           kind: "sketchEntity",
           sketchId: "sketch_measure",
-          entityId: "line_bottom",
+          entityId: "sketch_entity_line_bottom",
         },
         ["sketchEntity"],
       ),
       createEntity(
-        "circle_primary",
+        "sketch_entity_circle_primary",
         "Circle 1",
         {
           kind: "sketchEntity",
           sketchId: "sketch_measure",
-          entityId: "circle_primary",
+          entityId: "sketch_entity_circle_primary",
         },
         ["sketchEntity"],
       ),
       createEntity(
-        "arc_primary",
+        "sketch_entity_arc_primary",
         "Arc 1",
         {
           kind: "sketchEntity",
           sketchId: "sketch_measure",
-          entityId: "arc_primary",
+          entityId: "sketch_entity_arc_primary",
         },
         ["sketchEntity"],
       ),
       createEntity(
-        "spline_primary",
+        "sketch_entity_spline_primary",
         "Spline 1",
         {
           kind: "sketchEntity",
           sketchId: "sketch_measure",
-          entityId: "spline_primary",
+          entityId: "sketch_entity_spline_primary",
         },
         ["sketchEntity"],
-      ),
-      createEntity(
-        "projected_circle",
-        "Projected circle",
-        {
-          kind: "projectedReferenceGeometry",
-          referenceId: "reference_projected_circle",
-          geometryId: "projected_circle",
-          geometryKind: "circle",
-        },
-        ["projectedReferenceGeometry"],
       ),
     ];
 
@@ -248,7 +246,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
       createVertexRenderable("vertex_top_front_left", [0, 0, 5]),
     ];
 
-    const sketch = {
+    const sketch: SketchSnapshotRecord = {
       ownerDocumentId: "doc_measure",
       ownerRevisionId: "rev_measure",
       ownerFeatureId: null,
@@ -257,8 +255,6 @@ test("src/domain/measure/measurement.spec.ts", () => {
       sketchId: "sketch_measure",
       label: "Measure Sketch",
       plane,
-      planeTarget: plane.support,
-      planeKey: "xy" as const,
       sketch: {
         ownerDocumentId: "doc_measure",
         ownerRevisionId: "rev_measure",
@@ -270,107 +266,119 @@ test("src/domain/measure/measurement.spec.ts", () => {
         planeSupport: plane.support,
         definition: {
           schemaVersion: "sketch-definition/v1alpha2",
-          referenceIds: ["reference_projected_circle"],
+          referenceIds: ["ref_projected_circle"],
           references: [],
           pointIds: [
-            "point_rect_a",
-            "point_rect_b",
-            "point_rect_c",
-            "point_rect_d",
-            "point_circle_center",
-            "point_arc_center",
-            "point_arc_start",
-            "point_arc_end",
-            "point_spline_a",
-            "point_spline_b",
-            "point_spline_c",
-            "point_probe",
-            "point_arc_probe",
+            "sketch_point_rect_a",
+            "sketch_point_rect_b",
+            "sketch_point_rect_c",
+            "sketch_point_rect_d",
+            "sketch_point_circle_center",
+            "sketch_point_arc_center",
+            "sketch_point_arc_start",
+            "sketch_point_arc_end",
+            "sketch_point_spline_a",
+            "sketch_point_spline_b",
+            "sketch_point_spline_c",
+            "sketch_point_probe",
+            "sketch_point_arc_probe",
           ],
           points: [
-            createPoint("point_rect_a", [0, 0]),
-            createPoint("point_rect_b", [4, 0]),
-            createPoint("point_rect_c", [4, 3]),
-            createPoint("point_rect_d", [0, 3]),
-            createPoint("point_circle_center", [8, 1.5]),
-            createPoint("point_arc_center", [12, 1.5]),
-            createPoint("point_arc_start", [13, 1.5]),
-            createPoint("point_arc_end", [12, 2.5]),
-            createPoint("point_spline_a", [16, 0]),
-            createPoint("point_spline_b", [17.5, 2]),
-            createPoint("point_spline_c", [19, 0]),
-            createPoint("point_probe", [16.4, 1.3]),
-            createPoint("point_arc_probe", [13.8, 0.4]),
+            createPoint("sketch_point_rect_a", [0, 0]),
+            createPoint("sketch_point_rect_b", [4, 0]),
+            createPoint("sketch_point_rect_c", [4, 3]),
+            createPoint("sketch_point_rect_d", [0, 3]),
+            createPoint("sketch_point_circle_center", [8, 1.5]),
+            createPoint("sketch_point_arc_center", [12, 1.5]),
+            createPoint("sketch_point_arc_start", [13, 1.5]),
+            createPoint("sketch_point_arc_end", [12, 2.5]),
+            createPoint("sketch_point_spline_a", [16, 0]),
+            createPoint("sketch_point_spline_b", [17.5, 2]),
+            createPoint("sketch_point_spline_c", [19, 0]),
+            createPoint("sketch_point_probe", [16.4, 1.3]),
+            createPoint("sketch_point_arc_probe", [13.8, 0.4]),
           ],
           entityIds: [
-            "line_bottom",
-            "line_right",
-            "line_top",
-            "line_left",
-            "circle_primary",
-            "arc_primary",
-            "arc_clockwise",
-            "spline_primary",
+            "sketch_entity_line_bottom",
+            "sketch_entity_line_right",
+            "sketch_entity_line_top",
+            "sketch_entity_line_left",
+            "sketch_entity_circle_primary",
+            "sketch_entity_arc_primary",
+            "sketch_entity_arc_clockwise",
+            "sketch_entity_spline_primary",
           ],
           entities: [
             {
               kind: "lineSegment",
-              entityId: "line_bottom",
+              entityId: "sketch_entity_line_bottom",
               label: "Rectangle bottom",
               target: {
                 kind: "sketchEntity",
                 sketchId: "sketch_measure",
-                entityId: "line_bottom",
+                entityId: "sketch_entity_line_bottom",
               },
               isConstruction: false,
-              startPointId: "point_rect_a",
-              endPointId: "point_rect_b",
+              startPointId: "sketch_point_rect_a",
+              endPointId: "sketch_point_rect_b",
             },
-            createLine("line_right", "point_rect_b", "point_rect_c"),
-            createLine("line_top", "point_rect_c", "point_rect_d"),
-            createLine("line_left", "point_rect_d", "point_rect_a"),
+            createLine(
+              "sketch_entity_line_right",
+              "sketch_point_rect_b",
+              "sketch_point_rect_c",
+            ),
+            createLine(
+              "sketch_entity_line_top",
+              "sketch_point_rect_c",
+              "sketch_point_rect_d",
+            ),
+            createLine(
+              "sketch_entity_line_left",
+              "sketch_point_rect_d",
+              "sketch_point_rect_a",
+            ),
             {
               kind: "circle",
-              entityId: "circle_primary",
+              entityId: "sketch_entity_circle_primary",
               label: "Circle 1",
               target: {
                 kind: "sketchEntity",
                 sketchId: "sketch_measure",
-                entityId: "circle_primary",
+                entityId: "sketch_entity_circle_primary",
               },
               isConstruction: false,
-              centerPointId: "point_circle_center",
+              centerPointId: "sketch_point_circle_center",
               radius: 1.25,
             },
             {
               kind: "arc",
-              entityId: "arc_primary",
+              entityId: "sketch_entity_arc_primary",
               label: "Arc 1",
               target: {
                 kind: "sketchEntity",
                 sketchId: "sketch_measure",
-                entityId: "arc_primary",
+                entityId: "sketch_entity_arc_primary",
               },
               isConstruction: false,
-              centerPointId: "point_arc_center",
-              startPointId: "point_arc_start",
-              endPointId: "point_arc_end",
+              centerPointId: "sketch_point_arc_center",
+              startPointId: "sketch_point_arc_start",
+              endPointId: "sketch_point_arc_end",
               sweepDirection: "counterClockwise",
             },
             {
               // The same quarter arc authored clockwise (review A-3).
               kind: "arc",
-              entityId: "arc_clockwise",
+              entityId: "sketch_entity_arc_clockwise",
               label: "Arc CW",
               target: {
                 kind: "sketchEntity",
                 sketchId: "sketch_measure",
-                entityId: "arc_clockwise",
+                entityId: "sketch_entity_arc_clockwise",
               },
               isConstruction: false,
-              centerPointId: "point_arc_center",
-              startPointId: "point_arc_end",
-              endPointId: "point_arc_start",
+              centerPointId: "sketch_point_arc_center",
+              startPointId: "sketch_point_arc_end",
+              endPointId: "sketch_point_arc_start",
               sweepDirection: "clockwise",
             },
             MEASUREMENT_SPLINE,
@@ -386,12 +394,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
           // The region's boundary lines, as solved (T10e: regions resolve
           // against the record's own solved pair).
           solvedEntities: [
-            createSolvedLine("line_bottom", [0, 0], [4, 0]),
-            createSolvedLine("line_right", [4, 0], [4, 3]),
-            createSolvedLine("line_top", [4, 3], [0, 3]),
-            createSolvedLine("line_left", [0, 3], [0, 0]),
+            createSolvedLine("sketch_entity_line_bottom", [0, 0], [4, 0]),
+            createSolvedLine("sketch_entity_line_right", [4, 0], [4, 3]),
+            createSolvedLine("sketch_entity_line_top", [4, 3], [0, 3]),
+            createSolvedLine("sketch_entity_line_left", [0, 3], [0, 0]),
             {
-              entityId: "spline_primary",
+              entityId: "sketch_entity_spline_primary",
               kind: "spline",
               reconstruction: reconstructSplineAggregate(
                 MEASUREMENT_SPLINE,
@@ -407,12 +415,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
         derivedValidity: { state: "current", diagnostics: [] },
         projectedReferences: [
           {
-            referenceId: "reference_projected_circle",
+            referenceId: "ref_projected_circle",
             status: "projected",
             diagnostics: [],
             geometry: [
               {
-                geometryId: "projected_circle",
+                geometryId: "projected_geometry_circle",
                 kind: "circle",
                 centerPosition: [22, 1.5],
                 radius: 1,
@@ -423,6 +431,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
         regions: [
           {
             regionId: "region_measure",
+            signature: "measurement-rectangle",
+            ownerDocumentId: "doc_measure",
+            ownerRevisionId: "rev_measure",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_measure",
+            ownerBodyId: null,
             label: "Profile region",
             target: {
               kind: "region",
@@ -433,21 +447,23 @@ test("src/domain/measure/measurement.spec.ts", () => {
             isClosed: true,
             loops: [
               {
-                loopId: "loop_outer",
+                loopId: "region_loop_outer",
                 role: "outer",
+                orientation: "counterClockwise",
+                isClosed: true,
                 segments: lineLoopSegmentsForTest(
                   [
-                    { pointId: "point_rect_a", position: [0, 0] },
-                    { pointId: "point_rect_b", position: [4, 0] },
-                    { pointId: "point_rect_c", position: [4, 3] },
-                    { pointId: "point_rect_d", position: [0, 3] },
-                  ] as never,
+                    { pointId: "sketch_point_rect_a", position: [0, 0] },
+                    { pointId: "sketch_point_rect_b", position: [4, 0] },
+                    { pointId: "sketch_point_rect_c", position: [4, 3] },
+                    { pointId: "sketch_point_rect_d", position: [0, 3] },
+                  ],
                   [
-                    "line_bottom",
-                    "line_right",
-                    "line_top",
-                    "line_left",
-                  ] as never,
+                    "sketch_entity_line_bottom",
+                    "sketch_entity_line_right",
+                    "sketch_entity_line_top",
+                    "sketch_entity_line_left",
+                  ],
                 ),
               },
             ],
@@ -457,64 +473,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
     };
 
     const snapshot = {
-      contractVersion: CONTRACT_VERSION,
-      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      documentId: "doc_measure",
-      revisionId: "rev_measure",
-      settings: {
-        linearUnit: "millimeter" as const,
-        modelingTolerance: 0.001,
-        angularToleranceRadians: 0.0001,
-      },
-      capabilities: {
-        supportedFeatureKinds: ["extrude"],
-        previewableFeatureKinds: ["extrude"],
-        supportedProfileKinds: ["region", "face"],
-        supportsFaceBackedSketchPlanes: true,
-        supportsDurableTopologyNaming: true,
-      },
-      featureTree: [],
-      objects: [],
-      documentHistory: [],
-      sketches: [sketch],
-      features: [],
-      cursor: { kind: "empty" as const },
-      bodies: [
-        {
-          ownerDocumentId: "doc_measure",
-          ownerRevisionId: "rev_measure",
-          ownerFeatureId: "feature_body",
-          ownerSketchId: null,
-          ownerBodyId: "body_measure",
-          bodyId: "body_measure",
-          label: "Body A",
-          topology: {
-            faceIds: [
-              "face_top",
-              "face_bottom",
-              "face_front",
-              "face_back",
-              "face_left",
-              "face_right",
-            ],
-            edgeIds: ["edge_top_front", "edge_top_back", "edge_top_left"],
-            vertexIds: ["vertex_top_front_left"],
-          },
-        },
-      ],
-      constructions: [],
-      variables: [],
-      entities,
-      references: [],
-      diagnostics: [],
-      render: {
-        schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
-        records: renderRecords,
-      },
+      provenance: null,
       document: {
         contractVersion: CONTRACT_VERSION,
         schemaVersion: SNAPSHOT_SCHEMA_VERSION,
         documentId: "doc_measure",
+        name: "Measurement fixture",
         revisionId: "rev_measure",
         settings: {
           linearUnit: "millimeter" as const,
@@ -542,6 +506,8 @@ test("src/domain/measure/measurement.spec.ts", () => {
             ownerBodyId: "body_measure",
             bodyId: "body_measure",
             label: "Body A",
+            bodyKind: "solid",
+            appearance: { kind: "palette", slot: 0 },
             topology: {
               faceIds: [
                 "face_top",
@@ -580,7 +546,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   function createEntity(
     id: string,
     label: string,
-    target: PrimitiveRef,
+    target: SnapshotEntityRecord["target"],
     selectionSemantics: SnapshotEntityRecord["selectionSemantics"],
   ): SnapshotEntityRecord {
     return {
@@ -588,11 +554,9 @@ test("src/domain/measure/measurement.spec.ts", () => {
       ownerRevisionId: "rev_measure",
       ownerFeatureId: null,
       ownerSketchId:
-        "sketchId" in target || target.kind === "region"
-          ? target.sketchId
-          : null,
+        "sketchId" in target ? target.sketchId : null,
       ownerBodyId: "bodyId" in target ? target.bodyId : null,
-      id,
+      id: `snapshot_entity_${id}`,
       label,
       target,
       relatedTargets: [],
@@ -603,10 +567,10 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createLine(
-    entityId: string,
-    startPointId: string,
-    endPointId: string,
-  ) {
+    entityId: SketchEntityId,
+    startPointId: SketchPointId,
+    endPointId: SketchPointId,
+  ): Extract<SketchEntityDefinition, { kind: "lineSegment" }> {
     return {
       kind: "lineSegment" as const,
       entityId,
@@ -623,10 +587,13 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createSolvedLine(
-    entityId: string,
+    entityId: SketchEntityId,
     startPosition: readonly [number, number],
     endPosition: readonly [number, number],
-  ) {
+  ): Extract<
+    SolvedSketchSnapshot["solvedEntities"][number],
+    { kind: "lineSegment" }
+  > {
     return {
       entityId,
       kind: "lineSegment" as const,
@@ -635,7 +602,10 @@ test("src/domain/measure/measurement.spec.ts", () => {
     };
   }
 
-  function createPoint(pointId: string, position: readonly [number, number]) {
+  function createPoint(
+    pointId: SketchPointId,
+    position: SketchPoint2D,
+  ): SketchPointDefinition {
     return {
       pointId,
       label: pointId,
@@ -650,7 +620,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createFaceRenderable(
-    faceId: string,
+    faceId: FaceId,
     points: readonly [
       readonly [number, number, number],
       readonly [number, number, number],
@@ -684,7 +654,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createVerticalFaceRenderable(
-    faceId: string,
+    faceId: FaceId,
     points: readonly [
       readonly [number, number, number],
       readonly [number, number, number],
@@ -696,7 +666,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createEdgeRenderable(
-    edgeId: string,
+    edgeId: EdgeId,
     points: readonly [
       readonly [number, number, number],
       readonly [number, number, number],
@@ -723,7 +693,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   }
 
   function createVertexRenderable(
-    vertexId: string,
+    vertexId: VertexId,
     position: readonly [number, number, number],
   ): RenderableEntityRecord {
     return {
@@ -754,7 +724,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "line_bottom",
+        entityId: "sketch_entity_line_bottom",
       },
     ],
     snapshot,
@@ -772,7 +742,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "circle_primary",
+        entityId: "sketch_entity_circle_primary",
       },
     ],
     snapshot,
@@ -800,7 +770,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "arc_primary",
+        entityId: "sketch_entity_arc_primary",
       },
     ],
     snapshot,
@@ -824,7 +794,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "spline_primary",
+        entityId: "sketch_entity_spline_primary",
       },
     ],
     snapshot,
@@ -1004,8 +974,8 @@ test("src/domain/measure/measurement.spec.ts", () => {
     selection: [
       {
         kind: "projectedReferenceGeometry",
-        referenceId: "reference_projected_circle",
-        geometryId: "projected_circle",
+        referenceId: "ref_projected_circle",
+        geometryId: "projected_geometry_circle",
         geometryKind: "circle",
       },
     ],
@@ -1022,7 +992,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
     isMeasureSelectableTarget(snapshot, {
       kind: "sketchEntity",
       sketchId: "sketch_measure",
-      entityId: "arc_primary",
+      entityId: "sketch_entity_arc_primary",
     }),
     "Supported sketch arcs should be accepted by the measure selection filter.",
   ).toBeTruthy();
@@ -1049,7 +1019,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   // the 48-segment tessellation's chord error.
   const splineEntity =
     snapshot.document.sketches[0]!.sketch.definition.entities.find(
-      (entity) => entity.entityId === "spline_primary",
+      (entity) => entity.entityId === "sketch_entity_spline_primary",
     )!;
   const splinePositions = Object.fromEntries(
     snapshot.document.sketches[0]!.sketch.definition.points.map((point) => [
@@ -1071,12 +1041,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchPoint",
         sketchId: "sketch_measure",
-        pointId: "point_probe",
+        pointId: "sketch_point_probe",
       },
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "spline_primary",
+        entityId: "sketch_entity_spline_primary",
       },
     ],
     snapshot,
@@ -1087,7 +1057,10 @@ test("src/domain/measure/measurement.spec.ts", () => {
   expect(connector?.kind, "Point ↔ spline keeps its connector.").toBe(
     "polyline",
   );
-  const onCurve = (connector as { points: readonly number[][] }).points[1]!;
+  if (connector?.kind !== "polyline") {
+    throw new Error("Point ↔ spline connector is missing.");
+  }
+  const onCurve = connector.points[1]!;
   // The distance is stationary at the minimum, so it is compared tightly and
   // the location (determined only to about √ε along the curve) loosely.
   expect(
@@ -1114,12 +1087,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "spline_primary",
+        entityId: "sketch_entity_spline_primary",
       },
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "line_bottom",
+        entityId: "sketch_entity_line_bottom",
       },
     ],
     snapshot,
@@ -1137,12 +1110,12 @@ test("src/domain/measure/measurement.spec.ts", () => {
       {
         kind: "sketchPoint",
         sketchId: "sketch_measure",
-        pointId: "point_arc_probe",
+        pointId: "sketch_point_arc_probe",
       },
       {
         kind: "sketchEntity",
         sketchId: "sketch_measure",
-        entityId: "arc_clockwise",
+        entityId: "sketch_entity_arc_clockwise",
       },
     ],
     snapshot,
@@ -1153,9 +1126,9 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBe(`${Math.hypot(0.8, 1.1).toFixed(2)} mm`);
   const arcConnector = pointToArc?.witnesses.find((witness) =>
     witness.id.endsWith(":distance"),
-  ) as { points: readonly number[][] } | undefined;
+  );
   expect(
-    arcConnector?.points[1],
+    arcConnector?.kind === "polyline" && arcConnector.points[1],
     "The witness ends at the arc's end point.",
   ).toEqual([13, 1.5, 0]);
 
@@ -1309,7 +1282,10 @@ test("entity splines measure the record's solved spans; no valid solved spline m
     } as PrimitiveRef,
     spline,
   ])?.witnesses.find((entry) => entry.id.endsWith(":distance"));
-  const onCurve = (distance as { points: readonly number[][] }).points[1]!;
+  if (distance?.kind !== "polyline") {
+    throw new Error("Solved spline distance connector is missing.");
+  }
+  const onCurve = distance.points[1]!;
   expect(
     Math.abs(
       Math.hypot(onCurve[0]! - probe[0], onCurve[1]! - probe[1]) -
