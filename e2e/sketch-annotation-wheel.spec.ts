@@ -397,7 +397,9 @@ test("T14g review R-1: `+N` clicked during the damped tail of a pan keeps its wh
 
   // A pan, then `+N` a few hundred ms after the release: the damped camera
   // is still moving the cluster (premise), the wheel opens and stays open.
-  const released = await pan(-160);
+  // 120 px keeps the cluster clear of the top inset, where the layout
+  // re-places chips sideways and the press would miss the moving `+N`.
+  const released = await pan(-120);
   const early = await centreOf(chip);
   const clicked = await clickChip();
   // The delay depends on the load (about 0.5–0.8 s here); the premise that

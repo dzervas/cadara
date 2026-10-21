@@ -361,15 +361,15 @@ test("T14d: a dimension chip under the sketch tool panel moves clear of it when 
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
   await openSketch(workbench);
-  // Below the tool panel (top 128, ~155 px tall at this width); the label
+  // Below the tool panel (top 76, ~155 px tall at this width); the label
   // placed so the chip's top half reaches into the panel's rect.
   await drawLine(
     workbench,
-    { x: 300, y: 340 },
-    { x: 500, y: 340 },
+    { x: 300, y: 288 },
+    { x: 500, y: 288 },
     "1 entities",
   );
-  await dimensionLine(workbench, { x: 340, y: 340 }, { x: 400, y: 300 }, 1);
+  await dimensionLine(workbench, { x: 340, y: 288 }, { x: 400, y: 248 }, 1);
   const chip = page.locator(chipSelector);
   const idleChip = (await chip.boundingBox())!;
 

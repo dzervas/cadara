@@ -301,7 +301,7 @@ const SKETCH_PICK_HINT_SLOT_HEIGHT_PX = 72;
 
 /**
  * T14d: one read of the canvas rect, the top overlay inset (a CSS variable
- * that grows when the toolbar wraps), the bottom band, and the floating DOM
+ * clearing the floating toolbar), the bottom band, and the floating DOM
  * the annotation layout avoids, in canvas px.
  */
 function readSketchAnnotationDomFrame(
