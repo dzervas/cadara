@@ -184,3 +184,84 @@ it.each(["unsupported", "failed"] as const)(
     }
   },
 );
+
+// cadara-lyi: the acknowledgement of this session's own background write
+// changes only repository metadata. A snapshot read it races keeps the
+// runtime's snapshot (one adapter read, not two) and still certifies the
+// write's heads.
+it("a snapshot read racing its own background write's acknowledgement reads the adapter once", async () => {
+  let releaseWrite!: () => void;
+  let writeHeld: Promise<void> = Promise.resolve();
+  class GatedRepository extends MemoryDocumentRepository {
+    override mutate(...args: Parameters<MemoryDocumentRepository["mutate"]>) {
+      const gate = writeHeld;
+      return gate.then(() => super.mutate(...args));
+    }
+  }
+  let snapshotCaptured!: () => void;
+  let releaseSnapshot!: () => void;
+  let holdSnapshot = false;
+  let snapshotReads = 0;
+  class CountingAdapter extends MockKernelAdapter {
+    override async getDocumentSnapshot(
+      ...args: Parameters<MockKernelAdapter["getDocumentSnapshot"]>
+    ) {
+      snapshotReads += 1;
+      const snapshot = await super.getDocumentSnapshot(...args);
+      if (holdSnapshot) {
+        holdSnapshot = false;
+        snapshotCaptured();
+        await new Promise<void>((resolve) => {
+          releaseSnapshot = resolve;
+        });
+      }
+      return snapshot;
+    }
+  }
+  const repository = new GatedRepository();
+  const service = createModelingService(new CountingAdapter(), {
+    currentDocumentId: "doc_workspace",
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  try {
+    const initial = await service.getCurrentDocumentSnapshot();
+    writeHeld = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    const renamed = await service.renameBody({
+      baseRevisionId: initial.document.revisionId,
+      bodyId: "body_part-1" as never,
+      bodyLabel: "Renamed",
+    });
+    expect(renamed.isOk()).toBe(true);
+
+    const captured = new Promise<void>((resolve) => {
+      snapshotCaptured = resolve;
+    });
+    holdSnapshot = true;
+    snapshotReads = 0;
+    const pending = service.getCurrentDocumentSnapshot();
+    await captured;
+    releaseWrite();
+    await service.waitForPersistence();
+    releaseSnapshot();
+    const current = await pending;
+
+    expect(
+      snapshotReads,
+      "a metadata-only retry must not rebuild the unchanged runtime snapshot",
+    ).toBe(1);
+    expect(
+      current.document.bodies.find((body) => body.bodyId === "body_part-1")
+        ?.label,
+    ).toBe("Renamed");
+    expect(current.provenance?.repositoryHeads).toEqual(
+      repository.getMetadata("doc_workspace").heads,
+    );
+  } finally {
+    releaseWrite?.();
+    releaseSnapshot?.();
+    service.dispose();
+  }
+});

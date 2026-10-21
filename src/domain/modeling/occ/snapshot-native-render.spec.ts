@@ -8,7 +8,10 @@ import type {
   FeatureId,
   RevisionId,
 } from "@/contracts/shared/ids";
-import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
+import {
+  buildOccWorkspaceSnapshot,
+  resetRegionRenderRecordCacheForTest,
+} from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
@@ -761,6 +764,12 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       const warmup = await service.getCurrentDocumentSnapshot();
       expect(warmup.document.sketches).toHaveLength(1);
       expect(warmup.document.sketches[0]?.sketch.regions).toHaveLength(1);
+      // Unchanged sketch records reuse their region meshes (cadara-lyi);
+      // every snapshot below must build the region profile faces again.
+      const rebuildSnapshot = () => {
+        resetRegionRenderRecordCacheForTest();
+        return service.getCurrentDocumentSnapshot();
+      };
 
       const faceBuilderPrototype = oc.BRepBuilderAPI_MakeFace
         .prototype as unknown as Record<string, unknown>;
@@ -770,7 +779,7 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
         faceBuilderPrototype.IsDone = () => false;
         console.warn = () => undefined;
         recording = true;
-        await service.getCurrentDocumentSnapshot();
+        await rebuildSnapshot();
       } finally {
         recording = false;
         faceBuilderPrototype.IsDone = originalIsDone;
@@ -800,7 +809,7 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
 
       recording = true;
       for (let index = 0; index < 50; index += 1) {
-        await service.getCurrentDocumentSnapshot();
+        await rebuildSnapshot();
       }
       recording = false;
 
@@ -836,7 +845,7 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
           throw primarySnapshotError;
         };
         recording = true;
-        await service.getCurrentDocumentSnapshot();
+        await rebuildSnapshot();
       } catch (error) {
         snapshotError = error;
       } finally {
@@ -956,9 +965,11 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       ).toMatchObject({ face: 6, edge: 12, vertex: 8, region: 1 });
 
       for (let index = 0; index < 20; index += 1) {
-        const snapshot = await tracker.record(() =>
-          service.getCurrentDocumentSnapshot(),
-        );
+        // Each read must mesh the region again (cadara-lyi reuses it).
+        const snapshot = await tracker.record(() => {
+          resetRegionRenderRecordCacheForTest();
+          return service.getCurrentDocumentSnapshot();
+        });
         expect(
           snapshot.document.render.records,
           "Snapshot temporary cleanup must not change rendered faces, edges, vertices or regions.",
@@ -1018,7 +1029,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
         triangulationPrototype.Triangle = () => {
           throw primaryMeshError;
         };
-        await tracker.record(() => service.getCurrentDocumentSnapshot());
+        await tracker.record(() => {
+          resetRegionRenderRecordCacheForTest();
+          return service.getCurrentDocumentSnapshot();
+        });
       } catch (error) {
         meshSnapshotError = error;
       } finally {
@@ -1044,7 +1058,10 @@ test("src/domain/modeling/occ/snapshot-native-render.spec.ts", async () => {
       );
       let classificationSnapshotError: unknown;
       try {
-        await tracker.record(() => service.getCurrentDocumentSnapshot());
+        await tracker.record(() => {
+          resetRegionRenderRecordCacheForTest();
+          return service.getCurrentDocumentSnapshot();
+        });
       } catch (error) {
         classificationSnapshotError = error;
       }

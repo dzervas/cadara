@@ -723,3 +723,32 @@ test("T17d B4: failedDerivationReasons cross the worker transport and runtime va
   };
   expect(() => normalizeWorkspaceSnapshot(forged)).toThrow();
 }, 120_000);
+
+// cadara-lyi: the snapshot boundary still validates every mesh, but returns an
+// exact valid mesh as is, so an unchanged mesh keeps its identity (and the
+// viewport its GPU geometry) across snapshots.
+test("snapshot normalization validates meshes and keeps an exact valid mesh's identity", async () => {
+  const adapter = new MockKernelAdapter();
+  const workspace = (
+    await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot;
+  const meshIndex = workspace.document.render.records.findIndex(
+    (record) => record.geometry.kind === "mesh",
+  );
+  expect(meshIndex).toBeGreaterThanOrEqual(0);
+  const normalized = normalizeWorkspaceSnapshot(workspace);
+  expect(normalized.document.render.records[meshIndex]!.geometry).toBe(
+    workspace.document.render.records[meshIndex]!.geometry,
+  );
+
+  const forged = structuredClone(workspace);
+  const geometry = forged.document.render.records[meshIndex]!.geometry;
+  if (geometry.kind !== "mesh") throw new Error("Expected a mesh.");
+  geometry.triangleIndices = [[0, 1, geometry.vertexPositions.length]];
+  expect(() => normalizeWorkspaceSnapshot(forged)).toThrow(
+    "Mesh triangle indices must reference existing vertex positions.",
+  );
+});

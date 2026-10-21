@@ -214,6 +214,71 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
     ).toBe("mesh");
   }
 
+  // cadara-lyi: a label/appearance-only revision resends identical meshes;
+  // they keep the previous snapshot's geometry objects, so the viewport keeps
+  // its GPU geometry. A changed mesh is unpacked again.
+  async function testUnchangedSnapshotMeshesKeepTheirGeometry() {
+    const worker = new FakeOccWorker();
+    const client = new OccWorkerClient({ worker });
+    const mesh = (id: string, x: number): RenderableEntityRecord => ({
+      id: id as never,
+      label: "Body face",
+      ownerBodyId: "body_1" as never,
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${id}` as never,
+        pickPriority: 20,
+        target: { kind: "face", bodyId: "body_1" as never, faceId: `face_${id}` as never },
+        topology: "face",
+        semanticClass: "bodyFace",
+      },
+      geometry: {
+        kind: "mesh",
+        vertexPositions: [[0, 0, 0], [x, 0, 0], [0, 1, 0]],
+        vertexNormals: null,
+        triangleIndices: [[0, 1, 2]],
+      },
+    });
+    const receive = async (records: RenderableEntityRecord[]) => {
+      const promise = client.getDocumentSnapshot({
+        contractVersion: "modeling-contract/v1alpha1",
+        documentId: "doc_1",
+      });
+      const request = worker.posted.at(-1)!;
+      worker.emit({
+        kind: "invoked",
+        requestId: request.requestId,
+        operation: "getDocumentSnapshot",
+        payload: {
+          contractVersion: "modeling-contract/v1alpha1",
+          snapshot: packWorkspaceSnapshotRenderMeshes({
+            document: { render: { records } },
+          } as never).snapshot,
+        },
+      });
+      const geometries = (await promise).snapshot.document.render.records.map(
+        (record) => record.geometry,
+      );
+      return geometries;
+    };
+
+    const [unchanged, changed] = await receive([mesh("a", 1), mesh("b", 1)]);
+    const [unchangedAgain, changedAgain] = await receive([
+      { ...mesh("a", 1), label: "Renamed face" },
+      mesh("b", 2),
+    ]);
+    expect(
+      unchangedAgain,
+      "An identical mesh must reuse the previous snapshot's geometry object.",
+    ).toBe(unchanged);
+    expect(changedAgain, "A changed mesh must be unpacked again.").not.toBe(
+      changed,
+    );
+    expect(changedAgain).toMatchObject({
+      vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 1, 0]],
+    });
+  }
+
   async function testWarmupFailuresSurfaceToCaller() {
     const worker = new FakeOccWorker();
     const client = new OccWorkerClient({ worker });
@@ -693,6 +758,7 @@ test("src/domain/modeling/occ/worker-client.spec.ts", async () => {
   await testNeutralCurveQueriesRoundTripThroughTheWorker();
   await testDeriveSketchRegionsRoundTripsThroughTheWorker();
   await testSnapshotResponsesAreUnpacked();
+  await testUnchangedSnapshotMeshesKeepTheirGeometry();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();
   await testReleaseDocumentDoesNotTerminateTheSharedWorker();

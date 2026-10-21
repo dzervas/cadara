@@ -1299,58 +1299,58 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
             );
           }
 
-          return {
+          for (const point of vertexPositions) {
+            if (
+              !Array.isArray(point) ||
+              point.length !== 3 ||
+              point.some((component) => typeof component !== "number")
+            ) {
+              throw new Error("Invalid mesh vertex position payload.");
+            }
+          }
+          for (const normal of vertexNormals ?? []) {
+            if (
+              !Array.isArray(normal) ||
+              normal.length !== 3 ||
+              normal.some((component) => typeof component !== "number")
+            ) {
+              throw new Error("Invalid mesh vertex normal payload.");
+            }
+          }
+          for (const triangle of triangleIndices) {
+            if (
+              !Array.isArray(triangle) ||
+              triangle.length !== 3 ||
+              triangle.some(
+                (index) =>
+                  typeof index !== "number" || !Number.isInteger(index),
+              )
+            ) {
+              throw new Error("Invalid mesh triangle index payload.");
+            }
+
+            if (
+              triangle.some(
+                (index) => index < 0 || index >= vertexPositions.length,
+              )
+            ) {
+              throw new Error(
+                "Mesh triangle indices must reference existing vertex positions.",
+              );
+            }
+          }
+
+          const mesh = {
             kind: "mesh" as const,
-            vertexPositions: vertexPositions.map((point) => {
-              if (
-                !Array.isArray(point) ||
-                point.length !== 3 ||
-                point.some((component) => typeof component !== "number")
-              ) {
-                throw new Error("Invalid mesh vertex position payload.");
-              }
-
-              return point as [number, number, number];
-            }),
-            vertexNormals:
-              vertexNormals === null
-                ? null
-                : vertexNormals.map((normal) => {
-                    if (
-                      !Array.isArray(normal) ||
-                      normal.length !== 3 ||
-                      normal.some((component) => typeof component !== "number")
-                    ) {
-                      throw new Error("Invalid mesh vertex normal payload.");
-                    }
-
-                    return normal as [number, number, number];
-                  }),
-            triangleIndices: triangleIndices.map((triangle) => {
-              if (
-                !Array.isArray(triangle) ||
-                triangle.length !== 3 ||
-                triangle.some(
-                  (index) =>
-                    typeof index !== "number" || !Number.isInteger(index),
-                )
-              ) {
-                throw new Error("Invalid mesh triangle index payload.");
-              }
-
-              if (
-                triangle.some(
-                  (index) => index < 0 || index >= vertexPositions.length,
-                )
-              ) {
-                throw new Error(
-                  "Mesh triangle indices must reference existing vertex positions.",
-                );
-              }
-
-              return triangle as [number, number, number];
-            }),
+            vertexPositions: vertexPositions as [number, number, number][],
+            vertexNormals: vertexNormals as [number, number, number][] | null,
+            triangleIndices: triangleIndices as [number, number, number][],
           };
+          // An exact, validated mesh keeps its identity across snapshots, so
+          // unchanged meshes do not rebuild viewport geometry (cadara-lyi).
+          return Object.keys(entry.geometry).length === 4
+            ? (entry.geometry as typeof mesh)
+            : mesh;
         }
         case "polyline": {
           if (

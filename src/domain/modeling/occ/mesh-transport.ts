@@ -101,34 +101,102 @@ export function unpackMeshGeometry(
   };
 }
 
+// postMessage clones the packed snapshot, so packing and unpacking only
+// replace mesh geometry and never deep-copy the rest of the snapshot.
 export function packRenderableMeshes(
   records: readonly RenderableEntityRecord[],
 ) {
   return records.map((record): PackedRenderableEntityRecord => {
     if (record.geometry.kind !== "mesh") {
-      return structuredClone(record) as PackedRenderableEntityRecord;
+      return record as PackedRenderableEntityRecord;
     }
 
     return {
-      ...structuredClone(record),
+      ...record,
       geometry: packMeshGeometry(record.geometry),
     };
   });
 }
 
+/**
+ * The meshes of the last unpacked snapshot by renderable id. A mesh whose
+ * packed arrays are unchanged in the next snapshot reuses the same geometry
+ * object, so label/appearance-only changes keep the viewport's GPU geometry.
+ */
+export type RenderMeshUnpackCache = Map<
+  string,
+  { packed: PackedMeshGeometry; geometry: RenderMeshGeometry }
+>;
+
+export function createRenderMeshUnpackCache(): RenderMeshUnpackCache {
+  return new Map();
+}
+
 export function unpackRenderableMeshes(
   records: readonly PackedRenderableEntityRecord[],
+  cache?: RenderMeshUnpackCache,
 ) {
-  return records.map((record): RenderableEntityRecord => {
+  const unpacked = records.map((record): RenderableEntityRecord => {
     if (record.geometry.kind !== "packedMesh") {
-      return structuredClone(record) as RenderableEntityRecord;
+      return record as RenderableEntityRecord;
     }
 
+    const previous = cache?.get(record.id);
     return {
-      ...structuredClone(record),
-      geometry: unpackMeshGeometry(record.geometry),
+      ...record,
+      geometry:
+        previous && packedMeshesEqual(previous.packed, record.geometry)
+          ? previous.geometry
+          : unpackMeshGeometry(record.geometry),
     };
   });
+
+  if (cache) {
+    cache.clear();
+    records.forEach((record, index) => {
+      const geometry = unpacked[index]!.geometry;
+      if (record.geometry.kind === "packedMesh" && geometry.kind === "mesh") {
+        cache.set(record.id, { packed: record.geometry, geometry });
+      }
+    });
+  }
+
+  return unpacked;
+}
+
+function packedMeshesEqual(
+  left: PackedMeshGeometry,
+  right: PackedMeshGeometry,
+) {
+  return (
+    packedViewsEqual(
+      left.vertexPositions,
+      right.vertexPositions,
+      Float32Array,
+    ) &&
+    packedViewsEqual(
+      left.triangleIndices,
+      right.triangleIndices,
+      Uint32Array,
+    ) &&
+    (left.vertexNormals === null || right.vertexNormals === null
+      ? left.vertexNormals === right.vertexNormals
+      : packedViewsEqual(left.vertexNormals, right.vertexNormals, Float32Array))
+  );
+}
+
+function packedViewsEqual(
+  left: PackedTypedArrayView,
+  right: PackedTypedArrayView,
+  ArrayType: typeof Float32Array | typeof Uint32Array,
+) {
+  if (left.elementCount !== right.elementCount) return false;
+  const a = new ArrayType(left.buffer, left.byteOffset, left.elementCount);
+  const b = new ArrayType(right.buffer, right.byteOffset, right.elementCount);
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
 }
 
 export function collectPackedMeshTransferList(
@@ -154,11 +222,11 @@ export function collectPackedMeshTransferList(
 export function packWorkspaceSnapshotRenderMeshes(snapshot: WorkspaceSnapshot) {
   const records = packRenderableMeshes(snapshot.document.render.records);
   const packedSnapshot: PackedWorkspaceSnapshot = {
-    ...structuredClone(snapshot),
+    ...snapshot,
     document: {
-      ...structuredClone(snapshot.document),
+      ...snapshot.document,
       render: {
-        ...structuredClone(snapshot.document.render),
+        ...snapshot.document.render,
         records,
       },
     },
@@ -172,17 +240,19 @@ export function packWorkspaceSnapshotRenderMeshes(snapshot: WorkspaceSnapshot) {
 
 export function unpackWorkspaceSnapshotRenderMeshes(
   snapshot: WorkspaceSnapshot | PackedWorkspaceSnapshot,
+  cache?: RenderMeshUnpackCache,
 ): WorkspaceSnapshot {
   const records = unpackRenderableMeshes(
     snapshot.document.render.records as PackedRenderableEntityRecord[],
+    cache,
   );
 
   return {
-    ...structuredClone(snapshot),
+    ...snapshot,
     document: {
-      ...structuredClone(snapshot.document),
+      ...snapshot.document,
       render: {
-        ...structuredClone(snapshot.document.render),
+        ...snapshot.document.render,
         records,
       },
     },
