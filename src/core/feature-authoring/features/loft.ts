@@ -293,7 +293,7 @@ function moveTarget(
   return next;
 }
 
-/** Guard against lossy hydration and native controls that validate but do nothing. */
+/** Keep canonical admission bounded to qualified ordinary/path lofts. */
 export function prepareLoftFeatureDefinition(
   parameters: import("@/contracts/modeling/advanced-solid").LoftFeatureParameters,
 ) {
@@ -311,8 +311,9 @@ export function prepareLoftFeatureDefinition(
   const paths = parameters.participants.find(p => p.role === "path")?.targets ?? [];
   if (!profiles || (paths.length > 0 && profiles.length !== 2)) return null;
   if (getAuthoredLiteralValue(parameters.operationIntent ?? "create") !== "create") return null;
-  // Refuse even explicit neutral inert controls: only the browser builder may
-  // add its neutral defaults. Inactive path settings must not be stripped.
+  // Advanced native controls remain unsupported, not silently normalized.
+  // Refuse even explicit neutral advanced controls: only the browser builder
+  // may add its neutral defaults. Inactive path settings must not be stripped.
   if (parameters.options && Object.keys(parameters.options).some(k => k !== "path")) return null;
   if (parameters.options?.path && paths.length === 0) return null;
   return loftAuthoringDefinition.buildDefinition(
@@ -657,9 +658,9 @@ export const loftAuthoringDefinition = {
             },
             createReferenceCollectionField({
               id: "loft-guide-curves",
-              label: "Guide curves",
+              label: "Guide curves (unsupported)",
               value: session.draft.guideCurveTargets,
-              helper: "Guide curves are stored separately from path controls.",
+              helper: "Guide-driven lofts are unavailable in the current kernel. Remove guide curves to build an ordinary or path loft; they are never silently ignored.",
               participant: loftParticipants[2],
               selectionFilter: loftSelectionFilter,
               selectionRequirementId: "loft-guide-curve",
@@ -725,6 +726,8 @@ export const loftAuthoringDefinition = {
                   kind: "enum",
                   id: "loft-guide-continuity",
                   label: "Guide continuity",
+                  disabled: true,
+                  helper: "Guide-driven lofts are not supported by the current loft builder.",
                   value: guideContinuity,
                   options: [
                     { value: "none", label: "none" },
@@ -769,11 +772,13 @@ export const loftAuthoringDefinition = {
                   kind: "enum",
                   id: "loft-start-condition",
                   label: "Start condition",
+                  helper: "Endpoint shaping is unavailable in the current kernel; only none is supported.",
                   value: startCondition,
                   options: [
                     { value: "none", label: "none" },
-                    { value: "normal", label: "normal" },
-                    { value: "tangent", label: "tangent" },
+                    ...(startCondition !== "none"
+                      ? [{ value: startCondition, label: `${startCondition} (unsupported)` }]
+                      : []),
                   ],
                   patch:
                     LOFT_ADVANCED_OPTION_DESCRIPTORS[2].options[0].patchTarget,
@@ -782,12 +787,14 @@ export const loftAuthoringDefinition = {
                   kind: "numeric",
                   id: "loft-start-condition-magnitude",
                   label: "Start magnitude",
+                  disabled: startMagnitude === 1,
+                  helper: "Endpoint magnitudes are not supported by the current loft builder.",
                   value: authoredNumberFormValue(
                     profileConditions.startMagnitude ?? 1,
                   ),
                   input: "number",
                   step: 0.1,
-                  hidden: startCondition === "none",
+                  hidden: startCondition === "none" && startMagnitude === 1,
                   authoredValue: {
                     expressionCapable: true,
                     valueKind: { kind: "positiveNumber" },
@@ -812,11 +819,13 @@ export const loftAuthoringDefinition = {
                   kind: "enum",
                   id: "loft-end-condition",
                   label: "End condition",
+                  helper: "Endpoint shaping is unavailable in the current kernel; only none is supported.",
                   value: endCondition,
                   options: [
                     { value: "none", label: "none" },
-                    { value: "normal", label: "normal" },
-                    { value: "tangent", label: "tangent" },
+                    ...(endCondition !== "none"
+                      ? [{ value: endCondition, label: `${endCondition} (unsupported)` }]
+                      : []),
                   ],
                   patch:
                     LOFT_ADVANCED_OPTION_DESCRIPTORS[2].options[2].patchTarget,
@@ -825,12 +834,14 @@ export const loftAuthoringDefinition = {
                   kind: "numeric",
                   id: "loft-end-condition-magnitude",
                   label: "End magnitude",
+                  disabled: endMagnitude === 1,
+                  helper: "Endpoint magnitudes are not supported by the current loft builder.",
                   value: authoredNumberFormValue(
                     profileConditions.endMagnitude ?? 1,
                   ),
                   input: "number",
                   step: 0.1,
-                  hidden: endCondition === "none",
+                  hidden: endCondition === "none" && endMagnitude === 1,
                   authoredValue: {
                     expressionCapable: true,
                     valueKind: { kind: "positiveNumber" },
@@ -859,7 +870,7 @@ export const loftAuthoringDefinition = {
               label: "Match connections",
               value: `${session.draft.options.matchConnections?.length ?? 0}`,
               helper:
-                "Durable edge or vertex connection pairs are preserved for alignment.",
+                "Match connections are unavailable in the current loft builder. Non-empty edge or vertex pairs are rejected, not silently ignored.",
             },
           ],
         },

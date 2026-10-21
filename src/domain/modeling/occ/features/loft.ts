@@ -155,6 +155,23 @@ function assertSupportedLoftProfileConditions(
       );
     }
   }
+
+  // ThruSections.SetContinuity/SetCriteriumWeight control approximation,
+  // not endpoint derivatives or their magnitudes. Never substitute those.
+  if (
+    startCondition !== "none" ||
+    endCondition !== "none" ||
+    [profileConditions.startMagnitude, profileConditions.endMagnitude].some(
+      (value) => {
+        const literal = getLoftOptionLiteral(value);
+        return literal !== undefined && literal !== null && literal !== 1;
+      },
+    )
+  ) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC loft endpoint conditions and magnitudes are not supported by the current loft builder.",
+    );
+  }
 }
 
 function assertLoftGuideTargetsResolve(
@@ -195,7 +212,7 @@ function assertSupportedLoftConnections(
 
   if (connections.length !== 1 || profileTargets.length !== 2) {
     throw new Error(
-      "advanced-feature-unsupported-kernel-case: OCC loft currently supports one match connection across two ordered profiles.",
+      "advanced-feature-unsupported-kernel-case: OCC loft match connections require one connection across two ordered profiles; matching is not supported yet.",
     );
   }
 
@@ -222,6 +239,14 @@ function assertSupportedLoftConnections(
       );
     }
   }
+
+  // Criterium weights are approximation energy weights, not correspondence.
+  // Rotating wire starts with CheckCompatibility(false) can change pairing,
+  // but the resulting twisted solid is not qualified through the production
+  // native transform/history transaction. Keep this unsupported until it is.
+  throw new Error(
+    "advanced-feature-unsupported-kernel-case: OCC loft match connections are not supported by the current loft builder.",
+  );
 }
 
 function transformLoftSectionWire(input: {
@@ -303,6 +328,11 @@ function buildLoftFeatureShape(
         `advanced-feature-unsupported-kernel-case: OCC loft does not support ${String(guideContinuity)} guide continuity yet.`,
       );
     }
+    // MakePipeShell's auxiliary spine is a sweep framing input, not a
+    // general interpolation constraint through these ordered loft sections.
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC loft guide curves are not supported by the current loft builder.",
+    );
   } else if (guideContinuity !== "none") {
     throw new Error(
       "advanced-feature-unsupported-kernel-case: OCC loft guide continuity requires guide curves.",
