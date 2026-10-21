@@ -15,6 +15,8 @@ import { EditorContext } from "@/hooks/editor-context";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
+import { createSketchDraftRecoveryController } from "@/application/sketch-draft-recovery/controller";
+import { createLocalStorageSketchDraftStore } from "@/infrastructure/persistence/local-storage-sketch-draft-store";
 
 interface EditorProviderProps extends PropsWithChildren {
   modelingService: ModelingService;
@@ -51,7 +53,7 @@ export function EditorProvider({
     sketchActionsByDocument.set(modelingService.currentDocumentId, created);
     return created;
   }, [modelingService.currentDocumentId, sketchActionsByDocument]);
-  const { machineState, dispatch } = useEditorEventLoop(
+  const { machineState, dispatch, eventLoop } = useEditorEventLoop(
     runtime,
     errorReporter,
     stableEditorDependencies,
@@ -59,6 +61,9 @@ export function EditorProvider({
     traceRecorder.record,
     sketchActions,
   );
+  const draftRecovery = useMemo(() => typeof window === "undefined" ? undefined :
+    createSketchDraftRecoveryController(eventLoop, createLocalStorageSketchDraftStore(window.localStorage)),
+  [eventLoop]);
 
   useEffect(() => {
     return modelingService.subscribeToDocumentChanges((event) => {
@@ -88,8 +93,9 @@ export function EditorProvider({
       state: getEditorViewState(machineState),
       dispatch,
       getRuntimeTrace: () => traceRecorder.getSnapshot(),
+      draftRecovery,
     }),
-    [dispatch, machineState, traceRecorder],
+    [dispatch, machineState, traceRecorder, draftRecovery],
   );
 
   return (
