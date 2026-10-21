@@ -52,6 +52,8 @@ test("toolbar progressively collapses tool families, then islands, then merges i
   await page.goto("/app");
 
   await expect(toolbar).toHaveAttribute("data-toolbar-compaction", "expanded");
+  const partsPanel = page.getByLabel("Parts and objects");
+  const wideTop = (await partsPanel.boundingBox())!.y;
   await expect(
     page.locator(
       'button[data-tool-source="toolbar"][data-tool-id="circularPattern"]',
@@ -62,6 +64,10 @@ test("toolbar progressively collapses tool families, then islands, then merges i
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(toolbar).toHaveAttribute("data-toolbar-compaction", "islands");
+  expect(
+    (await partsPanel.boundingBox())!.y,
+    "The toolbar never wraps, so overlays below it keep their place at narrow widths.",
+  ).toBe(wideTop);
   await expect(
     page.locator('button[data-tool-dropdown-trigger="pattern"]'),
   ).toBeVisible();

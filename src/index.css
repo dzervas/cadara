@@ -97,12 +97,6 @@ input {
   transform: translateY(0) scale(1);
 }
 
-@media (width <= 1639px) {
-  :root {
-    --workbench-viewport-overlay-top: 128px;
-  }
-}
-
 @keyframes workbench-tab-loading-sweep {
   0% {
     transform: translateX(-100%);
