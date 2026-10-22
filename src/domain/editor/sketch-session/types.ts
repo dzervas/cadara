@@ -265,6 +265,8 @@ export interface SketchGeometryDragState {
   message: string | null;
   /** Set once any frame of this gesture was accepted. */
   acceptedFrame?: true;
+  /** Unfinished solver work is neither acceptance nor a new refusal verdict. */
+  pendingSolve?: true;
   /**
    * Structured local feedback for the viewport cue (issue 05). Present when
    * the drag target is constrained or fails; cleared on the next frame with

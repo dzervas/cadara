@@ -35,11 +35,12 @@ import {
   selectSketchEditToolTarget,
   startSketchDraw,
   toggleSketchSvgRendering,
-  updateSketchGeometryDrag,
+  updateSketchGeometryDrag as updateSketchGeometryDragPreview,
   updateSketchPointer,
   updateSketchReferenceProjection,
   acceptSketchDraw
 } from "@/domain/editor/sketch-session";
+import { updateSketchGeometryDragUntilSettled as updateSketchGeometryDrag } from "@/domain/editor/sketch-session/test-drag-replay";
 import { getSketchSessionDisplayRenderables, getStableSketchSessionDisplayRenderables, getTransientSketchSessionDisplayRenderables 
 } from "@/domain/editor/sketch-session/display";
 import { getStableSketchSessionDisplayKey } from "@/domain/editor/sketch-session/solved-snapshot";
@@ -6752,6 +6753,72 @@ function roundedRectangleForT13a2Review() {
     );
   return { session, grabbed, smallestFilletDistance };
 }
+
+test("a pending drag preview holds geometry and feedback without recording acceptance, then resolves its actual verdict", () => {
+  const { session, grabbed } = roundedRectangleForT13a2Review();
+  const started = beginSketchGeometryDrag(session, grabbed.target, grabbed.position);
+  const cursor: [number, number] = [grabbed.position[0] + 1 / 16, grabbed.position[1] + 0.6 / 16];
+  const pending = updateSketchGeometryDragPreview(started, cursor);
+  expect(pending.definition, "pending is not a newly accepted definition").toBe(started.definition);
+  expect(pending.activeDrag?.acceptedFrame, "unfinished work is not acceptance").toBeUndefined();
+  expect(pending.activeDrag?.feedback).toBe(started.activeDrag?.feedback);
+  expect(pending.activeDrag?.status).toBe(started.activeDrag?.status);
+  expect(pending.activeDrag?.intent).toBe(started.activeDrag?.intent);
+  expect(pending.activeDrag?.grabOffset).toBe(started.activeDrag?.grabOffset);
+  let resolved = pending;
+  for (let frame = 0; frame < 10 && !resolved.activeDrag?.acceptedFrame; frame += 1)
+    resolved = updateSketchGeometryDragPreview(resolved, cursor);
+  expect(resolved.activeDrag?.acceptedFrame).toBe(true);
+  const point = resolved.definition.points.find((p) => p.pointId === grabbed.pointId)!;
+  expect(Math.hypot(point.position[0] - cursor[0], point.position[1] - cursor[1])).toBeLessThan(1e-3);
+  const freshlyPending = updateSketchGeometryDragPreview(beginSketchGeometryDrag(session, grabbed.target, grabbed.position), cursor);
+  const released = finishSketchGeometryDrag(freshlyPending, cursor);
+  expect(released.activeDrag).toBeNull();
+  const releasedPoint = released.definition.points.find((p) => p.pointId === grabbed.pointId)!;
+  expect(Math.hypot(releasedPoint.position[0] - cursor[0], releasedPoint.position[1] - cursor[1])).toBeLessThanOrEqual(1e-4);
+});
+
+test("resuming the same pending body cursor does not accumulate its displayed-relative translation twice", () => {
+  const { session, grabbed } = roundedRectangleForT13a2Review();
+  const line = session.definition.entities.find((entity) => entity.kind === "lineSegment" &&
+    (entity.startPointId === grabbed.pointId || entity.endPointId === grabbed.pointId));
+  if (line?.kind !== "lineSegment") throw new Error("Expected the grabbed fillet tangent's line.");
+  const first = session.definition.points.find((point) => point.pointId === line.startPointId)!;
+  const started = beginSketchGeometryDrag(session, line.target, first.position);
+  expect(started.activeDrag?.intent.kind).toBe("translate");
+  const cursor: [number, number] = [first.position[0] + 1 / 16, first.position[1] + 0.6 / 16];
+  let pending = updateSketchGeometryDragPreview(started, cursor);
+  expect(pending.activeDrag?.pendingSolve).toBe(true);
+  pending = updateSketchGeometryDragPreview(pending, cursor);
+  const nextCursor: [number, number] = [first.position[0] + 2 / 16, first.position[1] + 1.2 / 16];
+  pending = updateSketchGeometryDragPreview(pending, nextCursor);
+  expect(pending.activeDrag?.pendingSolve).toBe(true);
+  expect(pending.activeDrag?.acceptedFrame).toBeUndefined();
+  const settled = updateSketchGeometryDrag(pending, nextCursor);
+  const released = finishSketchGeometryDrag(settled, nextCursor);
+  for (const state of [settled, released]) {
+    const point = state.definition.points.find((p) => p.pointId === first.pointId)!;
+    expect(Math.hypot(point.position[0] - nextCursor[0], point.position[1] - nextCursor[1])).toBeLessThan(1e-3);
+  }
+});
+
+test("a pending return from a refused fillet cursor keeps its existing cue until its real verdict", () => {
+  const { session, grabbed } = roundedRectangleForT13a2Review();
+  let dragging = beginSketchGeometryDrag(session, grabbed.target, grabbed.position);
+  const cursorAt = (step: number): [number, number] => [grabbed.position[0] + step / 16, grabbed.position[1] + 0.6 * step / 16];
+  for (let step = 1; step <= 10; step += 1)
+    dragging = updateSketchGeometryDrag(dragging, cursorAt(step));
+  expect(dragging.activeDrag?.status).toBe("blocked");
+  expect(dragging.activeDrag?.feedback?.kind).toBe("failed");
+  const pending = updateSketchGeometryDragPreview(dragging, cursorAt(8));
+  expect(pending.activeDrag?.pendingSolve).toBe(true);
+  expect(pending.definition).toBe(dragging.definition);
+  expect(pending.activeDrag?.status).toBe("blocked");
+  expect(pending.activeDrag?.feedback).toBe(dragging.activeDrag?.feedback);
+  const resolved = updateSketchGeometryDrag(pending, cursorAt(8));
+  expect(resolved.activeDrag?.status).toBe("dragging");
+  expect(resolved.activeDrag?.feedback).toBeNull();
+});
 
 // R-1: after the guard blocks a collapsing fillet, dragging back toward the
 // start must keep following the cursor; no frame may claim "constrained"
