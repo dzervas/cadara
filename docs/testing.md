@@ -37,6 +37,8 @@ Lanes say what a spec proves; tiers say when it runs. Tiers are Vitest projects 
 
 The CLI specs spawn the bundle that `test/helpers/cli-bundle-global-setup.ts` builds once per run and inject through `cliEntry()`. Spawning `bun src/cli/main.ts` costs about thirty seconds and six gigabytes per process because Bun transforms Typia at startup; only `workflow-recipes.spec.ts` exercises that source entry and the extracted release on purpose.
 
+Row budgets (15 s fast, 180 s for the source CLI workflow) are wall-clock and assume the host is not oversubscribed: each complete lane fans out to about one worker per CPU. Measured on the 32-CPU reference host (cadara-t2r/b9r/dso, 2026-10-22): one or two concurrent complete lanes (`bun run test`, or one of them plus `test:heavy`) are green; three produce timeout-only failures across all of them (load above 100). The source CLI workflow row takes about 117 s alone and 154 s beside two fast lanes. Run at most two complete lanes per host at a time; treat a timeout-only failure under heavier load as a rerun, not a defect.
+
 ## Test Lanes
 
 ### Logic
