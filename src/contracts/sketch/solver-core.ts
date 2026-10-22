@@ -133,6 +133,14 @@ export type SketchDraggedPointSolveResult =
       diagnostics: SketchSolveDiagnostic[];
     };
 
+export type SketchDragPreviewSolveResult =
+  | SketchDraggedPointSolveResult
+  | {
+      kind: "pending";
+      solvedSnapshot: SolvedSketchSnapshot;
+      diagnostics: SketchSolveDiagnostic[];
+    };
+
 export interface SketchCoreValidationResult {
   isValid: boolean;
   diagnostics: SketchSolveDiagnostic[];
@@ -395,6 +403,7 @@ function* immediateSolve<T>(run: () => T): SolveSteps<T> {
 // Hessian, recentlyReset, iteration stop, anchor, goal, frozen stage and rebuild
 // context. Nothing from that stack is published until the normal judge accepts.
 type DragContinuation = {
+  target: SketchDragTarget;
   steps: SolveSteps<SketchDraggedPointSolveResult>;
   next: IteratorResult<SolveWork, SketchDraggedPointSolveResult>;
   deferred?: SketchDragTarget;
@@ -11476,8 +11485,18 @@ export function sketchDraggedPointHasFreeDof(
 export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
   dragTarget: SketchDragTarget,
+  targetTolerance?: number,
+): SketchDraggedPointSolveResult;
+export function updateCompiledSketchSolveSession(
+  session: SketchCompiledSolveSession,
+  dragTarget: SketchDragTarget,
+  targetTolerance: number | null,
+): SketchDragPreviewSolveResult;
+export function updateCompiledSketchSolveSession(
+  session: SketchCompiledSolveSession,
+  dragTarget: SketchDragTarget,
   targetTolerance: number | null = session.program.tolerances.coincidence,
-): SketchDraggedPointSolveResult {
+): SketchDragPreviewSolveResult {
   // Reject invalid input before it can replace/coalesce a valid pending goal.
   if (session.disposed) {
     dragContinuations.delete(session);
@@ -11512,7 +11531,7 @@ export function updateCompiledSketchSolveSession(
       dragTarget,
       targetTolerance,
     );
-    continuation = { steps, next: steps.next() };
+    continuation = { target: dragTarget, steps, next: steps.next() };
   }
   let iterations = targetTolerance === null ? DRAG_PREVIEW_ITERATIONS : Infinity;
   let raw = targetTolerance === null ? DRAG_PREVIEW_RAW_BLOCKS : Infinity;
@@ -11522,7 +11541,7 @@ export function updateCompiledSketchSolveSession(
     if (work.count > available) {
       dragContinuations.set(session, continuation);
       return {
-        kind: "solved",
+        kind: "pending",
         solvedSnapshot: session.lastAcceptedSnapshot,
         diagnostics: session.lastAcceptedSnapshot.diagnostics,
       };
@@ -11534,6 +11553,11 @@ export function updateCompiledSketchSolveSession(
   let result = continuation.next.value;
   dragContinuations.delete(session);
   if (continuation.deferred) {
+    const deferred = continuation.deferred;
+    const repeatsGoal = deferred.kind === "sketchTranslate"
+      ? deferred.delta.every((coordinate) => coordinate === 0)
+      : JSON.stringify(deferred) === JSON.stringify(continuation.target);
+    if (targetTolerance === null && repeatsGoal) return result;
     if (targetTolerance !== null) {
       // Release flushes the preview first, then runs the actual release protocol
       // (including exact reach / zero-delta hard-row polishing) without caps.
@@ -11548,6 +11572,12 @@ export function updateCompiledSketchSolveSession(
       // Preserve the prototype's coalescing cadence: start the newer goal on the
       // next preview, not with a fresh per-phase budget in this call.
       deferredDragTargets.set(session, continuation.deferred);
+      // The old goal's verdict does not decide the newer coalesced goal.
+      return {
+        kind: "pending",
+        solvedSnapshot: session.lastAcceptedSnapshot,
+        diagnostics: session.lastAcceptedSnapshot.diagnostics,
+      };
     }
   }
   if (targetTolerance !== null && result.kind === "solved") {

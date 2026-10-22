@@ -3685,6 +3685,7 @@ export function applySketchGeometryDrag(
     return session;
   }
   if (
+    !drag.pendingSolve &&
     point[0] === drag.startPoint[0] &&
     point[1] === drag.startPoint[1] &&
     drag.currentPoint[0] === drag.startPoint[0] &&
@@ -3717,6 +3718,20 @@ export function applySketchGeometryDrag(
     complete,
   );
 
+  if (edit.kind === "pending") {
+    // A held snapshot is not a newly accepted pointer goal. In particular it
+    // must not clear a previous refusal cue, establish a new live basis, or
+    // promote acceptedFrame/currentPoint while its actual verdict is unknown.
+    return {
+      ...session,
+      activeDrag: {
+        ...drag,
+        pendingSolve: true,
+        interactiveSolveSession: edit.interactiveSolveSession,
+      },
+    };
+  }
+
   if (edit.kind === "blocked") {
     // T12f: carry structured feedback on activeDrag; no global
     // validationMessage during the drag (issue 05: local cue only).
@@ -3726,6 +3741,7 @@ export function applySketchGeometryDrag(
         ? null
         : {
             ...drag,
+            pendingSolve: undefined,
             currentPoint: point,
             status: "blocked",
             message: edit.message,
@@ -3751,6 +3767,7 @@ export function applySketchGeometryDrag(
         ? null
         : {
             ...drag,
+            pendingSolve: undefined,
             currentPoint: point,
             status: "dragging",
             message: null,
@@ -3933,6 +3950,11 @@ function buildDragTarget(
 /** T12f: structured drag edit result with optional feedback cue. */
 export type SolveDragEditResult =
   | {
+      kind: "pending";
+      solvedSnapshot: SolvedSketchSnapshot;
+      interactiveSolveSession: SketchCompiledSolveSession;
+    }
+  | {
       kind: "accepted";
       definition: SketchDefinition;
       solvedSnapshot?: SolvedSketchSnapshot;
@@ -3945,11 +3967,38 @@ export type SolveDragEditResult =
       feedback?: SketchDragFeedback;
     };
 
+// Editor translation inputs are measured from DISPLAYED geometry. While a
+// preview is held, convert that absolute goal to new motion, not a second copy
+// of the same relative delta. The solver still receives incremental deltas.
+const pendingTranslationGoals = new WeakMap<SketchCompiledSolveSession, SketchPoint>();
+
 /**
  * T12b: generalized drag edit that routes every intent through the solver.
  * T12f: every blocked result includes structured feedback for the viewport
  * cue (issue 05) with kind, target position and short diagnostic text.
  */
+export function solveDragEdit(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
+  derivation: AuthoredSketchDerivationSettings,
+  documentVariables: SketchSessionState["documentVariables"],
+  intent: SketchDragIntent,
+  dragTarget: SketchDragTarget,
+  interactiveSolveSession?: SketchCompiledSolveSession | null,
+  complete?: true,
+): Exclude<SolveDragEditResult, { kind: "pending" }>;
+export function solveDragEdit(
+  definition: SketchDefinition,
+  projectedReferences: readonly ProjectedSketchReferenceRecord[],
+  tolerances: SolverTolerancePolicy,
+  derivation: AuthoredSketchDerivationSettings,
+  documentVariables: SketchSessionState["documentVariables"],
+  intent: SketchDragIntent,
+  dragTarget: SketchDragTarget,
+  interactiveSolveSession: SketchCompiledSolveSession | null,
+  complete: boolean,
+): SolveDragEditResult;
 export function solveDragEdit(
   definition: SketchDefinition,
   projectedReferences: readonly ProjectedSketchReferenceRecord[],
@@ -4000,10 +4049,23 @@ export function solveDragEdit(
     solveSession = started.session;
   }
 
+  let solverTarget = dragTarget;
+  let translationGoal: SketchPoint | undefined;
+  if (solveSession && dragTarget.kind === "sketchTranslate") {
+    const pointId = dragTarget.pointIds[0];
+    const displayed = definition.points.find((point) => point.pointId === pointId)?.position;
+    const accepted = solveSession.lastAcceptedSnapshot.solvedPoints.find((point) => point.pointId === pointId)?.solvedPosition;
+    if (displayed && accepted) {
+      translationGoal = [displayed[0] + dragTarget.delta[0], displayed[1] + dragTarget.delta[1]];
+      const previous = pendingTranslationGoals.get(solveSession) ?? accepted;
+      solverTarget = { ...dragTarget, delta: [translationGoal[0] - previous[0], translationGoal[1] - previous[1]] };
+    }
+  }
+
   const solved = solveSession
     ? updateCompiledSketchSolveSession(
         solveSession,
-        dragTarget,
+        solverTarget,
         // T13a2: only the release frame runs the exact-reach step.
         complete ? 1e-4 : null,
       )
@@ -4027,7 +4089,20 @@ export function solveDragEdit(
           diagnostics: [],
         };
 
-  if (solved.kind !== "solved") {
+  if (solveSession) {
+    if (solved.kind === "pending" && translationGoal)
+      pendingTranslationGoals.set(solveSession, translationGoal);
+    else pendingTranslationGoals.delete(solveSession);
+  }
+  if (solved.kind === "pending") {
+    return {
+      kind: "pending",
+      solvedSnapshot: solved.solvedSnapshot,
+      interactiveSolveSession: solveSession!,
+    };
+  }
+
+  if (solved.kind === "blocked") {
     return {
       kind: "blocked",
       message: CONSTRAINED_DRAG_BLOCKED_MESSAGE,
