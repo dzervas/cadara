@@ -37,6 +37,9 @@ vi.mock("@/hooks/use-durable-history", () => ({
 }));
 
 const { useWorkbenchHistory } = await import("./use-workbench-history");
+const { useWorkbenchDocumentPresentation } = await import(
+  "./use-workbench-document-presentation"
+);
 
 beforeEach(() => {
   hookHarness.reset();
@@ -515,6 +518,79 @@ test("useWorkbenchHistory surfaces invalid variable updates without changing dur
   );
   expect(controller.toolbarHistoryAvailability.canUndo).toBeFalsy();
   expect(controller.toolbarHistoryAvailability.canRedo).toBeFalsy();
+});
+
+test("variable expression failures in one document do not mark another document's variables invalid after a tab switch", async () => {
+  // CadWorkbench stays mounted across tabs and composes these two hooks; variable
+  // ids restart at variable_1 in every document, so tab B reuses tab A's ids.
+  const documentA = makeSnapshot({
+    documentId: "doc_a",
+    variables: [{ name: "var1", valueText: "0", variableId: "variable_1" }],
+  });
+  const documentB = makeSnapshot({
+    documentId: "doc_b",
+    variables: [{ name: "var1", valueText: "0", variableId: "variable_1" }],
+  });
+  const renderWorkbench = (snapshot: typeof documentA, documentId: string) =>
+    hookHarness.render(() => {
+      const presentation = useWorkbenchDocumentPresentation(documentId);
+      const history = useWorkbenchHistory({
+        deps: {
+          documentOwner: {
+            async reorderDocumentHistory() {
+              throw new Error("Variable edits should not reorder history.");
+            },
+            async updateDocumentVariable() {
+              return err(
+                createAppError({
+                  code: "workbench/action-failed",
+                  context: [],
+                  message:
+                    'Document variable "var1" references unknown symbol "missing".',
+                }),
+              );
+            },
+          },
+        },
+        dispatch() {},
+        errorReporter: createTestErrorReporter(),
+        history: { canRedo: false, canUndo: false },
+        setInvalidVariableValueMessages:
+          presentation.setInvalidVariableValueMessages,
+        showWorkbenchError() {},
+        sketchSession: null,
+        snapshot,
+      });
+      return { history, presentation };
+    });
+
+  const onDocumentA = renderWorkbench(documentA, "doc_a");
+  await hookHarness.flushEffects();
+  onDocumentA.history.handleVariableUpdate(
+    { name: "var1", valueText: "0", variableId: "variable_1" } as never,
+    { name: "var1", valueText: "missing + 1" },
+  );
+  await flushMicrotasks();
+  expect(
+    renderWorkbench(documentA, "doc_a").presentation.invalidVariableValueMessages,
+    "Tab A's failed expression should mark its own variable invalid.",
+  ).toEqual({
+    variable_1: 'Document variable "var1" references unknown symbol "missing".',
+  });
+
+  renderWorkbench(documentB, "doc_b");
+  await hookHarness.flushEffects();
+  expect(
+    renderWorkbench(documentB, "doc_b").presentation.invalidVariableValueMessages,
+    "Tab B's valid variable_1 must not inherit tab A's expression failure.",
+  ).toEqual({});
+  expect(
+    renderWorkbench(documentA, "doc_a").presentation
+      .invalidVariableValueMessages,
+    "Returning to tab A should restore its own expression failure.",
+  ).toEqual({
+    variable_1: 'Document variable "var1" references unknown symbol "missing".',
+  });
 });
 
 test("useWorkbenchHistory reorders document history through the document owner and reflects durable-history availability", async () => {

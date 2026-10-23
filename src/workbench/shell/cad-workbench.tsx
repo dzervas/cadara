@@ -299,7 +299,7 @@ export function CadWorkbench({
     setRawExplicitHiddenTargetKeys,
     setRawExplicitlyShownAutoHiddenTargetKeys,
     viewportFitRequestId,
-  } = useWorkbenchDocumentPresentation();
+  } = useWorkbenchDocumentPresentation(snapshot?.document.documentId ?? null);
   const {
     reportDocumentFileActionFailure,
     restoreMessage,
