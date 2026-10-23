@@ -212,9 +212,13 @@ test("workbench architecture preserves document ownership routing", () => {
     "CadWorkbench should not own ordinary document mutation sequencing once the shared document owner hook is in place.",
   ).toBeTruthy();
   expect(
-    presentationHookSource.includes("resetForDocumentReplacement") &&
-      presentationHookSource.includes("setInvalidVariableValueMessages({})"),
-    "Document-scoped shell presentation state should expose one reset path for whole-document replacement flows.",
+    presentationHookSource.includes(
+      "useWorkbenchDocumentPresentation(documentId: string | null)",
+    ) &&
+      workbenchSource.includes(
+        "useWorkbenchDocumentPresentation(snapshot?.document.documentId ?? null)",
+      ),
+    "Document-scoped shell presentation state should be keyed by the displayed document, since CadWorkbench stays mounted across document tabs.",
   ).toBeTruthy();
 });
 
