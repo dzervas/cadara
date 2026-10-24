@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import { snapshotRepresentsRepositoryDocument } from "@/contracts/modeling/repository-basis";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createModelingService } from "./service";
 
@@ -265,3 +266,135 @@ it("a snapshot read racing its own background write's acknowledgement reads the 
     service.dispose();
   }
 });
+
+// cadara-13x: a steady-state label-only mutation exports the authored document
+// once (for its repository write) and reuses that export as the next
+// mutation's predecessor while no other runtime change intervenes.
+it.each(["blocking", "background"] as const)(
+  "consecutive %s body renames export the authored document once each",
+  async (documentRepositoryPersistence) => {
+    let exports = 0;
+    class CountingAdapter extends MockKernelAdapter {
+      override async exportAuthoredModelDocument(
+        ...args: Parameters<MockKernelAdapter["exportAuthoredModelDocument"]>
+      ) {
+        exports += 1;
+        return super.exportAuthoredModelDocument(...args);
+      }
+    }
+    const adapter = new CountingAdapter();
+    const repository = new MemoryDocumentRepository([
+      await adapter.exportAuthoredModelDocument("doc_workspace"),
+    ]);
+    const service = createModelingService(adapter, {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+      documentRepositoryPersistence,
+    });
+    const rename = async (bodyLabel: string) => {
+      const before = await service.getCurrentDocumentSnapshot();
+      exports = 0;
+      let write: DocumentRepositoryMutationResult | undefined;
+      const result = await service.renameBody({
+        baseRevisionId: before.document.revisionId,
+        bodyId: before.document.bodies[0]!.bodyId,
+        bodyLabel,
+        observePersistence: (value) => {
+          write = value;
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      expect(write?.ok, JSON.stringify(write)).toBe(true);
+      return exports;
+    };
+    try {
+      await rename("First");
+      expect(await rename("Second"), "steady-state rename").toBe(1);
+      expect(await rename("Third"), "steady-state rename").toBe(1);
+
+      // Any other runtime change (here a peer restore) drops the reused export.
+      const stored = await repository.load({
+        documentId: "doc_workspace",
+        seedDocument:
+          await adapter.exportAuthoredModelDocument("doc_workspace"),
+      });
+      if (!stored.ok) throw new Error("Expected a stored document");
+      const peer = await repository.receivePeerDocument(
+        { ...stored.document, name: "Peer title" },
+        stored.document,
+      );
+      if (!peer.ok) throw new Error("Expected peer write");
+      expect(await rename("Fourth"), "rename after a peer restore").toBe(2);
+      const current = await service.getCurrentDocumentSnapshot();
+      expect(current.document.name).toBe("Peer title");
+      expect(current.document.bodies[0]!.label).toBe("Fourth");
+    } finally {
+      service.dispose();
+    }
+  },
+);
+
+// cadara-13x: a mutation that takes no post-operation export (persistence is
+// closed after a failed write) must not leave the pre-operation export behind
+// as the current document.
+it.each(["blocking", "background"] as const)(
+  "%s rename after a failed repository write exports its new label",
+  async (documentRepositoryPersistence) => {
+    let failNextWrite = false;
+    class FailingRepository extends MemoryDocumentRepository {
+      override async mutate(
+        input: Parameters<MemoryDocumentRepository["mutate"]>[0],
+      ): Promise<DocumentRepositoryMutationResult> {
+        if (!failNextWrite) return super.mutate(input);
+        failNextWrite = false;
+        return {
+          ok: false,
+          status: {
+            kind: "failed",
+            documentId: input.documentId,
+            diagnostic: {
+              reasonCode: "test-write-failed",
+              message: "Write failed.",
+            },
+          },
+        };
+      }
+    }
+    const adapter = new MockKernelAdapter();
+    const repository = new FailingRepository([
+      await adapter.exportAuthoredModelDocument("doc_workspace"),
+    ]);
+    const service = createModelingService(adapter, {
+      currentDocumentId: "doc_workspace",
+      documentRepository: repository,
+      documentRepositoryPersistence,
+    });
+    const rename = async (bodyLabel: string) => {
+      const before = await service.getCurrentDocumentSnapshot();
+      let write: DocumentRepositoryMutationResult | undefined;
+      const result = await service.renameBody({
+        baseRevisionId: before.document.revisionId,
+        bodyId: before.document.bodies[0]!.bodyId,
+        bodyLabel,
+        observePersistence: (value) => {
+          write = value;
+        },
+      });
+      expect(result.isOk()).toBe(true);
+      return write;
+    };
+    try {
+      expect((await rename("First"))?.ok).toBe(true);
+      failNextWrite = true;
+      expect((await rename("Second"))?.ok).toBe(false);
+      // Persistence is now closed: this rename takes no post-operation export.
+      expect(await rename("Third")).toBeUndefined();
+      const exported = await service.exportCurrentDocument();
+      expect(JSON.parse(exported.payload as string).bodyLabels[0].label).toBe(
+        "Third",
+      );
+    } finally {
+      service.dispose();
+    }
+  },
+);

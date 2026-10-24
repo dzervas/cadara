@@ -437,8 +437,20 @@ export function createModelingService(
       action: () =>
         runLocalDocumentChange(async () => {
           const previousBasis = repositorySnapshotBasis;
+          const previousExport = lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
+            ? lastPersistedRuntimeExport : null;
           const generation = beginRuntimeChange();
-          const result = await input.action();
+          // The kernel operation has not run yet: until it does, the previous
+          // export still is this mutation's predecessor (cadara-13x).
+          const predecessorExport = previousExport && { ...previousExport, runtimeGeneration: generation };
+          lastPersistedRuntimeExport = predecessorExport;
+          let result: T;
+          try {
+            result = await input.action();
+          } finally {
+            // Only an export taken after the kernel operation describes it.
+            if (lastPersistedRuntimeExport === predecessorExport) lastPersistedRuntimeExport = null;
+          }
           // A refusal leaves the runtime untouched. Its previous verified basis
           // remains valid unless another runtime operation has intervened.
           if (result.revisionState.kind !== "accepted" && generation === runtimeGeneration && !repositorySnapshotBasis && previousBasis) {
@@ -496,8 +508,26 @@ export function createModelingService(
     return createAuthoredModelDocumentFromSnapshot(snapshot);
   }
 
+  /** cadara-13x: the authored document an accepted mutation exported for its
+   * repository write. Every other runtime change advances `runtimeGeneration`,
+   * so a matching generation means the runtime still holds exactly this export
+   * and the next mutation reuses it as its predecessor instead of exporting
+   * the whole document again. */
+  let lastPersistedRuntimeExport: {
+    document: AuthoredModelDocument;
+    runtimeGeneration: number;
+  } | null = null;
+
+  async function exportAcceptedAuthoredDocument() {
+    const document = await exportAuthoredDocumentForRepository();
+    lastPersistedRuntimeExport = { document, runtimeGeneration };
+    return document;
+  }
+
   async function getMutationPredecessor() {
-    const kernelBase = await exportAuthoredDocumentForRepository();
+    const kernelBase = lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
+      ? structuredClone(lastPersistedRuntimeExport.document)
+      : await exportAuthoredDocumentForRepository();
     // Restore/compensation rebuilds native witnesses, while the repository keeps
     // its exact previous stored basis. That basis applies only until the runtime
     // advances: later writes may be queued ahead of background persistence.
@@ -1579,7 +1609,7 @@ export function createModelingService(
         : result;
     }
 
-    const document = await exportAuthoredDocumentForRepository();
+    const document = await exportAcceptedAuthoredDocument();
     const writeResult = await documentRepository.mutate({
       documentId: currentDocumentId,
       expected,
@@ -1657,7 +1687,7 @@ export function createModelingService(
       return;
     }
 
-    const document = await exportAuthoredDocumentForRepository();
+    const document = await exportAcceptedAuthoredDocument();
     // Capture the existing replay tail associated with this exact candidate, not later queued work.
     const persistedHistory = operationHistoryStore
       ? [...operationHistoryPayload.entries]
