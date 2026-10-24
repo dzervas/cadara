@@ -149,8 +149,12 @@ test("a tool picked from a collapsed island becomes its face and stays first aft
   ).toHaveAttribute("data-tool-id", "mirror");
 });
 
+// Tolerate the 1px hover lift (still easing back for 180ms after the pointer
+// leaves) plus subpixel rounding; a wrapped tool sits a full row (~50px) lower.
+const toolbarRowTopTolerancePx = 2;
+
 async function expectToolbarToUseOneToolRow(page: Page) {
-  const rowTops = await page.evaluate(() => {
+  const toolTops = await page.evaluate(() => {
     const toolbar = document.querySelector(
       '[role="toolbar"][aria-label="CAD tools"]',
     );
@@ -163,14 +167,14 @@ async function expectToolbarToUseOneToolRow(page: Page) {
         'button[data-tool-source="toolbar"], button[data-tool-dropdown-trigger], button[data-toolbar-group-trigger]',
       ),
     );
-    return [
-      ...new Set(
-        buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
-      ),
-    ];
+    return buttons.map((button) => button.getBoundingClientRect().top);
   });
 
-  expect(rowTops).toHaveLength(1);
+  expect(toolTops.length).toBeGreaterThan(0);
+  expect(
+    Math.max(...toolTops) - Math.min(...toolTops),
+    `Toolbar tools should share one row; tops ${JSON.stringify(toolTops)}.`,
+  ).toBeLessThanOrEqual(toolbarRowTopTolerancePx);
 }
 
 async function expectToolbarToolsToAvoidSearch(page: Page) {
