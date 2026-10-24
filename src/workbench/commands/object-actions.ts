@@ -78,17 +78,20 @@ export function deleteWorkbenchTarget({
   });
 }
 
-export function addWorkbenchVariable({
+/** Resolves with the added variable's id, or null when nothing was added. */
+export async function addWorkbenchVariable({
   documentOwner,
   errorReporter,
   showWorkbenchError,
   snapshot,
-}: WorkbenchObjectActionContext) {
+}: WorkbenchObjectActionContext): Promise<
+  DocumentVariableRecord["variableId"] | null
+> {
   if (!snapshot) {
-    return;
+    return null;
   }
 
-  void runWorkbenchAction({
+  const result = await runWorkbenchAction({
     operation: "Add variable",
     reporter: errorReporter,
     reporting: { mappedFailure: "expected" },
@@ -101,9 +104,10 @@ export function addWorkbenchVariable({
           { key: "baseRevisionId", value: snapshot.document.revisionId },
         ],
       }),
-    mapSuccess: (result) => ok(result),
+    mapSuccess: (result) => ok(result.mutation.variableId),
     onError: (error) => showWorkbenchError(error.message),
   });
+  return result.isOk() ? result.value : null;
 }
 
 export function removeWorkbenchVariable({

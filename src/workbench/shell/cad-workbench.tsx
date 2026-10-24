@@ -1090,9 +1090,7 @@ export function CadWorkbench({
     setWorkbenchFeatureSuppression({ ...objectActionContext, item });
   };
 
-  const handleVariableAdd = () => {
-    addWorkbenchVariable(objectActionContext);
-  };
+  const handleVariableAdd = () => addWorkbenchVariable(objectActionContext);
 
   const handleVariableRemove = (variable: DocumentVariableRecord) => {
     removeWorkbenchVariable({ ...objectActionContext, variable });

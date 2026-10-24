@@ -110,8 +110,8 @@ test("a second Add variable while one is in flight adds another variable without
     showWorkbenchInfo: () => {},
   };
 
-  addWorkbenchVariable(context);
-  addWorkbenchVariable(context);
+  void addWorkbenchVariable(context);
+  void addWorkbenchVariable(context);
 
   await vi.waitFor(() =>
     expect(loadedSnapshots.length + errors.length).toBe(2),

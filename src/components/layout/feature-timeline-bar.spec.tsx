@@ -55,7 +55,7 @@ test.each(["150", ""])(
             },
           }}
           invalidVariableValueMessages={{ variable_width: message }}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
           onClose={() => undefined}
@@ -169,7 +169,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
               "Renamed Object",
           }}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -356,7 +356,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[snapshot.presentation.objects[0]!.target]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -427,7 +427,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -497,7 +497,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           }}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -547,7 +547,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           }}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -588,7 +588,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -628,7 +628,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
@@ -661,7 +661,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           invalidVariableValueIds={{}}
           objectLabelOverrides={{}}
           visibleSelection={[]}
-          onAddVariable={() => undefined}
+          onAddVariable={async () => null}
           onInspectDiagnostic={() => undefined}
           onObjectDelete={() => undefined}
           onObjectExport={() => undefined}
