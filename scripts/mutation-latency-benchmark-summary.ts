@@ -3,6 +3,12 @@
 // attribution by time window, and nearest-rank latency statistics. Kept
 // browser- and Playwright-free so test/scripts can guard the JSON shape.
 
+/** Span op of the OCC worker client's per-request spans (instrumented-worker-client.ts). */
+const OCC_WORKER_SPAN_OP = "cad.occ.worker";
+/** Phase name prefix of those spans (spanPhaseName). */
+const OCC_ROUND_TRIP_PHASE_PREFIX =
+  "OCC worker round trip (incl. main-thread delivery) ";
+
 /** One finished performance span, in epoch milliseconds. */
 export interface BenchmarkSpan {
   name: string;
@@ -54,6 +60,17 @@ export interface SampleWindow {
   endMs: number;
 }
 
+/** A V8 CPU profile (CDP Profiler.stop); `startTime` and `timeDeltas` in microseconds. */
+export interface CpuProfile {
+  nodes: {
+    id: number;
+    callFrame: { functionName: string; url: string; lineNumber: number };
+  }[];
+  startTime: number;
+  samples: number[];
+  timeDeltas: number[];
+}
+
 /**
  * The spans of every `transaction` item in a Sentry envelope body. The
  * product's performance telemetry starts inactive root spans, so each one
@@ -98,22 +115,46 @@ interface SentryTransactionEvent {
 }
 
 /**
- * Spans overlapping the sample window, clipped to it and grouped by span
- * name; time of spans that started before the window is also reported as
- * `carriedInMs`.
+ * Phase name of a span. The OCC worker client's spans time the main-thread
+ * request -> reply round trip, so they include the time the reply waits for
+ * the main thread: on the wheel rename the OCC worker was idle for ~1590 of
+ * 1640 ms while one ~250 ms round trip per sample moved between request kinds
+ * (cadara-lx4z). They are therefore not named as worker work; per-thread CPU
+ * time inside each phase comes from the profiles (attributeProfileBusy).
+ */
+function spanPhaseName(span: BenchmarkSpan) {
+  return span.op === OCC_WORKER_SPAN_OP
+    ? span.name.replace(/^OCC worker /, OCC_ROUND_TRIP_PHASE_PREFIX)
+    : span.name;
+}
+
+/** The spans overlapping the sample window, clipped to it, with their phase names. */
+function clipSpans(spans: readonly BenchmarkSpan[], window: SampleWindow) {
+  return spans
+    .filter(
+      (span) => span.endMs >= window.startMs && span.startMs <= window.endMs,
+    )
+    .map((span) => ({
+      phase: spanPhaseName(span),
+      startMs: Math.max(span.startMs, window.startMs),
+      endMs: Math.min(span.endMs, window.endMs),
+      carriedIn: span.startMs < window.startMs,
+    }));
+}
+
+/**
+ * Spans overlapping the sample window, clipped to it and grouped by phase
+ * name (spanPhaseName); time of spans that started before the window is also
+ * reported as `carriedInMs`.
  */
 export function attributeSpans(
   spans: readonly BenchmarkSpan[],
   window: SampleWindow,
 ): Record<string, SpanPhase> {
   const phases: Record<string, SpanPhase> = {};
-  for (const span of spans) {
-    if (span.endMs < window.startMs || span.startMs > window.endMs) continue;
-    const duration = round(
-      Math.min(span.endMs, window.endMs) -
-        Math.max(span.startMs, window.startMs),
-    );
-    const phase = (phases[span.name] ??= {
+  for (const span of clipSpans(spans, window)) {
+    const duration = round(span.endMs - span.startMs);
+    const phase = (phases[span.phase] ??= {
       count: 0,
       totalMs: 0,
       maxMs: 0,
@@ -122,11 +163,58 @@ export function attributeSpans(
     phase.count += 1;
     phase.totalMs = round(phase.totalMs + duration);
     phase.maxMs = Math.max(phase.maxMs, duration);
-    if (span.startMs < window.startMs) {
+    if (span.carriedIn) {
       phase.carriedInMs = round(phase.carriedInMs + duration);
     }
   }
   return phases;
+}
+
+/**
+ * CPU time (non-idle samples) of one profiled thread inside each phase's
+ * spans, clipped to the sample window like attributeSpans. A sample covers
+ * the interval since the previous one (its time delta), clipped to each
+ * span: a starved sampler's long delta must not land whole in a short span.
+ * That delta is still credited as busy when its closing sample is non-idle,
+ * although the profile never observed the gap: under host load, busy time
+ * close to a span's duration may be partly sampler starvation.
+ * `epochOffsetMs` maps the profile's microseconds to the spans' epoch
+ * milliseconds: epochMs = us / 1000 + epochOffsetMs.
+ */
+export function attributeProfileBusy(
+  spans: readonly BenchmarkSpan[],
+  window: SampleWindow,
+  profile: CpuProfile,
+  epochOffsetMs: number,
+): Record<string, number> {
+  const idleNodes = new Set(
+    profile.nodes
+      .filter((node) => node.callFrame.functionName === "(idle)")
+      .map((node) => node.id),
+  );
+  const busyIntervals: { fromMs: number; toMs: number }[] = [];
+  let tickUs = profile.startTime;
+  profile.samples.forEach((nodeId, index) => {
+    const fromMs = tickUs / 1000 + epochOffsetMs;
+    tickUs += profile.timeDeltas[index] ?? 0;
+    if (idleNodes.has(nodeId)) return;
+    busyIntervals.push({ fromMs, toMs: tickUs / 1000 + epochOffsetMs });
+  });
+  const busy: Record<string, number> = {};
+  for (const span of clipSpans(spans, window)) {
+    const inside = busyIntervals.reduce(
+      (total, interval) =>
+        total +
+        Math.max(
+          0,
+          Math.min(interval.toMs, span.endMs) -
+            Math.max(interval.fromMs, span.startMs),
+        ),
+      0,
+    );
+    busy[span.phase] = round((busy[span.phase] ?? 0) + inside);
+  }
+  return busy;
 }
 
 /** Long animation frames that started inside the sample window. */

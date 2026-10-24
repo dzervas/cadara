@@ -7,10 +7,24 @@
 // instrumented modeling service, OCC worker client and document repository,
 // captured by intercepting the Sentry envelope requests so nothing leaves
 // the machine) plus Long Animation Frame entries for main-thread rendering.
+// The `OCC worker <operation>` spans time main-thread request -> reply round
+// trips, not worker work: a reply also waits for the main thread, which in
+// headless chromium (SwiftShader) spends ~200 ms blocks in native
+// `(program)` time that Long Animation Frames do not report. Their phases
+// are named `OCC worker round trip (incl. main-thread delivery) <operation>`.
 // The worst rows are re-run with CPU profiles of the main thread and every
-// dedicated worker (raw CDP, Target.setAutoAttach flatten). Output: one
-// results.json (shape in scripts/mutation-latency-benchmark-summary.ts),
-// comparable across runs, plus .cpuprofile files.
+// dedicated worker (raw CDP, Target.setAutoAttach flatten); for those
+// samples every target reports its CPU busy time inside each phase
+// (`phaseBusyMs`), which separates OCC worker work from main-thread time.
+// A sampler gap (a long tick delta under host load) counts as busy when its
+// closing sample is non-idle, so busy time close to a span's duration may be
+// partly starvation rather than observed CPU.
+// Output: one results.json (shape in
+// scripts/mutation-latency-benchmark-summary.ts), comparable across runs
+// with the same schemaVersion (3 renamed the `OCC worker <operation>`
+// phases above and added `phaseBusyMs`),
+// plus .cpuprofile files; the console prints the latency table, each row's
+// phase medians and the profiled samples' per-thread phase busy time.
 //
 // Run from the workspace root with the devenv environment (only it exports
 // PLAYWRIGHT_BROWSERS_PATH for the nix chromium):
@@ -44,18 +58,20 @@ import { parseArgs } from "node:util";
 
 import {
   attributeFrames,
+  attributeProfileBusy,
   attributeSpans,
   parseSentryEnvelopeSpans,
   summarizeLatencies,
   summarizeSpanPhases,
   type BenchmarkFrame,
   type BenchmarkSpan,
+  type CpuProfile,
   type FramePhase,
   type LatencyStats,
   type SpanPhase,
 } from "./mutation-latency-benchmark-summary.ts";
 
-const RESULT_SCHEMA_VERSION = 2;
+const RESULT_SCHEMA_VERSION = 3;
 const SAMPLE_TIMEOUT_MS = 120_000;
 const OPEN_TIMEOUT_MS = 300_000;
 // Past this the capture is too slow to prepare as a benchmark fixture.
@@ -1024,13 +1040,31 @@ interface CdpTarget {
   attachError?: string;
   /** Why the current profile window has no profile for this target. */
   startError?: string;
+  /** Epoch ms when Profiler.start was sent and acknowledged. */
+  startCall?: { sentMs: number; ackedMs: number };
+}
+
+/**
+ * Maps profile timestamps to epoch: epochMs = us / 1000 + offsetMs. A profile
+ * starts while its Profiler.start call is in flight, so the offset is known
+ * to +-uncertaintyMs (half the call's round trip). All targets share the
+ * host's monotonic clock, so a sample uses its narrowest target bracket.
+ */
+interface ProfileClock {
+  offsetMs: number;
+  uncertaintyMs: number;
 }
 
 type ProfiledTarget =
   | { type: string; url: string; error: string }
-  | ({ type: string; url: string; file: string } & ReturnType<
-      typeof summarizeProfile
-    >);
+  | ({
+      type: string;
+      url: string;
+      file: string;
+      clock: ProfileClock;
+      /** Set once the sample's spans arrived (runRow). */
+      phaseBusyMs?: Record<string, number>;
+    } & ReturnType<typeof summarizeProfile>);
 
 type Profiler = Awaited<ReturnType<typeof connectProfiler>>;
 
@@ -1117,7 +1151,9 @@ async function connectProfiler(debugPort: number) {
           target.startError = target.attachError;
           if (target.startError) return;
           try {
+            const sentMs = now();
             await send("Profiler.start", {}, id);
+            target.startCall = { sentMs, ackedMs: now() };
           } catch (error) {
             target.startError = `start: ${errorMessage(error)}`;
           }
@@ -1141,7 +1177,12 @@ async function connectProfiler(debugPort: number) {
             .replace(/[^\w.-]/g, "_")
             .slice(0, 40)}.cpuprofile`;
           writeFileSync(resolve(directory, file), JSON.stringify(profile));
-          return { type, url, file, ...summarizeProfile(profile) };
+          const { sentMs, ackedMs } = target.startCall!;
+          const clock = {
+            offsetMs: (sentMs + ackedMs) / 2 - profile.startTime / 1000,
+            uncertaintyMs: round((ackedMs - sentMs) / 2),
+          };
+          return { type, url, file, clock, ...summarizeProfile(profile) };
         }),
       );
     },
@@ -1149,15 +1190,6 @@ async function connectProfiler(debugPort: number) {
       socket.close();
     },
   };
-}
-
-interface CpuProfile {
-  nodes: {
-    id: number;
-    callFrame: { functionName: string; url: string; lineNumber: number };
-  }[];
-  samples: number[];
-  timeDeltas: number[];
 }
 
 function summarizeProfile(profile: CpuProfile) {
@@ -1294,7 +1326,17 @@ interface RowResult {
     settledMs: LatencyStats | null;
     spans: Record<string, LatencyStats>;
   };
-  profiles?: unknown;
+  profiles?: SampleProfile[];
+}
+
+interface SampleProfile {
+  sample: "first" | "steady";
+  window: { startMs: number; endMs: number };
+  targets: ProfiledTarget[];
+  /** Spans clipped to the profile window: the denominator of `phaseBusyMs`. */
+  phases?: Record<string, SpanPhase>;
+  /** Uncertainty of the profile -> epoch mapping used for `phaseBusyMs`. */
+  clockUncertaintyMs?: number;
 }
 
 interface RowOptions {
@@ -1334,7 +1376,7 @@ async function runRow(
     profiling: null,
   };
   const timings: (SampleTiming & { load: number[] })[] = [];
-  const profiles: unknown[] = [];
+  const profiles: SampleProfile[] = [];
   try {
     row.openMs = round(await openFixture(page, fixture.name, document));
     await delay(settleMs);
@@ -1414,6 +1456,31 @@ async function runRow(
       ),
       spans: summarizeSpanPhases(row.steady.map((sample) => sample.spans)),
     };
+    for (const profile of profiles) {
+      profile.phases = attributeSpans(telemetry.spans, profile.window);
+      const profiled = profile.targets.flatMap((target) =>
+        "file" in target ? [target] : [],
+      );
+      const clock = profiled
+        .map((target) => target.clock)
+        .sort((left, right) => left.uncertaintyMs - right.uncertaintyMs)[0];
+      if (!clock) continue;
+      profile.clockUncertaintyMs = clock.uncertaintyMs;
+      for (const target of profiled) {
+        const cpuProfile = JSON.parse(
+          readFileSync(
+            resolve(rowOptions.profileDirectory!, target.file),
+            "utf8",
+          ),
+        ) as CpuProfile;
+        target.phaseBusyMs = attributeProfileBusy(
+          telemetry.spans,
+          profile.window,
+          cpuProfile,
+          clock.offsetMs,
+        );
+      }
+    }
     if (profiles.length > 0) row.profiles = profiles;
     releaseInfo ??= telemetry.release;
     await context.close();
@@ -1531,11 +1598,11 @@ async function main() {
         settled:
           "viewport data-render-idle set again (last transition after start); null when it never left idle",
         spans:
-          "Sentry performance spans overlapping the sample window, clipped to it, by span name; carriedInMs is the part from spans that started before the window",
+          "Sentry performance spans overlapping the sample window, clipped to it, by phase name; carriedInMs is the part from spans that started before the window. OCC worker client spans (op cad.occ.worker) are main-thread request->reply round trips including main-thread delivery delay, so their phase is 'OCC worker round trip (incl. main-thread delivery) <operation>'; per-thread CPU time inside a phase is profiles[].targets[].phaseBusyMs",
         frames:
           "Long Animation Frames (>50 ms) starting in the sample window; null when the frame log could not be read (row.errors)",
         profiles:
-          "CPU profiles from the sample start to persisted (window in profiles[].window); per-target error when a target could not be profiled",
+          "CPU profiles from the sample start to persisted (window in profiles[].window); per-target error when a target could not be profiled; profiles[].phases are the spans clipped to that window and targets[].phaseBusyMs the target's non-idle sampled CPU ms inside each phase's spans (profile ticks mapped to epoch by the narrowest Profiler.start call bracket, targets[].clock; profiles[].clockUncertaintyMs is that mapping's +- error; a sampler gap is credited as busy when its closing sample is non-idle)",
       },
       rows,
       profiledRows,
@@ -1556,10 +1623,64 @@ async function main() {
         settledMedian: row.stats.settledMs?.median,
       })),
     );
+    for (const row of rows) printPhases(row, "");
+    for (const row of profiledRows) printPhases(row, "profiled re-run ");
     console.log(`[bench] wrote ${resolve(outDir, "results.json")}`);
   } finally {
     await browser?.close();
     stopPreview(server);
+  }
+}
+
+/**
+ * The row's steady phase medians (span time) and, for profiled samples, each
+ * phase's span time beside every profiled thread's CPU busy time inside it.
+ */
+function printPhases(row: RowResult, label: string) {
+  if (Object.keys(row.stats.spans).length > 0) {
+    console.log(
+      `[bench] ${label}${row.fixture} ${row.mutation} phases (steady median span ms)`,
+    );
+    console.table(
+      Object.fromEntries(
+        Object.entries(row.stats.spans).map(([name, stats]) => [
+          name,
+          stats.median,
+        ]),
+      ),
+    );
+  }
+  for (const profile of row.profiles ?? []) {
+    const targetLabel = (target: ProfiledTarget) =>
+      `${target.type === "page" ? "main thread" : basename(target.url.split("?")[0]!)} busy`;
+    console.log(
+      `[bench] ${label}${row.fixture} ${row.mutation} ${profile.sample} sample (profiled, ${round(profile.window.endMs - profile.window.startMs)} ms window, ms): ${profile.targets
+        .map(
+          (target) =>
+            `${targetLabel(target)} ${"busyMs" in target ? target.busyMs : target.error}`,
+        )
+        .join(
+          "; ",
+        )}; profile clock +-${profile.clockUncertaintyMs ?? "n/a"} ms`,
+    );
+    console.table(
+      Object.fromEntries(
+        Object.entries(profile.phases ?? {}).map(([name, phase]) => [
+          name,
+          {
+            span: phase.totalMs,
+            ...Object.fromEntries(
+              profile.targets.map((target) => [
+                targetLabel(target),
+                "phaseBusyMs" in target
+                  ? (target.phaseBusyMs?.[name] ?? 0)
+                  : null,
+              ]),
+            ),
+          },
+        ]),
+      ),
+    );
   }
 }
 

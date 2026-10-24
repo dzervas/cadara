@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   attributeFrames,
+  attributeProfileBusy,
   attributeSpans,
   parseSentryEnvelopeSpans,
   summarizeLatencies,
   summarizeSpanPhases,
   type BenchmarkSpan,
+  type CpuProfile,
 } from "../../scripts/mutation-latency-benchmark-summary.ts";
 
 function envelope(...items: [object, object][]) {
@@ -75,6 +77,98 @@ describe("bench:mutation result shaping", () => {
         maxMs: 50,
         carriedInMs: 0,
       },
+    });
+  });
+
+  // cadara-lx4z: an OCC worker client span is the main-thread request ->
+  // reply round trip, which also waits for the main thread while the worker
+  // is idle, so its phase must not read as worker work.
+  const roundTripSpans: BenchmarkSpan[] = [
+    {
+      name: "OCC worker renameBody",
+      op: "cad.occ.worker",
+      startMs: 100,
+      endMs: 110,
+    },
+    {
+      name: "OCC worker exportAuthoredModelDocument",
+      op: "cad.occ.worker",
+      startMs: 112,
+      endMs: 350,
+    },
+    {
+      name: "Modeling service renameBody",
+      op: "cad.modeling",
+      startMs: 90,
+      endMs: 360,
+    },
+  ];
+
+  it("names OCC worker client spans as round trips including main-thread delivery", () => {
+    expect(
+      attributeSpans(roundTripSpans, { startMs: 100, endMs: 340 }),
+    ).toEqual({
+      "OCC worker round trip (incl. main-thread delivery) renameBody": {
+        count: 1,
+        totalMs: 10,
+        maxMs: 10,
+        carriedInMs: 0,
+      },
+      "OCC worker round trip (incl. main-thread delivery) exportAuthoredModelDocument":
+        {
+          count: 1,
+          totalMs: 228,
+          maxMs: 228,
+          carriedInMs: 0,
+        },
+      "Modeling service renameBody": {
+        count: 1,
+        totalMs: 240,
+        maxMs: 240,
+        carriedInMs: 240,
+      },
+    });
+  });
+
+  it("attributes a profiled thread's non-idle CPU time to the phases, clipping each sample's interval to the spans", () => {
+    // Profile ticks start at 5000 us; the offset maps them to epoch ms as
+    // us / 1000 - 5. A sample covers the interval since the previous one:
+    // samples at 100, 110, ..., 350 ms, every 10 ms after a first 100 ms gap
+    // (a starved sampler). Busy: 100 (covers 0..100, before every span),
+    // 110 (100..110, renameBody) and 250..350 (240..350; 340..350 is past
+    // the window end).
+    const busy = 1;
+    const idle = 2;
+    const sampleTimesMs = Array.from({ length: 26 }, (_, i) => 100 + i * 10);
+    const profile: CpuProfile = {
+      nodes: [
+        {
+          id: busy,
+          callFrame: { functionName: "(program)", url: "", lineNumber: -1 },
+        },
+        {
+          id: idle,
+          callFrame: { functionName: "(idle)", url: "", lineNumber: -1 },
+        },
+      ],
+      startTime: 5000,
+      samples: sampleTimesMs.map((atMs) =>
+        atMs <= 110 || atMs >= 250 ? busy : idle,
+      ),
+      timeDeltas: sampleTimesMs.map((_, i) => (i === 0 ? 100_000 : 10_000)),
+    };
+
+    expect(
+      attributeProfileBusy(
+        roundTripSpans,
+        { startMs: 100, endMs: 340 },
+        profile,
+        -5,
+      ),
+    ).toEqual({
+      "OCC worker round trip (incl. main-thread delivery) renameBody": 10,
+      "OCC worker round trip (incl. main-thread delivery) exportAuthoredModelDocument": 100,
+      "Modeling service renameBody": 110,
     });
   });
 
