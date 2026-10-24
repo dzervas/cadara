@@ -10,10 +10,11 @@
 import { scriptCommand } from "@/cli/commands/script";
 import { onshapeCaptureCommand } from "@/cli/commands/onshape-capture";
 import { documentRecipesCommand } from "@/cli/commands/document-recipes";
+import { cacheClearCommand } from "@/cli/commands/model-cache";
 import type { CliEnv, CliIO, CommandModule } from "@/cli/types";
 
 /** Registered subcommands. Add new commands here. */
-export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand, documentRecipesCommand, scriptCommand];
+export const commandRegistry: readonly CommandModule[] = [onshapeCaptureCommand, documentRecipesCommand, scriptCommand, cacheClearCommand];
 
 function commandTokens(name: string): string[] {
   return name.split(" ").filter(Boolean);

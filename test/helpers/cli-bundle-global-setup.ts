@@ -7,6 +7,7 @@ import type { TestProject } from "vitest/node";
 
 const root = resolve(import.meta.dirname, "../..");
 let bundleDirectory: string | undefined;
+let cacheDirectory: string | undefined;
 
 /**
  * The heavy project's CLI specs spawn the self-contained bundle built here
@@ -21,9 +22,17 @@ export async function setup(project: TestProject) {
     cwd: root,
   });
   project.provide("cliEntry", join(bundleDirectory, "main.js"));
+  // CLI processes inherit the environment. The model checkpoint cache
+  // (cadara-3sq.6) is off, so every CLI spec evaluates its documents cold
+  // whatever the scheduling; model-cache-recipes.spec.ts turns it on with its
+  // own cache. Anything that still writes uses this run's directory, never
+  // the user's ~/.cache/cadara.
+  process.env.CADARA_MODEL_CACHE = "off";
+  cacheDirectory = await mkdtemp(join(tmpdir(), "cadara-cli-cache-"));
+  process.env.XDG_CACHE_HOME = cacheDirectory;
 }
 
 export async function teardown() {
-  if (bundleDirectory)
-    await rm(bundleDirectory, { recursive: true, force: true });
+  for (const directory of [bundleDirectory, cacheDirectory])
+    if (directory) await rm(directory, { recursive: true, force: true });
 }

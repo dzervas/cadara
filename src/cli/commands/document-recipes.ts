@@ -39,6 +39,11 @@ import {
   type CompactRecipeOutput,
 } from "@/cli/commands/compact-output";
 import { validateCompactRecipeOutput } from "@/cli/commands/compact-output.runtime-schema";
+import {
+  createCliModelCheckpointStore,
+  invalidModelCacheEnvironment,
+  modelCacheHelp,
+} from "@/cli/commands/model-cache";
 
 interface RecipeOperation {
   command: RecipeCommand;
@@ -444,6 +449,8 @@ function help() {
     `Operations (${recipeOperationNames.length}):`,
     ...[...families].map(([family, names]) => `  ${family}: ${names.join(", ")}`),
     "",
+    modelCacheHelp,
+    "",
     "Example (the JSON below runs as is; it is the only JSON in this help):",
     JSON.stringify(example, null, 2),
     "",
@@ -484,7 +491,7 @@ export const documentRecipesCommand: CommandModule = {
   name: "document recipe",
   description:
     "Run a sequential document/sketch JSON recipe in an isolated document",
-  async run(argv, _env, io) {
+  async run(argv, env, io) {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) {
       io.stdout(help());
       return { ok: true };
@@ -536,10 +543,15 @@ export const documentRecipesCommand: CommandModule = {
       const operation = position.index < 0 ? undefined : (input as { operations: unknown[] }).operations[position.index];
       return refuse(io, locate(error.error, position.index, operation));
     }
+    const invalidCache = invalidModelCacheEnvironment(env);
+    if (invalidCache)
+      return refuse(io, recipeError("usage", "preflight", invalidCache, { help: "cadara document recipe --help" }).error);
     // Capture/help/invalid-input paths never acquire a model or load WASM.
-    const { createHeadlessSessionFactory } =
+    const { createHeadlessSessionFactory, fingerprintHeadlessRuntime } =
       await import("@/composition/headless");
-    const opened = await createHeadlessSessionFactory().open();
+    const opened = await createHeadlessSessionFactory({
+      modelCheckpoints: createCliModelCheckpointStore(env, io, fingerprintHeadlessRuntime),
+    }).open();
     if (opened.kind !== "ready") {
       const error = recipeError("initialization", "initialization", "Document initialization failed.");
       print(

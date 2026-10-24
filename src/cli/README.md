@@ -289,6 +289,55 @@ opening a public example and running ten `document.inspect` operations printed
 with no consistent difference in wall time. `examples/compact-summary.ts`
 consumes compact output: `bun examples/compact-summary.ts examples/plate.json`.
 
+### Model cache
+
+A released CLI (`bun dist-cli/main.js`, not `bun src/cli/main.ts`) keeps a
+per-user cache of evaluated native checkpoints. When `document.open` reads a
+native file whose exact content this build has evaluated before, the new
+process adopts the stored native state (exact geometry, topology identities,
+naming lineage, feature stages and identity counters) instead of replaying the
+feature history; otherwise it rebuilds from the document and stores the
+result. Every later operation, save, export and reopen behaves exactly as
+without the cache. The file stays the source of truth: the cache is disposable,
+never required, and never a repository commit or file write. Each process still
+builds its own repository history, receipts and basis; bases from another
+process are refused as before.
+
+- **Location:** `$XDG_CACHE_HOME/cadara/model-checkpoints` when
+  `XDG_CACHE_HOME` is absolute, otherwise `~/.cache/cadara/model-checkpoints`.
+  Directories are created `0700`; a symlinked, foreign-owned or group/other
+  writable cache directory and symlinked entry files are refused (the open
+  proceeds uncached). A platform without user ids (Windows) bypasses the cache.
+  The trace reason is `no-user-ownership-checks`.
+- **Compatibility:** an entry is keyed by a SHA-256 of the complete document
+  content as evaluated (the per-session document id excepted), every geometry
+  asset's bytes, the evaluation settings and restore diagnostics, the checkpoint
+  format, and a fingerprint of this build: every bundled JS file, the actual
+  `occ/cadara-occ.js`/`.wasm` bytes (plus `OCC_ASSET_VERSION`), the Bun/runtime
+  versions, platform and architecture. A different path, label, revision id or
+  modification time does not matter; any content or build change misses.
+  Documents with baked-body assets and failed or partially evaluated builds are
+  never cached.
+- **Entries:** one file per key holding a JSON manifest line (format, key,
+  compatibility, member lengths, body SHA-256; validated exactly) followed by
+  non-executable data. Writers publish through a synced temporary file and an
+  atomic rename, so readers see a complete entry or none. Each entry is
+  bounded to 256 MiB; above 1 GiB in total, least recently used entries are
+  evicted; temporary files of interrupted writers are removed after an hour.
+  Checksums detect corruption, not tampering. Before adoption, a decoded entry
+  must re-export both the opened document's authored inputs and its own
+  recorded document. Otherwise it is discarded and the document is rebuilt.
+- **Controls:** `CADARA_MODEL_CACHE=off` bypasses the cache (default `on`).
+  `cadara cache clear` deletes every entry. `CADARA_MODEL_CACHE_TRACE=1` prints
+  each `hit`, `miss`, `published`, `bypass` (with reason) and `evicted` event as
+  one stderr line `{"version":1,"modelCache":{...}}`. A `degraded` event (corrupt or
+  incompatible entry, unsafe directory, permission, read-only or full storage,
+  failed write) is always printed the same way; the open then proceeds from the
+  document and the command result is unaffected. Any other failure is not a
+  cache failure and propagates normally.
+- **Privacy:** the cache retains model-derived data (exact geometry, labels,
+  history) under your user until evicted or cleared.
+
 ### Feature lifecycle and rollback timeline
 
 The following operations require a current `basis` and explicit `intent`

@@ -68,6 +68,8 @@ Use a two-operation recipe instead of rebuilding the model:
 
 Read the final discovery; add `document.inspect.owner` when only one owner's references are needed. Its filter narrows `references`, not model/draft metadata. A reopened document has fresh editing authority and no restored private undo history.
 
+Repeated opens of an unchanged file are fast with the released CLI: it caches evaluated native checkpoints per user (README **Model cache**). Results are identical with or without it, so never depend on it; stderr lines `{"version":1,"modelCache":...}` are cache diagnostics, not recipe errors. Use `CADARA_MODEL_CACHE=off` to rule the cache out while debugging.
+
 ## Qualified recipe example
 
 `<cli>/examples/multi-sketch-part.json` is qualified by `src/cli/modelling-skill-recipes.spec.ts` against the built package. It extrudes a 40×20 XY plate to depth 4, joins a 20×30 YZ wall using owner-qualified profiles, updates wall depth from 4 to 6, renames the body `L bracket`, saves `l-bracket.cadara`, reopens it, and exports STEP/STL.

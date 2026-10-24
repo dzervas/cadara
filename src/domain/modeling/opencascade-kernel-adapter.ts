@@ -227,6 +227,12 @@ import {
 } from "@/domain/modeling/opencascade-kernel-seed";
 import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
+import {
+  createModelCheckpointKey,
+  hydrateModelCheckpoint,
+  publishModelCheckpoint,
+} from "@/domain/modeling/occ/model-checkpoint";
+import type { ModelCheckpointStore } from "@/domain/modeling/model-checkpoint-store";
 
 interface OpenCascadeKernelAdapterOptions {
   /**
@@ -247,6 +253,8 @@ interface OpenCascadeKernelAdapterOptions {
   assetResolver?: GeometryAssetResolver;
   documentId?: DocumentId;
   tolerances?: SolverTolerancePolicy;
+  /** cadara-3sq.6: evaluated checkpoints for complete document opens (main thread only). */
+  modelCheckpoints?: ModelCheckpointStore;
 }
 
 interface OccKernelRuntimeState {
@@ -1920,6 +1928,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly documentId: DocumentId;
   private readonly initialDocumentSettings: AuthoredModelDocument["settings"];
   private readonly neutralCurveQueries: NeutralCurveQueryCapability;
+  private readonly modelCheckpoints: ModelCheckpointStore | null;
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null;
   private runtimeState: OccKernelRuntimeState | null = null;
@@ -1956,6 +1965,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.workerSnapshotClient = options.workerSnapshotClient ?? null;
     this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
+    this.modelCheckpoints = options.modelCheckpoints ?? null;
     const initialTolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
     this.initialDocumentSettings = {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
@@ -2725,11 +2735,96 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       return;
     }
 
-    await this.restoreAuthoredModelDocumentOnMainThread(
+    await this.restoreCheckpointedAuthoredModelDocument(
       validatedDocument,
       diagnostics,
       assetResolver,
     );
+  }
+
+  /**
+   * cadara-3sq.6: validation is the complete open of an imported document (the
+   * service persists its export as the accepted basis). It adopts a verified
+   * model checkpoint instead of replaying the history, and a complete cold
+   * restore publishes one.
+   */
+  private async restoreCheckpointedAuthoredModelDocument(
+    document: AuthoredModelDocument,
+    diagnostics: readonly ModelingDiagnostic[],
+    assetResolver: GeometryAssetResolver | undefined,
+  ) {
+    const store = this.modelCheckpoints;
+    if (!store) {
+      await this.restoreAuthoredModelDocumentOnMainThread(
+        document,
+        diagnostics,
+        assetResolver,
+      );
+      return;
+    }
+    const oc = await this.loadOpenCascadeInstance();
+    const checkpointKey = await createModelCheckpointKey(store, {
+      document,
+      diagnostics,
+      assetBlobs: await resolveGeometryAssetBlobs(document, assetResolver),
+      hasBakedBodyAssets:
+        collectBakedBodyAssetReferences(document.features).size > 0,
+      evaluationSettings: this.initialDocumentSettings,
+    });
+    if ("bypass" in checkpointKey) {
+      store.report({ kind: "bypass", reason: checkpointKey.bypass });
+      await this.restoreAuthoredModelDocumentOnMainThread(
+        document,
+        diagnostics,
+        assetResolver,
+      );
+      return;
+    }
+    const hydrated = await hydrateModelCheckpoint({
+      store,
+      key: checkpointKey.key,
+      oc,
+      document,
+      assetResolver,
+      exportDocument: createAuthoredModelDocumentFromAuthoringState,
+      release: (candidate) =>
+        this.releaseDiscardedState(
+          candidate,
+          this.runtimeState ? [this.runtimeState.authoringState] : [],
+        ),
+    });
+    if (hydrated) {
+      // Same identity counters as the cold restore: the document's revision,
+      // never lowering the kernel's high-water mark.
+      this.replaceRuntimeState({
+        authoringState: hydrated,
+        revisionSequence: Math.max(
+          this.revisionHighWater,
+          parseRevisionSequence(document.revisionId),
+        ),
+      });
+      store.report({ kind: "hit", key: checkpointKey.key });
+      return;
+    }
+    // A restore that never reports its rebuild is not known to be complete.
+    let partial = true;
+    const restored = await this.restoreAuthoredModelDocumentOnMainThread(
+      document,
+      diagnostics,
+      assetResolver,
+      {
+        onRebuilt: (rebuild) => {
+          partial = rebuild.partial;
+        },
+      },
+    );
+    await publishModelCheckpoint({
+      store,
+      key: checkpointKey.key,
+      state: restored.authoringState,
+      partial,
+      exportDocument: createAuthoredModelDocumentFromAuthoringState,
+    });
   }
 
   private async restoreAuthoredModelDocumentOnMainThread(
@@ -2739,6 +2834,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     options: {
       deferredFeatureIds?: ReadonlySet<FeatureId>;
       replaceRuntimeState?: boolean;
+      /** cadara-3sq.6: whether the history rebuild stopped early or deferred features. */
+      onRebuilt?: (rebuild: { partial: boolean }) => void;
     } = {},
   ): Promise<OccKernelRuntimeState> {
     const oc = await this.loadOpenCascadeInstance();
@@ -2888,7 +2985,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         bakedShapeCache: projectionState.bakedShapeCache,
       };
 
-      const rebuiltAuthoringState = this.tryBuildNextAuthoringState(
+      const rebuilt = this.tryBuildNextAuthoringState(
         {
           authoringState,
           revisionSequence: Math.max(
@@ -2902,7 +2999,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           cursor: document.cursor,
           deferredFeatureIds: options.deferredFeatureIds,
         },
-      ).state;
+      );
+      options.onRebuilt?.(rebuilt);
+      const rebuiltAuthoringState = rebuilt.state;
       authoringState = {
         ...rebuiltAuthoringState,
         diagnostics: mergeModelingDiagnostics(

@@ -136,7 +136,8 @@ function collectOccBodyObjects(
   }
 }
 
-function collectOccOwnershipGraphObjects(state: OccOwnershipGraph) {
+/** Every embind wrapper an owner graph owns (a model checkpoint carries exactly these). */
+export function collectOccOwnershipGraphObjects(state: OccOwnershipGraph) {
   const objects = new Set<OccDisposable>();
   const namingDocuments = new Set<OccDisposable>();
   for (const body of state.baseBodies ?? [])

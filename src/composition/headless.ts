@@ -30,6 +30,9 @@ import { createModelingServiceEditorEffectRuntime } from "@/application/editor/e
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
 import { createConsoleErrorReporter } from "@/contracts/errors";
+import type { ModelCheckpointStore } from "@/domain/modeling/model-checkpoint-store";
+import { fingerprintModelCheckpointRuntime } from "@/infrastructure/modeling/model-checkpoint-file-store";
+import { dirname } from "node:path";
 
 // Replaced by the CLI bundler, never read from the caller's environment or cwd.
 declare const CADARA_CLI_PACKAGED: boolean;
@@ -42,6 +45,22 @@ const defaultAssetDirectory = fileURLToPath(
   ),
 );
 
+/**
+ * cadara-3sq.6: the model checkpoint compatibility digest of this runtime, or
+ * null for a source checkout, whose evaluator code is not one fingerprintable
+ * bundle (its opens are never cached).
+ */
+export function fingerprintHeadlessRuntime() {
+  if (typeof CADARA_CLI_PACKAGED === "undefined" || !CADARA_CLI_PACKAGED) {
+    return Promise.resolve(null);
+  }
+  return fingerprintModelCheckpointRuntime({
+    assetDirectory: defaultAssetDirectory,
+    // The bundle is flat: this chunk sits beside main.js, sdk.js and every other chunk.
+    codeDirectory: dirname(fileURLToPath(import.meta.url)),
+  });
+}
+
 /** Both source and release defaults are module-relative. */
 export function createHeadlessSessionFactory(
   options: {
@@ -51,6 +70,8 @@ export function createHeadlessSessionFactory(
     createRepository?: (
       assets: GeometryAssetStore,
     ) => GeometryAssetDocumentRepository;
+    /** cadara-3sq.6: evaluated checkpoints for complete native document opens. */
+    modelCheckpoints?: ModelCheckpointStore;
   } = {},
 ) {
   return createSemanticSessionFactory(
@@ -83,6 +104,7 @@ export function createHeadlessSessionFactory(
             repository.getGeometryAssetBytes(hash),
         },
         createSolverAdapter: () => solver,
+        modelCheckpoints: options.modelCheckpoints,
       });
       const exportProviders = createBuiltinExportProviderRegistry();
       let service: ReturnType<typeof createModelingService>;
