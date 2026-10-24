@@ -132,7 +132,8 @@ input {
     transform: none;
   }
 
-  [data-tab-hairline="pending"] > * {
+  [data-tab-hairline="pending"] > *,
+  [data-loading-progress="indeterminate"] > * {
     animation-duration: 0ms !important;
     animation-iteration-count: 1 !important;
     transform: none !important;

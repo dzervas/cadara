@@ -1,6 +1,7 @@
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
+import type { LoadingProgress } from "@/contracts/modeling/loading-status";
 import type { RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
@@ -98,6 +99,11 @@ export interface AuthoredDocumentRestoreOptions {
    * the stored id when it is later than every id used here, else the next one.
    */
   newRevision?: boolean;
+  /**
+   * Receives the feature rebuild's progress while this restore runs. Stays on
+   * the caller's side of a worker boundary; never posted to the worker.
+   */
+  onProgress?: (progress: LoadingProgress) => void;
 }
 
 /**

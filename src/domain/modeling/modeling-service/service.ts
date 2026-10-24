@@ -1430,11 +1430,16 @@ export function createModelingService(
     const historyLoadResult = operationHistoryStore?.load();
 
     if (loadResult.status.kind === "restored") {
+      // The document is open; rebuilding its features is geometry work, and
+      // the kernel reports it per feature (cadara-ku5k).
+      initialLoadingStatus.set("preparing-geometry");
       await restoreAuthoredRepositoryDocument(
         loadResult.document,
         loadResult.diagnostics,
-        [], undefined, loadResult.metadata,
+        [], { onProgress: initialLoadingStatus.setProgress }, loadResult.metadata,
       );
+      // Snapshot and mesh preparation follow without a measured total.
+      initialLoadingStatus.setProgress(null);
       if (
         historyLoadResult?.ok &&
         historyLoadResult.payload &&

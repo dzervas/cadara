@@ -4,6 +4,7 @@ import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repo
 import { OccCleanupError } from "@/domain/modeling/occ/memory";
 import { noopPerformanceTelemetry } from "@/contracts/performance/telemetry";
 import { createInstrumentedModelingService } from "./instrumented-service";
+import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 import { createModelingService } from "./service";
 
 function deferred() {
@@ -189,5 +190,60 @@ test("repository restore failure stays failed even if a fallback snapshot can be
   await service.getCurrentDocumentSnapshot();
   expect(service.initialLoadingStatus.getSnapshot()).toBe("failed");
   expect((await service.getHistoryRestoreState()).kind).toBe("failed");
+  service.dispose();
+});
+
+test("a restored document's feature rebuild reports measured progress under preparing geometry (cadara-ku5k)", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const step = (completed: number) => ({
+    stage: "rebuilding-features" as const,
+    completed,
+    total: 2,
+    label: completed < 2 ? `Extrude ${completed + 1}` : null,
+  });
+  class ReportingAdapter extends MockKernelAdapter {
+    readonly gate = deferred();
+    override async restoreAuthoredModelDocument(
+      ...[document, diagnostics, resolver, options]: Parameters<MockKernelAdapter["restoreAuthoredModelDocument"]>
+    ) {
+      options?.onProgress?.(step(0));
+      options?.onProgress?.(step(1));
+      await this.gate.promise;
+      options?.onProgress?.(step(2));
+      return super.restoreAuthoredModelDocument(document, diagnostics, resolver, options);
+    }
+  }
+  const adapter = new ReportingAdapter();
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+    documentRepository: new MemoryDocumentRepository([seed]),
+  });
+  const seen: unknown[] = [];
+  const stop = service.initialLoadingStatus.subscribe(() =>
+    seen.push([
+      service.initialLoadingStatus.getSnapshot(),
+      service.initialLoadingStatus.getProgress(),
+    ]),
+  );
+  const restore = service.getHistoryRestoreState();
+  await vi.waitFor(() =>
+    expect(service.initialLoadingStatus.getProgress()).toEqual(step(1)),
+  );
+  // A tab mounting now reads the retained progress immediately.
+  expect(service.initialLoadingStatus.getSnapshot()).toBe("preparing-geometry");
+  adapter.gate.resolve();
+  await restore;
+  await service.getCurrentDocumentSnapshot();
+  stop();
+  expect(seen).toEqual([
+    ["opening-document", null],
+    ["preparing-geometry", null],
+    ["preparing-geometry", step(0)],
+    ["preparing-geometry", step(1)],
+    ["preparing-geometry", step(2)],
+    // Snapshot preparation has no measured total.
+    ["preparing-geometry", null],
+    ["ready", null],
+  ]);
   service.dispose();
 });

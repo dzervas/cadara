@@ -65,6 +65,7 @@ import {
   unpackWorkspaceSnapshotRenderMeshes,
 } from "@/domain/modeling/occ/mesh-transport";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import { validateOccWorkerRestoreProgressMessage } from "@/domain/modeling/occ/worker-restore-progress.runtime-schema";
 import type {
   OccSnapshotLodRefinementOutcome,
   OccWorkerAssetConfig,
@@ -112,6 +113,7 @@ export interface OccWorkerLike {
 
 type PendingRequest = {
   operation: OccWorkerOperation["kind"];
+  onProgress?: AuthoredDocumentRestoreOptions["onProgress"];
   resolve: (value?: unknown) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout> | null;
@@ -284,13 +286,20 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     assets: readonly GeometryAssetBlobInput[] = [],
     options: AuthoredDocumentRestoreOptions = {},
   ) {
-    return this.invokeVoid({
-      kind: "restoreAuthoredModelDocument",
-      document,
-      diagnostics,
-      assets,
-      options,
-    });
+    // A function cannot cross postMessage; progress returns by request id.
+    const { onProgress, ...transportOptions } = options;
+    return this.invoke<void>(
+      {
+        kind: "restoreAuthoredModelDocument",
+        document,
+        diagnostics,
+        assets,
+        options: onProgress
+          ? { ...transportOptions, reportProgress: true }
+          : transportOptions,
+      },
+      onProgress,
+    );
   }
 
   validateAuthoredModelDocument(
@@ -650,7 +659,10 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     return this.invoke<void>(operation);
   }
 
-  private invoke<T>(operation: OccWorkerOperation): Promise<T> {
+  private invoke<T>(
+    operation: OccWorkerOperation,
+    onProgress?: PendingRequest["onProgress"],
+  ): Promise<T> {
     if (this.disposed) {
       return Promise.reject(new Error("OCC worker client disposed."));
     }
@@ -688,6 +700,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
             }, this.requestTimeoutMs);
       this.pending.set(requestId, {
         operation: operation.kind,
+        onProgress,
         resolve: (value) => {
           if (operation.kind === "restoreAuthoredModelDocument") {
             this.restoredDocuments.add(operation.document.documentId);
@@ -757,6 +770,22 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     const pending = this.pending.get(message.requestId);
 
     if (!pending) {
+      return;
+    }
+
+    if (message.kind === "restoreProgress") {
+      const validated = validateOccWorkerRestoreProgressMessage(message);
+      if (validated.success && pending.operation === "restoreAuthoredModelDocument") {
+        pending.onProgress?.(validated.data.progress);
+        return;
+      }
+      this.pending.delete(message.requestId);
+      this.clearPendingTimeout(pending);
+      pending.reject(new Error(
+        `Invalid OCC worker restore progress for ${pending.operation}: ${
+          validated.success ? "not a restore request" : validated.errors[0]?.path
+        }.`,
+      ));
       return;
     }
 

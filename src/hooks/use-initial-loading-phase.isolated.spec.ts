@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 afterEach(() => harness.cleanup());
 
-function service(phase: "opening-document" | "ready") {
+function service(phase: "opening-document" | "preparing-geometry" | "ready") {
   return { initialLoadingStatus: createLoadingStatus(phase) } satisfies Pick<
     ModelingService,
     "initialLoadingStatus"
@@ -84,4 +84,26 @@ test("file opening stays pending until the newest request settles and failures s
   expect(render().filePhase).toBe("failed");
   await render().openDocument(async () => ({ status: "cancelled" }));
   expect(render().phase).toBe("ready");
+});
+
+test("document restore progress is shown only while the document phase is displayed (cadara-ku5k)", async () => {
+  const active = service("preparing-geometry");
+  const progress = {
+    stage: "rebuilding-features",
+    completed: 2,
+    total: 5,
+    label: "Extrude 3",
+  } as const;
+  active.initialLoadingStatus.setProgress(progress);
+  const render = () => harness.render(() => useInitialLoadingPhase(active));
+  expect(render()).toMatchObject({ phase: "preparing-geometry", progress });
+  engine.set("preparing-engine");
+  expect(render()).toMatchObject({ phase: "preparing-engine", progress: null });
+  engine.set("ready");
+  const file = pending();
+  const opening = render().openDocument(() => file.promise);
+  expect(render()).toMatchObject({ phase: "opening-document", progress: null });
+  file.resolve({ status: "cancelled" });
+  await opening;
+  expect(render().progress).toEqual(progress);
 });

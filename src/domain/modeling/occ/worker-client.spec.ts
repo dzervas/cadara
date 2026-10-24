@@ -930,3 +930,58 @@ test("unsolicited fatal on a replacement stays terminal rather than spawning ano
   expect(reported).toHaveLength(2);
   await expect(client.warmup()).rejects.toThrow("Idle runtime abort");
 });
+
+test("restore progress reaches only its own restore's callback, validated, and never crosses postMessage (cadara-ku5k)", async () => {
+  const worker = new FakeOccWorker();
+  const client = new OccWorkerClient({ worker });
+  const document = await createSeedAuthoredModelDocument();
+  const seen: unknown[] = [];
+  const restore = client.restoreAuthoredModelDocument(document, [], [], {
+    newRevision: true,
+    onProgress: (progress) => seen.push(progress),
+  });
+  const request = worker.posted[0]!;
+  if (request.kind !== "invoke" || request.operation.kind !== "restoreAuthoredModelDocument") {
+    throw new Error("Expected restore invocation");
+  }
+  expect(
+    request.operation.options,
+    "The callback stays on the main thread; the worker is only told someone listens.",
+  ).toEqual({ newRevision: true, reportProgress: true });
+  expect(validateOccWorkerRequestEnvelope(structuredClone(request)).success).toBe(true);
+  const progress = { stage: "rebuilding-features", completed: 1, total: 4, label: "Extrude 2" } as const;
+  worker.emit({ kind: "restoreProgress", requestId: request.requestId, progress });
+  worker.emit({ kind: "restoreProgress", requestId: "request_occ_other_1", progress });
+  expect(seen).toEqual([progress]);
+  worker.emit({ kind: "invoked", requestId: request.requestId, operation: "restoreAuthoredModelDocument" });
+  await restore;
+  worker.emit({ kind: "restoreProgress", requestId: request.requestId, progress: { ...progress, completed: 2 } });
+  expect(seen, "Progress after the restore settled is stale.").toEqual([progress]);
+
+  // A restore without a callback does not ask the worker for progress.
+  const unwatched = client.restoreAuthoredModelDocument(document, [], [], { newRevision: true });
+  const unwatchedRequest = worker.posted[1]!;
+  if (unwatchedRequest.kind !== "invoke" || unwatchedRequest.operation.kind !== "restoreAuthoredModelDocument") {
+    throw new Error("Expected restore invocation");
+  }
+  expect(unwatchedRequest.operation.options).toEqual({ newRevision: true });
+  worker.emit({ kind: "invoked", requestId: unwatchedRequest.requestId, operation: "restoreAuthoredModelDocument" });
+  await unwatched;
+
+  // A malformed progress message is a protocol fault for that request.
+  const invalid = client.restoreAuthoredModelDocument(document, [], [], { onProgress: (value) => seen.push(value) });
+  const invalidRequest = worker.posted[2]!;
+  worker.emit({
+    kind: "restoreProgress",
+    requestId: invalidRequest.requestId,
+    progress: { ...progress, completed: "two" },
+  } as unknown as OccWorkerResponse);
+  await expect(invalid).rejects.toThrow("Invalid OCC worker restore progress");
+  expect(seen).toHaveLength(1);
+
+  // Progress addressed to a request that is not a restore is rejected too.
+  const snapshot = client.getDocumentSnapshot({ contractVersion: CONTRACT_VERSION, documentId: document.documentId });
+  worker.emit({ kind: "restoreProgress", requestId: worker.posted[3]!.requestId, progress });
+  await expect(snapshot).rejects.toThrow("not a restore request");
+  client.dispose();
+});

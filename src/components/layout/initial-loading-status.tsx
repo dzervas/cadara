@@ -1,5 +1,8 @@
 import { Progress, Stack, Text } from "@mantine/core";
-import type { LoadingPhase } from "@/contracts/modeling/loading-status";
+import type {
+  LoadingPhase,
+  LoadingProgress,
+} from "@/contracts/modeling/loading-status";
 
 const sentences: Record<Exclude<LoadingPhase, "ready">, string> = {
   "preparing-engine": "Preparing the geometry engine.",
@@ -8,9 +11,31 @@ const sentences: Record<Exclude<LoadingPhase, "ready">, string> = {
   failed: "Unable to prepare the document.",
 };
 
-export function InitialLoadingStatus({ phase }: { phase: LoadingPhase }) {
+// The accent at full strength over a faint accent track: the stripes this
+// replaced (15% white over light gray, 4px tall) were imperceptible (cadara-ku5k).
+const trackColor = "color-mix(in oklch, var(--workbench-shell-accent) 22%, transparent)";
+const barColor = "var(--workbench-shell-accent)";
+
+const rebuildingFeaturesSentence = "Rebuilding features.";
+
+function describeProgress({ completed, total, label }: LoadingProgress) {
+  const count = `Rebuilding features ${completed}/${total}`;
+  return label === null ? count : `${count} · ${label}`;
+}
+
+export function InitialLoadingStatus({
+  phase,
+  progress = null,
+}: {
+  phase: LoadingPhase;
+  progress?: LoadingProgress | null;
+}) {
   if (phase === "ready") return null;
-  const sentence = sentences[phase];
+  // A measured total of zero has nothing to count ("0/0").
+  const measured = phase !== "failed" && progress && progress.total > 0 ? progress : null;
+  // The live region names the stage only, so screen readers are not handed a
+  // new announcement per feature; the count lives in the bar's aria-valuetext.
+  const sentence = measured ? rebuildingFeaturesSentence : sentences[phase];
   return (
     <Stack
       gap="xs"
@@ -19,21 +44,58 @@ export function InitialLoadingStatus({ phase }: { phase: LoadingPhase }) {
       aria-live="polite"
       aria-label={sentence}
     >
-      <Text size="sm" c="dimmed">
-        {sentence}
-      </Text>
-      {phase !== "failed" ? (
-        // Full-width stripes indicate activity only, not measured completion.
-        <Progress.Root size={4} role="progressbar" aria-label={sentence}>
+      {measured ? (
+        <>
+          <Text size="sm" c="dimmed" truncate="end" aria-hidden="true">
+            {describeProgress(measured)}
+          </Text>
+          <span className="sr-only">{sentence}</span>
+        </>
+      ) : (
+        <Text size="sm" c="dimmed" truncate="end">
+          {sentence}
+        </Text>
+      )}
+      {phase === "failed" ? null : measured ? (
+        <Progress.Root
+          size={4}
+          bg={trackColor}
+          role="progressbar"
+          aria-label={sentence}
+          aria-valuemin={0}
+          aria-valuemax={measured.total}
+          aria-valuenow={measured.completed}
+          aria-valuetext={`${measured.completed} of ${measured.total} features`}
+          data-loading-progress="determinate"
+        >
           <Progress.Section
-            value={100}
-            striped
-            animated
-            color="gray"
+            value={(measured.completed / measured.total) * 100}
+            color={barColor}
             withAria={false}
           />
         </Progress.Root>
-      ) : null}
+      ) : (
+        // Unknown duration: a sweeping segment shows activity only, never a
+        // measured completion. It animates a transform, so the compositor
+        // keeps it moving even while the main thread is busy.
+        <Progress.Root
+          size={4}
+          bg={trackColor}
+          role="progressbar"
+          aria-label={sentence}
+          data-loading-progress="indeterminate"
+        >
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 w-[36%]"
+            style={{
+              backgroundColor: barColor,
+              animation:
+                "workbench-tab-loading-sweep 1100ms cubic-bezier(0.25, 1, 0.5, 1) infinite",
+            }}
+          />
+        </Progress.Root>
+      )}
     </Stack>
   );
 }

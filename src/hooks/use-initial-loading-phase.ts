@@ -20,6 +20,11 @@ export function useInitialLoadingPhase(
     service.initialLoadingStatus.getSnapshot,
     service.initialLoadingStatus.getSnapshot,
   );
+  const documentProgress = useSyncExternalStore(
+    service.initialLoadingStatus.subscribe,
+    service.initialLoadingStatus.getProgress,
+    service.initialLoadingStatus.getProgress,
+  );
   // A tab switch selects a different source immediately; old promises can only
   // settle their old source, never overwrite the active document's presentation.
   const opening = useMemo(() => {
@@ -56,9 +61,12 @@ export function useInitialLoadingPhase(
     opening.status.getSnapshot,
     opening.status.getSnapshot,
   );
+  const phase =
+    file === "ready" ? selectInitialLoadingPhase(engine, document) : file;
   return {
-    phase:
-      file === "ready" ? selectInitialLoadingPhase(engine, document) : file,
+    phase,
+    // Measured progress belongs to the document phase it was reported in.
+    progress: file === "ready" && phase === document ? documentProgress : null,
     filePhase: file,
     openDocument: opening.openDocument,
   };

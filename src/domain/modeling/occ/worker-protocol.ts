@@ -41,6 +41,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
+import type { OccWorkerRestoreProgressMessage } from "@/domain/modeling/occ/worker-restore-progress.runtime-schema";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -118,7 +119,11 @@ export type OccWorkerOperation =
     }
   | ({
       kind: "restoreAuthoredModelDocument";
-      options?: AuthoredDocumentRestoreOptions;
+      // Progress returns as restoreProgress messages for this request, sent
+      // only when reportProgress says the caller listens.
+      options?: Omit<AuthoredDocumentRestoreOptions, "onProgress"> & {
+        reportProgress?: boolean;
+      };
     } & AuthoredDocumentWorkerOperationBase)
   | ({
       kind: "validateAuthoredModelDocument";
@@ -369,6 +374,7 @@ export type OccWorkerResponse =
       requestId: RequestId;
       reference: BakedGeometryAssetReference;
     }
+  | OccWorkerRestoreProgressMessage
   | OccWorkerFailureMessage;
 
 export interface OccWorkerFailureMessage {

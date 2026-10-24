@@ -2700,6 +2700,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       validatedDocument,
       diagnostics,
       assetResolver ?? createInMemoryGeometryAssetResolver(assets),
+      { onProgress: options.onProgress },
     );
   }
 
@@ -2836,6 +2837,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       replaceRuntimeState?: boolean;
       /** cadara-3sq.6: whether the history rebuild stopped early or deferred features. */
       onRebuilt?: (rebuild: { partial: boolean }) => void;
+      onProgress?: AuthoredDocumentRestoreOptions["onProgress"];
     } = {},
   ): Promise<OccKernelRuntimeState> {
     const oc = await this.loadOpenCascadeInstance();
@@ -2998,6 +3000,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           features,
           cursor: document.cursor,
           deferredFeatureIds: options.deferredFeatureIds,
+          onProgress: options.onProgress,
         },
       );
       options.onRebuilt?.(rebuilt);
@@ -3437,6 +3440,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       historyOrder?: OccAuthoringState["historyOrder"];
       cursor?: OccAuthoringState["cursor"];
       deferredFeatureIds?: ReadonlySet<FeatureId>;
+      onProgress?: AuthoredDocumentRestoreOptions["onProgress"];
     },
   ): RebuildAttempt {
     const features = input.features ?? runtimeState.authoringState.features;
@@ -3540,9 +3544,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         )
       : baseState;
 
-    for (const feature of appliedFeatures.slice(
+    const evaluatedFeatures = appliedFeatures.slice(
       reusable?.prefixFeatureIds.length ?? 0,
-    )) {
+    );
+    for (const [index, feature] of evaluatedFeatures.entries()) {
+      input.onProgress?.({
+        stage: "rebuilding-features",
+        completed: index,
+        total: evaluatedFeatures.length,
+        label: feature.label ?? feature.featureId,
+      });
       if (deferredFeatureIds?.has(feature.featureId)) {
         failedFeatures.push(createFailedFeatureRecord(feature));
         continue;
@@ -3647,6 +3658,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         current,
         runtimeState.authoringState,
       ]);
+    }
+    // Nothing evaluated means nothing to count: no "0/0" update.
+    if (evaluatedFeatures.length > 0) {
+      input.onProgress?.({
+        stage: "rebuilding-features",
+        completed: evaluatedFeatures.length,
+        total: evaluatedFeatures.length,
+        label: null,
+      });
     }
 
     const rebuiltFeatures = new Map(

@@ -1560,7 +1560,10 @@ export function CadWorkbench({
                 aria-label="Initial model render pending"
                 className="absolute inset-0 z-30 grid place-items-center bg-(--workbench-viewport-background)/85"
               >
-                <InitialLoadingStatus phase={loading.phase} />
+                <InitialLoadingStatus
+                  phase={loading.phase}
+                  progress={loading.progress}
+                />
               </div>
             ) : null}
             {/* T14d (A-11): the left floating panel stack. The sketch

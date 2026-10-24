@@ -204,7 +204,10 @@ async function getWorkerExportCapabilities(
   return capabilitiesOrDiagnostic;
 }
 
-async function handleWorkerOperation(operation: OccWorkerOperation) {
+async function handleWorkerOperation(
+  requestId: RequestId,
+  operation: OccWorkerOperation,
+) {
   switch (operation.kind) {
     case "warmup":
       await getWorkerOpenCascadeInstance(operation.assets);
@@ -251,16 +254,31 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
         operation.baseRevisionId,
         operation.target,
       );
-    case "restoreAuthoredModelDocument":
+    case "restoreAuthoredModelDocument": {
+      const { reportProgress, ...restoreOptions } = operation.options ?? {};
       await getWorkerAdapter(
         operation.document.documentId,
       ).restoreAuthoredModelDocument?.(
         operation.document,
         operation.diagnostics ?? [],
         createWorkerAssetResolver(operation.assets),
-        operation.options,
+        {
+          ...restoreOptions,
+          // postMessage only queues: the rebuild loop stays synchronous while
+          // the main thread receives each update as it is posted. Restores
+          // nobody watches (peer sync, undo) post nothing.
+          onProgress: reportProgress
+            ? (progress) =>
+                postOccWorkerMessage({
+                  kind: "restoreProgress",
+                  requestId,
+                  progress,
+                })
+            : undefined,
+        },
       );
       return undefined;
+    }
     case "validateAuthoredModelDocument":
       await getWorkerAdapter(
         operation.document.documentId,
@@ -421,7 +439,10 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
 async function handleOccWorkerRequest(request: OccWorkerRequest) {
   switch (request.kind) {
     case "invoke": {
-      const result = await handleWorkerOperation(request.operation);
+      const result = await handleWorkerOperation(
+        request.requestId,
+        request.operation,
+      );
       if (runtimeAborted) return;
       if (
         request.operation.kind === "getDocumentSnapshot" &&
