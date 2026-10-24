@@ -20,6 +20,10 @@ export type { CaptureContext, SeverityLevel };
 export const SENTRY_DSN =
   "https://0a4eee874e00861be4c30cb81fe15ce1@o4511242392961024.ingest.de.sentry.io/4511333375148112";
 const SENTRY_PERFORMANCE_TRACES_SAMPLE_RATE = 1;
+// Replay only buffers in memory and uploads the last minute when an error is
+// captured; whole-session recording stays off.
+const SENTRY_REPLAYS_SESSION_SAMPLE_RATE = 0;
+const SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE = 1;
 const SENTRY_ENVELOPE_VERSION = "7";
 const SENTRY_BROWSER_CLIENT = "sentry.javascript.browser/10.49.0";
 
@@ -98,10 +102,20 @@ export function initializeSentryErrorReporting(
       environment: options.environment ?? "production",
       release: options.release ?? undefined,
       dist: options.dist ?? undefined,
-      enableLogs: true,
       tracesSampleRate: options.enablePerformanceTelemetry
         ? (options.tracesSampleRate ?? SENTRY_PERFORMANCE_TRACES_SAMPLE_RATE)
         : undefined,
+      replaysSessionSampleRate: SENTRY_REPLAYS_SESSION_SAMPLE_RATE,
+      replaysOnErrorSampleRate: SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE,
+      // Default replay masking (maskAllText, blockAllMedia) stays on; the WebGL
+      // viewport is not recorded (no replayCanvasIntegration). Browser tracing
+      // keeps the default same-origin tracePropagationTargets.
+      integrations: [
+        SentryBrowser.replayIntegration(),
+        ...(options.enablePerformanceTelemetry
+          ? [SentryBrowser.browserTracingIntegration()]
+          : []),
+      ],
     });
     initializedClients.add(client);
     return true;
