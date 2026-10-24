@@ -29,6 +29,9 @@ import type {
   EvaluatePreviewRequest,
   GetDocumentSnapshotRequest,
   RenameBodyRequest,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   ReorderDocumentHistoryRequest,
   SetBodyAppearanceRequest,
   ReorderFeatureRequest,
@@ -213,6 +216,30 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     return this.measure(
       "renameBody",
       () => this.inner.renameBody(request),
+      diagnosticResultAttributes,
+    );
+  }
+
+  renameFeature(request: RenameFeatureRequest) {
+    return this.measure(
+      "renameFeature",
+      () => this.inner.renameFeature(request),
+      diagnosticResultAttributes,
+    );
+  }
+
+  renameSketch(request: RenameSketchRequest) {
+    return this.measure(
+      "renameSketch",
+      () => this.inner.renameSketch(request),
+      diagnosticResultAttributes,
+    );
+  }
+
+  renameDocument(request: RenameDocumentRequest) {
+    return this.measure(
+      "renameDocument",
+      () => this.inner.renameDocument(request),
       diagnosticResultAttributes,
     );
   }

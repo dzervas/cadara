@@ -1618,6 +1618,38 @@ export interface RenameBodyResponse extends ModelingOperationResult {
 }
 
 /**
+ * Feature relabel request. Only the label changes, so no feature runs again;
+ * the response is an {@link UpdateFeatureResponse}.
+ */
+export interface RenameFeatureRequest extends DocumentMutationRequest {
+  /** Durable feature identity to relabel. */
+  featureId: FeatureId;
+  /** Human-readable feature label to store on the document feature record. */
+  featureLabel: string;
+}
+
+/**
+ * Sketch relabel request. Only the label changes, so the sketch is not solved
+ * again and no feature runs again; the response is a
+ * {@link CommitSketchResponse}.
+ */
+export interface RenameSketchRequest extends DocumentMutationRequest {
+  /** Durable sketch identity to relabel. */
+  sketchId: SketchId;
+  /** Human-readable sketch label to store on the document sketch record. */
+  sketchLabel: string;
+}
+
+/**
+ * Document rename request. Only the document name changes; the response is a
+ * plain {@link ModelingOperationResult}.
+ */
+export interface RenameDocumentRequest extends DocumentMutationRequest {
+  /** Document name to store on the authored document. */
+  name: string;
+}
+
+/**
  * Body appearance (display colour) request.
  */
 export interface SetBodyAppearanceRequest extends DocumentMutationRequest {

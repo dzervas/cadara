@@ -2,7 +2,9 @@
 // (production OCC adapter, durable history). cadara-xkg: Undo and Redo of a
 // body rename or recolour apply the label or colour in place instead of
 // restoring (rebuilding) the whole authored document; undoing a geometric
-// change still restores it.
+// change still restores it. cadara-kv69: so do a document rename and a sketch
+// relabel. The SDK has no feature relabel; the modeling-service rows cover it
+// (service-repository-undo.spec.ts, opencascade-kernel-adapter.relabel.heavy).
 import { afterEach, expect, test, vi } from "vitest";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
@@ -38,7 +40,7 @@ async function extrudedBody(prefix: string) {
     OpenCascadeKernelAdapter.prototype,
     "restoreAuthoredModelDocument",
   );
-  return { doc, body: body!, featureId, restore };
+  return { doc, body: body!, featureId, sketchId: sketch.sketchId!, restore };
 }
 
 const bodyLabel = (doc: SemanticDocument) =>
@@ -92,6 +94,49 @@ test("undo of a geometric change still restores the document", async () => {
 
     await doc.ops.history.undo({});
     expect(restore).toHaveBeenCalledTimes(1);
+    expect(doc.inspect(["bodies"]).bodies[0]!.bounds).toEqual(body.bounds);
+  } finally {
+    await doc.close();
+  }
+}, 180_000);
+
+test("undo and redo of a document rename and a sketch relabel apply the label without restoring the document", async () => {
+  const { doc, body, sketchId, restore } = await extrudedBody("undo-labels");
+  try {
+    const documentLabel = () => doc.current!.discovery!.document!.label;
+    const sketchLabel = () =>
+      doc
+        .references({ kind: "sketch" })
+        .find(
+          (reference) =>
+            reference.target.kind === "sketch" &&
+            reference.target.sketchId === sketchId,
+        )!.label;
+    const originalDocument = documentLabel();
+    const originalSketch = sketchLabel();
+
+    await doc.ops.document.rename({ label: "Renamed document" });
+    expect(documentLabel()).toBe("Renamed document");
+    await doc.ops.history.undo({});
+    expect(documentLabel()).toBe(originalDocument);
+    await doc.ops.history.redo({});
+    expect(documentLabel()).toBe("Renamed document");
+
+    await doc.ops.sketch.open({ sketchId });
+    await doc.ops.sketch.label.set({
+      target: { kind: "sketch", sketchId },
+      label: "Renamed sketch",
+    });
+    await doc.ops.sketch.publish({ requireProfiles: true });
+    expect(sketchLabel()).toBe("Renamed sketch");
+    // Only the history steps below count.
+    restore.mockClear();
+    await doc.ops.history.undo({});
+    expect(sketchLabel()).toBe(originalSketch);
+    await doc.ops.history.redo({});
+    expect(sketchLabel()).toBe("Renamed sketch");
+
+    expect(restore).not.toHaveBeenCalled();
     expect(doc.inspect(["bodies"]).bodies[0]!.bounds).toEqual(body.bounds);
   } finally {
     await doc.close();

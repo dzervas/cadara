@@ -5,7 +5,7 @@ import type {
   DocumentVariableRecord,
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
-import type { FeatureId, RequestId } from "@/contracts/shared/ids";
+import type { FeatureId } from "@/contracts/shared/ids";
 import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import {
   describeUnknownError,
@@ -67,10 +67,6 @@ const inFlightDocumentVariableAdds = new WeakMap<
   ModelingService,
   Promise<void>
 >();
-
-function createWorkbenchRequestId(scope: string) {
-  return `request_workbench_${scope}_${Date.now().toString(36)}` as RequestId;
-}
 
 export function createWorkbenchDocumentOwner({
   machineState,
@@ -284,11 +280,10 @@ export function createWorkbenchDocumentOwner({
           throw new Error(`Could not find ${target.featureId}.`);
         }
 
-        const result = await modelingService.updateFeature({
+        const result = await modelingService.renameFeature({
           baseRevisionId: currentSnapshot.document.revisionId,
           featureId: feature.featureId,
           featureLabel: nextLabel,
-          definition: feature.definition,
         });
         return acceptMutation(result, options);
       }
@@ -300,16 +295,10 @@ export function createWorkbenchDocumentOwner({
           throw new Error(`Could not find ${target.sketchId}.`);
         }
 
-        const requestId = createWorkbenchRequestId("rename-sketch");
-        const result = await modelingService.commitSketch({
+        const result = await modelingService.renameSketch({
           baseRevisionId: currentSnapshot.document.revisionId,
           sketchId: sketch.sketchId,
           sketchLabel: nextLabel,
-          plane: sketch.plane,
-          definition: sketch.sketch.definition,
-          solverCorrelation:
-            modelingService.sketchSolver?.createCommitCorrelation(requestId) ??
-            null,
         });
         return acceptMutation(result, options);
       }

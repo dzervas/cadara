@@ -13,10 +13,7 @@ import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-sche
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { EditorEvent, EditorState } from "@/domain/editor/state-machine";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import type {
-  ModelingCommitSketchCorrelation,
-  ModelingService,
-} from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/domain/modeling/modeling-service";
 import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";
 
 function createDiagnostic(
@@ -398,21 +395,20 @@ test("document owner routes rename operations for bodies, features, and sketches
   const body = snapshot.document.bodies[0]!;
   const feature = snapshot.document.features[0]!;
   const sketch = snapshot.document.sketches[0]!;
-  const correlations: ModelingCommitSketchCorrelation[] = [];
   const renameBodyCalls: Array<{
     bodyId: string;
     bodyLabel: string;
     baseRevisionId: string;
   }> = [];
-  const updateFeatureCalls: Array<{
+  const renameFeatureCalls: Array<{
     featureId: string;
     featureLabel: string;
-    definition: typeof feature.definition;
+    baseRevisionId: string;
   }> = [];
-  const commitSketchCalls: Array<{
+  const renameSketchCalls: Array<{
     sketchId: string;
     sketchLabel: string;
-    solverCorrelation: ModelingCommitSketchCorrelation | null;
+    baseRevisionId: string;
   }> = [];
 
   const owner = createOwner({
@@ -420,19 +416,7 @@ test("document owner routes rename operations for bodies, features, and sketches
     dispatch: (event) => dispatched.push(event),
     modelingService: {
       currentDocumentId: snapshot.document.documentId,
-      sketchSolver: {
-        createCommitCorrelation(requestId) {
-          const correlation = {
-            requestId,
-            projectionRequestId: `${requestId}_project`,
-            validationRequestId: `${requestId}_validate`,
-            solveRequestId: `${requestId}_solve`,
-            regionRequestId: `${requestId}_regions`,
-          } as ModelingCommitSketchCorrelation;
-          correlations.push(correlation);
-          return correlation;
-        },
-      },
+      sketchSolver: null,
       async getCurrentDocumentSnapshot() {
         return nextSnapshot;
       },
@@ -443,23 +427,15 @@ test("document owner routes rename operations for bodies, features, and sketches
           diagnostics: [],
         });
       },
-      async updateFeature(input) {
-        updateFeatureCalls.push({
-          featureId: input.featureId,
-          featureLabel: input.featureLabel,
-          definition: input.definition,
-        });
+      async renameFeature(input) {
+        renameFeatureCalls.push(input);
         return ok({
           revisionState: { kind: "accepted" as const },
           diagnostics: [],
         });
       },
-      async commitSketch(input) {
-        commitSketchCalls.push({
-          sketchId: input.sketchId,
-          sketchLabel: input.sketchLabel,
-          solverCorrelation: input.solverCorrelation,
-        });
+      async renameSketch(input) {
+        renameSketchCalls.push(input);
         return ok({
           revisionState: { kind: "accepted" as const },
           diagnostics: [],
@@ -494,18 +470,21 @@ test("document owner routes rename operations for bodies, features, and sketches
       renameBodyCalls[0]?.baseRevisionId === snapshot.document.revisionId,
     "Body renames should forward the body id, new label, and active base revision.",
   ).toBeTruthy();
-  expect(
-    updateFeatureCalls[0]?.featureId === feature.featureId &&
-      updateFeatureCalls[0]?.featureLabel === "Renamed feature" &&
-      updateFeatureCalls[0]?.definition === feature.definition,
-    "Feature renames should preserve the existing definition while updating the label.",
-  ).toBeTruthy();
-  expect(
-    commitSketchCalls[0]?.sketchId === sketch.sketchId &&
-      commitSketchCalls[0]?.sketchLabel === "Renamed sketch" &&
-      commitSketchCalls[0]?.solverCorrelation === correlations[0],
-    "Sketch renames should hand the sketch solver correlation through the modeling service port.",
-  ).toBeTruthy();
+  // cadara-kv69: relabels re-run no feature and solve no sketch.
+  expect(renameFeatureCalls).toEqual([
+    {
+      baseRevisionId: snapshot.document.revisionId,
+      featureId: feature.featureId,
+      featureLabel: "Renamed feature",
+    },
+  ]);
+  expect(renameSketchCalls).toEqual([
+    {
+      baseRevisionId: snapshot.document.revisionId,
+      sketchId: sketch.sketchId,
+      sketchLabel: "Renamed sketch",
+    },
+  ]);
   expect(
     dispatched.filter((event) => event.type === "document.snapshotLoaded")
       .length,

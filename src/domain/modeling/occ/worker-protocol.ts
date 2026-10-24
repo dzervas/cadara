@@ -18,8 +18,12 @@ import type {
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
+  ModelingOperationResult,
   RenameBodyRequest,
   RenameBodyResponse,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   SetBodyAppearanceRequest,
   SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
@@ -225,6 +229,18 @@ export type OccWorkerOperation =
       request: RenameBodyRequest;
     }
   | {
+      kind: "renameFeature";
+      request: RenameFeatureRequest;
+    }
+  | {
+      kind: "renameSketch";
+      request: RenameSketchRequest;
+    }
+  | {
+      kind: "renameDocument";
+      request: RenameDocumentRequest;
+    }
+  | {
       kind: "setBodyAppearance";
       request: SetBodyAppearanceRequest;
     }
@@ -315,6 +331,7 @@ export type OccWorkerOperationResult =
   | DeleteFeatureResponse
   | DeleteDocumentTargetResponse
   | RenameBodyResponse
+  | ModelingOperationResult
   | SetBodyAppearanceResponse
   | ReorderFeatureResponse
   | ReorderDocumentHistoryResponse

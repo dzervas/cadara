@@ -111,8 +111,12 @@ import type {
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
   DocumentVariableRecord,
+  ModelingOperationResult,
   RenameBodyRequest,
   RenameBodyResponse,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   SetBodyAppearanceRequest,
   SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
@@ -7356,6 +7360,136 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
           diagnostics: [],
         }),
         changedTargets: [{ kind: "body", bodyId: request.bodyId }],
+        diagnostics: [],
+      };
+    });
+  }
+
+  /** The mock evaluates no geometry, so a relabel takes the update path. */
+  async renameFeature(
+    request: RenameFeatureRequest,
+  ): Promise<UpdateFeatureResponse> {
+    assertSupportedModelingRequest(request);
+    const feature = (await this.getSnapshot()).document.features.find(
+      (entry) => entry.featureId === request.featureId,
+    );
+    if (!feature) {
+      const diagnostics = [createMissingFeatureDiagnostic(request.featureId)];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        featureId: request.featureId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: "mock-missing-feature",
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+    return this.updateFeature({ ...request, definition: feature.definition });
+  }
+
+  /** A commit that changes only the label is the mock's sketch rename. */
+  async renameSketch(
+    request: RenameSketchRequest,
+  ): Promise<CommitSketchResponse> {
+    assertSupportedModelingRequest(request);
+    const sketch = (await this.getSnapshot()).document.sketches.find(
+      (entry) => entry.sketchId === request.sketchId,
+    );
+    if (!sketch) {
+      const diagnostics = [createMissingSketchDiagnostic(request.sketchId)];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        sketchId: request.sketchId,
+        revisionState: {
+          kind: "rejected",
+          baseRevisionId: request.baseRevisionId,
+          reasonCode: "mock-missing-sketch",
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "validationRejected",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+    const requestId = `request_mock_rename_${request.sketchId}` as RequestId;
+    return this.commitSketch({
+      contractVersion: request.contractVersion,
+      documentId: request.documentId,
+      baseRevisionId: request.baseRevisionId,
+      solverCorrelation: {
+        requestId,
+        projectionRequestId: requestId,
+        validationRequestId: requestId,
+        solveRequestId: requestId,
+        regionRequestId: requestId,
+      },
+      sketchId: request.sketchId,
+      sketchLabel: request.sketchLabel,
+      plane: sketch.plane,
+      definition: sketch.sketch.definition,
+    });
+  }
+
+  async renameDocument(
+    request: RenameDocumentRequest,
+  ): Promise<ModelingOperationResult> {
+    assertSupportedModelingRequest(request);
+    if (hasRevisionConflict(request.baseRevisionId, this.currentRevisionId)) {
+      const diagnostics = [
+        createRevisionConflictDiagnostic(
+          request.baseRevisionId,
+          this.currentRevisionId,
+        ),
+      ];
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: this.currentRevisionId,
+        revisionState: {
+          kind: "conflict",
+          expectedRevisionId: request.baseRevisionId,
+          actualRevisionId: this.currentRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "skipped",
+          reasonCode: "revisionConflict",
+          diagnostics,
+        }),
+        changedTargets: [],
+        diagnostics,
+      };
+    }
+    return this.mutateSnapshot((mutableSnapshot, nextRevisionId) => {
+      mutableSnapshot.document.name = request.name;
+      return {
+        contractVersion: CONTRACT_VERSION,
+        documentId: request.documentId,
+        revisionId: nextRevisionId,
+        revisionState: {
+          kind: "accepted",
+          baseRevisionId: request.baseRevisionId,
+        },
+        rebuildResult: createRebuildResult({
+          kind: "rebuilt",
+          revisionId: nextRevisionId,
+          diagnostics: [],
+        }),
+        changedTargets: [],
         diagnostics: [],
       };
     });

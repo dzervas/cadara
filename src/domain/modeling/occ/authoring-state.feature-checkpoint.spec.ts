@@ -133,49 +133,63 @@ function createBase(overrides: Partial<OccAuthoringState> = {}) {
 }
 
 const previousBuild = createBase();
-const stages: OccFeatureTopologyStageMap = new Map(
-  features.map((feature, index) => {
-    const featureId = feature.featureId;
-    const state = {
-      ...previousBuild,
-      bodies: bodyIds
-        .slice(0, index + 1)
-        .map((bodyId) => ({ bodyId, label: bodyLabels.get(bodyId) })),
-      constructions: [],
-      constructionPlanes: [],
-      features: features.slice(0, index + 1),
-      entities: [],
-      renderRecords: [],
-      referenceState: {},
-      diagnostics: [],
-      featureTopologyStages: new Map([
-        [featureId, { featureId, outputs: new Map() }],
-      ]),
-    } as unknown as OccAuthoringState;
-    return [
-      featureId,
-      checkpointOccFeatureStage(state, featureId, 0).featureTopologyStages.get(
+/** Checkpoints of `previousBuild`; from feature index `diagnosticsFrom` on,
+ * each holds a rebuild diagnostic. */
+const createStages = (diagnosticsFrom = Infinity): OccFeatureTopologyStageMap =>
+  new Map(
+    features.map((feature, index) => {
+      const featureId = feature.featureId;
+      const state = {
+        ...previousBuild,
+        bodies: bodyIds
+          .slice(0, index + 1)
+          .map((bodyId) => ({ bodyId, label: bodyLabels.get(bodyId) })),
+        constructions: [],
+        constructionPlanes: [],
+        features: features.slice(0, index + 1),
+        entities: [],
+        renderRecords: [],
+        referenceState: {},
+        diagnostics:
+          index >= diagnosticsFrom
+            ? [{ code: "rebuild-warning", featureId: feature.featureId }]
+            : [],
+        featureTopologyStages: new Map([
+          [featureId, { featureId, outputs: new Map() }],
+        ]),
+      } as unknown as OccAuthoringState;
+      return [
         featureId,
-      )!,
-    ];
-  }),
-);
+        checkpointOccFeatureStage(
+          state,
+          featureId,
+          0,
+        ).featureTopologyStages.get(featureId)!,
+      ];
+    }),
+  );
+const stages = createStages();
 
 function reusedFeatureIds(
   base: OccAuthoringState,
   isReplayable: (feature: OccAuthoringFeatureRecord) => boolean = () => true,
+  appliedFeatures: readonly OccAuthoringFeatureRecord[] = features,
+  checkpoints = stages,
 ): FeatureId[] | null {
   const reusable = findReusableOccFeatureCheckpoint(
-    stages,
+    checkpoints,
     base,
-    features,
+    appliedFeatures,
     isReplayable,
   );
   if (!reusable) return null;
-  expect(reusable.checkpoint).toBe(
-    stages.get(reusable.prefixFeatureIds.at(-1)!)!.checkpoint,
+  expect(reusable.prefixFeatures).toEqual(
+    appliedFeatures.slice(0, reusable.prefixFeatures.length),
   );
-  return reusable.prefixFeatureIds;
+  expect(reusable.checkpoint).toBe(
+    checkpoints.get(reusable.prefixFeatures.at(-1)!.featureId)!.checkpoint,
+  );
+  return reusable.prefixFeatures.map((feature) => feature.featureId);
 }
 
 test("an unchanged history reuses every applied feature", () => {
@@ -193,8 +207,17 @@ test("an unchanged history reuses every applied feature", () => {
 });
 
 test("replacing a sketch reuses exactly the features before the first one naming it", () => {
+  // A commit re-solves the sketch into a new record.
   const editedSketches = sketches.map((sketch) =>
-    sketch.sketchId === "sketch_2" ? { ...sketch } : sketch,
+    sketch.sketchId === "sketch_2"
+      ? {
+          ...sketch,
+          sketch: {
+            ...sketch.sketch,
+            definition: structuredClone(sketch.sketch.definition),
+          },
+        }
+      : sketch,
   );
   expect(reusedFeatureIds(createBase({ sketches: editedSketches }))).toEqual([
     "feature_1",
@@ -276,4 +299,59 @@ test("a body rename rejects only the checkpoints holding that body", () => {
     reusedFeatureIds(createBase({ bodyLabels: renamed("body_later") })),
     "A label of a body no checkpoint holds keeps the whole prefix.",
   ).toEqual(["feature_1", "feature_2", "feature_3"]);
+});
+
+test("a feature or sketch relabel keeps the prefix unless a checkpoint holds diagnostics, whose messages name them (cadara-kv69)", () => {
+  const relabelledFeatures = (featureId: FeatureId) =>
+    features.map((feature) =>
+      feature.featureId === featureId
+        ? { ...feature, label: "Relabelled" }
+        : feature,
+    );
+  const relabelledSketches = (sketchId: SketchId) =>
+    createBase({
+      sketches: sketches.map((sketch) =>
+        sketch.sketchId === sketchId
+          ? {
+              ...sketch,
+              label: "Relabelled",
+              sketch: { ...sketch.sketch, label: "Relabelled" },
+            }
+          : sketch,
+      ),
+    });
+  const all = ["feature_1", "feature_2", "feature_3"];
+  expect(
+    reusedFeatureIds(createBase(), undefined, relabelledFeatures("feature_1")),
+  ).toEqual(all);
+  expect(reusedFeatureIds(relabelledSketches("sketch_1"))).toEqual(all);
+
+  // feature_2 and feature_3's checkpoints hold a diagnostic.
+  const withDiagnostics = createStages(1);
+  expect(
+    reusedFeatureIds(
+      createBase(),
+      undefined,
+      relabelledFeatures("feature_3"),
+      withDiagnostics,
+    ),
+  ).toEqual(["feature_1", "feature_2"]);
+  expect(
+    reusedFeatureIds(
+      relabelledSketches("sketch_2"),
+      undefined,
+      features,
+      withDiagnostics,
+    ),
+  ).toEqual(["feature_1"]);
+
+  expect(
+    reusedFeatureIds(
+      createBase(),
+      undefined,
+      relabelledFeatures("feature_1"),
+      createStages(2),
+    ),
+    "Only feature_3's checkpoint holds a diagnostic, so feature_2's takes the relabel.",
+  ).toEqual(["feature_1", "feature_2"]);
 });

@@ -73,6 +73,7 @@ import {
   createOccReferenceState,
   getOccDurableRefKey,
   renameOccReferenceStateBody,
+  renameOccReferenceStateSketch,
   type OccReferenceInvalidationRecord,
   type OccReferenceState,
   type OccTrackedBody,
@@ -174,10 +175,34 @@ export function checkpointOccFeatureStage(
   return { ...state, featureTopologyStages };
 }
 
-/** Ids of sketches that `next` adds, removes or replaces relative to `previous`. */
+/** Whether `next` is `previous` with at most its labels changed, as
+ * renameOccAuthoringStateSketch makes it. */
+function isSketchRelabel(
+  previous: SketchSnapshotRecord,
+  next: SketchSnapshotRecord,
+) {
+  const sameExcept = <T extends object>(
+    left: T,
+    right: T,
+    ignored: readonly (keyof T)[],
+  ) =>
+    [...new Set([...Object.keys(left), ...Object.keys(right)])].every(
+      (key) =>
+        ignored.includes(key as keyof T) ||
+        left[key as keyof T] === right[key as keyof T],
+    );
+  return (
+    sameExcept(previous, next, ["label", "sketch"]) &&
+    sameExcept(previous.sketch, next.sketch, ["label"])
+  );
+}
+
+/** Ids of sketches that `next` adds, removes or replaces relative to
+ * `previous`; a relabelled sketch counts as replaced unless `ignoreLabels`. */
 function getChangedSketchIds(
   previous: readonly SketchSnapshotRecord[],
   next: readonly SketchSnapshotRecord[],
+  ignoreLabels: boolean,
 ) {
   if (previous === next) return new Set<SketchId>();
   const previousById = new Map(
@@ -185,7 +210,11 @@ function getChangedSketchIds(
   );
   const changed = new Set<SketchId>();
   for (const sketch of next) {
-    if (previousById.get(sketch.sketchId) !== sketch) {
+    const evaluated = previousById.get(sketch.sketchId);
+    if (
+      evaluated !== sketch &&
+      !(ignoreLabels && evaluated && isSketchRelabel(evaluated, sketch))
+    ) {
       changed.add(sketch.sketchId);
     }
     previousById.delete(sketch.sketchId);
@@ -236,11 +265,19 @@ export function getSketchIdsResolvingDifferently(
  * The number of leading `prefix` features that `checkpoint` evaluated from
  * the same record and from the same sketches and resolved variable values
  * that a rebuild from `base` would use.
+ *
+ * Feature and sketch labels count only when the checkpoint holds diagnostics
+ * (cadara-kv69): their messages name features and sketches, and nothing else
+ * it holds derives from those labels. A body named after its feature took
+ * that name into `bodyLabels` when first evaluated, which
+ * isCheckpointContextUnchanged compares, and resuming takes each feature's
+ * label from `prefix`.
  */
 function countUnchangedCheckpointFeatures(
   checkpoint: OccFeatureStageCheckpoint,
   base: OccAuthoringState,
   prefix: readonly OccAuthoringFeatureRecord[],
+  labelsFeedCheckpoint = checkpoint.featureDiagnostics.length > 0,
 ) {
   const variablesChanged =
     checkpoint.variables !== base.variables &&
@@ -249,7 +286,11 @@ function countUnchangedCheckpointFeatures(
   // check already catches them; resolving under both variable sets keeps the
   // answer right for a caller that changes variables without re-solving.
   const changedSketchIds = new Set([
-    ...getChangedSketchIds(checkpoint.sketches, base.sketches),
+    ...getChangedSketchIds(
+      checkpoint.sketches,
+      base.sketches,
+      !labelsFeedCheckpoint,
+    ),
     ...(variablesChanged
       ? getSketchIdsResolvingDifferently(
           base.sketches,
@@ -265,8 +306,9 @@ function countUnchangedCheckpointFeatures(
       evaluated?.featureId !== feature.featureId ||
       evaluated.suppressed ||
       feature.suppressed ||
-      (evaluated.label ?? evaluated.featureId) !==
-        (feature.label ?? feature.featureId) ||
+      (labelsFeedCheckpoint &&
+        (evaluated.label ?? evaluated.featureId) !==
+          (feature.label ?? feature.featureId)) ||
       JSON.stringify(evaluated.definition) !== definition ||
       // Any sketch id the definition names, wherever it nests.
       [...changedSketchIds].some((sketchId) =>
@@ -343,7 +385,7 @@ export function findReusableOccFeatureCheckpoint(
   appliedFeatures: readonly OccAuthoringFeatureRecord[],
   isReplayable: (feature: OccAuthoringFeatureRecord) => boolean,
 ): {
-  prefixFeatureIds: FeatureId[];
+  prefixFeatures: OccAuthoringFeatureRecord[];
   checkpoint: OccFeatureStageCheckpoint;
 } | null {
   let count = 0;
@@ -368,21 +410,27 @@ export function findReusableOccFeatureCheckpoint(
       unchanged === count &&
       isCheckpointContextUnchanged(checkpoint, base, last)
     ) {
-      return {
-        prefixFeatureIds: prefix.map((feature) => feature.featureId),
-        checkpoint,
-      };
+      return { prefixFeatures: prefix, checkpoint };
     }
-    count = Math.min(unchanged, count - 1);
+    // A label difference rules out only checkpoints holding diagnostics; a
+    // shorter one without them can still take it, so skip only to the first
+    // other difference.
+    count = Math.min(
+      unchanged < count && checkpoint.featureDiagnostics.length > 0
+        ? countUnchangedCheckpointFeatures(checkpoint, base, prefix, false)
+        : unchanged,
+      count - 1,
+    );
   }
   return null;
 }
 
 /**
- * Continues the rebuild `base` after its first `prefixFeatureIds`, which
+ * Continues the rebuild `base` after its first `prefixFeatures`, which
  * `checkpoint` evaluated and whose `stages` are reused as they are. The caller
  * proves the prefix unchanged against `base`, so its bodies, labels,
- * appearances and assets are those a replay from `base` would produce. The
+ * appearances and assets are those a replay from `base` would produce; each
+ * feature record takes its label from `prefixFeatures`. The
  * references are re-evaluated at `base`'s revision against
  * `previousReferenceState`, as the replay's base state does: the prefix keeps
  * its live references, and references only the dropped suffix made live are
@@ -392,11 +440,11 @@ export function resumeOccAuthoringStateFromCheckpoint(
   base: OccAuthoringState,
   checkpoint: OccFeatureStageCheckpoint,
   stages: OccFeatureTopologyStageMap,
-  prefixFeatureIds: readonly FeatureId[],
+  prefixFeatures: readonly OccAuthoringFeatureRecord[],
   previousReferenceState: OccReferenceState,
 ): OccAuthoringState {
   const featureTopologyStages = new Map(
-    prefixFeatureIds.map((featureId) => {
+    prefixFeatures.map(({ featureId }) => {
       const stage = stages.get(featureId);
       if (!stage) {
         throw new Error(`Reused feature ${featureId} has no topology stage.`);
@@ -423,15 +471,19 @@ export function resumeOccAuthoringStateFromCheckpoint(
       checkpoint.referenceState.liveReferencesByKey.keys(),
     ),
   });
+  const features = checkpoint.features.map((feature, index) => {
+    const label = prefixFeatures[index]!.label ?? feature.featureId;
+    return feature.label === label ? feature : { ...feature, label };
+  });
 
   return {
     ...base,
     bodies: checkpoint.bodies,
     constructions: checkpoint.constructions,
     constructionPlanes: checkpoint.constructionPlanes,
-    features: checkpoint.features,
-    authoredFeatures: checkpoint.features,
-    cursor: { kind: "feature", featureId: prefixFeatureIds.at(-1)! },
+    features,
+    authoredFeatures: features,
+    cursor: { kind: "feature", featureId: prefixFeatures.at(-1)!.featureId },
     diagnostics: [...base.diagnostics, ...checkpoint.featureDiagnostics],
     entities: checkpoint.entities,
     renderRecords: checkpoint.renderRecords,
@@ -566,6 +618,64 @@ export function renameOccAuthoringStateBody(
       state.previousFeatureTopologyStages,
     ),
     referenceState: renameOccReferenceStateBody(state.referenceState, input),
+  };
+}
+
+/**
+ * A feature relabel changes only the feature record (cadara-kv69), so no
+ * feature runs again. Bodies named after the feature keep their names, as in a
+ * rebuild: those names entered `bodyLabels` when the bodies were first
+ * evaluated. References name a feature by its id. Rebuild diagnostics name
+ * features by label, so a caller relabels in place only a state without them.
+ */
+export function renameOccAuthoringStateFeature(
+  state: OccAuthoringState,
+  input: {
+    featureId: FeatureId;
+    label: string;
+    revisionId: OccAuthoringState["revisionId"];
+  },
+): OccAuthoringState {
+  return {
+    ...state,
+    revisionId: input.revisionId,
+    features: state.features.map((feature) =>
+      feature.featureId === input.featureId
+        ? { ...feature, label: input.label }
+        : feature,
+    ),
+  };
+}
+
+/**
+ * A sketch relabel changes only the sketch record and the sketch reference's
+ * label (cadara-kv69): the sketch is not solved again and no feature runs
+ * again. The features' checkpoints still hold the previous record, which
+ * countUnchangedCheckpointFeatures accepts as unchanged. Rebuild diagnostics
+ * name sketches by label, so a caller relabels in place only a state without
+ * them.
+ */
+export function renameOccAuthoringStateSketch(
+  state: OccAuthoringState,
+  input: {
+    sketchId: SketchId;
+    label: string;
+    revisionId: OccAuthoringState["revisionId"];
+  },
+): OccAuthoringState {
+  return {
+    ...state,
+    revisionId: input.revisionId,
+    sketches: state.sketches.map((sketch) =>
+      sketch.sketchId === input.sketchId
+        ? {
+            ...sketch,
+            label: input.label,
+            sketch: { ...sketch.sketch, label: input.label },
+          }
+        : sketch,
+    ),
+    referenceState: renameOccReferenceStateSketch(state.referenceState, input),
   };
 }
 

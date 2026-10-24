@@ -1509,6 +1509,16 @@ let regionRenderRecordCache = new WeakMap<
   >
 >();
 
+/** Lets `next`, a relabel of `previous` (cadara-kv69), reuse the region
+ * faces meshed for `previous`: region render records hold no sketch label. */
+export function carryOccSketchRegionRenderRecords(
+  previous: SketchSnapshotRecord,
+  next: SketchSnapshotRecord,
+) {
+  const tiers = regionRenderRecordCache.get(previous);
+  if (tiers) regionRenderRecordCache.set(next, tiers);
+}
+
 /** Makes the next snapshots mesh their region profile faces again. */
 export function resetRegionRenderRecordCacheForTest() {
   regionRenderRecordCache = new WeakMap();

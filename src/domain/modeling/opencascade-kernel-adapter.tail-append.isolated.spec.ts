@@ -470,15 +470,27 @@ test("cleanup-bearing aggregates bypass restore, rebuild, and preview fallback c
         adapter.restoreAuthoredModelDocument(document),
       run: async (adapter: InstanceType<typeof OpenCascadeKernelAdapter>) => {
         const sourceFeature = document.features[0]!;
-        // A relabel reruns the feature; an identical update would resume
-        // after it from its checkpoint (cadara-di5) and apply nothing.
+        // A new depth reruns the feature; an identical update or a relabel
+        // would resume after it from its checkpoint (cadara-di5, cadara-kv69)
+        // and apply nothing.
+        const definition = structuredClone(sourceFeature.definition);
+        if (
+          definition.kind !== "extrude" ||
+          definition.parameters.extent.mode !== "oneSide" ||
+          definition.parameters.extent.end.kind !== "blind"
+        ) {
+          throw new Error("Expected a one-sided blind extrude.");
+        }
+        definition.parameters.extent.end.distance = {
+          source: "literal",
+          value: 13,
+        };
         return adapter.updateFeature({
           contractVersion: "modeling-contract/v1alpha1",
           documentId: "doc_workspace",
           baseRevisionId: document.revisionId,
           featureId: sourceFeature.featureId,
-          featureLabel: "Relabelled source",
-          definition: sourceFeature.definition,
+          definition,
         });
       },
     },

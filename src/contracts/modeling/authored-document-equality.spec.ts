@@ -114,8 +114,8 @@ it.each<[string, Variant, Variant?]>([
   expect(authoredModelDocumentsEqual(left, right)).toBe(false);
 });
 
-// cadara-xkg: the metadata-only classifier that lets Undo/Redo of a body
-// rename or recolour skip the full restore.
+// cadara-xkg, cadara-kv69: the metadata-only classifier that lets Undo/Redo
+// of a rename or recolour skip the full restore.
 const secondBody: Variant = (d) => {
   d.bodyLabels.push({ bodyId: "body_other", label: "Other" });
   d.bodyAppearances?.push({
@@ -124,16 +124,39 @@ const secondBody: Variant = (d) => {
   });
 };
 
-it("classifies body label and colour changes as body metadata", async () => {
+it("classifies body label and colour changes as metadata", async () => {
   const [left, right] = await pair((d) => {
     d.revisionId = "rev_9999";
     d.bodyLabels[1]!.label = "Renamed";
     d.bodyAppearances![0]!.appearance = { kind: "custom", hex: "#123abc" };
   }, secondBody);
   expect(classifyAuthoredModelDocumentChange(left, right)).toEqual({
-    kind: "bodyMetadata",
+    kind: "metadata",
+    name: null,
+    featureLabels: [],
+    sketchLabels: [],
     bodyLabels: [right.bodyLabels[1]],
     bodyAppearances: [right.bodyAppearances![0]],
+  });
+});
+
+it("classifies feature and sketch labels and the document name as metadata", async () => {
+  const [left, right] = await pair((d) => {
+    d.features[0]!.label = "Relabelled feature";
+    d.sketches[0]!.label = "Relabelled sketch";
+    d.name = "Renamed document";
+  });
+  expect(classifyAuthoredModelDocumentChange(left, right)).toEqual({
+    kind: "metadata",
+    name: "Renamed document",
+    featureLabels: [
+      { featureId: right.features[0]!.featureId, label: "Relabelled feature" },
+    ],
+    sketchLabels: [
+      { sketchId: right.sketches[0]!.sketchId, label: "Relabelled sketch" },
+    ],
+    bodyLabels: [],
+    bodyAppearances: [],
   });
 });
 
@@ -161,15 +184,28 @@ it("ignores the record order of sketches and features", async () => {
     },
   );
   expect(classifyAuthoredModelDocumentChange(left, right)).toMatchObject({
-    kind: "bodyMetadata",
+    kind: "metadata",
+    featureLabels: [],
+    sketchLabels: [],
     bodyLabels: [{ label: "Renamed" }],
   });
 });
 
 it.each<[string, Variant, Variant?]>([
-  ["a feature label", (d) => void (d.features[0]!.label = "Relabelled")],
-  ["a sketch label", (d) => void (d.sketches[0]!.label = "Relabelled")],
-  ["the document name", (d) => void (d.name = "Renamed document")],
+  [
+    "a feature label next to a definition change",
+    (d) => {
+      d.features[0]!.label = "Relabelled";
+      d.features[0]!.suppressed = !d.features[0]!.suppressed;
+    },
+  ],
+  [
+    "a sketch label next to a definition change",
+    (d) => {
+      d.sketches[0]!.label = "Relabelled";
+      d.sketches[0]!.definition.points.reverse();
+    },
+  ],
   [
     "a body label next to a geometric change",
     (d) => {

@@ -51,8 +51,12 @@ import type {
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
   ModelingDiagnosticDetail,
+  ModelingOperationResult,
   RenameBodyRequest,
   RenameBodyResponse,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   SetBodyAppearanceRequest,
   SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
@@ -129,6 +133,8 @@ import {
   findReusableOccFeatureCheckpoint,
   getSketchIdsResolvingDifferently,
   renameOccAuthoringStateBody,
+  renameOccAuthoringStateFeature,
+  renameOccAuthoringStateSketch,
   resumeOccAuthoringStateFromCheckpoint,
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
@@ -162,6 +168,7 @@ import {
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
+  carryOccSketchRegionRenderRecords,
   refineNextOccSketchRegionRenderRecords,
 } from "@/domain/modeling/occ/snapshot";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
@@ -1566,6 +1573,13 @@ function getPersistentAuthoringDiagnostics(
   return diagnostics.filter((diagnostic) => diagnostic.featureId == null);
 }
 
+/** Whether `state` holds diagnostics its last rebuild made, whose messages
+ * name features and sketches by label (cadara-kv69): a relabel then rebuilds
+ * instead of changing the label in place. */
+function hasRebuildDiagnostics(state: OccAuthoringState) {
+  return state.diagnostics.some((diagnostic) => diagnostic.featureId != null);
+}
+
 function mergeModelingDiagnostics(
   existing: readonly ModelingDiagnostic[],
   additional: readonly ModelingDiagnostic[],
@@ -2264,6 +2278,24 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   renameBody(request: RenameBodyRequest) {
     return this.runSerializedOperation(() =>
       this.renameBodySerialized(request),
+    );
+  }
+
+  renameFeature(request: RenameFeatureRequest) {
+    return this.runSerializedOperation(() =>
+      this.renameFeatureSerialized(request),
+    );
+  }
+
+  renameSketch(request: RenameSketchRequest) {
+    return this.runSerializedOperation(() =>
+      this.renameSketchSerialized(request),
+    );
+  }
+
+  renameDocument(request: RenameDocumentRequest) {
+    return this.runSerializedOperation(() =>
+      this.renameDocumentSerialized(request),
     );
   }
 
@@ -3244,14 +3276,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           baseState,
           reusable.checkpoint,
           runtimeState.authoringState.featureTopologyStages,
-          reusable.prefixFeatureIds,
+          reusable.prefixFeatures,
           baseState.referenceState,
         )
       : baseState;
 
     try {
       for (const feature of appliedFeatures.slice(
-        reusable?.prefixFeatureIds.length ?? 0,
+        reusable?.prefixFeatures.length ?? 0,
       )) {
         const previous = current;
         current = applyOccFeatureToAuthoringState(current, feature);
@@ -3583,13 +3615,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           baseState,
           reusable.checkpoint,
           runtimeState.authoringState.featureTopologyStages,
-          reusable.prefixFeatureIds,
+          reusable.prefixFeatures,
           runtimeState.authoringState.referenceState,
         )
       : baseState;
 
     const evaluatedFeatures = appliedFeatures.slice(
-      reusable?.prefixFeatureIds.length ?? 0,
+      reusable?.prefixFeatures.length ?? 0,
     );
     for (const [index, feature] of evaluatedFeatures.entries()) {
       input.onProgress?.({
@@ -5604,6 +5636,189 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       bodyId: request.bodyId,
       changedTargets: [bodyTarget],
       ...accepted,
+    });
+  }
+
+  private async renameFeatureSerialized(
+    request: RenameFeatureRequest,
+  ): Promise<UpdateFeatureResponse> {
+    assertSupportedModelingRequest(request, this.documentId);
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.renameFeature(request);
+    }
+
+    const runtimeState = await this.getRuntimeState();
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState);
+    if (request.baseRevisionId !== currentRevisionId) {
+      return this.withOperationEnvelope({
+        featureId: request.featureId,
+        changedTargets: [],
+        ...this.buildConflictResult(request.baseRevisionId, currentRevisionId),
+      });
+    }
+
+    const feature = runtimeState.authoringState.features.find(
+      (entry) => entry.featureId === request.featureId,
+    );
+    if (!feature) {
+      return this.withOperationEnvelope({
+        featureId: request.featureId,
+        changedTargets: [],
+        ...this.buildRejectedResult(
+          request.baseRevisionId,
+          [createMissingFeatureDiagnostic(request.featureId)],
+          OCC_MISSING_FEATURE_CODE,
+        ),
+      });
+    }
+    if (hasRebuildDiagnostics(runtimeState.authoringState)) {
+      return this.updateFeatureSerialized({
+        ...request,
+        definition: feature.definition,
+      });
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1;
+    const nextAuthoringState = renameOccAuthoringStateFeature(
+      runtimeState.authoringState,
+      {
+        featureId: request.featureId,
+        label: request.featureLabel,
+        revisionId: createRevisionId(nextSequence),
+      },
+    );
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState,
+      revisionSequence: nextSequence,
+    });
+
+    return this.withOperationEnvelope({
+      featureId: request.featureId,
+      changedTargets: [{ kind: "feature" as const, featureId: request.featureId }],
+      ...this.buildAcceptedResult(
+        runtimeState.authoringState,
+        nextAuthoringState,
+        [],
+      ),
+    });
+  }
+
+  private async renameSketchSerialized(
+    request: RenameSketchRequest,
+  ): Promise<CommitSketchResponse> {
+    assertSupportedModelingRequest(request, this.documentId);
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.renameSketch(request);
+    }
+
+    const runtimeState = await this.getRuntimeState();
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState);
+    if (request.baseRevisionId !== currentRevisionId) {
+      return this.withOperationEnvelope({
+        sketchId: request.sketchId,
+        changedTargets: [],
+        ...this.buildConflictResult(request.baseRevisionId, currentRevisionId),
+      });
+    }
+
+    const sketch = runtimeState.authoringState.sketches.find(
+      (entry) => entry.sketchId === request.sketchId,
+    );
+    if (!sketch) {
+      const diagnostic = createMissingSketchDiagnostic(request.sketchId);
+      return this.withOperationEnvelope({
+        sketchId: request.sketchId,
+        changedTargets: [],
+        ...this.buildRejectedResult(
+          request.baseRevisionId,
+          [diagnostic],
+          diagnostic.code,
+        ),
+      });
+    }
+    if (hasRebuildDiagnostics(runtimeState.authoringState)) {
+      return this.commitSketchSerialized({
+        contractVersion: request.contractVersion,
+        documentId: request.documentId,
+        baseRevisionId: request.baseRevisionId,
+        solverCorrelation: null,
+        sketchId: request.sketchId,
+        sketchLabel: request.sketchLabel,
+        plane: sketch.plane,
+        definition: sketch.sketch.definition,
+      });
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1;
+    const nextAuthoringState = renameOccAuthoringStateSketch(
+      runtimeState.authoringState,
+      {
+        sketchId: request.sketchId,
+        label: request.sketchLabel,
+        revisionId: createRevisionId(nextSequence),
+      },
+    );
+    carryOccSketchRegionRenderRecords(
+      sketch,
+      nextAuthoringState.sketches.find(
+        (entry) => entry.sketchId === request.sketchId,
+      )!,
+    );
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState,
+      revisionSequence: nextSequence,
+    });
+
+    return this.withOperationEnvelope({
+      sketchId: request.sketchId,
+      changedTargets: [{ kind: "sketch" as const, sketchId: request.sketchId }],
+      ...this.buildAcceptedResult(
+        runtimeState.authoringState,
+        nextAuthoringState,
+        [],
+      ),
+    });
+  }
+
+  private async renameDocumentSerialized(
+    request: RenameDocumentRequest,
+  ): Promise<ModelingOperationResult> {
+    assertSupportedModelingRequest(request, this.documentId);
+
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.renameDocument(request);
+    }
+
+    const runtimeState = await this.getRuntimeState();
+    const currentRevisionId = this.getCurrentRevisionId(runtimeState);
+    if (request.baseRevisionId !== currentRevisionId) {
+      return this.withOperationEnvelope({
+        changedTargets: [],
+        ...this.buildConflictResult(request.baseRevisionId, currentRevisionId),
+      });
+    }
+
+    const nextSequence = runtimeState.revisionSequence + 1;
+    // The name feeds no evaluated state (cadara-kv69).
+    const nextAuthoringState: OccAuthoringState = {
+      ...runtimeState.authoringState,
+      revisionId: createRevisionId(nextSequence),
+      name: request.name,
+    };
+    this.replaceRuntimeState({
+      authoringState: nextAuthoringState,
+      revisionSequence: nextSequence,
+    });
+
+    return this.withOperationEnvelope({
+      changedTargets: [],
+      ...this.buildAcceptedResult(
+        runtimeState.authoringState,
+        nextAuthoringState,
+        [],
+      ),
     });
   }
 

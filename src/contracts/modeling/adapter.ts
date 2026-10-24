@@ -23,8 +23,12 @@ import type {
   EvaluatePreviewResponse,
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
+  ModelingOperationResult,
   RenameBodyRequest,
   RenameBodyResponse,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   ReorderDocumentHistoryRequest,
   ReorderDocumentHistoryResponse,
   ReorderFeatureRequest,
@@ -175,6 +179,14 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   ): Promise<DeleteDocumentTargetResponse>;
   /** Renames an existing durable body without changing its topology. */
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>;
+  /** Relabels an existing durable feature without re-running any feature. */
+  renameFeature(request: RenameFeatureRequest): Promise<UpdateFeatureResponse>;
+  /** Relabels an existing durable sketch without solving it or re-running any feature. */
+  renameSketch(request: RenameSketchRequest): Promise<CommitSketchResponse>;
+  /** Renames the document without re-running any feature. */
+  renameDocument(
+    request: RenameDocumentRequest,
+  ): Promise<ModelingOperationResult>;
   /** Sets an existing durable body's display colour without changing geometry. */
   setBodyAppearance(
     request: SetBodyAppearanceRequest,

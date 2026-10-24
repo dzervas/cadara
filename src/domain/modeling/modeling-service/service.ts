@@ -91,6 +91,7 @@ import {
   normalizeUpdateFeatureInput,
   normalizeDeleteFeatureInput,
   normalizeDeleteTargetInput,
+  normalizeRelabelInput,
   normalizeRenameBodyInput,
   normalizeSetBodyAppearanceInput,
   normalizeReorderFeatureInput,
@@ -408,13 +409,14 @@ export function createModelingService(
     }, metadata);
   }
 
-  /** cadara-xkg: an Undo/Redo whose state differs from the runtime's `current`
-   * export only in body labels or colours is applied through the kernel's
-   * rename and appearance operations, which re-run no feature. Any other
-   * difference, or an operation the kernel refuses, restores the whole
-   * document. Each operation allocates the next unused revision; a peer
-   * state keeps the full restore, which adopts its stored revision id when
-   * that is later than every id used here. */
+  /** cadara-xkg, cadara-kv69: an Undo/Redo whose state differs from the
+   * runtime's `current` export only in the document name, feature or sketch
+   * labels, or body labels or colours is applied through the kernel's rename
+   * and appearance operations, which re-run no feature. Any other difference,
+   * or an operation the kernel refuses, restores the whole document. Each
+   * operation allocates the next unused revision; a peer state keeps the full
+   * restore, which adopts its stored revision id when that is later than
+   * every id used here. */
   async function adoptRepositoryState(
     current: AuthoredModelDocument,
     event: DocumentRepositoryChangeEvent,
@@ -422,27 +424,43 @@ export function createModelingService(
     const change = event.metadata.source === "undo" || event.metadata.source === "redo"
       ? classifyAuthoredModelDocumentChange(current, event.document)
       : null;
-    if (change?.kind !== "bodyMetadata" || event.diagnostics?.length) {
+    if (change?.kind !== "metadata" || event.diagnostics?.length) {
       return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
     }
+    const { name } = change;
+    const operations: ((baseRevisionId: RevisionId) => Promise<ModelingOperationResult>)[] = [
+      ...(name === null ? [] : [(baseRevisionId: RevisionId) =>
+        adapter.renameDocument({
+          ...buildDocumentRequest(currentDocumentId),
+          baseRevisionId,
+          name,
+        })]),
+      ...change.featureLabels.map(({ featureId, label }) => (baseRevisionId: RevisionId) =>
+        adapter.renameFeature(normalizeRelabelInput(
+          { baseRevisionId, featureId, featureLabel: label },
+          currentDocumentId,
+        ))),
+      ...change.sketchLabels.map(({ sketchId, label }) => (baseRevisionId: RevisionId) =>
+        adapter.renameSketch(normalizeRelabelInput(
+          { baseRevisionId, sketchId, sketchLabel: label },
+          currentDocumentId,
+        ))),
+      ...change.bodyLabels.map(({ bodyId, label }) => (baseRevisionId: RevisionId) =>
+        adapter.renameBody(normalizeRenameBodyInput(
+          { baseRevisionId, bodyId, bodyLabel: label },
+          currentDocumentId,
+        ))),
+      ...change.bodyAppearances.map(({ bodyId, appearance }) => (baseRevisionId: RevisionId) =>
+        adapter.setBodyAppearance(normalizeSetBodyAppearanceInput(
+          { baseRevisionId, bodyId, appearance },
+          currentDocumentId,
+        ))),
+    ];
     const generation = beginRuntimeChange();
     restoredMutationPredecessor = null;
     let runtimeRevisionId = current.revisionId;
-    for (const { bodyId, label } of change.bodyLabels) {
-      const response = await adapter.renameBody(normalizeRenameBodyInput(
-        { baseRevisionId: runtimeRevisionId, bodyId, bodyLabel: label },
-        currentDocumentId,
-      ));
-      if (!isAcceptedMutation(response)) {
-        return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
-      }
-      runtimeRevisionId = response.revisionId;
-    }
-    for (const { bodyId, appearance } of change.bodyAppearances) {
-      const response = await adapter.setBodyAppearance(normalizeSetBodyAppearanceInput(
-        { baseRevisionId: runtimeRevisionId, bodyId, appearance },
-        currentDocumentId,
-      ));
+    for (const operation of operations) {
+      const response = await operation(runtimeRevisionId);
       if (!isAcceptedMutation(response)) {
         return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
       }
@@ -485,32 +503,36 @@ export function createModelingService(
   ) {
     return runModelingMutationBoundary<T>({
       ...input,
-      action: () =>
-        runLocalDocumentChange(async () => {
-          const previousBasis = repositorySnapshotBasis;
-          const previousExport = lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
-            ? lastPersistedRuntimeExport : null;
-          const generation = beginRuntimeChange();
-          // The kernel operation has not run yet: until it does, the previous
-          // export still is this mutation's predecessor (cadara-13x).
-          const predecessorExport = previousExport && { ...previousExport, runtimeGeneration: generation };
-          lastPersistedRuntimeExport = predecessorExport;
-          let result: T;
-          try {
-            result = await input.action();
-          } finally {
-            // Only an export taken after the kernel operation describes it.
-            if (lastPersistedRuntimeExport === predecessorExport) lastPersistedRuntimeExport = null;
-          }
-          // A refusal leaves the runtime untouched. Its previous verified basis
-          // remains valid unless another runtime operation has intervened.
-          if (result.revisionState.kind !== "accepted" && generation === runtimeGeneration && !repositorySnapshotBasis && previousBasis) {
-            repositorySnapshotBasis = previousBasis;
-            stateGeneration += 1;
-          }
-          return result;
-        }),
+      action: () => runLocalDocumentChange(() => applyLocalMutation(input.action)),
     });
+  }
+
+  /** Runs one kernel mutation inside a local document change. */
+  async function applyLocalMutation<T extends ModelingMutationBoundaryResult>(
+    action: () => Promise<T>,
+  ) {
+    const previousBasis = repositorySnapshotBasis;
+    const previousExport = lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
+      ? lastPersistedRuntimeExport : null;
+    const generation = beginRuntimeChange();
+    // The kernel operation has not run yet: until it does, the previous
+    // export still is this mutation's predecessor (cadara-13x).
+    const predecessorExport = previousExport && { ...previousExport, runtimeGeneration: generation };
+    lastPersistedRuntimeExport = predecessorExport;
+    let result: T;
+    try {
+      result = await action();
+    } finally {
+      // Only an export taken after the kernel operation describes it.
+      if (lastPersistedRuntimeExport === predecessorExport) lastPersistedRuntimeExport = null;
+    }
+    // A refusal leaves the runtime untouched. Its previous verified basis
+    // remains valid unless another runtime operation has intervened.
+    if (result.revisionState.kind !== "accepted" && generation === runtimeGeneration && !repositorySnapshotBasis && previousBasis) {
+      repositorySnapshotBasis = previousBasis;
+      stateGeneration += 1;
+    }
+    return result;
   }
 
   async function currentRevisionId() {
@@ -575,10 +597,14 @@ export function createModelingService(
     return document;
   }
 
-  async function getMutationPredecessor() {
-    const kernelBase = lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
+  async function exportRuntimeDocument() {
+    return lastPersistedRuntimeExport?.runtimeGeneration === runtimeGeneration
       ? structuredClone(lastPersistedRuntimeExport.document)
-      : await exportAuthoredDocumentForRepository();
+      : exportAuthoredDocumentForRepository();
+  }
+
+  async function getMutationPredecessor(kernelBase?: AuthoredModelDocument) {
+    kernelBase ??= await exportRuntimeDocument();
     // Restore/compensation rebuilds native witnesses, while the repository keeps
     // its exact previous stored basis. That basis applies only until the runtime
     // advances: later writes may be queued ahead of background persistence.
@@ -2057,7 +2083,7 @@ export function createModelingService(
     },
     async renameDocument(input) {
       return runLocalDocumentChange(async () => {
-        const document = await exportAuthoredDocumentForRepository();
+        const document = await exportRuntimeDocument();
         if (document.name === input.name) {
           const snapshot = validateSnapshotResponse(
             await adapter.getDocumentSnapshot(
@@ -2072,16 +2098,58 @@ export function createModelingService(
           };
         }
 
-        return replaceCurrentAuthoredDocument(
-          {
-            ...document,
+        // The name feeds no evaluated state, so the kernel renames the
+        // document in place instead of restoring it (cadara-kv69).
+        const expected = await getMutationPredecessor(document);
+        let receipt: DocumentRepositoryMutationResult | null = null;
+        const result = await applyLocalMutation(async () => {
+          const response = await adapter.renameDocument({
+            ...buildDocumentRequest(currentDocumentId),
+            baseRevisionId: document.revisionId,
             name: input.name,
-            revisionId: createRevisionId(parseRevisionSequence(document.revisionId) + 1),
-          },
-          [],
-          { observeTransaction: input.observe, authoredAction: { expected: document, label: "Rename document" } },
-        );
-      }, true);
+          });
+          return finalizeMutationResult(
+            expected,
+            response,
+            response,
+            {
+              // An observer makes a background write awaited; a synchronous
+              // write is awaited anyway.
+              observePersistence:
+                input.observe || documentRepositoryPersistence !== "background"
+                  ? (transaction) => {
+                      receipt = transaction;
+                      input.observe?.(transaction);
+                    }
+                  : undefined,
+            },
+            null,
+            "Rename document",
+          );
+        });
+        const refused = receipt as DocumentRepositoryMutationResult | null;
+        if (refused && !refused.ok && !refused.appliedLive) {
+          // The repository refused the write before applying it, so the
+          // document keeps its name, and so does the kernel.
+          const rollback = await applyLocalMutation(() =>
+            adapter.renameDocument({
+              ...buildDocumentRequest(currentDocumentId),
+              baseRevisionId: result.revisionId,
+              name: document.name,
+            }),
+          );
+          // A refused rollback leaves the kernel renamed: report why.
+          return {
+            ok: false,
+            diagnostics: isAcceptedMutation(rollback)
+              ? result.diagnostics
+              : [...result.diagnostics, ...rollback.diagnostics],
+          };
+        }
+        return result.revisionState.kind === "accepted"
+          ? { ok: true, revisionId: result.revisionId, diagnostics: result.diagnostics }
+          : { ok: false, diagnostics: result.diagnostics };
+      });
     },
     async bindLocalFile(input) {
       await ensureInitialized();
@@ -2461,6 +2529,77 @@ export function createModelingService(
             input,
             () => createRenameBodyHistoryEntry(request),
             "Rename Body",
+          );
+        },
+      });
+    },
+    renameFeature(input) {
+      return runLocalMutation({
+        operation: "Rename feature",
+        fallbackMessage: "Rename feature failed.",
+        context: [
+          { key: "baseRevisionId", value: input.baseRevisionId },
+          { key: "featureId", value: input.featureId },
+        ],
+        action: async () => {
+          const request = normalizeRelabelInput(input, currentDocumentId);
+          const expected = await getMutationPredecessor();
+          const response = await adapter.renameFeature(request);
+          const feature = expected.features.find(
+            (entry) => entry.featureId === request.featureId,
+          );
+          // Recorded as the update it replaces, whose replay is equivalent.
+          return finalizeMutationResult(
+            expected,
+            response,
+            mapFeatureMutationResponse(response, currentDocumentId),
+            input,
+            feature
+              ? () =>
+                  createUpdateFeatureHistoryEntry({
+                    ...request,
+                    definition: feature.definition,
+                  })
+              : null,
+            feature && `Edit ${featureKindLabel(feature.definition.kind)}`,
+          );
+        },
+      });
+    },
+    renameSketch(input) {
+      return runLocalMutation({
+        operation: "Rename sketch",
+        fallbackMessage: "Rename sketch failed.",
+        context: [
+          { key: "baseRevisionId", value: input.baseRevisionId },
+          { key: "sketchId", value: input.sketchId },
+        ],
+        action: async () => {
+          const request = normalizeRelabelInput(input, currentDocumentId);
+          const expected = await getMutationPredecessor();
+          const response = await adapter.renameSketch(request);
+          const sketch = expected.sketches.find(
+            (entry) => entry.sketchId === request.sketchId,
+          );
+          // Recorded as the commit it replaces, whose replay is equivalent.
+          return finalizeMutationResult(
+            expected,
+            response,
+            mapCommitSketchResponse(response, currentDocumentId),
+            input,
+            sketch
+              ? () =>
+                  createCommitSketchHistoryEntry(
+                    {
+                      ...request,
+                      solverCorrelation: null,
+                      plane: sketch.plane,
+                      definition: sketch.definition,
+                    },
+                    request.sketchId,
+                  )
+              : null,
+            "Edit Sketch",
           );
         },
       });

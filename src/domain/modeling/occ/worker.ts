@@ -359,6 +359,18 @@ async function handleWorkerOperation(
       return getWorkerAdapter(operation.request.documentId).renameBody(
         operation.request,
       );
+    case "renameFeature":
+      return getWorkerAdapter(operation.request.documentId).renameFeature(
+        operation.request,
+      );
+    case "renameSketch":
+      return getWorkerAdapter(operation.request.documentId).renameSketch(
+        operation.request,
+      );
+    case "renameDocument":
+      return getWorkerAdapter(operation.request.documentId).renameDocument(
+        operation.request,
+      );
     case "setBodyAppearance":
       return getWorkerAdapter(operation.request.documentId).setBodyAppearance(
         operation.request,

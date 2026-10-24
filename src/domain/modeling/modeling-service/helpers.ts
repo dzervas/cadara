@@ -55,6 +55,8 @@ import type {
   ModelingDeleteFeatureInput,
   ModelingDeleteTargetInput,
   ModelingRenameBodyInput,
+  ModelingRenameFeatureInput,
+  ModelingRenameSketchInput,
   ModelingSetBodyAppearanceInput,
   ModelingAddDocumentVariableInput,
   ModelingUpdateDocumentVariableInput,
@@ -269,6 +271,18 @@ export function normalizeRenameBodyInput(
 
   return {
     ...requestInput,
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  };
+}
+
+/** The kernel request of a feature or sketch relabel (cadara-kv69). */
+export function normalizeRelabelInput<
+  T extends ModelingRenameFeatureInput | ModelingRenameSketchInput,
+>(input: T, documentId: DocumentId) {
+  assertMutationBase(input);
+  return {
+    ...stripRepositoryMutationBasis(input),
     contractVersion: CONTRACT_VERSION,
     documentId,
   };

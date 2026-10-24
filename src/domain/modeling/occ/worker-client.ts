@@ -15,8 +15,12 @@ import type {
   GetDocumentSnapshotRequest,
   GetDocumentSnapshotResponse,
   ModelingDiagnostic,
+  ModelingOperationResult,
   RenameBodyRequest,
   RenameBodyResponse,
+  RenameDocumentRequest,
+  RenameFeatureRequest,
+  RenameSketchRequest,
   SetBodyAppearanceRequest,
   SetBodyAppearanceResponse,
   ReorderDocumentHistoryRequest,
@@ -177,6 +181,11 @@ export interface OccWorkerSnapshotClient {
     request: DeleteDocumentTargetRequest,
   ): Promise<DeleteDocumentTargetResponse>;
   renameBody(request: RenameBodyRequest): Promise<RenameBodyResponse>;
+  renameFeature(request: RenameFeatureRequest): Promise<UpdateFeatureResponse>;
+  renameSketch(request: RenameSketchRequest): Promise<CommitSketchResponse>;
+  renameDocument(
+    request: RenameDocumentRequest,
+  ): Promise<ModelingOperationResult>;
   setBodyAppearance(
     request: SetBodyAppearanceRequest,
   ): Promise<SetBodyAppearanceResponse>;
@@ -448,6 +457,24 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
 
   renameBody(request: RenameBodyRequest) {
     return this.invoke<RenameBodyResponse>({ kind: "renameBody", request });
+  }
+
+  renameFeature(request: RenameFeatureRequest) {
+    return this.invoke<UpdateFeatureResponse>({
+      kind: "renameFeature",
+      request,
+    });
+  }
+
+  renameSketch(request: RenameSketchRequest) {
+    return this.invoke<CommitSketchResponse>({ kind: "renameSketch", request });
+  }
+
+  renameDocument(request: RenameDocumentRequest) {
+    return this.invoke<ModelingOperationResult>({
+      kind: "renameDocument",
+      request,
+    });
   }
 
   setBodyAppearance(request: SetBodyAppearanceRequest) {

@@ -128,6 +128,14 @@ export interface ModelingService {
   renameBody(
     input: ModelingRenameBodyInput,
   ): AppResultAsync<ModelingRenameBodyResult>;
+  /** Relabels a feature without re-running it (cadara-kv69). */
+  renameFeature(
+    input: ModelingRenameFeatureInput,
+  ): AppResultAsync<ModelingFeatureMutationResult>;
+  /** Relabels a sketch without solving it or re-running a feature (cadara-kv69). */
+  renameSketch(
+    input: ModelingRenameSketchInput,
+  ): AppResultAsync<ModelingCommitSketchResult>;
   setBodyAppearance(
     input: ModelingSetBodyAppearanceInput,
   ): AppResultAsync<ModelingSetBodyAppearanceResult>;
@@ -383,6 +391,20 @@ export type ModelingDeleteTargetInput = Omit<
   };
 export type ModelingRenameBodyInput = Omit<
   schema.RenameBodyRequest,
+  "contractVersion" | "documentId"
+> &
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
+export type ModelingRenameFeatureInput = Omit<
+  schema.RenameFeatureRequest,
+  "contractVersion" | "documentId"
+> &
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
+export type ModelingRenameSketchInput = Omit<
+  schema.RenameSketchRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput> & {

@@ -5,6 +5,7 @@ import type {
   FeatureId,
   RevisionId,
   SketchEntityId,
+  SketchId,
   SketchPointId,
   VertexId,
 } from "@/contracts/shared/ids";
@@ -2186,6 +2187,39 @@ export function renameOccReferenceStateBody(
         ? { ...body, label: input.label, ownerRevisionId: input.revisionId }
         : body,
     ),
+    liveReferencesByKey: rename(state.liveReferencesByKey),
+    invalidatedReferencesByKey: rename(state.invalidatedReferencesByKey),
+  };
+}
+
+/**
+ * Relabels `sketchId` in place: the reference to the sketch takes the new
+ * label (as a rebuild labels it) and `revisionId`. References to its points,
+ * entities and regions carry their own labels.
+ */
+export function renameOccReferenceStateSketch(
+  state: OccReferenceState,
+  input: { sketchId: SketchId; label: string; revisionId: RevisionId },
+): OccReferenceState {
+  const rename = (references: ReadonlyMap<string, ResolvedReferenceRecord>) =>
+    new Map(
+      [...references].map(([key, reference]) => {
+        const { target } = reference;
+        return [
+          key,
+          target.kind === "sketch" && target.sketchId === input.sketchId
+            ? {
+                ...reference,
+                label: input.label,
+                ownerRevisionId: input.revisionId,
+              }
+            : reference,
+        ] as const;
+      }),
+    );
+
+  return {
+    ...state,
     liveReferencesByKey: rename(state.liveReferencesByKey),
     invalidatedReferencesByKey: rename(state.invalidatedReferencesByKey),
   };

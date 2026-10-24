@@ -283,6 +283,22 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
+  renameFeature(input: Parameters<ModelingService["renameFeature"]>[0]) {
+    return this.measureAppResult(
+      "renameFeature",
+      () => this.inner.renameFeature(input),
+      mutationAttributes,
+    );
+  }
+
+  renameSketch(input: Parameters<ModelingService["renameSketch"]>[0]) {
+    return this.measureAppResult(
+      "renameSketch",
+      () => this.inner.renameSketch(input),
+      mutationAttributes,
+    );
+  }
+
   setBodyAppearance(input: ModelingSetBodyAppearanceInput) {
     return this.measureAppResult(
       "setBodyAppearance",
