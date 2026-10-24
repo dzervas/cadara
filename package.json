@@ -22,6 +22,7 @@
     "landing:models:build": "bun landing/scripts/build-bracket.ts && bun landing/scripts/build-wheel.ts && bun landing/scripts/build-enclosure.ts",
     "bench:init": "bun ./scripts/init-time-benchmark.ts",
     "bench:sketch": "bun ./scripts/sketch-solver-benchmark.ts",
+    "bench:mutation": "bun ./scripts/mutation-latency-benchmark.ts",
     "cli": "bun src/cli/main.ts",
     "build:cli": "bun scripts/build-cli.mjs",
     "test:logic": "vitest run --project fast --project isolated src/contracts src/core src/domain src/application src/infrastructure/modeling src/infrastructure/persistence src/infrastructure/workers",
