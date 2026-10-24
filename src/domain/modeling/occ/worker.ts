@@ -23,6 +23,7 @@ import {
   isOccRuntimeAbort,
   normalizeOccWorkerFailure,
   validateOccWorkerRequestEnvelope,
+  type OccSnapshotLodRefinementOutcome,
   type OccWorkerAssetConfig,
   type OccWorkerOperation,
   type OccWorkerRequest,
@@ -37,6 +38,11 @@ import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;
 const adapters = new Map<string, OpenCascadeKernelAdapter>();
+/**
+ * The running background LOD refinement per document; a newer one, or the
+ * document's release, supersedes it.
+ */
+const snapshotLodRefinements = new Map<DocumentId, RequestId>();
 let runtimeAborted = false;
 let requestQueue: Promise<void> = Promise.resolve();
 let assetRequestSequence = 0;
@@ -269,6 +275,7 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
         operation.documentId,
       ).exportAuthoredModelDocument?.(operation.documentId);
     case "releaseDocument":
+      snapshotLodRefinements.delete(operation.documentId);
       adapters.get(operation.documentId)?.dispose();
       adapters.delete(operation.documentId);
       return undefined;
@@ -285,6 +292,10 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
         transferList: packed.transferList,
       } satisfies PackedSnapshotOperationResult;
     }
+    case "refineSnapshotLod":
+      throw new Error(
+        "Snapshot LOD refinement runs between the serial requests, not as one of them.",
+      );
     case "projectSketchExternalReferences":
       return getWorkerAdapter(
         operation.request.documentId,
@@ -513,25 +524,84 @@ function reportRuntimeAbort(reason: unknown) {
   });
 }
 
+function reportOccWorkerRequestFailure(
+  request: OccWorkerRequest,
+  error: unknown,
+) {
+  if (runtimeAborted) return;
+  if (isOccRuntimeAbort(error)) {
+    reportRuntimeAbort(error);
+    return;
+  }
+  postOccWorkerMessage(
+    normalizeOccWorkerFailure(
+      request.requestId,
+      error,
+      request.kind === "invoke" && request.operation.kind === "warmup"
+        ? "occ-worker-initialization-failed"
+        : "occ-worker-request-failed",
+    ),
+  );
+}
+
 function enqueueOccWorkerRequest(request: OccWorkerRequest) {
   requestQueue = requestQueue
     .then(() => runtimeAborted ? undefined : handleOccWorkerRequest(request))
-    .catch((error: unknown) => {
-      if (runtimeAborted) return;
-      if (isOccRuntimeAbort(error)) {
-        reportRuntimeAbort(error);
-        return;
-      }
-      postOccWorkerMessage(
-        normalizeOccWorkerFailure(
-          request.requestId,
-          error,
-          request.kind === "invoke" && request.operation.kind === "warmup"
-            ? "occ-worker-initialization-failed"
-            : "occ-worker-request-failed",
-        ),
+    .catch((error: unknown) => reportOccWorkerRequestFailure(request, error));
+}
+
+/**
+ * cadara-se2: each refinement step is its own entry at the tail of the serial
+ * queue, after a macrotask, so requests that arrived during a step (an
+ * authored mutation, an export) run before the next step rather than behind
+ * the whole remesh. The adapter's step rescans the current revision.
+ */
+async function refineSnapshotLodBetweenRequests(
+  requestId: RequestId,
+  operation: Extract<OccWorkerOperation, { kind: "refineSnapshotLod" }>,
+): Promise<OccSnapshotLodRefinementOutcome> {
+  const { documentId } = operation.request;
+  const isCurrent = () => snapshotLodRefinements.get(documentId) === requestId;
+  snapshotLodRefinements.set(documentId, requestId);
+  try {
+    for (;;) {
+      if (!isCurrent()) return "superseded";
+      const step = requestQueue.then(() => {
+        const adapter = adapters.get(documentId);
+        return runtimeAborted || !isCurrent() || !adapter
+          ? null
+          : adapter.refineSnapshotLodStep(operation.lodTierId);
+      });
+      requestQueue = step.then(
+        () => undefined,
+        () => undefined,
       );
-    });
+      const completed = await step;
+      if (completed === null) return "superseded";
+      if (completed) return "completed";
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  } finally {
+    if (isCurrent()) snapshotLodRefinements.delete(documentId);
+  }
+}
+
+function startSnapshotLodRefinement(
+  request: Extract<OccWorkerRequest, { kind: "invoke" }>,
+  operation: Extract<OccWorkerOperation, { kind: "refineSnapshotLod" }>,
+) {
+  void refineSnapshotLodBetweenRequests(request.requestId, operation).then(
+    (outcome) => {
+      if (runtimeAborted) return;
+      postOccWorkerMessage({
+        kind: "invoked",
+        requestId: request.requestId,
+        operation: operation.kind,
+        payload: outcome,
+      });
+    },
+    (error: unknown) => reportOccWorkerRequestFailure(request, error),
+  );
 }
 
 workerScope.addEventListener(
@@ -561,6 +631,13 @@ workerScope.addEventListener(
       return;
     }
 
+    if (
+      parsed.data.kind === "invoke" &&
+      parsed.data.operation.kind === "refineSnapshotLod"
+    ) {
+      startSnapshotLodRefinement(parsed.data, parsed.data.operation);
+      return;
+    }
     enqueueOccWorkerRequest(parsed.data);
   },
 );

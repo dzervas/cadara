@@ -66,6 +66,7 @@ import {
 } from "@/domain/modeling/occ/mesh-transport";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type {
+  OccSnapshotLodRefinementOutcome,
   OccWorkerAssetConfig,
   OccWorkerOperation,
   OccWorkerRequest,
@@ -146,6 +147,11 @@ export interface OccWorkerSnapshotClient {
     request: GetDocumentSnapshotRequest,
     lodTierId?: OccTessellationTierId,
   ): Promise<GetDocumentSnapshotResponse>;
+  /** Background LOD refinement; requests sent meanwhile run between its steps. */
+  refineSnapshotLod(
+    request: GetDocumentSnapshotRequest,
+    lodTierId: OccTessellationTierId,
+  ): Promise<OccSnapshotLodRefinementOutcome>;
   projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ): Promise<ProjectSketchExternalReferencesResponse>;
@@ -317,6 +323,17 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   ) {
     return this.invoke<GetDocumentSnapshotResponse>({
       kind: "getDocumentSnapshot",
+      request,
+      lodTierId,
+    });
+  }
+
+  refineSnapshotLod(
+    request: GetDocumentSnapshotRequest,
+    lodTierId: OccTessellationTierId,
+  ) {
+    return this.invoke<OccSnapshotLodRefinementOutcome>({
+      kind: "refineSnapshotLod",
       request,
       lodTierId,
     });

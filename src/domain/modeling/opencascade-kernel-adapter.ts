@@ -157,6 +157,7 @@ import {
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
+  refineNextOccSketchRegionRenderRecords,
 } from "@/domain/modeling/occ/snapshot";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
@@ -1933,6 +1934,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly parkedOwnerGraphs: OccOwnerGraph[] = [];
   private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null;
   private snapshotLodTierId: OccTessellationTierId = "startup";
+  /** The latest `refineSnapshotLod` call; older ones are superseded. */
+  private snapshotLodRefinementSequence = 0;
   private nativeTopologyBodyPayloadCache = new Map<
     string,
     CachedNativeTopologyBodyPayload
@@ -3618,65 +3621,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const tier = getOccTessellationTier(lodTierId ?? this.snapshotLodTierId);
     const nativeBodies = state.bodies
       .filter((body) => body.topologyPresentation !== "bodyOnlyMesh")
-      .map((body) => {
-        const cacheKey = this.createNativeTopologyBodyPayloadCacheKey({
-          bodyId: body.bodyId,
-          topologyToken: body.topologyToken,
-          lodTierId: tier.id,
-        });
-        const cached = this.nativeTopologyBodyPayloadCache.get(cacheKey);
-
-        if (
-          cached &&
-          cached.body.shape === body.shape &&
-          cached.body.topology === body.topology
-        ) {
-          return {
-            bodyId: body.bodyId,
-            nativePayload: cached.nativePayload,
-          };
-        }
-
-        // The committed identity payload has its own mesh budget, not this
-        // display tier. OCCT also reuses triangulations when the angular budget
-        // tightens, so discard only display polygons before the native builder's
-        // BRepMesh_IncrementalMesh (absolute tier deflections). Exact shapes and
-        // naming owners stay intact; immutable payload arrays are cached per tier.
-        state.oc.BRepTools.Clean(body.shape, true);
-        const parsedNativePayload = parseNativeShimPayloadJson(
-          builder(
-            body.shape,
-            body.bodyId,
-            body.topologyToken,
-            tier.linearDeflectionModelUnits,
-            tier.angularDeflectionRadians,
-          ),
-        );
-        // A remesh must keep semantic/history-preserved face bindings rather
-        // than exposing the builder's canonical native ids as new public ids.
-        const nativePayload = rewriteNativeTopologyPayloadIds(
-          body.bodyId,
-          parsedNativePayload,
-          buildNativeTopologyIdAliasesForTrackedBody(
-            state.oc,
-            body,
-            parsedNativePayload,
-          ),
-        );
-
-        this.nativeTopologyBodyPayloadCache.set(cacheKey, {
-          body,
-          bodyId: body.bodyId,
-          topologyToken: body.topologyToken,
-          lodTierId: tier.id,
-          nativePayload,
-        });
-
-        return {
-          bodyId: body.bodyId,
-          nativePayload,
-        };
-      });
+      .map((body) => ({
+        bodyId: body.bodyId,
+        nativePayload:
+          this.getCachedNativeTopologyBodyPayload(body, tier.id) ??
+          this.buildNativeTopologyBodyPayload(state, body, tier, builder),
+      }));
     const payload = createOccNativeTopologyPayloadFromShimPayloads({
       revisionId: state.revisionId,
       lodTierId: tier.id,
@@ -3688,6 +3638,162 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       payload,
       diagnostics: payload.diagnostics,
     };
+  }
+
+  private getCachedNativeTopologyBodyPayload(
+    body: OccTrackedBody,
+    lodTierId: OccTessellationTierId,
+  ) {
+    const cached = this.nativeTopologyBodyPayloadCache.get(
+      this.createNativeTopologyBodyPayloadCacheKey({
+        bodyId: body.bodyId,
+        topologyToken: body.topologyToken,
+        lodTierId,
+      }),
+    );
+
+    return cached &&
+      cached.body.shape === body.shape &&
+      cached.body.topology === body.topology
+      ? cached.nativePayload
+      : null;
+  }
+
+  private buildNativeTopologyBodyPayload(
+    state: OccAuthoringState,
+    body: OccTrackedBody,
+    tier: ReturnType<typeof getOccTessellationTier>,
+    builder: NonNullable<
+      NonNullable<
+        OpenCascadeNativeTopologyKernelHost["CadaraBuildNativeTopologyPayload"]
+      >["BuildJson"]
+    >,
+  ) {
+    // The committed identity payload has its own mesh budget, not this
+    // display tier. OCCT also reuses triangulations when the angular budget
+    // tightens, so discard only display polygons before the native builder's
+    // BRepMesh_IncrementalMesh (absolute tier deflections). Exact shapes and
+    // naming owners stay intact; immutable payload arrays are cached per tier.
+    state.oc.BRepTools.Clean(body.shape, true);
+    const parsedNativePayload = parseNativeShimPayloadJson(
+      builder(
+        body.shape,
+        body.bodyId,
+        body.topologyToken,
+        tier.linearDeflectionModelUnits,
+        tier.angularDeflectionRadians,
+      ),
+    );
+    // A remesh must keep semantic/history-preserved face bindings rather
+    // than exposing the builder's canonical native ids as new public ids.
+    const nativePayload = rewriteNativeTopologyPayloadIds(
+      body.bodyId,
+      parsedNativePayload,
+      buildNativeTopologyIdAliasesForTrackedBody(
+        state.oc,
+        body,
+        parsedNativePayload,
+      ),
+    );
+
+    this.nativeTopologyBodyPayloadCache.set(
+      this.createNativeTopologyBodyPayloadCacheKey({
+        bodyId: body.bodyId,
+        topologyToken: body.topologyToken,
+        lodTierId: tier.id,
+      }),
+      {
+        body,
+        bodyId: body.bodyId,
+        topologyToken: body.topologyToken,
+        lodTierId: tier.id,
+        nativePayload,
+      },
+    );
+
+    return nativePayload;
+  }
+
+  /**
+   * Background LOD refinement (cadara-se2): meshes the current revision's
+   * bodies and applied sketch regions at `tierId`, one item per serialized
+   * step, so authored operations queued meanwhile run between steps instead
+   * of behind the whole remesh. Every step rescans the current runtime state:
+   * an authored revision change restarts the scan, and bodies whose topology
+   * it kept hit the per-tier payload cache. Snapshots stay at the displayed
+   * tier until the scan finds nothing left; only then does `tierId` become
+   * the displayed tier. Resolves true when the displayed tier changed; false
+   * when it already was `tierId` or a newer refinement superseded this one.
+   */
+  async refineSnapshotLod(
+    request: GetDocumentSnapshotRequest,
+    tierId: OccTessellationTierId,
+  ): Promise<boolean> {
+    assertSupportedModelingRequest(request, this.documentId);
+    this.assertNotDisposed();
+    const refinement = ++this.snapshotLodRefinementSequence;
+    const superseded = () =>
+      refinement !== this.snapshotLodRefinementSequence || this.disposed;
+
+    if (this.workerSnapshotClient) {
+      const outcome = await this.workerSnapshotClient.refineSnapshotLod(
+        request,
+        tierId,
+      );
+      if (outcome !== "completed") return false;
+    } else {
+      while (!(await this.refineSnapshotLodStep(tierId))) {
+        if (superseded()) return false;
+        // A macrotask, so queued messages and authored operations go first.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (superseded()) return false;
+      }
+    }
+
+    return !superseded() && this.setSnapshotLodTier(tierId);
+  }
+
+  /**
+   * One serialized refinement step for the current runtime state: meshes the
+   * first body, else the first applied sketch's regions, without a cached
+   * payload at `tierId`. True when nothing is left to mesh at that tier.
+   */
+  refineSnapshotLodStep(tierId: OccTessellationTierId): Promise<boolean> {
+    return this.runSerializedOperation(async () => {
+      const { authoringState } = await this.getRuntimeState();
+      return (
+        !this.refineNextNativeTopologyBodyPayload(authoringState, tierId) &&
+        !refineNextOccSketchRegionRenderRecords(authoringState, tierId)
+      );
+    });
+  }
+
+  private refineNextNativeTopologyBodyPayload(
+    state: OccAuthoringState,
+    tierId: OccTessellationTierId,
+  ) {
+    const body = state.bodies.find(
+      (candidate) =>
+        candidate.topologyPresentation !== "bodyOnlyMesh" &&
+        this.getCachedNativeTopologyBodyPayload(candidate, tierId) === null,
+    );
+    if (!body) return false;
+
+    const nativeHost =
+      this.getNativeTopologyHost<OccNativeTopologyPayload>(state);
+    const builder = nativeHost.ok
+      ? nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson
+      : undefined;
+    // Without the native builder the snapshot read reports the gap itself.
+    if (!builder) return false;
+
+    this.buildNativeTopologyBodyPayload(
+      state,
+      body,
+      getOccTessellationTier(tierId),
+      builder,
+    );
+    return true;
   }
 
   private getNativePayloadBody(

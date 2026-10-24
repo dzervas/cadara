@@ -137,6 +137,15 @@ export type OccWorkerOperation =
       lodTierId?: OccTessellationTierId;
     }
   | {
+      /**
+       * Background LOD refinement (cadara-se2): runs between the serial
+       * requests, one body or sketch per step, instead of as one request.
+       */
+      kind: "refineSnapshotLod";
+      request: GetDocumentSnapshotRequest;
+      lodTierId: OccTessellationTierId;
+    }
+  | {
       kind: "buildNativeTopologySnapshot";
       request: GetDocumentSnapshotRequest;
       lodTierId?: OccTessellationTierId;
@@ -280,8 +289,12 @@ export type OccWorkerOperation =
       target: DurableRef;
     };
 
+/** A newer refinement of the same document, or its release, supersedes one. */
+export type OccSnapshotLodRefinementOutcome = "completed" | "superseded";
+
 export type OccWorkerOperationResult =
   | void
+  | OccSnapshotLodRefinementOutcome
   | AuthoredModelDocument
   | GetDocumentSnapshotResponse
   | ProjectSketchExternalReferencesResponse

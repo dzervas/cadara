@@ -55,7 +55,13 @@ export interface ModelingService {
   waitForPersistence(): Promise<void>;
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>;
   resetOperationHistory(): void;
+  /** Records the viewport's tier; true when a background refinement is due. */
   setViewportLodTier(tierId: OccTessellationTierId): boolean;
+  /**
+   * Refines snapshots to the latest requested viewport tier without holding
+   * up authored mutations (cadara-se2). True when the snapshot tier changed.
+   */
+  refineViewportLod(): Promise<boolean>;
   getCurrentDocumentSnapshot(): Promise<schema.WorkspaceSnapshot>;
   buildNativeExactBrepPayload(input: {
     baseRevisionId: RevisionId;

@@ -154,7 +154,7 @@ export function useWorkbenchViewportEvents({
       },
       handleViewportLodTierChange(tierId: OccTessellationTierId) {
         if (modelingService.setViewportLodTier(tierId)) {
-          dispatch({ type: "document.refreshRequested" });
+          dispatch({ type: "document.lodRefinementRequested" });
         }
       },
       handleViewportSelect(

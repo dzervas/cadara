@@ -341,6 +341,14 @@ export interface DocumentRefreshRequestedEvent {
   type: "document.refreshRequested";
 }
 
+/**
+ * The viewport wants another tessellation tier (cadara-se2). The kernel
+ * refines in the background; a snapshot is fetched only once it is done.
+ */
+export interface DocumentLodRefinementRequestedEvent {
+  type: "document.lodRefinementRequested";
+}
+
 /** T17o review fixes: the user dismissed the failure notice. */
 export interface FailureNoticeDismissedEvent {
   type: "failureNotice.dismissed";
@@ -758,6 +766,7 @@ export type EditorEvent =
   | CommandCancelledEvent
   | CommandCommitRequestedEvent
   | DocumentRefreshRequestedEvent
+  | DocumentLodRefinementRequestedEvent
   | FailureNoticeDismissedEvent
   | DocumentSnapshotLoadedEvent
   | DocumentReplacedEvent
@@ -812,6 +821,17 @@ export type EditorEvent =
   | SectionClearedEvent
   | SnapshotLoadedEvent
   | SnapshotFailedEvent
+  | {
+      type: "effect.snapshotLodRefined";
+      requestId: RequestId;
+      /** True when the snapshot tier changed, so the displayed snapshot is stale. */
+      refined: boolean;
+    }
+  | {
+      type: "effect.snapshotLodRefinementFailed";
+      requestId: RequestId;
+      message: string;
+    }
   | {
       type: "effect.sketchSessionOpened";
       /** Effect request being completed by this sketch-open result. */
@@ -1201,6 +1221,16 @@ export type EditorEffect =
       preserveRenderRecordsOnFeatureDiagnostics?: boolean;
     }
   | {
+      /**
+       * cadara-se2: background LOD refinement. Detached from the serial queue,
+       * so queued authored effects never wait for the remesh.
+       */
+      type: "document.refineSnapshotLod";
+      background: true;
+      requestId: RequestId;
+      documentId: DocumentId | null;
+    }
+  | {
       type: "sketch.openSession";
       /** Editor-owned correlation ID for this sketch-open request. */
       requestId: RequestId;
@@ -1391,6 +1421,11 @@ export interface EditorTransitionResult {
 export interface EditorEffectRuntime {
   /** Fetches the latest typed snapshot for the active document. */
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
+  /**
+   * Refines snapshots to the viewport's requested tier in the background.
+   * True when the snapshot tier changed. Absent: there is nothing to refine.
+   */
+  refineSnapshotLod?(): Promise<boolean>;
   /** Commits the active sketch session against a base revision. */
   commitSketch(input: {
     requestId: RequestId;

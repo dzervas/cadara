@@ -69,6 +69,23 @@ export function emitSnapshotFetch(
   };
 }
 
+/** cadara-se2: the snapshot fetch follows only once refinement completes. */
+export function emitSnapshotLodRefinement(
+  state: EditorState,
+): EditorTransitionResult {
+  return {
+    state: { ...state, nextRequestSequence: state.nextRequestSequence + 1 },
+    effects: [
+      {
+        type: "document.refineSnapshotLod",
+        background: true,
+        requestId: nextRequestId(state, "snapshot-lod"),
+        documentId: state.document.documentId,
+      },
+    ],
+  };
+}
+
 export function getSnapshotMutationBasis(
   state: EditorState,
 ): SnapshotMutationBasis | null {

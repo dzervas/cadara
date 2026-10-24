@@ -65,6 +65,7 @@ import {
   emitSketchOpen,
   emitSketchPlaneCommit,
   emitSnapshotFetch,
+  emitSnapshotLodRefinement,
 } from "./effect-emitters";
 import { isFeatureTool } from "./utility-helpers";
 import { reduceFeatureWorkflow } from "./reducer-feature";
@@ -562,6 +563,15 @@ function handleSharedEvent(
       return { state, effects: [] };
     case "document.refreshRequested":
       return emitSnapshotFetch(state, null);
+    case "document.lodRefinementRequested":
+      return emitSnapshotLodRefinement(state);
+    case "effect.snapshotLodRefined":
+      return event.refined
+        ? emitSnapshotFetch(state, null)
+        : { state, effects: [] };
+    case "effect.snapshotLodRefinementFailed":
+      // The event loop already reported it; snapshots keep their tier.
+      return { state, effects: [] };
     case "failureNotice.dismissed":
       return state.failureNotice
         ? { state: { ...state, failureNotice: null }, effects: [] }
