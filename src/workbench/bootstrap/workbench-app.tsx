@@ -39,6 +39,7 @@ import {
 import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
 import { DurableHistoryProvider } from "@/hooks/durable-history-provider";
+import { AppUpdateNotification } from "@/components/layout/app-update-notification";
 import {
   openDocumentCopyAsTab,
   openLinkedDocumentAsTab,
@@ -183,6 +184,10 @@ export function WorkbenchApp({
     ],
   );
   const modelingService = modelingServices.get(tabsState.activeDocumentId);
+  const waitForLocalChanges = useCallback(
+    () => modelingServices.waitForLocalChanges(),
+    [modelingServices],
+  );
 
   const durableHistory = useMemo(
     () =>
@@ -363,6 +368,8 @@ export function WorkbenchApp({
           </EditorProvider>
         </DurableHistoryProvider>
       </ModelingServiceProvider>
+      {/* Production builds only: the service worker's update prompt. */}
+      <AppUpdateNotification waitForLocalChanges={waitForLocalChanges} />
     </RuntimeExtensionRegistryProvider>
   );
 }

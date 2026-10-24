@@ -125,6 +125,7 @@ export function WorkbenchNotification({
               variant="default"
               size="xs"
               className="pointer-events-auto mt-1 self-start border-[var(--cad-border-strong)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]"
+              disabled={action.disabled}
               onClick={action.onClick}
             >
               {action.label}

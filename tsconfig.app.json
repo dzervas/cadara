@@ -32,6 +32,7 @@
     "src/**/*.spec.tsx",
     "landing/**/*.spec.ts",
     "landing/**/*.spec.tsx",
-    "landing/scripts/**"
+    "landing/scripts/**",
+    "src/service-worker.ts"
   ]
 }

@@ -1,5 +1,6 @@
-export const OCC_ASSET_VERSION =
-  "37acb2fba53ea0334c068bf83481df25ae68e507f5e784902f89f29593a6dd91-4a178cba5a8575576111c0b9a5d5f2e03516eda085422de451926bc34a9e386f";
+import { OCC_ASSET_VERSION } from "./asset-version";
+
+export { OCC_ASSET_VERSION };
 
 const CUSTOM_OPENCASCADE_ASSET_PATHS = {
   mainJS: "/cadara-occ.js",

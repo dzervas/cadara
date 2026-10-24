@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
-    "typecheck": "bunx --package @typescript/native tsc -b ./tsconfig.app.json",
+    "typecheck": "bunx --package @typescript/native tsc -b ./tsconfig.app.json ./tsconfig.sw.json",
     "typecheck:specs": "bunx --package @typescript/native tsc -p ./tsconfig.test.json",
     "build": "bun run typecheck && vite build",
     "build:single": "bun run typecheck && vite build --config vite.single.config.ts",
@@ -93,7 +93,13 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.3.4",
+    "vite-plugin-pwa": "^2.0.0",
     "vitest": "^4.1.6",
+    "workbox-core": "^7.4.1",
+    "workbox-precaching": "^7.4.1",
+    "workbox-routing": "^7.4.1",
+    "workbox-strategies": "^7.4.1",
+    "workbox-window": "^7.4.1",
     "wrangler": "^4.145.0"
   }
 }

@@ -131,6 +131,95 @@ test.each([
   }
 });
 
+// cadara-vk96. Seam: `waitForLocalChanges`, which the app update prompt's
+// Reload awaits before reloading: a colour change requested just before it,
+// still queued under background persistence, is stored when it settles.
+class SlowBodyAppearanceAdapter extends MockKernelAdapter {
+  override async setBodyAppearance(
+    ...input: Parameters<MockKernelAdapter["setBodyAppearance"]>
+  ) {
+    // The kernel still works on the change when the wait starts.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return super.setBodyAppearance(...input);
+  }
+}
+
+test("waitForLocalChanges settles only after a local change requested before it is stored", async () => {
+  const repository = createMemoryDocumentRepository();
+  const service = createModelingService(new SlowBodyAppearanceAdapter(), {
+    currentDocumentId: documentId,
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  const custom: BodyAppearance = { kind: "custom", hex: "#336699" };
+  try {
+    const initial = await service.getCurrentDocumentSnapshot();
+    const set = service.setBodyAppearance({
+      baseRevisionId: initial.document.revisionId,
+      bodyId,
+      appearance: custom,
+    });
+    await service.waitForLocalChanges();
+    const stored = await repository.load({
+      documentId,
+      seedDocument: await createSeedAuthoredModelDocument(documentId),
+    });
+    expect(
+      stored.ok && storedAppearance(stored.document),
+      "the repository holds the change requested before the wait",
+    ).toEqual(custom);
+    expect((await set).isOk()).toBe(true);
+  } finally {
+    service.dispose();
+  }
+});
+
+test("waitForLocalChanges resolves for a document that failed to open: it has nothing to save", async () => {
+  const repository = createMemoryDocumentRepository();
+  repository.load = () => Promise.reject(new Error("storage unreadable"));
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: documentId,
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  try {
+    await expect(
+      service.waitForPersistence(),
+      "premise: the document failed to initialize",
+    ).rejects.toThrow("storage unreadable");
+    await expect(service.waitForLocalChanges()).resolves.toBeUndefined();
+  } finally {
+    service.dispose();
+  }
+});
+
+test("waitForLocalChanges rejects with the reason when an accepted local change could not be stored", async () => {
+  const repository = createMemoryDocumentRepository();
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: documentId,
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  try {
+    const initial = await service.getCurrentDocumentSnapshot();
+    repository.mutate = () => Promise.reject(new Error("quota exceeded"));
+    const set = await service.setBodyAppearance({
+      baseRevisionId: initial.document.revisionId,
+      bodyId,
+      appearance: { kind: "custom", hex: "#336699" },
+    });
+    expect(
+      set.isOk() && set.value.revisionState.kind,
+      "premise: the change was accepted in memory",
+    ).toBe("accepted");
+    await expect(service.waitForLocalChanges()).rejects.toThrow(
+      "Local changes could not be saved, so reloading would lose them: quota exceeded",
+    );
+  } finally {
+    service.dispose();
+  }
+});
+
 // cadara-01k.1 follow-up. Seam: the workbench "Open a copy" entry point
 // (`openDocumentCopyAsTab`: `repository.initialize` with the parsed file, then
 // the tab's service restores it) for a document saved before body colours.

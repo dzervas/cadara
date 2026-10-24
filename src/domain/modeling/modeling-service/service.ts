@@ -165,6 +165,8 @@ export function createModelingService(
     createEmptyOperationHistory(currentDocumentId);
   let canPersistOperationHistory = true;
   let canPersistAuthoredDocument = true;
+  /** Why an accepted local change exists in memory only (cadara-vk96). */
+  let unsavedLocalChangeReason: string | null = null;
   let historyRestoreState: ModelingHistoryRestoreState = {
     kind: "pending",
     entriesReplayed: 0,
@@ -919,6 +921,8 @@ export function createModelingService(
     resetOperationHistoryPayloadForCurrentRepository();
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
+    // The in-memory document was replaced; nothing unsaved remains.
+    unsavedLocalChangeReason = null;
     historyRestoreState = {
       kind: "restored",
       entriesReplayed: 0,
@@ -1608,6 +1612,8 @@ export function createModelingService(
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
+    // The in-memory document was replaced; nothing unsaved remains.
+    unsavedLocalChangeReason = null;
     historyRestoreState = {
       kind: "empty",
       entriesReplayed: 0,
@@ -1652,6 +1658,10 @@ export function createModelingService(
 
     if (!canPersistAuthoredDocument) {
       const status = documentRepository.getRestoreStatus(currentDocumentId);
+      unsavedLocalChangeReason =
+        status.kind === "failed"
+          ? status.diagnostic.message
+          : "Document storage is unavailable.";
       return status.kind === "failed"
         ? {
             ...result,
@@ -1685,6 +1695,7 @@ export function createModelingService(
         document.revisionId);
     }
     canPersistAuthoredDocument = false;
+    unsavedLocalChangeReason = writeResult.status.diagnostic.message;
     return {
       ...result,
       diagnostics: [
@@ -1737,7 +1748,11 @@ export function createModelingService(
     label?: string,
     observe?: (transaction: DocumentRepositoryMutationResult) => void,
   ) {
-    if (!documentRepository || !canPersistAuthoredDocument) {
+    if (!documentRepository) {
+      return;
+    }
+    if (!canPersistAuthoredDocument) {
+      unsavedLocalChangeReason ??= "Document storage is unavailable.";
       return;
     }
 
@@ -1749,6 +1764,7 @@ export function createModelingService(
     repositoryPersistencePromise = repositoryPersistencePromise
       .then(async () => {
         if (!canPersistAuthoredDocument || !documentRepository) {
+          unsavedLocalChangeReason ??= "Document storage is unavailable.";
           return;
         }
         const writeResult = await documentRepository.mutate({
@@ -1773,6 +1789,7 @@ export function createModelingService(
             document.revisionId);
         }
         canPersistAuthoredDocument = false;
+        unsavedLocalChangeReason = writeResult.status.diagnostic.message;
         historyRestoreState = createRestoreFailure(
           writeResult.status.diagnostic.reasonCode,
           writeResult.status.diagnostic.message,
@@ -1782,11 +1799,13 @@ export function createModelingService(
       })
       .catch((error: unknown) => {
         canPersistAuthoredDocument = false;
-        historyRestoreState = createRestoreFailure(
-          "repository-write-exception",
+        unsavedLocalChangeReason =
           error instanceof Error
             ? error.message
-            : "Authored document could not be written.",
+            : "Authored document could not be written.";
+        historyRestoreState = createRestoreFailure(
+          "repository-write-exception",
+          unsavedLocalChangeReason,
           null,
           historyRestoreState.entriesReplayed,
         );
@@ -1876,6 +1895,27 @@ export function createModelingService(
       await ensureInitialized();
       await waitForRepositoryChanges();
       await repositoryPersistencePromise;
+    },
+    async waitForLocalChanges() {
+      // A mutation queues its repository write only once it has run.
+      await localMutations;
+      try {
+        await ensureInitialized();
+        await waitForRepositoryChanges();
+      } catch (error) {
+        // A document that failed to open, or to take a repository change,
+        // refuses local mutations and already shows that failure: nothing
+        // here is left to save, so it must not block (cadara-vk96).
+        if (historyRestoreState.kind !== "failed" && !repositoryRestoreFailure) {
+          throw error;
+        }
+      }
+      await repositoryPersistencePromise;
+      if (unsavedLocalChangeReason !== null) {
+        throw new Error(
+          `Local changes could not be saved, so reloading would lose them: ${unsavedLocalChangeReason}`,
+        );
+      }
     },
     async getHistoryRestoreState() {
       await ensureInitialized();

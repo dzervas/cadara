@@ -73,7 +73,7 @@ test("root assets retain their types and missing assets stay failures", async ({
   expect((await wasm.body()).subarray(0, 4)).toEqual(
     Buffer.from([0, 97, 115, 109]),
   );
-  const serviceWorker = await request.get("/occ-asset-cache-sw.js");
+  const serviceWorker = await request.get("/service-worker.js");
   expect(serviceWorker.status()).toBe(200);
   expect(serviceWorker.headers()["content-type"]).toMatch(/javascript/);
   const icon = await request.get("/icons/GitHub-logo.svg");

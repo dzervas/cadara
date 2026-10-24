@@ -49,6 +49,15 @@ export class WorkbenchModelingServices {
     );
   }
 
+  /** Every open document's local changes requested so far are persisted. */
+  async waitForLocalChanges(): Promise<void> {
+    await Promise.all(
+      [...this.services.values()].map((service) =>
+        service.waitForLocalChanges(),
+      ),
+    );
+  }
+
   dispose(): void {
     // Replacement/unmount is not explicit close: another host can use the same
     // worker document. Only retainOpenDocuments releases shared native state.

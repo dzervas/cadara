@@ -1,12 +1,14 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
-
 import { expect, test, type Page } from "@playwright/test";
 import type { AuthoredModelDocument } from "../../src/contracts/modeling/authored-document";
 
 import { waitForCommittedAction } from "../helpers/acceptance";
 import { openDocumentCopy, saveDocumentCopy } from "../helpers/document-files";
 import { createRectangleProfileOperationHistory } from "../helpers/modeling-fixtures";
+import {
+  reachable,
+  startPreview,
+  stopPreview,
+} from "../helpers/offline-preview";
 import { FeatureWorkbenchHarness } from "../helpers/feature-workbench";
 import { runMechanicalPartFlow } from "../helpers/mechanical-part";
 import {
@@ -28,50 +30,6 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // through, so only a stopped server shows whether a worker first spawned
 // offline can load (T17h2 F-1). No `route` (it disables the HTTP cache).
 // Step → row map and discrimination: T17h2.md.
-
-/** `vite preview` of the offline build on the project's base URL port. */
-function startPreview(baseURL: string, logPath: string) {
-  const log = openSync(logPath, "a");
-  const server = spawn(
-    "bunx",
-    [
-      "vite",
-      "preview",
-      "--config",
-      "vite.offline-test.config.ts",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      new URL(baseURL).port,
-      "--strictPort",
-    ],
-    { detached: true, stdio: ["ignore", log, log] },
-  );
-  closeSync(log);
-  return server;
-}
-
-const reachable = (url: string) =>
-  fetch(url).then(
-    (response) => response.ok,
-    () => false,
-  );
-
-/** Stops the preview's process group and waits until its port is closed. */
-async function stopPreview(server: ChildProcess, baseURL: string) {
-  try {
-    process.kill(-server.pid!, "SIGTERM");
-  } catch (error) {
-    // Already stopped (the row stops it once to cut the network).
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-  }
-  await expect
-    .poll(() => reachable(baseURL), {
-      message: "the preview server is gone",
-      timeout: 15_000,
-    })
-    .toBe(false);
-}
 
 /** Two full circles (canvas) that overlap: three regions. */
 const OVERLAPPING_CIRCLES = [
@@ -221,6 +179,12 @@ test("reload while offline boots and opens the document; a cold page starts offl
         },
       )
       .toBe(true);
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: "A new version of CADara is available" }),
+      "the first install shows no update prompt",
+    ).toHaveCount(0);
 
     await stopPreview(server, baseURL);
     await context.setOffline(true);

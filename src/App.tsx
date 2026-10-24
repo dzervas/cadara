@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { WorkbenchApp } from "@/workbench/bootstrap/workbench-app";
 import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
-import { registerOpenCascadeAssetCache } from "@/infrastructure/occ/asset-cache";
 import {
   createBrowserOccKernelAdapter,
   releaseBrowserOccDocument,
@@ -70,7 +69,6 @@ function App() {
     <ErrorReporterProvider>
       <ReportedErrorBoundary>
         <OccWarmupErrorEffect performanceTelemetry={performanceTelemetry} />
-        <OccAssetCacheEffect />
         <WorkbenchApp
           createKernelAdapter={createBrowserOccKernelAdapter}
           releaseDocumentResources={releaseBrowserOccDocument}
@@ -85,34 +83,6 @@ function App() {
       <BuildMetadataLabel />
     </ErrorReporterProvider>
   );
-}
-
-// TODO: OCC init stuff shouldn't be here
-function OccAssetCacheEffect() {
-  const errorReporter = useErrorReporter();
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !import.meta.env.PROD) {
-      return;
-    }
-
-    void registerOpenCascadeAssetCache().catch((error: unknown) => {
-      errorReporter.report(
-        normalizeUnknownError(error, {
-          code: "app/operation-failed",
-          fallbackMessage: "OpenCascade asset cache registration failed.",
-          context: [{ key: "operation", value: "occ.assetCache.register" }],
-        }),
-        {
-          source: "occ-asset-cache",
-          visibility: "developer",
-          dedupeKey: "occ-asset-cache:register",
-        },
-      );
-    });
-  }, [errorReporter]);
-
-  return null;
 }
 
 function OccWarmupErrorEffect({

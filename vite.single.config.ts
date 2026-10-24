@@ -7,6 +7,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import UnpluginTypia from "@typia/unplugin/vite";
 import { defineConfig, type Plugin } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
 
 import {
   createBuildMetadataDefines,
@@ -171,6 +172,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
     cadaraSingleHtmlPlugin(),
+    // A single HTML file registers no service worker: disabled, the plugin
+    // resolves `virtual:pwa-register/react` (src/hooks/use-app-update.ts) to
+    // its no-op stub and emits nothing.
+    VitePWA({ disable: true, injectRegister: false, manifest: false }),
   ],
   assetsInclude: ["**/*.wasm"],
   resolve: {

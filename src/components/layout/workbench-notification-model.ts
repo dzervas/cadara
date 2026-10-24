@@ -5,6 +5,7 @@ export type WorkbenchNotificationType = "info" | "warning" | "error";
 export interface WorkbenchNotificationAction {
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 }
 
 /**

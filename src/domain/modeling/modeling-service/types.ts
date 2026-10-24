@@ -53,6 +53,8 @@ export interface ModelingService {
     listener: (event: ModelingServiceDocumentChangeEvent) => void,
   ): () => void;
   waitForPersistence(): Promise<void>;
+  /** Settles after every local mutation requested so far and its repository writes. */
+  waitForLocalChanges(): Promise<void>;
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>;
   resetOperationHistory(): void;
   /** Records the viewport's tier; true when a background refinement is due. */
