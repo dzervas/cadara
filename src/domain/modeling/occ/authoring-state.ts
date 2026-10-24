@@ -107,6 +107,291 @@ export interface OccAuthoringState extends OccFeatureExecutionContext {
   previousFeatureTopologyLineage: OccFeatureTopologyLineageMap;
 }
 
+/**
+ * The history state right after a feature applied in a rebuild, with the
+ * inputs it was evaluated from. It rides on the feature's current topology
+ * stage, so the stage map's native ownership graph retains its bodies. A later
+ * rebuild whose history is unchanged up to this feature resumes from it instead
+ * of replaying from the empty cursor (cadara-di5).
+ */
+export interface OccFeatureStageCheckpoint extends Pick<
+  OccAuthoringState,
+  | "sketches"
+  | "variables"
+  | "historyOrder"
+  | "modelingTolerance"
+  | "angularToleranceRadians"
+  | "bodies"
+  | "constructions"
+  | "constructionPlanes"
+  | "features"
+  | "entities"
+  | "renderRecords"
+  | "referenceState"
+  | "bodyAppearances"
+  | "assets"
+> {
+  /** Diagnostics the features up to this one added to the rebuild's base diagnostics. */
+  featureDiagnostics: readonly ModelingDiagnostic[];
+}
+
+/** Records `state`, which just applied `featureId`, on that feature's stage. */
+export function checkpointOccFeatureStage(
+  state: OccAuthoringState,
+  featureId: FeatureId,
+  baseDiagnosticCount: number,
+): OccAuthoringState {
+  const stage = state.featureTopologyStages.get(featureId);
+  if (!stage) {
+    throw new Error(`Applied feature ${featureId} has no topology stage.`);
+  }
+  const checkpoint: OccFeatureStageCheckpoint = {
+    sketches: state.sketches,
+    variables: state.variables,
+    historyOrder: state.historyOrder,
+    modelingTolerance: state.modelingTolerance,
+    angularToleranceRadians: state.angularToleranceRadians,
+    bodies: state.bodies,
+    constructions: state.constructions,
+    constructionPlanes: state.constructionPlanes,
+    features: state.features,
+    entities: state.entities,
+    renderRecords: state.renderRecords,
+    referenceState: state.referenceState,
+    bodyAppearances: state.bodyAppearances,
+    assets: state.assets,
+    featureDiagnostics: state.diagnostics.slice(baseDiagnosticCount),
+  };
+  const featureTopologyStages = new Map(state.featureTopologyStages);
+  featureTopologyStages.set(featureId, { ...stage, checkpoint });
+  return { ...state, featureTopologyStages };
+}
+
+/** Ids of sketches that `next` adds, removes or replaces relative to `previous`. */
+function getChangedSketchIds(
+  previous: readonly SketchSnapshotRecord[],
+  next: readonly SketchSnapshotRecord[],
+) {
+  if (previous === next) return new Set<SketchId>();
+  const previousById = new Map(
+    previous.map((sketch) => [sketch.sketchId, sketch]),
+  );
+  const changed = new Set<SketchId>();
+  for (const sketch of next) {
+    if (previousById.get(sketch.sketchId) !== sketch) {
+      changed.add(sketch.sketchId);
+    }
+    previousById.delete(sketch.sketchId);
+  }
+  for (const sketchId of previousById.keys()) changed.add(sketchId);
+  return changed;
+}
+
+/**
+ * The number of leading `prefix` features that `checkpoint` evaluated from
+ * the same record and from the same sketches and resolved variable values
+ * that a rebuild from `base` would use.
+ */
+function countUnchangedCheckpointFeatures(
+  checkpoint: OccFeatureStageCheckpoint,
+  base: OccAuthoringState,
+  prefix: readonly OccAuthoringFeatureRecord[],
+) {
+  const changedSketchIds = getChangedSketchIds(
+    checkpoint.sketches,
+    base.sketches,
+  );
+  const variablesChanged =
+    checkpoint.variables !== base.variables &&
+    JSON.stringify(checkpoint.variables) !== JSON.stringify(base.variables);
+  for (const [index, feature] of prefix.entries()) {
+    const evaluated = checkpoint.features[index];
+    const definition = JSON.stringify(feature.definition);
+    if (
+      evaluated?.featureId !== feature.featureId ||
+      evaluated.suppressed ||
+      feature.suppressed ||
+      (evaluated.label ?? evaluated.featureId) !==
+        (feature.label ?? feature.featureId) ||
+      JSON.stringify(evaluated.definition) !== definition ||
+      // Any sketch id the definition names, wherever it nests.
+      [...changedSketchIds].some((sketchId) =>
+        definition.includes(`"${sketchId}"`),
+      ) ||
+      (variablesChanged &&
+        JSON.stringify(
+          resolveFeatureDefinitionValues({
+            definition: feature.definition,
+            variables: checkpoint.variables,
+          }),
+        ) !==
+          JSON.stringify(
+            resolveFeatureDefinitionValues({
+              definition: feature.definition,
+              variables: base.variables,
+            }),
+          ))
+    ) {
+      return index;
+    }
+  }
+  return checkpoint.features.length === prefix.length ? prefix.length : 0;
+}
+
+/**
+ * Whether a rebuild from `base` evaluates the features before and including
+ * `last` in the same document context as `checkpoint`: settings, history order
+ * up to `last`, the label of every body it holds (renaming one rejects this
+ * checkpoint; as for renameOccAuthoringStateBody, other labels cannot change
+ * its result), an appearance for every body it knew, and asset records.
+ */
+function isCheckpointContextUnchanged(
+  checkpoint: OccFeatureStageCheckpoint,
+  base: OccAuthoringState,
+  last: FeatureId,
+) {
+  const isLast = (entry: DocumentHistoryOrderEntry) =>
+    entry.kind === "feature" && entry.featureId === last;
+  const end = base.historyOrder.findIndex(isLast);
+  return (
+    checkpoint.modelingTolerance === base.modelingTolerance &&
+    checkpoint.angularToleranceRadians === base.angularToleranceRadians &&
+    end >= 0 &&
+    checkpoint.historyOrder.findIndex(isLast) === end &&
+    base.historyOrder
+      .slice(0, end)
+      .every(
+        (entry, index) =>
+          JSON.stringify(entry) ===
+          JSON.stringify(checkpoint.historyOrder[index]),
+      ) &&
+    checkpoint.bodies.every(
+      (body) => base.bodyLabels.get(body.bodyId) === body.label,
+    ) &&
+    [...checkpoint.bodyAppearances.keys()].every((bodyId) =>
+      base.bodyAppearances.has(bodyId),
+    ) &&
+    (checkpoint.assets === base.assets ||
+      JSON.stringify(checkpoint.assets) === JSON.stringify(base.assets))
+  );
+}
+
+/**
+ * The longest leading run of `appliedFeatures` that a rebuild from `base` can
+ * take unchanged from the checkpoints on `stages` (the current runtime's), and
+ * the checkpoint to resume from. Only features `isReplayable` accepts and that
+ * applied in that runtime carry a checkpoint, so a failed, suppressed or
+ * deferred feature ends the run.
+ */
+export function findReusableOccFeatureCheckpoint(
+  stages: OccFeatureTopologyStageMap,
+  base: OccAuthoringState,
+  appliedFeatures: readonly OccAuthoringFeatureRecord[],
+  isReplayable: (feature: OccAuthoringFeatureRecord) => boolean,
+): {
+  prefixFeatureIds: FeatureId[];
+  checkpoint: OccFeatureStageCheckpoint;
+} | null {
+  let count = 0;
+  while (
+    count < appliedFeatures.length &&
+    isReplayable(appliedFeatures[count]!) &&
+    stages.get(appliedFeatures[count]!.featureId)?.checkpoint
+  ) {
+    count += 1;
+  }
+
+  while (count > 0) {
+    const prefix = appliedFeatures.slice(0, count);
+    const last = prefix.at(-1)!.featureId;
+    const checkpoint = stages.get(last)!.checkpoint!;
+    const unchanged = countUnchangedCheckpointFeatures(
+      checkpoint,
+      base,
+      prefix,
+    );
+    if (
+      unchanged === count &&
+      isCheckpointContextUnchanged(checkpoint, base, last)
+    ) {
+      return {
+        prefixFeatureIds: prefix.map((feature) => feature.featureId),
+        checkpoint,
+      };
+    }
+    count = Math.min(unchanged, count - 1);
+  }
+  return null;
+}
+
+/**
+ * Continues the rebuild `base` after its first `prefixFeatureIds`, which
+ * `checkpoint` evaluated and whose `stages` are reused as they are. The caller
+ * proves the prefix unchanged against `base`, so its bodies, labels,
+ * appearances and assets are those a replay from `base` would produce. The
+ * references are re-evaluated at `base`'s revision against
+ * `previousReferenceState`, as the replay's base state does: the prefix keeps
+ * its live references, and references only the dropped suffix made live are
+ * invalidated.
+ */
+export function resumeOccAuthoringStateFromCheckpoint(
+  base: OccAuthoringState,
+  checkpoint: OccFeatureStageCheckpoint,
+  stages: OccFeatureTopologyStageMap,
+  prefixFeatureIds: readonly FeatureId[],
+  previousReferenceState: OccReferenceState,
+): OccAuthoringState {
+  const featureTopologyStages = new Map(
+    prefixFeatureIds.map((featureId) => {
+      const stage = stages.get(featureId);
+      if (!stage) {
+        throw new Error(`Reused feature ${featureId} has no topology stage.`);
+      }
+      return [featureId, stage] as const;
+    }),
+  );
+  const referenceState = createOccReferenceState({
+    documentId: base.documentId,
+    revisionId: base.revisionId,
+    bodies: checkpoint.bodies,
+    constructions: checkpoint.constructions,
+    sketches: base.sketches,
+    features: checkpoint.features,
+    previous: {
+      bodySnapshots: [],
+      liveReferencesByKey: previousReferenceState.liveReferencesByKey,
+      invalidatedReferencesByKey: new Map([
+        ...checkpoint.referenceState.invalidatedReferencesByKey,
+        ...previousReferenceState.invalidatedReferencesByKey,
+      ]),
+    },
+    provedLiveReferenceKeys: new Set(
+      checkpoint.referenceState.liveReferencesByKey.keys(),
+    ),
+  });
+
+  return {
+    ...base,
+    bodies: checkpoint.bodies,
+    constructions: checkpoint.constructions,
+    constructionPlanes: checkpoint.constructionPlanes,
+    features: checkpoint.features,
+    authoredFeatures: checkpoint.features,
+    cursor: { kind: "feature", featureId: prefixFeatureIds.at(-1)! },
+    diagnostics: [...base.diagnostics, ...checkpoint.featureDiagnostics],
+    entities: checkpoint.entities,
+    renderRecords: checkpoint.renderRecords,
+    referenceState,
+    previousTopologyStage: null,
+    topologyProvenanceIndex: createOccTopologyProvenanceIndex({
+      stages: featureTopologyStages,
+      previousLineage: base.previousFeatureTopologyLineage,
+      historyOrder: base.historyOrder,
+    }),
+    featureTopologyStages,
+  };
+}
+
 function createTailCursor(
   features: readonly { featureId: FeatureId }[],
   sketches: readonly { sketchId: SketchId }[],
@@ -685,6 +970,7 @@ function collectOccNamingStates(state: Partial<OccNamingOwnershipGraph>) {
   ]) {
     for (const stage of stages?.values() ?? []) {
       for (const output of stage.outputs.values()) bodies.push(output.body);
+      bodies.push(...(stage.checkpoint?.bodies ?? []));
     }
   }
   return bodies.flatMap((body) => (body.naming ? [body.naming] : []));

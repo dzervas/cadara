@@ -123,8 +123,11 @@ import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publicat
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   applyOccFeatureToAuthoringState,
+  checkpointOccFeatureStage,
   createOccAuthoringState,
+  findReusableOccFeatureCheckpoint,
   renameOccAuthoringStateBody,
+  resumeOccAuthoringStateFromCheckpoint,
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
@@ -3368,11 +3371,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       // Cursor rollback leaves later stages unapplied, not forgotten. Reuse
       // their last evaluation on return just as a current-cursor rebuild does;
       // otherwise fresh native hashes can claim non-replayable fallback inputs.
+      // Only current stages keep their checkpoint (the rebuild resumes from
+      // those), so superseded evaluations retain no more than their outputs.
       previousFeatureTopologyStages: new Map(
         [...mergeOccFeatureTopologyStageMaps(
           runtimeState.authoringState.previousFeatureTopologyStages,
           runtimeState.authoringState.featureTopologyStages,
-        )].filter(([featureId]) => featureIds.has(featureId)),
+        )]
+          .filter(([featureId]) => featureIds.has(featureId))
+          .map(([featureId, { featureId: stageFeatureId, outputs }]) => [
+            featureId,
+            { featureId: stageFeatureId, outputs },
+          ]),
       ),
       previousFeatureTopologyLineage:
         runtimeState.authoringState.previousFeatureTopologyLineage,
@@ -3382,7 +3392,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor: { kind: "empty" },
     });
 
-    let current = baseState;
     const failedFeatures: FailedFeatureRecord[] = [];
     const diagnostics: ModelingDiagnostic[] = [];
     const dependencyOrderDiagnostics = new Map<
@@ -3407,10 +3416,33 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       );
     }
 
-    for (const feature of getAppliedFeatures(
+    // Resume after the leading applied features this rebuild leaves unchanged
+    // instead of replaying them (cadara-di5).
+    const appliedFeatures = getAppliedFeatures(
       features,
       cursor,
       baseState.historyOrder,
+    );
+    const reusable = deferredFeatureIds
+      ? null
+      : findReusableOccFeatureCheckpoint(
+          runtimeState.authoringState.featureTopologyStages,
+          baseState,
+          appliedFeatures,
+          (feature) => !dependencyOrderDiagnostics.has(feature.featureId),
+        );
+    let current = reusable
+      ? resumeOccAuthoringStateFromCheckpoint(
+          baseState,
+          reusable.checkpoint,
+          runtimeState.authoringState.featureTopologyStages,
+          reusable.prefixFeatureIds,
+          runtimeState.authoringState.referenceState,
+        )
+      : baseState;
+
+    for (const feature of appliedFeatures.slice(
+      reusable?.prefixFeatureIds.length ?? 0,
     )) {
       if (deferredFeatureIds?.has(feature.featureId)) {
         failedFeatures.push(createFailedFeatureRecord(feature));
@@ -3507,6 +3539,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         failedFeatures.push(createFailedFeatureRecord(feature));
         continue;
       }
+      current = checkpointOccFeatureStage(
+        current,
+        feature.featureId,
+        baseState.diagnostics.length,
+      );
       this.releaseIntermediateState(previous, [
         current,
         runtimeState.authoringState,
