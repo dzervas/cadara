@@ -270,3 +270,84 @@ test("lifetime policy rejects drift in an existing public signature", () => {
     "Existing declarations must equal the v8 reference",
   );
 });
+
+// cadara-3sq.7: the bit-exact shape-set checkpoint shim is the only other
+// approved extension; it must arrive complete and exactly as audited.
+const checkpointExtension = JSON.parse(
+  readFileSync("scripts/occ/shape-set-checkpoint-extension.json", "utf8"),
+) as { abi: string[]; declaration: string; instanceEntry: string };
+const withoutCheckpoint = declarations
+  .replace(checkpointExtension.declaration + "\n\n", "")
+  .replace("  " + checkpointExtension.instanceEntry + "\n", "");
+const withCheckpoint =
+  checkpointExtension.declaration +
+  "\n\n" +
+  withoutCheckpoint.replace(
+    "export type OpenCascadeInstance = {FS: typeof FS} & {",
+    "export type OpenCascadeInstance = {FS: typeof FS} & {\n  " +
+      checkpointExtension.instanceEntry,
+  );
+
+function checkAbi(lines: string[]) {
+  return spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+      import { assertLifetimeAbi } from "./scripts/occ/lifetime-abi-policy.mjs";
+      import { readFileSync } from "node:fs";
+      assertLifetimeAbi(JSON.parse(readFileSync(0, "utf8")));
+    `,
+    ],
+    { input: JSON.stringify(lines), encoding: "utf8" },
+  );
+}
+
+test("lifetime policy accepts declarations with or without the approved shape-set checkpoint", () => {
+  for (const candidate of [withoutCheckpoint, withCheckpoint]) {
+    const result = checkDeclarations(candidate);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  }
+});
+
+test("lifetime policy rejects an altered or partial shape-set checkpoint declaration", () => {
+  for (const [changed, message] of [
+    [
+      withCheckpoint.replace(
+        "static Write(root: TopoDS_Shape): CadaraNativeShapeSetCheckpoint;",
+        "static Write(root: TopoDS_Shape): string;",
+      ),
+      "Shape-set checkpoint declaration must equal the approved inventory",
+    ],
+    [
+      withCheckpoint.replace(checkpointExtension.instanceEntry, ""),
+      "Shape-set checkpoint instance entry must match the approved declaration",
+    ],
+  ] as const) {
+    expect(changed).not.toBe(withCheckpoint);
+    const result = checkDeclarations(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(message);
+  }
+});
+
+test("lifetime policy rejects a partial or altered shape-set checkpoint registry", () => {
+  for (const changed of [
+    checkpointExtension.abi.slice(1),
+    checkpointExtension.abi.map((line) =>
+      line.replace(
+        "Write(CadaraNativeShapeSetCheckpoint, TopoDS_Shape) iii",
+        "Write(std::string, TopoDS_Shape) iii",
+      ),
+    ),
+  ]) {
+    expect(changed).not.toEqual(checkpointExtension.abi);
+    const result = checkAbi(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Shape-set checkpoint registry must equal the approved inventory",
+    );
+  }
+});

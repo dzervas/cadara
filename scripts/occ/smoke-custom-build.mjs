@@ -33,6 +33,15 @@ const resources = new Map([
       ),
     ],
   ],
+  [
+    "/shape-set-checkpoint.mjs",
+    [
+      "text/javascript",
+      readFileSync(
+        new URL("./shape-set-checkpoint-conformance.mjs", import.meta.url),
+      ),
+    ],
+  ],
   ["/", ["text/html", "<!doctype html><title>Staged OCC smoke</title>"]],
   [
     "/worker.mjs",
@@ -42,11 +51,13 @@ const resources = new Map([
     import init from '/cadara-occ.js';
     import { runNeutralCurveConformance } from '/conformance.mjs';
     import { runNativeSemanticDispatcherConformance } from '/native-semantic.mjs';
+    import { runShapeSetCheckpointConformance } from '/shape-set-checkpoint.mjs';
     try {
       const oc = await init({locateFile: path => '/' + path});
       postMessage({result: {
         semantic: runNeutralCurveConformance(oc),
         dispatcher: runNativeSemanticDispatcherConformance(oc),
+        shapeSetCheckpoint: runShapeSetCheckpointConformance(oc),
       }});
     } catch (error) { postMessage({error: String(error), stack: error.stack}); }
   `,
@@ -73,10 +84,13 @@ try {
     const { runNeutralCurveConformance } = await import("/conformance.mjs");
     const { runNativeSemanticDispatcherConformance } =
       await import("/native-semantic.mjs");
+    const { runShapeSetCheckpointConformance } =
+      await import("/shape-set-checkpoint.mjs");
     const oc = await init({ locateFile: (path) => "/" + path });
     const main = {
       semantic: runNeutralCurveConformance(oc),
       dispatcher: runNativeSemanticDispatcherConformance(oc),
+      shapeSetCheckpoint: runShapeSetCheckpointConformance(oc),
     };
     const worker = await new Promise((resolve, reject) => {
       const worker = new Worker("/worker.mjs", { type: "module" });
@@ -110,7 +124,9 @@ try {
     result.main.semantic.summary.error ||
     result.main.dispatcher.summary.error ||
     result.worker.semantic.summary.error ||
-    result.worker.dispatcher.summary.error
+    result.worker.dispatcher.summary.error ||
+    result.main.shapeSetCheckpoint.summary.error ||
+    result.worker.shapeSetCheckpoint.summary.error
   ) {
     process.exitCode = 1;
   }

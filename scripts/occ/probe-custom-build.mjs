@@ -9,6 +9,7 @@ import {
   runRawGInterCharacterization,
 } from "./neutral-curve-conformance.mjs";
 import { runNativeSemanticDispatcherConformance } from "./native-semantic-conformance.mjs";
+import { runShapeSetCheckpointConformance } from "./shape-set-checkpoint-conformance.mjs";
 
 const directory = resolve(
   process.argv[2] ?? fileURLToPath(new URL("../../public", import.meta.url)),
@@ -40,6 +41,7 @@ const oc = await init({
 const semantic = runNeutralCurveConformance(oc);
 const rawGInterCharacterization = runRawGInterCharacterization(oc);
 const nativeDispatcher = runNativeSemanticDispatcherConformance(oc);
+const shapeSetCheckpoint = runShapeSetCheckpointConformance(oc);
 const result = {
   runtime: process.version,
   directory,
@@ -47,6 +49,7 @@ const result = {
   ...semantic,
   rawGInterCharacterization,
   nativeDispatcher,
+  shapeSetCheckpoint,
 };
 // The same rebuild must include the independently owned native precision correction.
 const expectedX = 0.12345678901234566;
@@ -89,6 +92,7 @@ const expectedRawFailures = [
 if (
   result.summary.error ||
   nativeDispatcher.summary.error ||
+  shapeSetCheckpoint.summary.error ||
   JSON.stringify(rawExpectedFailures) !== JSON.stringify(expectedRawFailures) ||
   !result.nativePrecision.pass
 ) {

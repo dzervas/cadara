@@ -497,6 +497,11 @@ run("registry-abi-and-declarations-approved-extension", (out) => {
       (out.approvedReturnStatusDeclarationEnums === 0),
     "Registry and declarations must agree on the approved STEP status enum",
   );
+  assert(
+    (out.approvedShapeSetCheckpointAbiEntries === 0) ===
+      (out.approvedShapeSetCheckpointDeclarationClasses === 0),
+    "Registry and declarations must agree on the approved shape-set checkpoint",
+  );
 });
 
 // Audited inventory: every binding returning T* yields a borrowed alias that must
@@ -804,6 +809,25 @@ const slopeCases = [
     },
   },
   {
+    // A successful read owns the restored shapes; a rejected (truncated) read
+    // must own nothing once deleted.
+    name: "CadaraNativeShapeSetCheckpoint read results, children and rejected reads",
+    reps: 2_000,
+    deleted: (i) => {
+      const text = shapeSetCheckpointText(i);
+      const result = oc.CadaraNativeShapeSetCheckpoint.Read(text);
+      result.Child(0).delete();
+      result.Root().delete();
+      result.delete();
+      oc.CadaraNativeShapeSetCheckpoint.Read(text.slice(0, -8)).delete();
+    },
+    retained: (i, keep) => {
+      const text = shapeSetCheckpointText(i);
+      keep.push(oc.CadaraNativeShapeSetCheckpoint.Read(text));
+      oc.CadaraNativeShapeSetCheckpoint.Read(text.slice(0, -8)).delete();
+    },
+  },
+  {
     // Builders must be deleted BEFORE their document: with real destructors a
     // builder outliving its document is a use-after-free (observed abort).
     name: "TNaming_Builder retention past document deletion",
@@ -876,6 +900,20 @@ const slopeCases = [
     },
   },
 ];
+function shapeSetCheckpointText(i) {
+  const s = meshedBox(i);
+  const b = new oc.BRep_Builder();
+  const c = new oc.TopoDS_Compound();
+  b.MakeCompound(c);
+  b.Add(c, s);
+  const written = oc.CadaraNativeShapeSetCheckpoint.Write(c);
+  const text = written.Checkpoint();
+  written.delete();
+  c.delete();
+  b.delete();
+  s.delete();
+  return text;
+}
 function namingAttributeWrappers(i) {
   const shape = meshedBox(i);
   const document_ = document();
