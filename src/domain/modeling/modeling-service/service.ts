@@ -35,7 +35,10 @@ import {
   createAuthoredModelDocumentFromSnapshot,
   type AuthoredModelDocument,
 } from "@/contracts/modeling/authored-document";
-import { authoredModelDocumentsEqual } from "@/contracts/modeling/authored-document-equality";
+import {
+  authoredModelDocumentsEqual,
+  classifyAuthoredModelDocumentChange,
+} from "@/contracts/modeling/authored-document-equality";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {
   createCommitSketchHistoryEntry,
@@ -401,6 +404,52 @@ export function createModelingService(
     return restoreAuthoredRepositoryDocument(document, diagnostics, [], {
       newRevision: true,
     }, metadata);
+  }
+
+  /** cadara-xkg: an Undo/Redo whose state differs from the runtime's `current`
+   * export only in body labels or colours is applied through the kernel's
+   * rename and appearance operations, which re-run no feature. Any other
+   * difference, or an operation the kernel refuses, restores the whole
+   * document. Each operation allocates the next unused revision; a peer
+   * state keeps the full restore, which adopts its stored revision id when
+   * that is later than every id used here. */
+  async function adoptRepositoryState(
+    current: AuthoredModelDocument,
+    event: DocumentRepositoryChangeEvent,
+  ) {
+    const change = event.metadata.source === "undo" || event.metadata.source === "redo"
+      ? classifyAuthoredModelDocumentChange(current, event.document)
+      : null;
+    if (change?.kind !== "bodyMetadata" || event.diagnostics?.length) {
+      return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
+    }
+    const generation = beginRuntimeChange();
+    restoredMutationPredecessor = null;
+    let runtimeRevisionId = current.revisionId;
+    for (const { bodyId, label } of change.bodyLabels) {
+      const response = await adapter.renameBody(normalizeRenameBodyInput(
+        { baseRevisionId: runtimeRevisionId, bodyId, bodyLabel: label },
+        currentDocumentId,
+      ));
+      if (!isAcceptedMutation(response)) {
+        return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
+      }
+      runtimeRevisionId = response.revisionId;
+    }
+    for (const { bodyId, appearance } of change.bodyAppearances) {
+      const response = await adapter.setBodyAppearance(normalizeSetBodyAppearanceInput(
+        { baseRevisionId: runtimeRevisionId, bodyId, appearance },
+        currentDocumentId,
+      ));
+      if (!isAcceptedMutation(response)) {
+        return restoreRepositoryState(event.document, event.diagnostics, event.metadata);
+      }
+      runtimeRevisionId = response.revisionId;
+    }
+    // A later runtime operation cannot supply evidence for this state.
+    if (generation !== runtimeGeneration) return;
+    restoredMutationPredecessor = { document: structuredClone(event.document), runtimeRevisionId };
+    markRepositorySnapshotFresh(event.metadata, event.document, runtimeRevisionId);
   }
 
   /** T17k3 (A-1): a document mutation runs after the repository changes
@@ -1227,7 +1276,7 @@ export function createModelingService(
             const rollbackDocument = await exportAuthoredDocumentForRepository();
             const rollbackBasis = repositorySnapshotBasis;
             try {
-              await restoreRepositoryState(latest.document, latest.diagnostics, latest.metadata);
+              await adoptRepositoryState(rollbackDocument, latest);
             } catch (error) {
               try {
                 await restoreAuthoredRepositoryDocument(rollbackDocument);
