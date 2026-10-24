@@ -8,6 +8,7 @@ import type {
 import type { DocumentExportResult } from "@/contracts/modeling/export";
 import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
 import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
+import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import { orchestrateGeometryExport } from "@/domain/export/export-orchestrator";
 import { createExportProviderRegistry } from "@/domain/export/provider-registry";
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
@@ -209,6 +210,9 @@ export function createModelingService(
   let isRestoringRepositoryDocument = documentRepository !== null;
   let disposed = false;
   let adapterDisposed = false;
+  /** The viewport's tier; the adapter's snapshots start at "startup". */
+  let requestedViewportLodTierId: OccTessellationTierId = "startup";
+  let displayedViewportLodTierId: OccTessellationTierId = "startup";
   let initializationSettled = false;
   let initializationPromise: Promise<void> | null = null;
   let unsubscribeDocumentRepository: (() => void) | undefined;
@@ -1796,7 +1800,31 @@ export function createModelingService(
     },
     resetOperationHistory,
     setViewportLodTier(tierId) {
-      return adapter.setSnapshotLodTier?.(tierId) ?? false;
+      if (!adapter.refineSnapshotLod || requestedViewportLodTierId === tierId) {
+        return false;
+      }
+      requestedViewportLodTierId = tierId;
+      return true;
+    },
+    async refineViewportLod() {
+      if (!adapter.refineSnapshotLod) return false;
+      const tierId = requestedViewportLodTierId;
+      let refined = false;
+      try {
+        await ensureInitialized();
+        refined = await adapter.refineSnapshotLod(
+          buildDocumentRequest(currentDocumentId),
+          tierId,
+        );
+        if (refined) displayedViewportLodTierId = tierId;
+        return refined;
+      } finally {
+        // A failed or dropped refinement keeps the displayed tier; forget the
+        // request so the next lodTierChanged for this tier retries it.
+        if (!refined && requestedViewportLodTierId === tierId) {
+          requestedViewportLodTierId = displayedViewportLodTierId;
+        }
+      }
     },
     async getCurrentDocumentSnapshot() {
       try {

@@ -86,6 +86,12 @@ export function createEditorEffectFailureEvent(
   });
 
   switch (effect.type) {
+    case "document.refineSnapshotLod":
+      return {
+        type: "effect.snapshotLodRefinementFailed",
+        requestId: effect.requestId,
+        message: appError.message,
+      };
     case "document.fetchSnapshot":
       return {
         type: "effect.snapshotFailed",

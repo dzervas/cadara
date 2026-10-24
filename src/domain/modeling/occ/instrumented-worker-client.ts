@@ -122,6 +122,15 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     );
   }
 
+  refineSnapshotLod(
+    request: GetDocumentSnapshotRequest,
+    lodTierId: OccTessellationTierId,
+  ) {
+    return this.measure("refineSnapshotLod", () =>
+      this.inner.refineSnapshotLod(request, lodTierId),
+    );
+  }
+
   projectSketchExternalReferences(
     request: ProjectSketchExternalReferencesRequest,
   ) {

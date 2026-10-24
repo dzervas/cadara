@@ -75,6 +75,12 @@ export function createEffectExecutor(
     effect: EditorEffect,
   ): Promise<EditorEvent> {
     switch (effect.type) {
+      case "document.refineSnapshotLod":
+        return {
+          type: "effect.snapshotLodRefined",
+          requestId: effect.requestId,
+          refined: (await runtime.refineSnapshotLod?.()) ?? false,
+        };
       case "document.fetchSnapshot": {
         // T17o (T17c3 route): a failed fetch is not caught here. It reaches
         // the event loop's error reporting, which then dispatches
@@ -581,6 +587,7 @@ export async function runEditorEffect(
 
 export function createModelingServiceEditorEffectRuntime(modelingService: {
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
+  refineViewportLod?(): Promise<boolean>;
   projectSketchExternalReferences(input: {
     solverSchemaVersion: typeof SOLVER_SCHEMA_VERSION;
     requestId: RequestId;
@@ -730,6 +737,9 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       modelingService.sketchSolver?.supersedesRegionDerivation === true,
     getCurrentDocumentSnapshot: () =>
       modelingService.getCurrentDocumentSnapshot(),
+    refineSnapshotLod: modelingService.refineViewportLod
+      ? () => modelingService.refineViewportLod!()
+      : undefined,
     async commitSketch(input) {
       // Resolve geometry without replacing persisted authored expressions.
       const commitDefinition = evaluateAuthoredSketchDerivations({

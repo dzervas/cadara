@@ -285,6 +285,67 @@ test("src/application/editor/editor-event-loop.spec.ts executes effects serially
   loop.stop();
 });
 
+// cadara-se2. Logic lane; seam: the event loop over the real effect executor
+// and a fake modeling runtime. A viewport LOD change refines in the
+// background: a history move queued meanwhile runs without waiting for it,
+// and only a refinement that changed the snapshot tier fetches a snapshot.
+// Red on base: the LOD change queued a serial snapshot fetch that every
+// later effect waited behind.
+test("cadara-se2: a queued history move runs while LOD refinement is in flight; only a completed refinement refreshes the snapshot", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  let snapshotReads = 0;
+  let cursorMoves = 0;
+  const refinements: Array<(refined: boolean) => void> = [];
+  const loop = createEditorEventLoop(
+    {
+      ...createRuntime(snapshot),
+      async getCurrentDocumentSnapshot() {
+        snapshotReads += 1;
+        return snapshot;
+      },
+      refineSnapshotLod: () =>
+        new Promise((resolve) => refinements.push(resolve)),
+      async setDocumentCursor() {
+        cursorMoves += 1;
+        return {
+          revisionId: snapshot.document.revisionId,
+          accepted: true,
+          diagnostics: [],
+        };
+      },
+    },
+    createTestErrorReporter(),
+  );
+  loop.start();
+  await waitForState(loop, (state) => state.snapshot !== null);
+
+  loop.dispatch({ type: "document.lodRefinementRequested" });
+  expect(refinements).toHaveLength(1);
+  const previous = getPreviousDocumentHistoryCursor(snapshot);
+  expect(previous, "premise: a previous history cursor").not.toBeNull();
+  loop.dispatch({ type: "document.historyCursorRequested", cursor: previous! });
+  await waitForCondition(
+    () =>
+      cursorMoves === 1 &&
+      loop.getState().pendingHistoryCursorRequestId === null &&
+      loop.getState().pendingSnapshotRequestId === null,
+  );
+  const readsBeforeRefinement = snapshotReads;
+
+  refinements[0]!(true);
+  await waitForCondition(() => snapshotReads === readsBeforeRefinement + 1);
+  await loop.drain();
+
+  loop.dispatch({ type: "document.lodRefinementRequested" });
+  refinements[1]!(false);
+  await loop.drain();
+  expect(
+    snapshotReads,
+    "A refinement that kept the snapshot tier fetches nothing.",
+  ).toBe(readsBeforeRefinement + 1);
+  loop.stop();
+});
+
 // T17o (T17c3 route, high priority). Logic lane; seam: the event loop over
 // the real effect executor. A failed document snapshot fetch must reach
 // error handling (the reporter, user visibility) and leave the reason in

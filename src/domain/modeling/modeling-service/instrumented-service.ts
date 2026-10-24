@@ -101,6 +101,12 @@ class InstrumentedModelingService implements ModelingService {
     return this.inner.setViewportLodTier(tierId);
   }
 
+  refineViewportLod() {
+    return this.measure("refineViewportLod", () =>
+      this.inner.refineViewportLod(),
+    );
+  }
+
   getCurrentDocumentSnapshot() {
     return this.measure(
       "getCurrentDocumentSnapshot",

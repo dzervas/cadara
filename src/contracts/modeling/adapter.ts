@@ -111,6 +111,15 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   dispose?(): void;
   /** Updates the requested viewport snapshot tessellation tier when supported. */
   setSnapshotLodTier?(tierId: "startup" | "normal" | "fine"): boolean;
+  /**
+   * Meshes the current document at `tierId` in the background, letting
+   * authored operations run meanwhile, then makes it the snapshot tier.
+   * True when the snapshot tier changed (a refresh is due).
+   */
+  refineSnapshotLod?(
+    request: GetDocumentSnapshotRequest,
+    tierId: "startup" | "normal" | "fine",
+  ): Promise<boolean>;
   /** Rehydrates kernel runtime state from a repository-authored document when supported. */
   restoreAuthoredModelDocument?(
     document: AuthoredDocument,

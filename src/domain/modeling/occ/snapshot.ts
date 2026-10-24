@@ -1490,19 +1490,23 @@ function regionProfileFailureDiagnostic(
 }
 
 /**
- * Region meshes per immutable sketch record. Label/appearance-only revisions
- * keep their sketch records, so their snapshots skip re-meshing every region
- * profile face (cadara-lyi).
+ * Region meshes per immutable sketch record and tessellation tier.
+ * Label/appearance-only revisions keep their sketch records, so their
+ * snapshots skip re-meshing every region profile face (cadara-lyi). Every
+ * tier is kept, so background LOD refinement can mesh the requested tier
+ * while snapshots stay at the displayed one (cadara-se2).
  */
 let regionRenderRecordCache = new WeakMap<
   SketchSnapshotRecord,
-  {
-    oc: OccAuthoringState["oc"];
-    modelingTolerance: number;
-    tierId: string;
-    records: readonly RenderableEntityRecord[];
-    diagnostics: readonly ModelingDiagnostic[];
-  }
+  Map<
+    string,
+    {
+      oc: OccAuthoringState["oc"];
+      modelingTolerance: number;
+      records: readonly RenderableEntityRecord[];
+      diagnostics: readonly ModelingDiagnostic[];
+    }
+  >
 >();
 
 /** Makes the next snapshots mesh their region profile faces again. */
@@ -1519,13 +1523,12 @@ function buildRegionRenderRecords(
   const tessellationTier = getOccTessellationTier(options.lodTierId);
 
   return sketches.flatMap((sketch) => {
-    const cached = regionRenderRecordCache.get(sketch);
-    if (
-      cached !== undefined &&
-      cached.oc === state.oc &&
-      cached.modelingTolerance === state.modelingTolerance &&
-      cached.tierId === tessellationTier.id
-    ) {
+    const cached = getCachedRegionRenderRecords(
+      state,
+      sketch,
+      tessellationTier.id,
+    );
+    if (cached !== undefined) {
       diagnostics.push(...cached.diagnostics);
       return cached.records;
     }
@@ -1537,16 +1540,55 @@ function buildRegionRenderRecords(
       tessellationTier,
       sketchDiagnostics,
     );
-    regionRenderRecordCache.set(sketch, {
+    let tiers = regionRenderRecordCache.get(sketch);
+    if (!tiers) {
+      tiers = new Map();
+      regionRenderRecordCache.set(sketch, tiers);
+    }
+    tiers.set(tessellationTier.id, {
       oc: state.oc,
       modelingTolerance: state.modelingTolerance,
-      tierId: tessellationTier.id,
       records,
       diagnostics: sketchDiagnostics,
     });
     diagnostics.push(...sketchDiagnostics);
     return records;
   });
+}
+
+function getCachedRegionRenderRecords(
+  state: OccAuthoringState,
+  sketch: SketchSnapshotRecord,
+  tierId: string,
+) {
+  const cached = regionRenderRecordCache.get(sketch)?.get(tierId);
+  return cached !== undefined &&
+    cached.oc === state.oc &&
+    cached.modelingTolerance === state.modelingTolerance
+    ? cached
+    : undefined;
+}
+
+/**
+ * One step of background LOD refinement (cadara-se2): meshes the region
+ * faces of the first applied sketch that has no cached records at `lodTierId`,
+ * so the next snapshot at that tier reuses them. False when none is left.
+ */
+export function refineNextOccSketchRegionRenderRecords(
+  state: OccAuthoringState,
+  lodTierId: OccTessellationTierId,
+) {
+  const { appliedSketches } = buildSnapshotPresentationRecords(
+    state,
+    createProducedTargetsByFeatureId(state.features),
+  );
+  const sketch = appliedSketches.find(
+    (candidate) =>
+      getCachedRegionRenderRecords(state, candidate, lodTierId) === undefined,
+  );
+  if (!sketch) return false;
+  buildRegionRenderRecords(state, [sketch], { lodTierId }, []);
+  return true;
 }
 
 function buildSketchRegionRenderRecords(
