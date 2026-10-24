@@ -24,6 +24,7 @@ import type {
   ModelingService,
   ModelingSetFeatureCursorInput,
   ModelingUpdateDocumentVariableInput,
+  ModelingRemoveDocumentVariableInput,
   ModelingUpdateFeatureInput,
 } from "@/domain/modeling/modeling-service/types";
 import type {
@@ -210,6 +211,14 @@ class InstrumentedModelingService implements ModelingService {
     return this.measureAppResult(
       "updateDocumentVariable",
       () => this.inner.updateDocumentVariable(input),
+      mutationAttributes,
+    );
+  }
+
+  removeDocumentVariable(input: ModelingRemoveDocumentVariableInput) {
+    return this.measureAppResult(
+      "removeDocumentVariable",
+      () => this.inner.removeDocumentVariable(input),
       mutationAttributes,
     );
   }

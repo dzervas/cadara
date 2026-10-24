@@ -57,6 +57,7 @@ test.each(["150", ""])(
           invalidVariableValueMessages={{ variable_width: message }}
           onAddVariable={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
           onClose={() => undefined}
         />
       </MantineProvider>,
@@ -85,11 +86,21 @@ test.each(["150", ""])(
     expect(
       widthRow,
       "the error follows the complete row control as a separate block",
-    ).toMatch(valueText ? /<\/button><p\b/ : /<\/div><p\b/);
+    ).toMatch(/<\/div><p\b/);
     if (valueText) {
       expect(widthRow).toContain('aria-label="Edit variable width"');
-      expect(widthRow).toContain(">width</span>");
+      expect(widthRow).toContain(">width</button>");
       expect(widthRow).toContain(">150</span>");
+      const deleteButton = widthRow.match(
+        /<button\b[^>]*aria-label="Delete variable width"[^>]*>/,
+      )?.[0];
+      expect(
+        deleteButton,
+        "the delete control is dim and only revealed on row hover or focus",
+      ).toContain("color:var(--workbench-shell-text-dim)");
+      expect(deleteButton).toMatch(
+        /opacity-0 [^"]*group-hover:opacity-100 [^"]*focus-visible:opacity-100/,
+      );
     } else {
       expect(widthRow).toContain('aria-label="Variable name variable_width"');
       expect(widthRow).toContain('value="width"');
@@ -167,6 +178,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -353,6 +365,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -423,6 +436,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -492,6 +506,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -541,6 +556,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -581,6 +597,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -620,6 +637,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,
@@ -652,6 +670,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
           onUpdateVariable={() => undefined}
+          onRemoveVariable={() => undefined}
         />
       </EditorContext.Provider>
     </MantineProvider>,

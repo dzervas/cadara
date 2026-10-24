@@ -17,6 +17,7 @@ import type {
   SetFeatureCursorResponse,
   SetFeatureSuppressionResponse,
   UpdateDocumentVariableResponse,
+  RemoveDocumentVariableResponse,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import type { DocumentExportResult } from "@/contracts/modeling/export";
@@ -296,7 +297,10 @@ export function mapSetBodyAppearanceResponse(
 }
 
 export function mapDocumentVariableResponse(
-  response: AddDocumentVariableResponse | UpdateDocumentVariableResponse,
+  response:
+    | AddDocumentVariableResponse
+    | UpdateDocumentVariableResponse
+    | RemoveDocumentVariableResponse,
   expectedDocumentId: DocumentId,
 ): ModelingDocumentVariableMutationResult {
   const normalized = parseResponseWithFallback({

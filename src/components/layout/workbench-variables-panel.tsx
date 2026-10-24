@@ -28,6 +28,7 @@ interface WorkbenchVariablesPanelProps {
     variable: DocumentVariableRecord,
     next: Pick<DocumentVariableRecord, "name" | "valueText">,
   ) => void;
+  onRemoveVariable: (variable: DocumentVariableRecord) => void;
   onClose: () => void;
 }
 
@@ -148,6 +149,7 @@ export function WorkbenchVariablesPanel({
   invalidVariableValueMessages = {},
   onAddVariable,
   onUpdateVariable,
+  onRemoveVariable,
   onClose,
 }: WorkbenchVariablesPanelProps) {
   const [editingVariableId, setEditingVariableId] = useState<string | null>(
@@ -374,26 +376,44 @@ export function WorkbenchVariablesPanel({
                   />
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left transition hover:bg-[var(--workbench-shell-sidebar-item-hover)] focus:outline-none focus:ring-1 focus:ring-[var(--workbench-shell-accent)]"
-                  style={{ background: "transparent", border: 0 }}
-                  aria-label={`Edit variable ${accessibleVariableName}`}
-                  aria-keyshortcuts="Enter Space F2"
-                  title="Double-click to edit. Press Enter, Space, or F2 to edit from the keyboard."
-                  onKeyDown={(event) => {
-                    if (!shouldStartVariableKeyboardEdit(event.key)) return;
-                    event.preventDefault();
-                    setEditingVariableId(variable.variableId);
-                  }}
+                // The delete button cannot nest inside the edit button, so the
+                // row is a group: the edit button keeps the name, the hover-only
+                // delete sits beside it and double-click anywhere edits.
+                <div
+                  className="group flex w-full items-center gap-1 rounded-md px-2 py-1.5 transition hover:bg-[var(--workbench-shell-sidebar-item-hover)]"
                   onDoubleClick={() =>
                     setEditingVariableId(variable.variableId)
                   }
                 >
-                  <span className="min-w-0 truncate text-[13px] font-medium leading-5 text-[var(--workbench-shell-text)]">
+                  <button
+                    type="button"
+                    className="min-w-0 truncate rounded text-left text-[13px] font-medium leading-5 text-[var(--workbench-shell-text)] focus:outline-none focus:ring-1 focus:ring-[var(--workbench-shell-accent)]"
+                    style={{ background: "transparent", border: 0, padding: 0 }}
+                    aria-label={`Edit variable ${accessibleVariableName}`}
+                    aria-keyshortcuts="Enter Space F2"
+                    title="Double-click to edit. Press Enter, Space, or F2 to edit from the keyboard."
+                    onKeyDown={(event) => {
+                      if (!shouldStartVariableKeyboardEdit(event.key)) return;
+                      event.preventDefault();
+                      setEditingVariableId(variable.variableId);
+                    }}
+                  >
                     {accessibleVariableName}
-                  </span>
-                  <span className="ml-auto flex min-w-0 max-w-[68%] shrink-0 items-center justify-end gap-1.5">
+                  </button>
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size={20}
+                    data-variable-delete={variable.variableId}
+                    aria-label={`Delete variable ${accessibleVariableName}`}
+                    title="Delete variable"
+                    className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    style={{ color: "var(--workbench-shell-text-dim)" }}
+                    onClick={() => onRemoveVariable(variable)}
+                  >
+                    <WorkbenchIcon name="trash" className="h-3.5 w-3.5" />
+                  </ActionIcon>
+                  <span className="ml-auto flex min-w-0 max-w-[68%] shrink-0 items-center justify-end gap-1.5 pl-2">
                     <span
                       className="min-w-0 truncate rounded border bg-[var(--workbench-shell-control-surface)] px-2 py-1 text-right font-mono text-[12px] leading-4 text-[var(--workbench-shell-text-muted)]"
                       data-variable-expression={variable.variableId}
@@ -409,7 +429,7 @@ export function WorkbenchVariablesPanel({
                     </span>
                     {variableResultChip}
                   </span>
-                </button>
+                </div>
               )}
               {variableResult.kind === "error" && (
                 <Text

@@ -28,6 +28,7 @@ export type {
   ModelingAddDocumentVariableInput,
   ModelingUpdateFeatureInput,
   ModelingUpdateDocumentVariableInput,
+  ModelingRemoveDocumentVariableInput,
   ModelingDeleteFeatureInput,
   ModelingDeleteTargetInput,
   ModelingRenameBodyInput,

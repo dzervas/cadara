@@ -131,6 +131,8 @@ import type {
   UpdateFeatureResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
+  RemoveDocumentVariableRequest,
+  RemoveDocumentVariableResponse,
 } from "@/contracts/modeling/schema";
 import {
   createLiteralAuthoredValue,
@@ -8036,8 +8038,21 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
-  async updateDocumentVariable(
+  updateDocumentVariable(
     request: UpdateDocumentVariableRequest,
+  ): Promise<UpdateDocumentVariableResponse> {
+    return this.replaceDocumentVariable(request);
+  }
+
+  removeDocumentVariable(
+    request: RemoveDocumentVariableRequest,
+  ): Promise<RemoveDocumentVariableResponse> {
+    return this.replaceDocumentVariable(request);
+  }
+
+  /** Updates the variable in place, or removes it when the request carries no name/value. */
+  private async replaceDocumentVariable(
+    request: UpdateDocumentVariableRequest | RemoveDocumentVariableRequest,
   ): Promise<UpdateDocumentVariableResponse> {
     assertSupportedModelingRequest(request);
     const snapshot = await this.getSnapshot();
@@ -8104,15 +8119,20 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       };
     }
 
-    const candidateVariables = snapshot.document.variables.map((variable) =>
-      variable.variableId === request.variableId
-        ? {
-            variableId: request.variableId,
-            name: request.name,
-            valueText: request.valueText,
-          }
-        : variable,
-    );
+    const candidateVariables =
+      "name" in request
+        ? snapshot.document.variables.map((variable) =>
+            variable.variableId === request.variableId
+              ? {
+                  variableId: request.variableId,
+                  name: request.name,
+                  valueText: request.valueText,
+                }
+              : variable,
+          )
+        : snapshot.document.variables.filter(
+            (variable) => variable.variableId !== request.variableId,
+          );
     const variableValidation =
       evaluateDocumentVariableExpressions(candidateVariables);
 
@@ -8193,10 +8213,11 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
       const diagnostics: UpdateDocumentVariableResponse["diagnostics"] = [
         ...sketchRebuild.diagnostics,
         {
-          code: "mock-update-document-variable",
+          code: "name" in request
+            ? "mock-update-document-variable"
+            : "mock-remove-document-variable",
           severity: "info",
-          message:
-            "Mock kernel committed the document variable update request.",
+          message: `Mock kernel committed the document variable ${"name" in request ? "update" : "remove"} request.`,
           target: null,
           detail: null,
         },

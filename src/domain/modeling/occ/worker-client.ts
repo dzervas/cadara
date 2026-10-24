@@ -31,6 +31,8 @@ import type {
   SetFeatureSuppressionResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
+  RemoveDocumentVariableRequest,
+  RemoveDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
@@ -185,6 +187,9 @@ export interface OccWorkerSnapshotClient {
   updateDocumentVariable(
     request: UpdateDocumentVariableRequest,
   ): Promise<UpdateDocumentVariableResponse>;
+  removeDocumentVariable(
+    request: RemoveDocumentVariableRequest,
+  ): Promise<RemoveDocumentVariableResponse>;
   evaluatePreview(
     request: EvaluatePreviewRequest,
   ): Promise<EvaluatePreviewResponse>;
@@ -457,6 +462,13 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   updateDocumentVariable(request: UpdateDocumentVariableRequest) {
     return this.invoke<UpdateDocumentVariableResponse>({
       kind: "updateDocumentVariable",
+      request,
+    });
+  }
+
+  removeDocumentVariable(request: RemoveDocumentVariableRequest) {
+    return this.invoke<RemoveDocumentVariableResponse>({
+      kind: "removeDocumentVariable",
       request,
     });
   }

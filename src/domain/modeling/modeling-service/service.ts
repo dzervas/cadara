@@ -50,6 +50,7 @@ import {
   createSetFeatureCursorHistoryEntry,
   createSetFeatureSuppressionHistoryEntry,
   createUpdateDocumentVariableHistoryEntry,
+  createRemoveDocumentVariableHistoryEntry,
   createUpdateFeatureHistoryEntry,
   type ModelingOperationHistoryEntry,
   type ModelingOperationHistoryPayload,
@@ -81,6 +82,7 @@ import {
   normalizeCommitSketchInput,
   normalizeAddDocumentVariableInput,
   normalizeUpdateDocumentVariableInput,
+  normalizeRemoveDocumentVariableInput,
   normalizeCreateFeatureInput,
   normalizeUpdateFeatureInput,
   normalizeDeleteFeatureInput,
@@ -2113,6 +2115,32 @@ export function createModelingService(
             input,
             () => createUpdateDocumentVariableHistoryEntry(request),
             "Edit Variable",
+          );
+        },
+      });
+    },
+    removeDocumentVariable(input) {
+      return runLocalMutation({
+        operation: "Remove document variable",
+        fallbackMessage: "Remove document variable failed.",
+        context: [
+          { key: "baseRevisionId", value: input.baseRevisionId },
+          { key: "variableId", value: input.variableId },
+        ],
+        action: async () => {
+          const request = normalizeRemoveDocumentVariableInput(
+            input,
+            currentDocumentId,
+          );
+          const expected = await getMutationPredecessor();
+          const response = await adapter.removeDocumentVariable(request);
+          return finalizeMutationResult(
+            expected,
+            response,
+            mapDocumentVariableResponse(response, currentDocumentId),
+            input,
+            () => createRemoveDocumentVariableHistoryEntry(request),
+            "Delete Variable",
           );
         },
       });

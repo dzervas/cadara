@@ -99,6 +99,9 @@ export interface ModelingService {
   updateDocumentVariable(
     input: ModelingUpdateDocumentVariableInput,
   ): AppResultAsync<ModelingDocumentVariableMutationResult>;
+  removeDocumentVariable(
+    input: ModelingRemoveDocumentVariableInput,
+  ): AppResultAsync<ModelingDocumentVariableMutationResult>;
   createFeature(
     input: ModelingCreateFeatureInput,
   ): AppResultAsync<ModelingFeatureMutationResult>;
@@ -344,6 +347,13 @@ export type ModelingSetFeatureSuppressionInput = Omit<
   };
 export type ModelingUpdateDocumentVariableInput = Omit<
   schema.UpdateDocumentVariableRequest,
+  "contractVersion" | "documentId"
+> &
+  Partial<ModelingMutationBasisInput> & {
+    observePersistence?: (transaction: DocumentRepositoryMutationResult) => void;
+  };
+export type ModelingRemoveDocumentVariableInput = Omit<
+  schema.RemoveDocumentVariableRequest,
   "contractVersion" | "documentId"
 > &
   Partial<ModelingMutationBasisInput> & {

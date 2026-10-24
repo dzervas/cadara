@@ -1676,6 +1676,22 @@ export interface UpdateDocumentVariableResponse extends ModelingOperationResult 
 }
 
 /**
+ * Variable removal request.
+ */
+export interface RemoveDocumentVariableRequest extends DocumentMutationRequest {
+  /** Durable variable identity to remove. */
+  variableId: DocumentVariableId;
+}
+
+/**
+ * Variable removal response.
+ */
+export interface RemoveDocumentVariableResponse extends ModelingOperationResult {
+  /** Durable variable identity that was targeted by the removal. */
+  variableId: DocumentVariableId;
+}
+
+/**
  * Typed feature preview request.
  * The previewed feature definition is explicit and must not depend on out-of-band
  * generic target arrays.

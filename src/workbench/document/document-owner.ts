@@ -150,6 +150,19 @@ export function createWorkbenchDocumentOwner({
     return acceptMutation(result, options);
   }
 
+  async function removeDocumentVariable(
+    variableId: DocumentVariableRecord["variableId"],
+    options: AcceptedMutationOptions,
+  ) {
+    const currentSnapshot = requireSnapshot();
+    const result = await modelingService.removeDocumentVariable({
+      baseRevisionId: currentSnapshot.document.revisionId,
+      variableId,
+    });
+
+    return acceptMutation(result, options);
+  }
+
   async function reorderDocumentHistory(
     item: DocumentHistoryOrderEntry,
     beforeItem: DocumentHistoryOrderEntry | null,
@@ -400,6 +413,7 @@ export function createWorkbenchDocumentOwner({
     addDocumentVariable,
     commitPartImport,
     deleteTarget,
+    removeDocumentVariable,
     renameDocument,
     reorderDocumentHistory,
     renameTarget,

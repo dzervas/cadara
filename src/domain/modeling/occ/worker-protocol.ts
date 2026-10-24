@@ -34,6 +34,8 @@ import type {
   SetFeatureSuppressionResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
+  RemoveDocumentVariableRequest,
+  RemoveDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
@@ -233,6 +235,10 @@ export type OccWorkerOperation =
       request: UpdateDocumentVariableRequest;
     }
   | {
+      kind: "removeDocumentVariable";
+      request: RemoveDocumentVariableRequest;
+    }
+  | {
       kind: "evaluatePreview";
       request: EvaluatePreviewRequest;
     }
@@ -297,6 +303,7 @@ export type OccWorkerOperationResult =
   | SetFeatureCursorResponse
   | AddDocumentVariableResponse
   | UpdateDocumentVariableResponse
+  | RemoveDocumentVariableResponse
   | EvaluatePreviewResponse
   | ResolveReferenceResponse
   | OccNativeTopologyCapabilityProbeResult

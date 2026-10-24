@@ -36,6 +36,7 @@ import type {
   SetFeatureCursorRequest,
   SetFeatureSuppressionRequest,
   UpdateDocumentVariableRequest,
+  RemoveDocumentVariableRequest,
   UpdateFeatureRequest,
 } from "@/contracts/modeling/schema";
 import type { ProjectSketchExternalReferencesRequest } from "@/contracts/solver/schema";
@@ -251,6 +252,14 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
     return this.measure(
       "updateDocumentVariable",
       () => this.inner.updateDocumentVariable(request),
+      diagnosticResultAttributes,
+    );
+  }
+
+  removeDocumentVariable(request: RemoveDocumentVariableRequest) {
+    return this.measure(
+      "removeDocumentVariable",
+      () => this.inner.removeDocumentVariable(request),
       diagnosticResultAttributes,
     );
   }

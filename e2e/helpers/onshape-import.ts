@@ -134,7 +134,7 @@ export async function editVariable(page: Page, name: string, value: string) {
   const editButton = panel.getByRole("button", {
     name: `Edit variable ${name}`,
   });
-  const variableId = await editButton.locator("..").getAttribute("data-variable-row");
+  const variableId = await editButton.locator("xpath=ancestor::*[@data-variable-row][1]").getAttribute("data-variable-row");
   expect(variableId).not.toBeNull();
   await editButton.click();
   await page.keyboard.press("F2");
