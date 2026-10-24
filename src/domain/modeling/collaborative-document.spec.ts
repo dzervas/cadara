@@ -434,3 +434,51 @@ test("T16g A-13: a peer's concurrent dimension on a copy removed with its mirror
     ]),
   ).toEqual([["missing-dimension-entity", "error"]]);
 });
+test("variables materialize in creation (id ordinal) order, also after a delete is undone (cadara-1ui8)", async () => {
+  const seed = await fixture();
+  seed.variables = ["1", "2", "3", "10"].map((ordinal) => ({
+    variableId: `variable_${ordinal}` as const,
+    name: `v${ordinal}`,
+    valueText: ordinal,
+  }));
+  const ids = (storage: CollaborativeDocument) =>
+    materializeCollaborativeDocument(storage).variables.map(
+      (variable) => variable.variableId,
+    );
+  const order = ["variable_1", "variable_2", "variable_3", "variable_10"];
+  const loaded = Automerge.from(createCollaborativeDocument(seed));
+  expect(ids(loaded), "Automerge sorts map keys as text on load").toEqual(
+    order,
+  );
+
+  const history = new AuthoredActionHistory();
+  const identity = {
+    actorId: Automerge.getActorId(loaded),
+    documentId: seed.documentId,
+    context: { kind: "document" as const },
+  };
+  const current = () =>
+    documentActionState(materializeCollaborativeDocument(stored));
+  let stored = loaded;
+  const apply = (result: ReturnType<AuthoredActionHistory["undo"]>) => {
+    expect(result.status).toBe("applied");
+    stored = Automerge.change(stored, (storage) => {
+      if (result.status === "applied")
+        applyCollaborativeWrites(storage, result.writes);
+    });
+  };
+  const without = structuredClone(seed);
+  without.variables.splice(1, 1);
+  apply(
+    history.commit(
+      identity,
+      current(),
+      documentActionState(without),
+      "Delete Variable",
+      current(),
+    ),
+  );
+  expect(ids(stored)).toEqual(order.filter((id) => id !== "variable_2"));
+  apply(history.undo(identity, current()));
+  expect(ids(stored), "Undo puts the variable back in place").toEqual(order);
+});

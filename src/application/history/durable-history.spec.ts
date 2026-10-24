@@ -151,6 +151,41 @@ test("repository compensation synchronizes background document edits", async () 
     ).toBeTruthy();
   }
 
+  async function testUndoRestoresDeletedVariableInPlace() {
+    const { modelingService, durableHistory } =
+      await createBackgroundDurableHistoryFixture();
+    const variableIds = async () =>
+      (await modelingService.getCurrentDocumentSnapshot()).document.variables.map(
+        (variable) => variable.variableId,
+      );
+    for (const name of ["a", "b", "c"]) {
+      const current = await modelingService.getCurrentDocumentSnapshot();
+      await unwrapModelingResult(
+        modelingService.addDocumentVariable({
+          baseRevisionId: current.document.revisionId,
+          name,
+          valueText: "1",
+        }),
+      );
+      await modelingService.waitForPersistence();
+    }
+    const before = await variableIds();
+    const current = await modelingService.getCurrentDocumentSnapshot();
+    await unwrapModelingResult(
+      modelingService.removeDocumentVariable({
+        baseRevisionId: current.document.revisionId,
+        variableId: before[1]!,
+      }),
+    );
+    await modelingService.waitForPersistence();
+
+    await durableHistory.undo({ documentId: current.document.documentId });
+    expect(
+      await variableIds(),
+      "Undoing a variable delete restores it at its original position (cadara-1ui8).",
+    ).toEqual(before);
+  }
+
   async function testImmediateUndoAfterBackgroundExtrudeUpdate() {
     const { modelingService, durableHistory } =
       await createBackgroundDurableHistoryFixture();
@@ -459,6 +494,7 @@ test("repository compensation synchronizes background document edits", async () 
   }
 
   await testImmediateUndoAfterBackgroundVariableUpdate();
+  await testUndoRestoresDeletedVariableInPlace();
   await testImmediateUndoAfterBackgroundExtrudeUpdate();
   await testImmediateUndoAfterBackgroundSketchPlaneCommit();
   await testImmediateUndoWaitsForDelayedRepositoryUndoEvent();

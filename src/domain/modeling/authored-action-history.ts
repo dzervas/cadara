@@ -180,10 +180,22 @@ function encode(state: AuthoredActionState): Fields {
   }
   return data;
 }
+/** Encoded collections are maps whose key order is not durable: Automerge sorts
+ * keys on load and appends a re-created key, so an undone variable delete came
+ * back last (cadara-1ui8). Kernels allocate `variable_<n>` ids in creation
+ * order, so that ordinal order is the canonical variable order.
+ */
+const byVariableOrdinal = new Intl.Collator("en", { numeric: true });
 function decode(state: AuthoredActionState, data: Fields): AuthoredActionState {
   if (state.context.kind === "sketch") sketch(data, false);
   else {
     collections(data, documentCollections, false);
+    (data.variables as Fields[] | undefined)?.sort((left, right) =>
+      byVariableOrdinal.compare(
+        String(left.variableId),
+        String(right.variableId),
+      ),
+    );
     collections(data.assets as Fields, { records: "assetId" }, false);
     for (const record of data.sketches as Fields[]) sketch(record, false);
   }
