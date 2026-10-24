@@ -58,6 +58,16 @@ interface WorkbenchDocumentOwnerDependencies {
   createImportHistoryProbe?: () => ImportHistoryProbeCapabilities;
 }
 
+/**
+ * cadara-5nz: a second Add variable issued while one is in flight would reuse
+ * the same base revision and `var{N+1}` name and be refused. The owner is
+ * recreated per snapshot, so the in-flight add is tracked per modeling service.
+ */
+const inFlightDocumentVariableAdds = new WeakMap<
+  ModelingService,
+  Promise<void>
+>();
+
 function createWorkbenchRequestId(scope: string) {
   return `request_workbench_${scope}_${Date.now().toString(36)}` as RequestId;
 }
@@ -123,14 +133,36 @@ export function createWorkbenchDocumentOwner({
   }
 
   async function addDocumentVariable(options: AcceptedMutationOptions) {
-    const currentSnapshot = requireSnapshot();
-    const result = await modelingService.addDocumentVariable({
-      baseRevisionId: currentSnapshot.document.revisionId,
-      name: `var${currentSnapshot.document.variables.length + 1}`,
-      valueText: "0",
+    const activeSnapshot = requireSnapshot();
+    const previousAdd = inFlightDocumentVariableAdds.get(modelingService);
+    const run = (async () => {
+      // Queued behind another add: rebase on the revision it produced.
+      let currentSnapshot = activeSnapshot;
+      if (previousAdd) {
+        await previousAdd;
+        currentSnapshot = await modelingService.getCurrentDocumentSnapshot();
+      }
+      const result = await modelingService.addDocumentVariable({
+        baseRevisionId: currentSnapshot.document.revisionId,
+        name: `var${currentSnapshot.document.variables.length + 1}`,
+        valueText: "0",
+      });
+
+      return acceptMutation(result, options);
+    })();
+    // Ordering only: the caller still receives `run`'s outcome.
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    inFlightDocumentVariableAdds.set(modelingService, settled);
+    void settled.then(() => {
+      if (inFlightDocumentVariableAdds.get(modelingService) === settled) {
+        inFlightDocumentVariableAdds.delete(modelingService);
+      }
     });
 
-    return acceptMutation(result, options);
+    return run;
   }
 
   async function updateDocumentVariable(
