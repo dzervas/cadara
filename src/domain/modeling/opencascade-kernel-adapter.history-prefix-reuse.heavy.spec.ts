@@ -785,3 +785,83 @@ test("a preview of a feature before the tail that joins an earlier body, after a
     session.adapter.dispose();
   }
 }, 900_000);
+
+test("snapshots after a cursor rollback it already showed or a tail plane add/delete reuse every native body payload (cadara-rgq)", async () => {
+  const source = JSON.parse(
+    await readFile(
+      new URL(
+        "../../../landing/examples/bracket/model.cadara",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ) as AuthoredModelDocument;
+  const session = await open(source);
+  // Bodies whose native topology payload (triangles + ids) the snapshot built.
+  const native = (
+    (await occ!) as unknown as {
+      CadaraBuildNativeTopologyPayload: {
+        BuildJson: (...args: unknown[]) => string;
+      };
+    }
+  ).CadaraBuildNativeTopologyPayload;
+  const buildJson = native.BuildJson;
+  let builtBodies: string[] = [];
+  native.BuildJson = (...args: unknown[]) => {
+    builtBodies.push(String(args[1]));
+    return buildJson(...args);
+  };
+  let lastSnapshot: WorkspaceSnapshot | null = null;
+  const snapshotBuilds = async () => {
+    builtBodies = [];
+    lastSnapshot = await session.snapshot();
+    return builtBodies;
+  };
+  try {
+    await session.snapshot();
+    const opened = await session.exported();
+    const end = opened.cursor;
+    const rolledBack = {
+      kind: "feature",
+      featureId: appliedFeatureIds(opened).at(-2)!,
+    } as const;
+
+    await session.setCursor(rolledBack);
+    const tailBodies = await snapshotBuilds();
+    expect(
+      tailBodies.length,
+      "premise: the tail feature changes a body, which the rollback shows as it was before",
+    ).toBeGreaterThan(0);
+    const firstRollback = evaluatedModel(lastSnapshot!);
+    await session.setCursor(end);
+    // Deliberate tripwire: Roll To End re-executes the tail from its
+    // checkpoint, so it builds new bodies. Update this when the unapplied
+    // tail keeps its stage checkpoint (cadara-vjcv).
+    expect(
+      await snapshotBuilds(),
+      "rolling to the end evaluates the tail again and builds its bodies",
+    ).toEqual(tailBodies);
+    await session.setCursor(rolledBack);
+    expect(
+      await snapshotBuilds(),
+      "rolling back again shows the bodies kept by the feature checkpoints",
+    ).toEqual([]);
+    expect(
+      evaluatedModel(lastSnapshot!),
+      "the reused payloads show the same model as the first rollback",
+    ).toEqual(firstRollback);
+
+    await session.setCursor(end);
+    await session.snapshot();
+    const plane = await session.create(tailPlane);
+    expect(await snapshotBuilds(), "a tail plane changes no body").toEqual([]);
+    await session.deleteFeature(plane);
+    expect(
+      await snapshotBuilds(),
+      "deleting the tail plane resumes from the unchanged checkpoint",
+    ).toEqual([]);
+  } finally {
+    native.BuildJson = buildJson;
+    session.adapter.dispose();
+  }
+}, 900_000);

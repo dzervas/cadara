@@ -3135,18 +3135,39 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     ].join(":");
   }
 
+  /**
+   * Keeps the payload of every body `state` still holds: live bodies and the
+   * bodies its feature stages keep for a later rebuild (checkpoints and
+   * outputs, cadara-di5). A rebuild that resumes from a checkpoint, such as a
+   * cursor rollback, shows those same body records again and reuses their
+   * payloads (cadara-rgq). A payload leaves with the last state holding its
+   * body, whose shape wrapper is released then. Lookups still require the
+   * cached shape and naming owner (getCachedNativeTopologyBodyPayload).
+   */
   private pruneNativeTopologyBodyPayloadCache(state: OccAuthoringState) {
-    const liveBodies = new Map(
-      state.bodies.map((body) => [`${body.bodyId}:${body.topologyToken}`, body]),
-    );
+    const heldTopologiesByShape = new Map<unknown, Set<unknown>>();
+    const hold = (body: OccTrackedBody) => {
+      const topologies = heldTopologiesByShape.get(body.shape) ?? new Set();
+      topologies.add(body.topology);
+      heldTopologiesByShape.set(body.shape, topologies);
+    };
+    state.bodies.forEach(hold);
+    state.baseBodies.forEach(hold);
+    for (const stages of [
+      state.featureTopologyStages,
+      state.previousFeatureTopologyStages,
+    ]) {
+      for (const stage of stages.values()) {
+        for (const output of stage.outputs.values()) hold(output.body);
+        stage.checkpoint?.bodies.forEach(hold);
+      }
+    }
 
     for (const [key, cached] of this.nativeTopologyBodyPayloadCache) {
-      const body = liveBodies.get(`${cached.bodyId}:${cached.topologyToken}`);
-      // Rebuilds/invalid feature edits can reuse a token for a different shape
-      // or naming owner. Never retain that previous body's display triangles.
       if (
-        body?.shape !== cached.body.shape ||
-        body?.topology !== cached.body.topology
+        !heldTopologiesByShape
+          .get(cached.body.shape)
+          ?.has(cached.body.topology)
       ) {
         this.nativeTopologyBodyPayloadCache.delete(key);
       }
