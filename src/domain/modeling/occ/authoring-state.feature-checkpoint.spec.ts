@@ -26,6 +26,7 @@ import type { OccFeatureTopologyStageMap } from "@/domain/modeling/occ/topology-
 // checkpointOccFeatureStage, with plain records and no OCC (cadara-di5). It
 // decides which leading features a history rebuild may take from the previous
 // build instead of rerunning them; a wrong answer shows stale geometry.
+// Variable-driven sketch dimensions are cadara-afj3.
 
 const extrude = (
   sketchId: SketchId,
@@ -66,12 +67,40 @@ const features: OccAuthoringFeatureRecord[] = [
     definition: extrude("sketch_3", createLiteralAuthoredValue(5)),
   },
 ];
-const sketches = ["sketch_1", "sketch_2", "sketch_3"].map(
-  (sketchId) => ({ sketchId }) as SketchSnapshotRecord,
+/** sketch_3 has a dimension given by the variable `gap`. */
+const sketches = (
+  [
+    ["sketch_1", createLiteralAuthoredValue(3)],
+    ["sketch_2", createLiteralAuthoredValue(3)],
+    ["sketch_3", createExpressionAuthoredValue("gap * 2")],
+  ] as const
+).map(
+  ([sketchId, value]) =>
+    ({
+      sketchId,
+      sketch: {
+        definition: {
+          points: [],
+          entities: [],
+          references: [],
+          dimensions: [
+            {
+              dimensionId: `dimension_${sketchId}`,
+              kind: "distance",
+              label: "Distance",
+              axis: "aligned",
+              pointIds: ["point_a", "point_b"],
+              value,
+            },
+          ],
+        },
+      },
+    }) as unknown as SketchSnapshotRecord,
 );
 const variables: DocumentVariableRecord[] = [
   { variableId: "variable_depth", name: "depth", valueText: "9" },
   { variableId: "variable_width", name: "width", valueText: "4" },
+  { variableId: "variable_gap", name: "gap", valueText: "2" },
 ];
 const historyOrder: DocumentHistoryOrderEntry[] = features.flatMap(
   (feature, index) => [
@@ -192,8 +221,30 @@ test("a variable change reuses exactly the features before the first one it reso
     reusedFeatureIds(
       createBase({ variables: withVariable("variable_width", "8") }),
     ),
-    "A variable no feature reads keeps the whole prefix.",
+    "A variable no feature or sketch reads keeps the whole prefix.",
   ).toEqual(["feature_1", "feature_2", "feature_3"]);
+});
+
+test("a variable change reuses exactly the features before the first one fed by a sketch it resolves differently (cadara-afj3)", () => {
+  // The sketch records stay the same objects: only their resolved dimension
+  // values differ, so the variable alone invalidates their consumers.
+  expect(
+    reusedFeatureIds(
+      createBase({
+        variables: variables.map((variable) =>
+          variable.name === "gap" ? { ...variable, valueText: "3" } : variable,
+        ),
+      }),
+    ),
+  ).toEqual(["feature_1", "feature_2"]);
+  expect(
+    reusedFeatureIds(
+      createBase({
+        variables: variables.filter((variable) => variable.name !== "gap"),
+      }),
+    ),
+    "A removed variable leaves the sketch dimension unresolved, which also counts as changed.",
+  ).toEqual(["feature_1", "feature_2"]);
 });
 
 test("a tolerance or earlier history-order change shortens the prefix or rejects it", () => {

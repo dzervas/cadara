@@ -41,6 +41,7 @@ import {
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features";
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   combineOccCleanupError,
@@ -188,6 +189,44 @@ function getChangedSketchIds(
 }
 
 /**
+ * Ids of `sketches` whose dimensions or offset distances resolve differently
+ * under `nextVariables` than under `previousVariables`: a document-variable
+ * edit must re-solve them, and the features they feed rerun (cadara-afj3).
+ */
+export function getSketchIdsResolvingDifferently(
+  sketches: readonly SketchSnapshotRecord[],
+  previousVariables: readonly DocumentVariableRecord[],
+  nextVariables: readonly DocumentVariableRecord[],
+) {
+  const resolvedValues = (
+    sketch: SketchSnapshotRecord,
+    variables: readonly DocumentVariableRecord[],
+  ) => {
+    const resolution = resolveSketchDimensionValues({
+      definition: sketch.sketch.definition,
+      variables,
+    });
+    return JSON.stringify(
+      resolution.ok
+        ? [
+            resolution.definition.dimensions,
+            resolution.definition.derivedRelationships,
+          ]
+        : resolution.diagnostics,
+    );
+  };
+  return new Set(
+    sketches
+      .filter(
+        (sketch) =>
+          resolvedValues(sketch, previousVariables) !==
+          resolvedValues(sketch, nextVariables),
+      )
+      .map((sketch) => sketch.sketchId),
+  );
+}
+
+/**
  * The number of leading `prefix` features that `checkpoint` evaluated from
  * the same record and from the same sketches and resolved variable values
  * that a rebuild from `base` would use.
@@ -197,13 +236,22 @@ function countUnchangedCheckpointFeatures(
   base: OccAuthoringState,
   prefix: readonly OccAuthoringFeatureRecord[],
 ) {
-  const changedSketchIds = getChangedSketchIds(
-    checkpoint.sketches,
-    base.sketches,
-  );
   const variablesChanged =
     checkpoint.variables !== base.variables &&
     JSON.stringify(checkpoint.variables) !== JSON.stringify(base.variables);
+  // Callers that re-solve sketches replace their records, so the identity
+  // check already catches them; resolving under both variable sets keeps the
+  // answer right for a caller that changes variables without re-solving.
+  const changedSketchIds = new Set([
+    ...getChangedSketchIds(checkpoint.sketches, base.sketches),
+    ...(variablesChanged
+      ? getSketchIdsResolvingDifferently(
+          base.sketches,
+          checkpoint.variables,
+          base.variables,
+        )
+      : []),
+  ]);
   for (const [index, feature] of prefix.entries()) {
     const evaluated = checkpoint.features[index];
     const definition = JSON.stringify(feature.definition);

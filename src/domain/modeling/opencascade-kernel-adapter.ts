@@ -80,6 +80,7 @@ import {
   withAutoBodyAppearances,
 } from "@/contracts/modeling/body-appearance";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -126,6 +127,7 @@ import {
   checkpointOccFeatureStage,
   createOccAuthoringState,
   findReusableOccFeatureCheckpoint,
+  getSketchIdsResolvingDifferently,
   renameOccAuthoringStateBody,
   resumeOccAuthoringStateFromCheckpoint,
   type OccAuthoringFeatureRecord,
@@ -3199,15 +3201,36 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ),
     });
 
-    let current = baseState;
     const features = input.features ?? runtimeState.authoringState.features;
     const cursor = input.cursor ?? runtimeState.authoringState.cursor;
+    // Resume after the leading features the runtime evaluated unchanged
+    // (cadara-afj3), as tryBuildNextAuthoringState does. The replay starts
+    // from `baseState` without the runtime's reference history, and so does
+    // the resumed prefix.
+    const appliedFeatures = getAppliedFeatures(
+      features,
+      cursor,
+      baseState.historyOrder,
+    );
+    const reusable = findReusableOccFeatureCheckpoint(
+      runtimeState.authoringState.featureTopologyStages,
+      baseState,
+      appliedFeatures,
+      () => true,
+    );
+    let current = reusable
+      ? resumeOccAuthoringStateFromCheckpoint(
+          baseState,
+          reusable.checkpoint,
+          runtimeState.authoringState.featureTopologyStages,
+          reusable.prefixFeatureIds,
+          baseState.referenceState,
+        )
+      : baseState;
 
     try {
-      for (const feature of getAppliedFeatures(
-        features,
-        cursor,
-        baseState.historyOrder,
+      for (const feature of appliedFeatures.slice(
+        reusable?.prefixFeatureIds.length ?? 0,
       )) {
         const previous = current;
         current = applyOccFeatureToAuthoringState(current, feature);
@@ -6177,20 +6200,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
-    const candidateDocument = {
-      ...createAuthoredModelDocumentFromAuthoringState(
-        runtimeState.authoringState,
+    const nextRuntimeState = {
+      authoringState: await this.buildDocumentVariableEditState(
+        runtimeState,
+        nextRevisionId,
+        candidateVariables,
       ),
-      revisionId: nextRevisionId,
-      variables: candidateVariables,
-    } satisfies AuthoredModelDocument;
-    const nextRuntimeState =
-      await this.restoreAuthoredModelDocumentOnMainThread(
-        candidateDocument,
-        [],
-        runtimeState.authoringState.assetResolver,
-        { replaceRuntimeState: false },
-      );
+      revisionSequence: nextSequence,
+    };
 
     this.replaceRuntimeState(nextRuntimeState);
 
@@ -6218,6 +6235,111 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             }
           : accepted.rebuildResult,
     });
+  }
+
+  /**
+   * The authoring state after `runtimeState`'s document variables become
+   * `variables` (cadara-afj3): sketches whose dimensions resolve differently
+   * are re-solved, and the rebuild resumes after the unchanged feature prefix.
+   * A restore of the edited document also re-places face sketches and
+   * re-projects external references from the geometry before them, so while
+   * such a sketch follows the first history item the edit changes, the edit
+   * restores the edited document instead.
+   */
+  private async buildDocumentVariableEditState(
+    runtimeState: OccKernelRuntimeState,
+    revisionId: RevisionId,
+    variables: AuthoredModelDocument["variables"],
+  ): Promise<OccAuthoringState> {
+    const state = runtimeState.authoringState;
+    const resolvedSketchIds = getSketchIdsResolvingDifferently(
+      state.sketches,
+      state.variables,
+      variables,
+    );
+    const sketchById = new Map(
+      state.sketches.map((sketch) => [sketch.sketchId, sketch]),
+    );
+    const featureById = new Map(
+      state.features.map((feature) => [feature.featureId, feature]),
+    );
+    const resolvesDifferently = (feature: OccAuthoringFeatureRecord) =>
+      JSON.stringify(
+        resolveFeatureDefinitionValues({
+          definition: feature.definition,
+          variables: state.variables,
+        }),
+      ) !==
+      JSON.stringify(
+        resolveFeatureDefinitionValues({
+          definition: feature.definition,
+          variables,
+        }),
+      );
+    const firstChangedIndex = state.historyOrder.findIndex((entry) => {
+      if (entry.kind === "sketch") return resolvedSketchIds.has(entry.sketchId);
+      const feature = featureById.get(entry.featureId);
+      return feature !== undefined && resolvesDifferently(feature);
+    });
+    const restoresGeometryDependentSketch =
+      firstChangedIndex >= 0 &&
+      state.historyOrder.slice(firstChangedIndex).some((entry) => {
+        const sketch =
+          entry.kind === "sketch" ? sketchById.get(entry.sketchId) : undefined;
+        return (
+          sketch !== undefined &&
+          (sketch.plane.support.kind === "face" ||
+            sketch.sketch.definition.references.length > 0)
+        );
+      });
+    if (!restoresGeometryDependentSketch && resolvedSketchIds.size === 0) {
+      return this.tryBuildNextAuthoringState(runtimeState, {
+        revisionId,
+        variables,
+      }).state;
+    }
+
+    const candidateDocument = {
+      ...createAuthoredModelDocumentFromAuthoringState(state),
+      revisionId,
+      variables,
+    } satisfies AuthoredModelDocument;
+    if (restoresGeometryDependentSketch) {
+      return (
+        await this.restoreAuthoredModelDocumentOnMainThread(
+          candidateDocument,
+          [],
+          state.assetResolver,
+          { replaceRuntimeState: false },
+        )
+      ).authoringState;
+    }
+
+    // The re-solved sketches neither sit on a face nor project references, so
+    // the source state only has to carry the edited revision.
+    const sourceState = { ...state, revisionId };
+    const sketches: SketchSnapshotRecord[] = [];
+    for (const sketch of state.sketches) {
+      const authoredSketch = resolvedSketchIds.has(sketch.sketchId)
+        ? candidateDocument.sketches.find(
+            (entry) => entry.sketchId === sketch.sketchId,
+          )
+        : undefined;
+      sketches.push(
+        authoredSketch
+          ? await this.rebuildAuthoredSketchRecord(
+              candidateDocument,
+              authoredSketch,
+              sourceState,
+            )
+          : sketch,
+      );
+    }
+    return this.tryBuildNextAuthoringState(runtimeState, {
+      revisionId,
+      variables,
+      sketches,
+    }).state;
   }
 
   private async evaluatePreviewSerialized(

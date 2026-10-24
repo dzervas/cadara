@@ -9,6 +9,13 @@
 // the edited document: authored export (lineage included), body/topology ids,
 // live references, diagnostics and render geometry.
 //
+// cadara-afj3: document-variable edits and removal take the same path (a
+// variable that only a sketch dimension reads re-solves that sketch and reruns
+// its consumers), and a feature preview reuses the prefix before the previewed
+// feature and leaves the session as it was. A variable edit still restores the
+// document when a face sketch follows the first item it changes, since a
+// restore re-places that sketch on the moved face.
+//
 // Cold opens and rebuilds are not a fixed point on topology tokens (each
 // evaluation re-mints fallback ids `…_t0019_1` -> `…_t0020_1`, see the
 // body-rename heavy spec) and stamp their revision; comparisons normalize
@@ -38,7 +45,12 @@ import type {
   FeatureDefinition,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
-import type { FeatureId } from "@/contracts/shared/ids";
+import type {
+  DocumentVariableId,
+  FeatureId,
+  PreviewId,
+  SketchId,
+} from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -127,6 +139,50 @@ async function open(document: AuthoredModelDocument) {
         "feature updated",
       );
     },
+    async addVariable(name: string, valueText: string) {
+      const response = await adapter.addDocumentVariable({
+        ...(await mutation()),
+        name,
+        valueText,
+      });
+      accepted(response, "variable added");
+      return response.variableId;
+    },
+    async setVariable(
+      variableId: DocumentVariableId,
+      name: string,
+      valueText: string,
+    ) {
+      accepted(
+        await adapter.updateDocumentVariable({
+          ...(await mutation()),
+          variableId,
+          name,
+          valueText,
+        }),
+        "variable updated",
+      );
+    },
+    async removeVariable(variableId: DocumentVariableId) {
+      accepted(
+        await adapter.removeDocumentVariable({
+          ...(await mutation()),
+          variableId,
+        }),
+        "variable removed",
+      );
+    },
+    async preview(
+      definition: FeatureDefinition,
+      replacesFeatureId: FeatureId | null,
+    ) {
+      return adapter.evaluatePreview({
+        ...(await mutation()),
+        previewId: "preview_afj3" as PreviewId,
+        replacesFeatureId,
+        definition,
+      });
+    },
   };
 }
 
@@ -181,6 +237,21 @@ function evaluatedModel(snapshot: WorkspaceSnapshot) {
       .sort(),
   };
 }
+
+/** A preview's diagnostics and a digest of every render record's geometry. */
+const previewModel = (preview: Awaited<ReturnType<Session["preview"]>>) => ({
+  diagnostics: JSON.parse(
+    normalize(JSON.stringify(preview.diagnostics)),
+  ) as unknown,
+  geometry: preview.render.records
+    .map(
+      ({ geometry, ...record }) =>
+        `${normalize(JSON.stringify(record))} ${createHash("sha256")
+          .update(JSON.stringify(geometry))
+          .digest("hex")}`,
+    )
+    .sort(),
+});
 
 const authored = (document: AuthoredModelDocument) =>
   JSON.parse(normalize(JSON.stringify(document))) as AuthoredModelDocument;
@@ -286,7 +357,11 @@ const tailPlane: FeatureDefinition = {
 type TailEdit = (
   session: Session,
   document: AuthoredModelDocument,
-) => Promise<{ expected: AuthoredModelDocument; reruns: number }>;
+) => Promise<{
+  expected: AuthoredModelDocument;
+  reruns: number;
+  featureId: FeatureId;
+}>;
 
 /** Edits a literal parameter of `featureId`; only it and its suffix rerun. */
 const editFeature =
@@ -308,6 +383,7 @@ const editFeature =
     return {
       expected: { ...document, features },
       reruns: applied.length - applied.indexOf(featureId),
+      featureId,
     };
   };
 
@@ -393,7 +469,10 @@ test.each(Object.entries(models))(
 
       const beforeEdit = await session.exported();
       featureRuns.count = 0;
-      const { expected, reruns } = await tailEdit(session, beforeEdit);
+      const { expected, reruns, featureId } = await tailEdit(
+        session,
+        beforeEdit,
+      );
       expect(
         reruns,
         "premise: the edit leaves an unchanged prefix",
@@ -402,9 +481,307 @@ test.each(Object.entries(models))(
         reruns,
       );
       await expectColdEquivalent(session, expected, "edit");
+
+      // Reopening the edited feature previews it in its history position.
+      const definition = expected.features.find(
+        (feature) => feature.featureId === featureId,
+      )!.definition;
+      featureRuns.count = 0;
+      const preview = await session.preview(definition, featureId);
+      expect(
+        featureRuns.count,
+        "a preview runs only the previewed feature after the reused prefix",
+      ).toBe(1);
+      expect(
+        preview.render.records.length,
+        "premise: the preview renders the feature",
+      ).toBeGreaterThan(0);
+      await expectColdEquivalent(session, expected, "preview has no effect");
+      const cold = await open(expected);
+      try {
+        expect(
+          previewModel(preview),
+          "the preview equals one evaluated by a cold open",
+        ).toEqual(previewModel(await cold.preview(definition, featureId)));
+      } finally {
+        cold.adapter.dispose();
+      }
     } finally {
       session.adapter.dispose();
     }
   },
   900_000,
 );
+
+/** The applied features that read `name` (directly or through a sketch). */
+function readersOf(document: AuthoredModelDocument, name: string) {
+  const reads = (value: unknown) =>
+    new RegExp(`\\b${name}\\b`).test(JSON.stringify(value));
+  const sketchIds = document.sketches
+    .filter((sketch) => reads(sketch.definition))
+    .map((sketch) => sketch.sketchId);
+  return appliedFeatureIds(document).filter((featureId) => {
+    const definition = document.features.find(
+      (feature) => feature.featureId === featureId,
+    )!.definition;
+    return (
+      reads(definition) ||
+      sketchIds.some((sketchId) =>
+        JSON.stringify(definition).includes(`"${sketchId}"`),
+      )
+    );
+  });
+}
+
+test("document variable edits and removal on the landing enclosure rerun only the features they change and equal a cold open (cadara-afj3)", async () => {
+  const source = JSON.parse(
+    await readFile(
+      new URL(
+        "../../../landing/examples/enclosure/model.cadara",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ) as AuthoredModelDocument;
+  const session = await open(source);
+  try {
+    let expected = await session.exported();
+    const applied = appliedFeatureIds(expected);
+    const edit = async (name: string, valueText: string) => {
+      const variable = expected.variables.find((entry) => entry.name === name)!;
+      const readers = readersOf(expected, name);
+      expect(readers.length, `premise: features read ${name}`).toBeGreaterThan(
+        0,
+      );
+      featureRuns.count = 0;
+      await session.setVariable(variable.variableId, name, valueText);
+      expected = {
+        ...expected,
+        variables: expected.variables.map((entry) =>
+          entry.variableId === variable.variableId
+            ? { ...entry, valueText }
+            : entry,
+        ),
+      };
+      return applied.length - applied.indexOf(readers[0]!);
+    };
+
+    const featureReruns = await edit("socketFloor", "0.9");
+    expect(featureReruns, "premise: an unchanged prefix").toBeLessThan(
+      applied.length,
+    );
+    expect(
+      featureRuns.count,
+      "a variable that features read reruns from the first of them",
+    ).toBe(featureReruns);
+    await expectColdEquivalent(session, expected, "feature variable edit");
+
+    expect(
+      expected.features.some((feature) =>
+        JSON.stringify(feature.definition).includes("ventWidth"),
+      ),
+      "premise: only a sketch dimension reads ventWidth",
+    ).toBe(false);
+    const sketchReruns = await edit("ventWidth", "3.5");
+    expect(sketchReruns, "premise: an unchanged prefix").toBeLessThan(
+      applied.length,
+    );
+    expect(
+      featureRuns.count,
+      "a variable that a sketch reads re-solves it and reruns from its first consumer",
+    ).toBe(sketchReruns);
+    await expectColdEquivalent(session, expected, "sketch variable edit");
+
+    const variableId = await session.addVariable("unusedProbe", "1");
+    featureRuns.count = 0;
+    await session.removeVariable(variableId);
+    expect(featureRuns.count, "removing an unread variable runs none").toBe(0);
+    await expectColdEquivalent(session, expected, "variable removal");
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+const loadLandingModel = async (model: string) =>
+  JSON.parse(
+    await readFile(
+      new URL(
+        `../../../landing/examples/${model}/model.cadara`,
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ) as AuthoredModelDocument;
+
+test("a document variable edit restores a face sketch that follows the first item it changes, and resumes the prefix when the face sketch precedes it (cadara-afj3)", async () => {
+  const source = await loadLandingModel("enclosure");
+  const baseFeatureId = "feature_extrude-1" as FeatureId;
+  // feature_extrude-1 extrudes the footprint by height - lidThickness - lidGap.
+  const topZ = 32 - 3 - 0.3;
+  const probe = await open(source);
+  let support: Extract<
+    AuthoredModelDocument["sketches"][number]["plane"]["support"],
+    { kind: "face" }
+  >;
+  try {
+    await probe.setCursor({ kind: "feature", featureId: baseFeatureId });
+    const topFaces = (await probe.snapshot()).document.render.records.filter(
+      (record) =>
+        record.binding.target.kind === "face" &&
+        record.geometry.kind === "mesh" &&
+        record.geometry.vertexPositions.every(
+          ([, , z]) => Math.abs(z - topZ) < 1e-6,
+        ),
+    );
+    expect(topFaces.length, "premise: one top face after the base").toBe(1);
+    support = topFaces[0]!.binding.target as typeof support;
+  } finally {
+    probe.adapter.dispose();
+  }
+
+  // An empty sketch on that face right after the base feature; nothing
+  // consumes it, so only its placement depends on upstream geometry.
+  const faceSketchId = "sketch_afj3-top-face" as SketchId;
+  const emptyDefinition = {
+    ...source.sketches[0]!.definition,
+    ...Object.fromEntries(
+      Object.entries(source.sketches[0]!.definition).flatMap(([key, value]) =>
+        Array.isArray(value) ? [[key, []]] : [],
+      ),
+    ),
+  } as AuthoredModelDocument["sketches"][number]["definition"];
+  const baseIndex = source.historyOrder.findIndex(
+    (item) => item.kind === "feature" && item.featureId === baseFeatureId,
+  );
+  const document: AuthoredModelDocument = {
+    ...source,
+    sketches: [
+      ...source.sketches,
+      {
+        sketchId: faceSketchId,
+        label: "Top face",
+        plane: {
+          support,
+          frame: {
+            handedness: "rightHanded",
+            linearUnit: "documentLength",
+            origin: [0, 0, topZ],
+            normal: [0, 0, 1],
+            xAxis: [1, 0, 0],
+            yAxis: [0, 1, 0],
+          },
+          key: null,
+        },
+        definition: emptyDefinition,
+      },
+    ],
+    historyOrder: source.historyOrder.toSpliced(baseIndex + 1, 0, {
+      kind: "sketch",
+      sketchId: faceSketchId,
+    }),
+  };
+
+  const session = await open(document);
+  try {
+    let expected = await session.exported();
+    const applied = appliedFeatureIds(expected);
+    const faceSketchZ = async () =>
+      (await session.snapshot()).document.sketches.find(
+        (sketch) => sketch.sketchId === faceSketchId,
+      )!.plane.frame.origin[2];
+    expect(
+      await faceSketchZ(),
+      "premise: the sketch sits on the top",
+    ).toBeCloseTo(topZ, 6);
+    const edit = async (name: string, valueText: string) => {
+      const variable = expected.variables.find((entry) => entry.name === name)!;
+      featureRuns.count = 0;
+      await session.setVariable(variable.variableId, name, valueText);
+      expected = {
+        ...expected,
+        variables: expected.variables.map((entry) =>
+          entry.variableId === variable.variableId
+            ? { ...entry, valueText }
+            : entry,
+        ),
+      };
+    };
+
+    const firstReader = readersOf(expected, "socketFloor")[0]!;
+    expect(
+      applied.indexOf(firstReader),
+      "premise: socketFloor is first read after the face sketch",
+    ).toBeGreaterThan(applied.indexOf(baseFeatureId));
+    await edit("socketFloor", "0.9");
+    expect(
+      featureRuns.count,
+      "a face sketch before the first changed item keeps the prefix",
+    ).toBe(applied.length - applied.indexOf(firstReader));
+    await expectColdEquivalent(session, expected, "edit after the face sketch");
+
+    expect(
+      readersOf(expected, "lidThickness")[0],
+      "premise: lidThickness feeds the base feature",
+    ).toBe(baseFeatureId);
+    await edit("lidThickness", "4");
+    expect(
+      await faceSketchZ(),
+      "an edit before the face sketch re-places it on the moved face",
+    ).toBeCloseTo(topZ - 1, 6);
+    await expectColdEquivalent(
+      session,
+      expected,
+      "edit before the face sketch",
+    );
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+test("a preview of a feature before the tail that joins an earlier body, after a deletion in the session, resumes the prefix and equals a cold preview (cadara-afj3)", async () => {
+  const source = await loadLandingModel("bracket");
+  const session = await open(source);
+  try {
+    const opened = await session.exported();
+    const applied = appliedFeatureIds(opened);
+    const featureId = "feature_extrude-6" as FeatureId;
+    expect(
+      applied.indexOf(featureId),
+      "premise: the previewed feature is not the tail",
+    ).toBeLessThan(applied.length - 1);
+    const definition = structuredClone(
+      opened.features.find((feature) => feature.featureId === featureId)!
+        .definition,
+    );
+    const parameters = definition.parameters as unknown as {
+      booleanScope: { kind: string };
+      extent: { end: { distance: { value: number } } };
+    };
+    expect(
+      parameters.booleanScope.kind,
+      "premise: it joins an earlier body",
+    ).toBe("targetBody");
+    parameters.extent.end.distance.value = 3.5;
+
+    // The session now carries reference history a cold open does not have.
+    await session.deleteFeature(await session.create(tailPlane));
+    featureRuns.count = 0;
+    const preview = await session.preview(definition, featureId);
+    expect(
+      featureRuns.count,
+      "a preview runs only the previewed feature after the reused prefix",
+    ).toBe(1);
+    await expectColdEquivalent(session, opened, "preview has no effect");
+    const cold = await open(opened);
+    try {
+      expect(
+        previewModel(preview),
+        "the preview equals one evaluated by a cold open",
+      ).toEqual(previewModel(await cold.preview(definition, featureId)));
+    } finally {
+      cold.adapter.dispose();
+    }
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
