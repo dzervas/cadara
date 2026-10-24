@@ -6,6 +6,7 @@ import type {
   AuthoredTopologyLineageTarget,
 } from "@/contracts/modeling/authored-document";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
+import type { OccFeatureStageCheckpoint } from "@/domain/modeling/occ/authoring-state";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
 import { getOccDurableRefKey } from "@/domain/modeling/occ/topology";
 
@@ -24,6 +25,8 @@ export interface OccTopologyStageOutput {
 export interface OccFeatureTopologyStage {
   featureId: FeatureId;
   outputs: ReadonlyMap<OccTopologyOutputSlot, OccTopologyStageOutput>;
+  /** The history state right after this evaluation, on current-build stages only. */
+  checkpoint?: OccFeatureStageCheckpoint;
 }
 
 export type OccFeatureTopologyStageMap = ReadonlyMap<

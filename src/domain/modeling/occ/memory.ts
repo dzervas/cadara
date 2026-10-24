@@ -60,6 +60,7 @@ type OccOwnedTopologyStageMap = ReadonlyMap<
   unknown,
   {
     outputs: ReadonlyMap<unknown, { body: OccOwnedTrackedBody }>;
+    checkpoint?: { bodies: readonly OccOwnedTrackedBody[] };
   }
 >;
 
@@ -152,6 +153,10 @@ function collectOccOwnershipGraphObjects(state: OccOwnershipGraph) {
     for (const stage of stages?.values() ?? []) {
       for (const output of stage.outputs.values()) {
         collectOccBodyObjects(objects, namingDocuments, output.body);
+      }
+      // A later rebuild resumes from these bodies (cadara-di5).
+      for (const body of stage.checkpoint?.bodies ?? []) {
+        collectOccBodyObjects(objects, namingDocuments, body);
       }
     }
   }

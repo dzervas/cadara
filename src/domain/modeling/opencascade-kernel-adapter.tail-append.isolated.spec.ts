@@ -470,11 +470,14 @@ test("cleanup-bearing aggregates bypass restore, rebuild, and preview fallback c
         adapter.restoreAuthoredModelDocument(document),
       run: async (adapter: InstanceType<typeof OpenCascadeKernelAdapter>) => {
         const sourceFeature = document.features[0]!;
+        // A relabel reruns the feature; an identical update would resume
+        // after it from its checkpoint (cadara-di5) and apply nothing.
         return adapter.updateFeature({
           contractVersion: "modeling-contract/v1alpha1",
           documentId: "doc_workspace",
           baseRevisionId: document.revisionId,
           featureId: sourceFeature.featureId,
+          featureLabel: "Relabelled source",
           definition: sourceFeature.definition,
         });
       },
