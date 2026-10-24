@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { expect, test } from "vitest";
 import {
@@ -11,7 +12,7 @@ import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 
 test("offset distance edits preserve expression bindings, stable copies, one-action history and native save/reopen", async () => {
   const w = await createSketchWorkflow();
-  const directory = await mkdtemp("/tmp/opencode/offset-edit-");
+  const directory = await mkdtemp(resolve(tmpdir(), "cadara-offset-edit-"));
   try {
     await w.execute({ operation: "sketch.discard", draft: w.draft() });
     const added = await w.execute({
