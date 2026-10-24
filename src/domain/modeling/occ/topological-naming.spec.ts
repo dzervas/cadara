@@ -2123,6 +2123,68 @@ test("durable naming qualification keeps coincident delete and recreate invalid 
   );
 }, 15000);
 
+// Lane: logic. Seam: authoring-state restore from persisted lineage. A restore
+// keeps a stored output's token and ids only when it reproduces that output
+// exactly; any other difference advances the token (cadara-797).
+test("restore keeps persisted topology ids only for an output it reproduces exactly", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("restore_reproduced_lineage_base");
+  const sketchId = "sketch_occ_restore_reproduced_lineage" as SketchId;
+  const rectangle = createDimensionedRectangleSketch(
+    sketchId,
+    createStandardPlaneDefinition("xy"),
+    10,
+  );
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(rectangle.sketch, rectangle.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const serialize = (state: OccAuthoringState) =>
+    serializeOccFeatureTopologyLineage(
+      state.featureTopologyStages,
+      new Map(),
+      new Set([baseFeatureId]),
+    );
+  const restore = (lineage: ReturnType<typeof serialize>) =>
+    applyFeature(
+      createOccAuthoringState(oc, {
+        sketches: [rectangle.sketch],
+        previousFeatureTopologyLineage:
+          createOccFeatureTopologyLineageMap(lineage),
+      }),
+      baseFeature,
+    );
+  const restoreAndSerialize = (lineage: ReturnType<typeof serialize>) =>
+    serialize(restore(lineage));
+  const authored = applyFeature(
+    createOccAuthoringState(oc, { sketches: [rectangle.sketch] }),
+    baseFeature,
+  );
+  // Stored basis: lineage as a restore writes it, not a fresh evaluation's.
+  const stored = restoreAndSerialize(serialize(authored));
+  const storedOutput = stored[0]!.outputs[0]!;
+
+  expect(
+    restoreAndSerialize(stored),
+    "A restore that reproduces the stored output keeps its token and ids.",
+  ).toEqual(stored);
+
+  const differing = restoreAndSerialize([
+    {
+      ...stored[0]!,
+      outputs: [{ ...storedOutput, outputWitnesses: ["witness:stale"] }],
+    },
+  ])[0]!.outputs[0]!;
+  expect(
+    differing.topologyToken,
+    "An output that differs only outside its ids still advances the token.",
+  ).not.toBe(storedOutput.topologyToken);
+}, 15000);
+
 test("durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping", async () => {
   const oc = await getDefaultOpenCascadeInstance();
   const baseFeatureId = featureId("qualification_sketch_deleted_edge_base");

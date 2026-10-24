@@ -1389,10 +1389,76 @@ function createCurrentToReconciledAliases(
   return { faceIdsByNativeId, edgeIdsByNativeId, vertexIdsByNativeId };
 }
 
+/** The id a semantic reconciliation gives the current subtopology at `index`: its preserved id, else one minted from `topologyToken`. */
+function semanticStageTopologyId(options: {
+  kind: "face" | "edge" | "vertex";
+  bodyId: BodyId;
+  currentKey: string;
+  index: number;
+  topologyToken: string;
+  preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+}) {
+  const preserved = options.preservedTargetsByCurrentKey.get(
+    options.currentKey,
+  );
+  if (preserved && preserved.kind !== options.kind) {
+    throw new Error(
+      `Semantic topology claim changed ${options.kind} ${options.currentKey} into ${preserved.kind}.`,
+    );
+  }
+  return preserved
+    ? idFromSubtopologyRef(preserved)
+    : `${options.kind}_${options.bodyId}_${options.topologyToken}_${options.index + 1}`;
+}
+
+/** The topology ids `applySemanticStageTopologyIds` assigns to `current` when it mints with `topologyToken`. */
+export function planSemanticStageTopologyIds(input: {
+  current: OccTrackedBody;
+  preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+  topologyToken: string;
+}) {
+  const plan = (kind: "face" | "edge" | "vertex", ids: readonly string[]) =>
+    ids.map((currentId, index) =>
+      semanticStageTopologyId({
+        kind,
+        bodyId: input.current.bodyId,
+        currentKey: getOccDurableRefKey(
+          kind === "face"
+            ? {
+                kind,
+                bodyId: input.current.bodyId,
+                faceId: currentId as FaceId,
+              }
+            : kind === "edge"
+              ? {
+                  kind,
+                  bodyId: input.current.bodyId,
+                  edgeId: currentId as EdgeId,
+                }
+              : {
+                  kind,
+                  bodyId: input.current.bodyId,
+                  vertexId: currentId as VertexId,
+                },
+        ),
+        index,
+        topologyToken: input.topologyToken,
+        preservedTargetsByCurrentKey: input.preservedTargetsByCurrentKey,
+      }),
+    );
+  return {
+    faceIds: plan("face", input.current.topology.faceIds) as FaceId[],
+    edgeIds: plan("edge", input.current.topology.edgeIds) as EdgeId[],
+    vertexIds: plan("vertex", input.current.topology.vertexIds) as VertexId[],
+  };
+}
+
 export function applySemanticStageTopologyIds(input: {
   previous: Pick<OccTrackedBody, "bodyId" | "topologyToken">;
   current: OccTrackedBody;
   preservedTargetsByCurrentKey: ReadonlyMap<string, OccSubtopologyRef>;
+  /** Mint with the previous token instead of advancing it; only when the result is proven equal to the previous output. */
+  reusePreviousTopologyToken?: boolean;
 }) {
   if (input.previous.bodyId !== input.current.bodyId) {
     throw new Error(
@@ -1400,7 +1466,9 @@ export function applySemanticStageTopologyIds(input: {
     );
   }
 
-  const topologyToken = advanceTopologyToken(input.previous.topologyToken);
+  const topologyToken = input.reusePreviousTopologyToken
+    ? input.previous.topologyToken
+    : advanceTopologyToken(input.previous.topologyToken);
   const targetByCurrentKey = new Map<string, OccSubtopologyRef>();
 
   const remapKind = <
@@ -1440,20 +1508,14 @@ export function applySemanticStageTopologyIds(input: {
         }
       })();
       const currentKey = getOccDurableRefKey(currentTarget);
-      const preserved = input.preservedTargetsByCurrentKey.get(currentKey);
-      if (preserved && preserved.kind !== options.kind) {
-        throw new Error(
-          `Semantic topology claim changed ${options.kind} ${currentKey} into ${preserved.kind}.`,
-        );
-      }
-
-      const nextId = (preserved
-        ? preserved.kind === "face"
-          ? preserved.faceId
-          : preserved.kind === "edge"
-            ? preserved.edgeId
-            : preserved.vertexId
-        : `${options.kind}_${input.current.bodyId}_${topologyToken}_${index + 1}`) as Id;
+      const nextId = semanticStageTopologyId({
+        kind: options.kind,
+        bodyId: input.current.bodyId,
+        currentKey,
+        index,
+        topologyToken,
+        preservedTargetsByCurrentKey: input.preservedTargetsByCurrentKey,
+      }) as Id;
       const shape = options.shapesById.get(currentId);
       if (!shape) {
         throw new Error(`Missing ${options.kind} shape for ${currentId}.`);

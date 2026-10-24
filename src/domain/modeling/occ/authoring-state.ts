@@ -6,6 +6,7 @@ import {
   type GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
+import type { AuthoredTopologyLineageOutput } from "@/contracts/modeling/authored-document";
 import {
   withAutoBodyAppearances,
   type BodyAppearance,
@@ -53,17 +54,22 @@ import {
   createOccTopologyProvenanceIndex,
   getPreviousFeatureTopologyLineage,
   getPreviousFeatureTopologyStage,
+  isSameTopologyLineageOutput,
+  serializeOccTopologyStageOutput,
   type OccFeatureTopologyLineageMap,
   type OccFeatureTopologyStageMap,
+  type OccTopologyStageOutput,
 } from "@/domain/modeling/occ/topology-stage";
 import {
   classifyPersistedStageTopology,
   classifySemanticStageTopology,
   createUnsupportedPersistedTopologyInvalidations,
   createUnsupportedStageTopologyInvalidations,
+  type OccSemanticStageReconciliation,
 } from "@/domain/modeling/occ/topology-naming";
 import {
   applySemanticStageTopologyIds,
+  planSemanticStageTopologyIds,
   createOccReferenceState,
   getOccDurableRefKey,
   renameOccReferenceStateBody,
@@ -788,6 +794,83 @@ export function createOccAuthoringState(
   };
 }
 
+function reconcileStageOutputIds(input: {
+  previous: Pick<OccTrackedBody, "bodyId" | "topologyToken">;
+  current: OccTopologyStageOutput;
+  preservedTargetsByCurrentKey: OccSemanticStageReconciliation["preservedTargetsByCurrentKey"];
+  reusePreviousTopologyToken?: boolean;
+}) {
+  const reconciled = applySemanticStageTopologyIds({
+    previous: input.previous,
+    current: input.current.body,
+    preservedTargetsByCurrentKey: input.preservedTargetsByCurrentKey,
+    reusePreviousTopologyToken: input.reusePreviousTopologyToken,
+  });
+  const sourceTargets = new Map(
+    [...input.current.sourceTargets].map(([sourceKey, targets]) => [
+      sourceKey,
+      targets.map((target) =>
+        target.kind === "face" ||
+        target.kind === "edge" ||
+        target.kind === "vertex"
+          ? (reconciled.targetByCurrentKey.get(getOccDurableRefKey(target)) ??
+            target)
+          : target,
+      ),
+    ]),
+  );
+  return { reconciled, sourceTargets };
+}
+
+/**
+ * A restore keeps a persisted output's token and topology ids when minting
+ * with that token reproduces the persisted output exactly (ids, source
+ * targets, witnesses), so reopening a document rewrites none of its lineage
+ * (cadara-797). Any difference advances the token as an in-session rebuild does.
+ */
+function reproducePersistedStageOutput(
+  previous: AuthoredTopologyLineageOutput,
+  current: OccTopologyStageOutput,
+  preservedTargetsByCurrentKey: OccSemanticStageReconciliation["preservedTargetsByCurrentKey"],
+) {
+  // Planned ids first: minting with an already used token can collide with a
+  // preserved id when the output changed, which reconciliation rejects.
+  const planned = planSemanticStageTopologyIds({
+    current: current.body,
+    preservedTargetsByCurrentKey,
+    topologyToken: previous.topologyToken,
+  });
+  const sameIds = (left: readonly string[], right: readonly string[]) =>
+    left.length === right.length &&
+    left.every((id, index) => id === right[index]);
+  if (
+    !sameIds(planned.faceIds, previous.topology.faceIds) ||
+    !sameIds(planned.edgeIds, previous.topology.edgeIds) ||
+    !sameIds(planned.vertexIds, previous.topology.vertexIds)
+  ) {
+    return null;
+  }
+  const result = reconcileStageOutputIds({
+    previous: {
+      bodyId: previous.outputSlot,
+      topologyToken: previous.topologyToken,
+    },
+    current,
+    preservedTargetsByCurrentKey,
+    reusePreviousTopologyToken: true,
+  });
+  return isSameTopologyLineageOutput(
+    previous,
+    serializeOccTopologyStageOutput(previous.outputSlot, {
+      ...current,
+      body: result.reconciled.body,
+      sourceTargets: result.sourceTargets,
+    }),
+  )
+    ? result
+    : null;
+}
+
 function reconcileFeatureTopologyStage(
   previousStage: ReturnType<typeof getPreviousFeatureTopologyStage>,
   previousLineage: ReturnType<typeof getPreviousFeatureTopologyLineage>,
@@ -827,27 +910,22 @@ function reconcileFeatureTopologyStage(
           previous: previousLineageOutput!,
           current: currentOutput,
         });
-    const reconciled = applySemanticStageTopologyIds({
-      previous: previousOutput?.body ?? {
-        bodyId: previousLineageOutput!.outputSlot,
-        topologyToken: previousLineageOutput!.topologyToken,
-      },
-      current: currentOutput.body,
-      preservedTargetsByCurrentKey: classification.preservedTargetsByCurrentKey,
-    });
-    const sourceTargets = new Map(
-      [...currentOutput.sourceTargets].map(([sourceKey, targets]) => [
-        sourceKey,
-        targets.map((target) =>
-          target.kind === "face" ||
-          target.kind === "edge" ||
-          target.kind === "vertex"
-            ? (reconciled.targetByCurrentKey.get(getOccDurableRefKey(target)) ??
-              target)
-            : target,
-        ),
-      ]),
-    );
+    const { reconciled, sourceTargets } =
+      (!previousOutput &&
+        reproducePersistedStageOutput(
+          previousLineageOutput!,
+          currentOutput,
+          classification.preservedTargetsByCurrentKey,
+        )) ||
+      reconcileStageOutputIds({
+        previous: previousOutput?.body ?? {
+          bodyId: previousLineageOutput!.outputSlot,
+          topologyToken: previousLineageOutput!.topologyToken,
+        },
+        current: currentOutput,
+        preservedTargetsByCurrentKey:
+          classification.preservedTargetsByCurrentKey,
+      });
 
     for (const target of classification.preservedTargetsByCurrentKey.values()) {
       provedLiveReferenceKeys.add(getOccDurableRefKey(target));

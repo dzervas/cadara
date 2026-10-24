@@ -3,6 +3,7 @@ import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-histo
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
   AuthoredFeatureTopologyLineage,
+  AuthoredTopologyLineageOutput,
   AuthoredTopologyLineageTarget,
 } from "@/contracts/modeling/authored-document";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
@@ -711,29 +712,72 @@ export function serializeOccFeatureTopologyLineage(
     }
     records.set(featureId, {
       featureId,
-      outputs: [...stage.outputs].map(([outputSlot, output]) => ({
-        outputSlot,
-        topologyToken: output.body.topologyToken,
-        topology: {
-          faceIds: [...output.body.topology.faceIds],
-          edgeIds: [...output.body.topology.edgeIds],
-          vertexIds: [...output.body.topology.vertexIds],
-        },
-        ...(output.outputWitnesses
-          ? { outputWitnesses: [...output.outputWitnesses] }
-          : {}),
-        sourceTargets: [...output.sourceTargets].map(([sourceKey, targets]) => ({
-          sourceKey,
-          targets: targets.filter((target) =>
-            isOutputSubtopologyTarget(target, outputSlot),
-          ),
-        })),
-        unsupportedSourceKeys: [...output.unsupportedSourceKeys],
-      })),
+      outputs: [...stage.outputs].map(([outputSlot, output]) =>
+        serializeOccTopologyStageOutput(outputSlot, output),
+      ),
     });
   }
 
   return [...records.values()];
+}
+
+export function serializeOccTopologyStageOutput(
+  outputSlot: OccTopologyOutputSlot,
+  output: OccTopologyStageOutput,
+): AuthoredTopologyLineageOutput {
+  return {
+    outputSlot,
+    topologyToken: output.body.topologyToken,
+    topology: {
+      faceIds: [...output.body.topology.faceIds],
+      edgeIds: [...output.body.topology.edgeIds],
+      vertexIds: [...output.body.topology.vertexIds],
+    },
+    ...(output.outputWitnesses
+      ? { outputWitnesses: [...output.outputWitnesses] }
+      : {}),
+    sourceTargets: [...output.sourceTargets].map(([sourceKey, targets]) => ({
+      sourceKey,
+      targets: targets.filter((target) =>
+        isOutputSubtopologyTarget(target, outputSlot),
+      ),
+    })),
+    unsupportedSourceKeys: [...output.unsupportedSourceKeys],
+  };
+}
+
+/**
+ * Equal as persisted lineage. Collaborative storage keys source targets by
+ * source key (collaborative-document.ts provenance), so a stored document
+ * returns them in key order; every other list keeps its order.
+ */
+export function isSameTopologyLineageOutput(
+  left: AuthoredTopologyLineageOutput,
+  right: AuthoredTopologyLineageOutput,
+) {
+  const canonical = (output: AuthoredTopologyLineageOutput) =>
+    JSON.stringify([
+      output.outputSlot,
+      output.topologyToken,
+      output.topology.faceIds,
+      output.topology.edgeIds,
+      output.topology.vertexIds,
+      output.outputWitnesses ?? null,
+      [...output.sourceTargets]
+        .sort((left, right) =>
+          left.sourceKey < right.sourceKey
+            ? -1
+            : left.sourceKey > right.sourceKey
+              ? 1
+              : 0,
+        )
+        .map(({ sourceKey, targets }) => [
+          sourceKey,
+          targets.map(getOccDurableRefKey),
+        ]),
+      output.unsupportedSourceKeys,
+    ]);
+  return canonical(left) === canonical(right);
 }
 
 type ExactSuccessorSubtopologyRef = Extract<

@@ -10,10 +10,13 @@ import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 // timeline cursor of the public nine-feature bracket to the feature it already
 // is at re-runs every feature and rebuilds keyed topology lineage, whose
 // repository materialization orders keyed records differently from the live
-// export; the saves fail unless certification compares keyed records by key.
+// export; the saves failed unless certification compares keyed records by key.
 // (Until cadara-49h a body rename rebuilt lineage the same way and was this
 // reproduction; a rename now re-runs no feature and stays below as a control.)
-// Keep this row until a smaller genuinely red geometry fixture exists.
+// Re-qualified for cadara-797: on its base and with it, these rows pass with
+// that keyed comparison removed, so they no longer reproduce cadara-3sq.1;
+// authored-document-equality.spec.ts and document-repository.spec.ts carry
+// the keyed-order regression. The rows still guard save/reopen identity.
 const root = resolve(import.meta.dirname, "../..");
 const bracketSource = resolve(root, "landing/examples/bracket/model.cadara");
 const BRACKET_SHA256 =
@@ -27,7 +30,7 @@ async function bracketFixture(directory: string) {
   const bytes = await readFile(bracketSource);
   expect(
     createHash("sha256").update(bytes).digest("hex"),
-    "The public bracket changed; re-qualify this reproduction (it must fail without the keyed-lineage certification fix) before updating the digest.",
+    "The public bracket changed; re-check these save/reopen identity rows against it before updating the digest.",
   ).toBe(BRACKET_SHA256);
   const path = resolve(directory, "bracket.cadara");
   await writeFile(path, bytes);
@@ -198,10 +201,12 @@ it.each([
     expect(
       stable(before).filter((r) => r.includes('"kind":"face"')),
     ).toHaveLength(26);
-    // Reopen is canonical: returning must not publish 52 fresh native hashes
-    // whose lineage depends on revision-sensitive fallback input ids.
-    expect(stable(before)).toHaveLength(174);
-    expect(stable(after)).toHaveLength(174);
+    // Reopen is canonical and the returned session must agree with it. A
+    // restore that reproduces the stored lineage keeps the file's ids
+    // (cadara-797), so all 226 references keep their stable ids; before that,
+    // every restore re-minted 52 of the file's hashed edge/vertex ids (174).
+    expect(stable(before)).toHaveLength(226);
+    expect(stable(after)).toHaveLength(226);
     expect(
       stable(after),
       "stable target identities survive save and reopen",
