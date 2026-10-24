@@ -1,10 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { ActionIcon, Text } from "@mantine/core";
 
 import { shouldStartVariableKeyboardEdit } from "@/components/layout/feature-sidebar.a11y";
@@ -23,7 +17,8 @@ interface WorkbenchVariablesPanelProps {
   snapshot: WorkspaceSnapshot | null;
   invalidVariableValueIds?: Record<string, boolean>;
   invalidVariableValueMessages?: Record<string, string>;
-  onAddVariable: () => void;
+  /** Resolves with the added variable's id, or null when nothing was added. */
+  onAddVariable: () => Promise<DocumentVariableRecord["variableId"] | null>;
   onUpdateVariable: (
     variable: DocumentVariableRecord,
     next: Pick<DocumentVariableRecord, "name" | "valueText">,
@@ -158,7 +153,6 @@ export function WorkbenchVariablesPanel({
   const [variableDrafts, setVariableDrafts] = useState<
     Record<string, Pick<DocumentVariableRecord, "name" | "valueText">>
   >({});
-  const previousVariableIdsRef = useRef<Set<string> | null>(null);
 
   const variables = useMemo(
     () => snapshot?.document.variables ?? [],
@@ -173,25 +167,6 @@ export function WorkbenchVariablesPanel({
       ),
     [variables, invalidVariableValueIds, invalidVariableValueMessages],
   );
-  useEffect(() => {
-    if (!snapshot) {
-      previousVariableIdsRef.current = null;
-      return;
-    }
-
-    const previousVariableIds = previousVariableIdsRef.current;
-    if (previousVariableIds) {
-      const addedVariable = variables.find(
-        (variable) => !previousVariableIds.has(variable.variableId),
-      );
-      if (addedVariable) {
-        setEditingVariableId(addedVariable.variableId);
-      }
-    }
-    previousVariableIdsRef.current = new Set(
-      variables.map((variable) => variable.variableId),
-    );
-  }, [snapshot, variables]);
 
   const getVariableDraft = (variable: DocumentVariableRecord) =>
     variableDrafts[variable.variableId] ?? {
@@ -449,7 +424,13 @@ export function WorkbenchVariablesPanel({
         })}
         <button
           type="button"
-          onClick={onAddVariable}
+          // Only the panel's own Add opens a row for editing: a variable
+          // re-created by Undo or a peer stays read-only (cadara-tn9).
+          onClick={() =>
+            void onAddVariable().then((variableId) => {
+              if (variableId) setEditingVariableId(variableId);
+            })
+          }
           aria-label="Add variable"
           className="mt-1 flex w-full items-center gap-2 px-4 py-2 text-left text-[13px] font-medium leading-5 text-[var(--workbench-shell-text-dim)] transition hover:text-[var(--workbench-shell-text)] focus:outline-none focus:ring-1 focus:ring-[var(--workbench-shell-accent)]"
         >
