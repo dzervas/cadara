@@ -3,7 +3,10 @@ import type {
   AuthoredModelDocument,
   AuthoredTopologyLineageOutput,
 } from "./authored-document";
-import { authoredModelDocumentsEqual } from "./authored-document-equality";
+import {
+  authoredModelDocumentsEqual,
+  classifyAuthoredModelDocumentChange,
+} from "./authored-document-equality";
 import {
   createRebuiltTopologyLineage,
   createSeedAuthoredModelDocument,
@@ -109,4 +112,77 @@ it.each<[string, Variant, Variant?]>([
 ])("distinguishes %s", async (_, change, shared) => {
   const [left, right] = await pair(change, shared);
   expect(authoredModelDocumentsEqual(left, right)).toBe(false);
+});
+
+// cadara-xkg: the metadata-only classifier that lets Undo/Redo of a body
+// rename or recolour skip the full restore.
+const secondBody: Variant = (d) => {
+  d.bodyLabels.push({ bodyId: "body_other", label: "Other" });
+  d.bodyAppearances?.push({
+    bodyId: "body_other",
+    appearance: { kind: "palette", slot: 1 },
+  });
+};
+
+it("classifies body label and colour changes as body metadata", async () => {
+  const [left, right] = await pair((d) => {
+    d.revisionId = "rev_9999";
+    d.bodyLabels[1]!.label = "Renamed";
+    d.bodyAppearances![0]!.appearance = { kind: "custom", hex: "#123abc" };
+  }, secondBody);
+  expect(classifyAuthoredModelDocumentChange(left, right)).toEqual({
+    kind: "bodyMetadata",
+    bodyLabels: [right.bodyLabels[1]],
+    bodyAppearances: [right.bodyAppearances![0]],
+  });
+});
+
+it("classifies a revision-only difference as the same content", async () => {
+  const [left, right] = await pair((d) => void (d.revisionId = "rev_9999"));
+  expect(classifyAuthoredModelDocumentChange(left, right)).toEqual({
+    kind: "sameContent",
+  });
+});
+
+// A repository materializes keyed sketch and feature records in its own order.
+it("ignores the record order of sketches and features", async () => {
+  const [left, right] = await pair(
+    (d) => {
+      d.sketches.reverse();
+      d.features.reverse();
+      d.bodyLabels[0]!.label = "Renamed";
+    },
+    (d) => {
+      d.sketches.push({
+        ...structuredClone(d.sketches[0]!),
+        sketchId: "sketch_other",
+      });
+      d.historyOrder.push({ kind: "sketch", sketchId: "sketch_other" });
+    },
+  );
+  expect(classifyAuthoredModelDocumentChange(left, right)).toMatchObject({
+    kind: "bodyMetadata",
+    bodyLabels: [{ label: "Renamed" }],
+  });
+});
+
+it.each<[string, Variant, Variant?]>([
+  ["a feature label", (d) => void (d.features[0]!.label = "Relabelled")],
+  ["a sketch label", (d) => void (d.sketches[0]!.label = "Relabelled")],
+  ["the document name", (d) => void (d.name = "Renamed document")],
+  [
+    "a body label next to a geometric change",
+    (d) => {
+      d.bodyLabels[0]!.label = "Renamed";
+      d.featureOrder.reverse();
+    },
+  ],
+  ["an added body label", secondBody],
+  ["reordered body labels", (d) => void d.bodyLabels.reverse(), secondBody],
+  ["dropped body colours", (d) => void delete d.bodyAppearances],
+])("classifies %s as an authored change", async (_, change, shared) => {
+  const [left, right] = await pair(change, shared);
+  expect(classifyAuthoredModelDocumentChange(left, right)).toEqual({
+    kind: "authored",
+  });
 });
