@@ -516,7 +516,7 @@ async function editD3ColumnDepth(page: Page) {
   await page.locator("[data-workbench-variables-fab]").click();
   const panel = page.locator("[data-workbench-variables-panel]");
   const editButton = panel.getByRole("button", { name: "Edit variable columnDepth" });
-  const variableId = await editButton.locator("..").getAttribute("data-variable-row");
+  const variableId = await editButton.locator("xpath=ancestor::*[@data-variable-row][1]").getAttribute("data-variable-row");
   expect(variableId).not.toBeNull();
   await editButton.click();
   await page.keyboard.press("F2");

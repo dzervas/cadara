@@ -284,6 +284,19 @@ export async function replayHistoryEntry(input: {
         cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
       };
     }
+    case "removeDocumentVariable": {
+      const response = await input.adapter.removeDocumentVariable({
+        ...entry.payload,
+        contractVersion: CONTRACT_VERSION,
+        documentId: input.documentId,
+        baseRevisionId,
+      });
+
+      return {
+        response,
+        cursor: advanceHistoryReplayCursor(input.cursor, input.entry, response),
+      };
+    }
     default:
       entry satisfies never;
       throw new Error("Unsupported operation history entry.");

@@ -68,6 +68,8 @@ import type {
   SketchSnapshotRecord,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
+  RemoveDocumentVariableRequest,
+  RemoveDocumentVariableResponse,
   UpdateFeatureRequest,
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
@@ -2278,6 +2280,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   updateDocumentVariable(request: UpdateDocumentVariableRequest) {
+    return this.runSerializedOperation(() =>
+      this.updateDocumentVariableSerialized(request),
+    );
+  }
+
+  removeDocumentVariable(request: RemoveDocumentVariableRequest) {
     return this.runSerializedOperation(() =>
       this.updateDocumentVariableSerialized(request),
     );
@@ -5818,13 +5826,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     });
   }
 
+  /** Updates the variable in place, or removes it when the request carries no name/value. */
   private async updateDocumentVariableSerialized(
-    request: UpdateDocumentVariableRequest,
-  ): Promise<UpdateDocumentVariableResponse> {
+    request: UpdateDocumentVariableRequest | RemoveDocumentVariableRequest,
+  ): Promise<UpdateDocumentVariableResponse | RemoveDocumentVariableResponse> {
     assertSupportedModelingRequest(request, this.documentId);
 
     if (this.workerSnapshotClient) {
-      return this.workerSnapshotClient.updateDocumentVariable(request);
+      return "name" in request
+        ? this.workerSnapshotClient.updateDocumentVariable(request)
+        : this.workerSnapshotClient.removeDocumentVariable(request);
     }
 
     const runtimeState = await this.getRuntimeState();
@@ -5868,16 +5879,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       });
     }
 
-    const candidateVariables = runtimeState.authoringState.variables.map(
-      (variable) =>
-        variable.variableId === request.variableId
-          ? {
-              variableId: request.variableId,
-              name: request.name,
-              valueText: request.valueText,
-            }
-          : variable,
-    );
+    const candidateVariables =
+      "name" in request
+        ? runtimeState.authoringState.variables.map((variable) =>
+            variable.variableId === request.variableId
+              ? {
+                  variableId: request.variableId,
+                  name: request.name,
+                  valueText: request.valueText,
+                }
+              : variable,
+          )
+        : runtimeState.authoringState.variables.filter(
+            (variable) => variable.variableId !== request.variableId,
+          );
     const variableValidation =
       evaluateDocumentVariableExpressions(candidateVariables);
 

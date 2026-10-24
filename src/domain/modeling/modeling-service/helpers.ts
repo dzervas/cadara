@@ -31,6 +31,7 @@ import type {
   SetFeatureSuppressionRequest,
   UpdateFeatureRequest,
   UpdateDocumentVariableRequest,
+  RemoveDocumentVariableRequest,
 } from "@/contracts/modeling/schema";
 import { requireDocumentExportRequest } from "@/contracts/modeling/export.runtime-schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
@@ -57,6 +58,7 @@ import type {
   ModelingSetBodyAppearanceInput,
   ModelingAddDocumentVariableInput,
   ModelingUpdateDocumentVariableInput,
+  ModelingRemoveDocumentVariableInput,
   ModelingReorderFeatureInput,
   ModelingReorderDocumentHistoryInput,
   ModelingSetFeatureCursorInput,
@@ -314,6 +316,21 @@ export function normalizeUpdateDocumentVariableInput(
   input: ModelingUpdateDocumentVariableInput,
   documentId: DocumentId,
 ): UpdateDocumentVariableRequest {
+  assertMutationBase(input);
+  const requestInput = stripRepositoryMutationBasis(input);
+
+  return {
+    ...requestInput,
+    variableId: assertDocumentVariableId(input.variableId),
+    contractVersion: CONTRACT_VERSION,
+    documentId,
+  };
+}
+
+export function normalizeRemoveDocumentVariableInput(
+  input: ModelingRemoveDocumentVariableInput,
+  documentId: DocumentId,
+): RemoveDocumentVariableRequest {
   assertMutationBase(input);
   const requestInput = stripRepositoryMutationBasis(input);
 

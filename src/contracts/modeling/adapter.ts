@@ -36,6 +36,8 @@ import type {
   SetFeatureCursorResponse,
   SetFeatureSuppressionRequest,
   SetFeatureSuppressionResponse,
+  RemoveDocumentVariableRequest,
+  RemoveDocumentVariableResponse,
   UpdateDocumentVariableRequest,
   UpdateDocumentVariableResponse,
   UpdateFeatureRequest,
@@ -182,6 +184,10 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   updateDocumentVariable(
     request: UpdateDocumentVariableRequest,
   ): Promise<UpdateDocumentVariableResponse>;
+  /** Removes a durable document variable record when no other variable still references it. */
+  removeDocumentVariable(
+    request: RemoveDocumentVariableRequest,
+  ): Promise<RemoveDocumentVariableResponse>;
   /** Evaluates a transient preview for a typed feature definition. */
   evaluatePreview(
     request: EvaluatePreviewRequest,

@@ -100,6 +100,7 @@ import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,
+  DocumentVariableRecord,
 } from "@/contracts/modeling/schema";
 import { ok } from "@/contracts/errors";
 import {
@@ -154,6 +155,7 @@ import {
 import {
   addWorkbenchVariable,
   deleteWorkbenchTarget,
+  removeWorkbenchVariable,
   renameWorkbenchTarget,
   setWorkbenchBodyAppearance,
   setWorkbenchFeatureSuppression,
@@ -1092,6 +1094,10 @@ export function CadWorkbench({
     addWorkbenchVariable(objectActionContext);
   };
 
+  const handleVariableRemove = (variable: DocumentVariableRecord) => {
+    removeWorkbenchVariable({ ...objectActionContext, variable });
+  };
+
   const handleDocumentHistoryDelete = (item: DocumentHistoryItemRecord) => {
     handleDeleteTarget(item.target, item.label);
   };
@@ -1868,6 +1874,7 @@ export function CadWorkbench({
                   invalidVariableValueMessages={invalidVariableValueMessages}
                   onAddVariable={handleVariableAdd}
                   onUpdateVariable={handleVariableUpdate}
+                  onRemoveVariable={handleVariableRemove}
                   onClose={() => setVariablesPanelOpen(false)}
                 />
               ) : null}

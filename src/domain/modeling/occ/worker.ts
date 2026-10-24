@@ -354,6 +354,10 @@ async function handleWorkerOperation(operation: OccWorkerOperation) {
       return getWorkerAdapter(
         operation.request.documentId,
       ).updateDocumentVariable(operation.request);
+    case "removeDocumentVariable":
+      return getWorkerAdapter(
+        operation.request.documentId,
+      ).removeDocumentVariable(operation.request);
     case "evaluatePreview":
       return getWorkerAdapter(operation.request.documentId).evaluatePreview(
         operation.request,

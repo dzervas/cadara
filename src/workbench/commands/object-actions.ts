@@ -7,6 +7,7 @@ import {
 } from "@/core/editor/schema";
 import type {
   DocumentHistoryItemRecord,
+  DocumentVariableRecord,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
@@ -99,6 +100,40 @@ export function addWorkbenchVariable({
         context: [
           { key: "baseRevisionId", value: snapshot.document.revisionId },
         ],
+      }),
+    mapSuccess: (result) => ok(result),
+    onError: (error) => showWorkbenchError(error.message),
+  });
+}
+
+export function removeWorkbenchVariable({
+  documentOwner,
+  errorReporter,
+  showWorkbenchError,
+  snapshot,
+  variable,
+}: WorkbenchObjectActionContext & {
+  variable: DocumentVariableRecord;
+}) {
+  if (!snapshot) {
+    return;
+  }
+
+  const operation = `Delete ${variable.name || variable.variableId}`;
+  const context = [
+    { key: "baseRevisionId", value: snapshot.document.revisionId },
+    { key: "variableId", value: variable.variableId },
+  ];
+  void runWorkbenchAction({
+    operation,
+    reporter: errorReporter,
+    reporting: { mappedFailure: "expected" },
+    context,
+    action: () =>
+      documentOwner.removeDocumentVariable(variable.variableId, {
+        operation,
+        fallbackMessage: `${operation} failed.`,
+        context,
       }),
     mapSuccess: (result) => ok(result),
     onError: (error) => showWorkbenchError(error.message),

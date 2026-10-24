@@ -10,6 +10,7 @@ import type {
   ReorderFeatureRequest,
   SetFeatureCursorRequest,
   SetFeatureSuppressionRequest,
+  RemoveDocumentVariableRequest,
   UpdateDocumentVariableRequest,
   UpdateFeatureRequest,
 } from "@/contracts/modeling/schema";
@@ -78,6 +79,10 @@ export type PersistedUpdateDocumentVariablePayload = Omit<
   UpdateDocumentVariableRequest,
   "contractVersion" | "documentId" | "baseRevisionId"
 >;
+export type PersistedRemoveDocumentVariablePayload = Omit<
+  RemoveDocumentVariableRequest,
+  "contractVersion" | "documentId" | "baseRevisionId"
+>;
 
 export type ModelingOperationHistoryEntry =
   | { kind: "commitSketch"; payload: PersistedCommitSketchPayload }
@@ -104,6 +109,10 @@ export type ModelingOperationHistoryEntry =
   | {
       kind: "updateDocumentVariable";
       payload: PersistedUpdateDocumentVariablePayload;
+    }
+  | {
+      kind: "removeDocumentVariable";
+      payload: PersistedRemoveDocumentVariablePayload;
     };
 
 export interface ModelingOperationHistoryPayload {
@@ -311,5 +320,14 @@ export function createUpdateDocumentVariableHistoryEntry(
       name: payload.name,
       valueText: payload.valueText,
     },
+  };
+}
+
+export function createRemoveDocumentVariableHistoryEntry(
+  payload: RemoveDocumentVariableRequest,
+): ModelingOperationHistoryEntry {
+  return {
+    kind: "removeDocumentVariable",
+    payload: { variableId: payload.variableId },
   };
 }

@@ -605,6 +605,75 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
     ).toBeTruthy();
   }
 
+  async function testPersistedHistoryReplaysDocumentVariableRemoval() {
+    const { service, store } = await createServiceWithStore();
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const width = await unwrapModelingResult(
+      service.addDocumentVariable({
+        baseRevisionId: snapshot.document.revisionId,
+        variableId: "variable_width",
+        name: "width",
+        valueText: "12",
+      }),
+    );
+    const depth = await unwrapModelingResult(
+      service.addDocumentVariable({
+        baseRevisionId: width.revisionId,
+        variableId: "variable_depth",
+        name: "depth",
+        valueText: "width + 50",
+      }),
+    );
+
+    const referenced = await expectModelingError(
+      service.removeDocumentVariable({
+        baseRevisionId: depth.revisionId,
+        variableId: "variable_width",
+      }),
+    );
+    expect(
+      referenced.message,
+      "A variable another variable still references must not be removed.",
+    ).toContain('references unknown symbol "width"');
+
+    const removed = await unwrapModelingResult(
+      service.removeDocumentVariable({
+        baseRevisionId: depth.revisionId,
+        variableId: "variable_depth",
+      }),
+    );
+    expect(removed.revisionState.kind).toBe("accepted");
+    expect(
+      (await service.getCurrentDocumentSnapshot()).document.variables.map(
+        (variable) => variable.variableId,
+      ),
+    ).toEqual(["variable_width"]);
+
+    const finalHistory = store.savedPayloads.at(-1);
+    expect(
+      finalHistory?.entries.map((entry) => entry.kind),
+      "Only the accepted removal should persist.",
+    ).toEqual([
+      "addDocumentVariable",
+      "addDocumentVariable",
+      "removeDocumentVariable",
+    ]);
+
+    const restoredService = createModelingService(new MockKernelAdapter(), {
+      currentDocumentId: "doc_workspace",
+      operationHistoryStore: createMemoryOperationHistoryStore(finalHistory),
+    });
+    expect((await restoredService.getHistoryRestoreState()).kind).toBe(
+      "restored",
+    );
+    expect(
+      (
+        await restoredService.getCurrentDocumentSnapshot()
+      ).document.variables.map((variable) => variable.variableId),
+      "Replay should apply persisted variable removals.",
+    ).toEqual(["variable_width"]);
+  }
+
   async function testUnsupportedHistoryVersionFailsRestore() {
     const store = createMemoryOperationHistoryStore({
       ...createEmptyOperationHistory("doc_workspace"),
@@ -691,6 +760,7 @@ test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
   await testGenericDeleteReplayMatchesFinalState();
   await testInvalidGenericDeleteReplayFailsRestore();
   await testPersistedHistoryReplaysDocumentVariables();
+  await testPersistedHistoryReplaysDocumentVariableRemoval();
   await testUnsupportedHistoryVersionFailsRestore();
   await testInvalidCursorHistoryFailsRestore();
   await testStartupSnapshotWaitsForReplay();
