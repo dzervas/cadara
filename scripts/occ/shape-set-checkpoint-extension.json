@@ -1,0 +1,17 @@
+{
+  "abi": [
+    "class CadaraNativeShapeSetCheckpoint base=-",
+    "ctor CadaraNativeShapeSetCheckpoint(CadaraNativeShapeSetCheckpoint*) ii",
+    "method CadaraNativeShapeSetCheckpoint.Checkpoint(std::string, const CadaraNativeShapeSetCheckpoint*) iii pure=0",
+    "method CadaraNativeShapeSetCheckpoint.Child(TopoDS_Shape, const CadaraNativeShapeSetCheckpoint*, int) iiii pure=0",
+    "method CadaraNativeShapeSetCheckpoint.ChildCount(int, const CadaraNativeShapeSetCheckpoint*) iii pure=0",
+    "method CadaraNativeShapeSetCheckpoint.ErrorMessage(std::string, const CadaraNativeShapeSetCheckpoint*) iii pure=0",
+    "method CadaraNativeShapeSetCheckpoint.IsDone(bool, const CadaraNativeShapeSetCheckpoint*) iii pure=0",
+    "method CadaraNativeShapeSetCheckpoint.Root(TopoDS_Shape, const CadaraNativeShapeSetCheckpoint*) iii pure=0",
+    "static CadaraNativeShapeSetCheckpoint.FormatVersion(std::string) ii",
+    "static CadaraNativeShapeSetCheckpoint.Read(CadaraNativeShapeSetCheckpoint, std::string) iii",
+    "static CadaraNativeShapeSetCheckpoint.Write(CadaraNativeShapeSetCheckpoint, TopoDS_Shape) iii"
+  ],
+  "declaration": "export declare class CadaraNativeShapeSetCheckpoint {\n  constructor();\n  static FormatVersion(): string;\n  static Write(root: TopoDS_Shape): CadaraNativeShapeSetCheckpoint;\n  static Read(checkpoint: string): CadaraNativeShapeSetCheckpoint;\n  IsDone(): Standard_Boolean;\n  ErrorMessage(): string;\n  Checkpoint(): string;\n  Root(): TopoDS_Shape;\n  ChildCount(): Standard_Integer;\n  Child(index: Standard_Integer): TopoDS_Shape;\n  delete(): void;\n}",
+  "instanceEntry": "CadaraNativeShapeSetCheckpoint: typeof CadaraNativeShapeSetCheckpoint;"
+}

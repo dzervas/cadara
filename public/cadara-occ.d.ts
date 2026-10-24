@@ -4666,6 +4666,20 @@ export declare class CadaraBuildNativeMeshExportPayload {
   delete(): void;
 }
 
+export declare class CadaraNativeShapeSetCheckpoint {
+  constructor();
+  static FormatVersion(): string;
+  static Write(root: TopoDS_Shape): CadaraNativeShapeSetCheckpoint;
+  static Read(checkpoint: string): CadaraNativeShapeSetCheckpoint;
+  IsDone(): Standard_Boolean;
+  ErrorMessage(): string;
+  Checkpoint(): string;
+  Root(): TopoDS_Shape;
+  ChildCount(): Standard_Integer;
+  Child(index: Standard_Integer): TopoDS_Shape;
+  delete(): void;
+}
+
 type Standard_Boolean = boolean;
 type Standard_Byte = number;
 type Standard_Character = number;
@@ -5316,6 +5330,7 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   CadaraExecuteNativeFeatureTransaction: typeof CadaraExecuteNativeFeatureTransaction;
   CadaraBuildNativeExactBrepPayload: typeof CadaraBuildNativeExactBrepPayload;
   CadaraBuildNativeMeshExportPayload: typeof CadaraBuildNativeMeshExportPayload;
+  CadaraNativeShapeSetCheckpoint: typeof CadaraNativeShapeSetCheckpoint;
 };
 
 declare function init(): Promise<OpenCascadeInstance>;
