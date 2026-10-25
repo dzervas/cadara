@@ -1,12 +1,14 @@
 import { Paper, Text } from "@mantine/core";
+import type { Ref } from "react";
 
 import type { MeasurementViewModel } from "@/domain/measure/measurement";
 
 interface MeasurementPanelProps {
   measurement: MeasurementViewModel | null;
+  ref?: Ref<HTMLDivElement>;
 }
 
-export function MeasurementPanel({ measurement }: MeasurementPanelProps) {
+export function MeasurementPanel({ measurement, ref }: MeasurementPanelProps) {
   if (!measurement || (measurement.rows.length === 0 && !measurement.note)) {
     return null;
   }
@@ -15,7 +17,9 @@ export function MeasurementPanel({ measurement }: MeasurementPanelProps) {
     <Paper
       radius="md"
       withBorder
-      className="w-[240px] border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs shadow-[var(--cad-panel-shadow)]"
+      ref={ref}
+      data-measurement-panel=""
+      className="w-[240px] shrink-0 border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] px-3 py-2 text-xs shadow-[var(--cad-panel-shadow)]"
     >
       <Text
         size="11px"
@@ -26,38 +30,41 @@ export function MeasurementPanel({ measurement }: MeasurementPanelProps) {
       >
         Measure
       </Text>
-      <Text size="sm" fw={600} c="var(--cad-foreground)" className="mt-1">
-        {measurement.title}
-      </Text>
-      <Text
-        size="11px"
-        c="var(--workbench-shell-text-muted)"
-        className="mt-0.5"
-      >
-        {measurement.subtitle}
-      </Text>
+      {measurement.targetLabels.map((label, index) => (
+        <Text
+          key={index}
+          size="xs"
+          fw={600}
+          c="var(--cad-foreground)"
+          className={index === 0 ? "mt-1 break-words" : "break-words"}
+        >
+          {label}
+        </Text>
+      ))}
 
-      <div className="mt-3 grid gap-1.5">
-        {measurement.rows.map((row) => (
-          <div
-            key={row.id}
-            className="flex items-baseline justify-between gap-3"
-          >
-            <span className="text-[var(--cad-muted-foreground)]">
-              {row.label}
-            </span>
-            <span className="text-right font-mono text-[12px] text-[var(--cad-foreground)]">
-              {row.value}
-            </span>
-          </div>
-        ))}
-      </div>
+      {measurement.rows.length > 0 ? (
+        <div className="mt-2 grid gap-1 border-t border-[var(--cad-border)] pt-2">
+          {measurement.rows.map((row) => (
+            <div
+              key={row.id}
+              className="flex items-baseline justify-between gap-3"
+            >
+              <span className="text-[var(--cad-muted-foreground)]">
+                {row.label}
+              </span>
+              <span className="text-right font-mono text-[12px] tabular-nums text-[var(--cad-foreground)]">
+                {row.value}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {measurement.note ? (
         <Text
           size="11px"
           c="var(--workbench-shell-text-muted)"
-          className={measurement.rows.length > 0 ? "mt-3" : "mt-2"}
+          className="mt-2"
         >
           {measurement.note}
         </Text>

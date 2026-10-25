@@ -890,6 +890,27 @@ export function CadWorkbench({
       }),
     [activeCommand?.toolId, snapshot, visibleSelection],
   );
+  // The readout sits under the parts tree's column (cadara-h026.4): publish
+  // its height so the tree's max height stops above it; 0px when hidden.
+  const publishMeasurementPanelHeight = useCallback(
+    (panel: HTMLDivElement | null) => {
+      const root = panel?.closest("main");
+      if (!panel || !root) return;
+      const publish = () =>
+        root.style.setProperty(
+          "--workbench-measure-readout-height",
+          `${panel.offsetHeight}px`,
+        );
+      const observer = new ResizeObserver(publish);
+      observer.observe(panel);
+      publish();
+      return () => {
+        observer.disconnect();
+        root.style.setProperty("--workbench-measure-readout-height", "0px");
+      };
+    },
+    [],
+  );
 
   useCadaraDebugPlatform({
     getState: () => debuggerState,
@@ -1902,8 +1923,14 @@ export function CadWorkbench({
               <div className="flex flex-col gap-3">
                 <div className="flex items-end gap-3 px-4">
                   <div className="contents" data-viewport-annotation-chrome="">
+                    {/* The readout leads the row so it stays pinned at the
+                        left inset; after the 360px debugger it drifted to
+                        mid/right on narrow viewports (cadara-h026.4). */}
+                    <MeasurementPanel
+                      ref={publishMeasurementPanelHeight}
+                      measurement={measurementViewModel}
+                    />
                     <WorkbenchStateDebugger state={debuggerState} />
-                    <MeasurementPanel measurement={measurementViewModel} />
                   </div>
                 </div>
                 <div

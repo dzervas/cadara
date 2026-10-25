@@ -76,8 +76,8 @@ export type MeasurementWitness =
   | MeasurementWitnessMarker;
 
 export interface MeasurementViewModel {
-  title: string;
-  subtitle: string;
+  /** The measured targets' readout names, one per target (one or two). */
+  targetLabels: readonly string[];
   rows: readonly MeasurementRow[];
   note: string | null;
   witnesses: readonly MeasurementWitness[];
@@ -247,8 +247,7 @@ export function deriveMeasurementViewModel(input: {
   if (resolvedSelection.length === 1) {
     const target = resolvedSelection[0]!;
     return {
-      title: target.label,
-      subtitle: "Single target",
+      targetLabels: [target.label],
       rows: target.rows,
       note: joinNotes(target.validityNote, target.note),
       witnesses: target.witnesses,
@@ -280,8 +279,7 @@ export function deriveMeasurementViewModel(input: {
   );
 
   return {
-    title: `${first!.label} + ${second!.label}`,
-    subtitle: "Two targets",
+    targetLabels: [first!.label, second!.label],
     rows,
     note,
     witnesses: derivePairwiseWitnesses(first!, second!, pairwise),
@@ -628,7 +626,7 @@ function resolveSketchPointTarget(
   return {
     target,
     key: getPrimitiveRefKey(target),
-    label: point.label,
+    label: getTargetLabel(snapshot, target),
     category: "point",
     distancePrimitive: {
       kind: "point",
@@ -697,7 +695,7 @@ function resolveSketchEntityTarget(
 
     return createCurveTarget({
       target,
-      label: entity.label,
+      label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: [start, end],
       rows: [
@@ -720,7 +718,7 @@ function resolveSketchEntityTarget(
     const polyline = sampleCirclePoints(sketch, center, entity.radius);
     return createCurveTarget({
       target,
-      label: entity.label,
+      label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline,
       exact: exactCircle(sketch, center, entity.radius),
@@ -769,7 +767,7 @@ function resolveSketchEntityTarget(
 
     return createCurveTarget({
       target,
-      label: entity.label,
+      label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline,
       exact: exactArc(
@@ -805,7 +803,7 @@ function resolveSketchEntityTarget(
   const refused = (reason: string): MeasuredTarget => ({
     target,
     key: getPrimitiveRefKey(target),
-    label: entity.label,
+    label: getTargetLabel(snapshot, target),
     category: "curve",
     distancePrimitive: null,
     rows: [],
@@ -856,7 +854,7 @@ function resolveSketchEntityTarget(
     const length = cubicSpansLength(spans);
     return createCurveTarget({
       target,
-      label: entity.label,
+      label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
       exact: { plane: sketch.plane, curve: { kind: "cubics", spans } },
@@ -902,7 +900,7 @@ function resolveSketchEntityTarget(
     const length = cubicSpansLength(spans, domains);
     return createCurveTarget({
       target,
-      label: entity.label,
+      label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
       exact: { plane: sketch.plane, curve: { kind: "cubics", spans, domains } },
@@ -1687,13 +1685,75 @@ function getRenderableForTarget(
   );
 }
 
-function getTargetLabel(snapshot: WorkspaceSnapshot, target: PrimitiveRef) {
-  return (
-    snapshot.presentation.entities.find(
-      (entry) =>
-        getPrimitiveRefKey(entry.target) === getPrimitiveRefKey(target),
-    )?.label ?? getPrimitiveRefLabel(target)
+type MeasurableTarget = Extract<
+  PrimitiveRef,
+  {
+    kind:
+      | "face"
+      | "edge"
+      | "vertex"
+      | "region"
+      | "sketchPoint"
+      | "sketchEntity"
+      | "projectedReferenceGeometry";
+  }
+>;
+
+const PROJECTED_GEOMETRY_NOUNS = {
+  point: "point",
+  lineSegment: "line",
+  circle: "circle",
+  arc: "arc",
+  spline: "spline",
+} as const;
+
+/**
+ * The readout name of a measured target: its geometry kind and its owner's
+ * display label ("Face · Extrude 1", "Circle 2 · Sketch 3"), never a
+ * durable id (cadara-h026.4). Presentation labels are not used: OCC ones
+ * embed the topology id.
+ */
+function getTargetLabel(
+  snapshot: WorkspaceSnapshot,
+  target: MeasurableTarget,
+): string {
+  if (
+    target.kind === "face" ||
+    target.kind === "edge" ||
+    target.kind === "vertex"
+  ) {
+    const kind = { face: "Face", edge: "Edge", vertex: "Vertex" }[target.kind];
+    const body = snapshot.document.bodies.find(
+      (entry) => entry.bodyId === target.bodyId,
+    );
+    return `${kind} · ${body?.label || "Body"}`;
+  }
+
+  if (target.kind === "projectedReferenceGeometry") {
+    const sketch = snapshot.document.sketches.find((entry) =>
+      entry.sketch.projectedReferences?.some(
+        (reference) => reference.referenceId === target.referenceId,
+      ),
+    );
+    return `Projected ${PROJECTED_GEOMETRY_NOUNS[target.geometryKind]} · ${sketch?.label || "Sketch"}`;
+  }
+
+  const sketch = snapshot.document.sketches.find(
+    (entry) => entry.sketchId === target.sketchId,
   );
+  const ownName =
+    target.kind === "region"
+      ? sketch?.sketch.regions.find(
+          (entry) => entry.regionId === target.regionId,
+        )?.label || "Region"
+      : target.kind === "sketchPoint"
+        ? sketch?.sketch.definition.points.find(
+            (entry) => entry.pointId === target.pointId,
+          )?.label || "Point"
+        : sketch?.sketch.definition.entities.find(
+            (entry) => entry.entityId === target.entityId,
+          )?.label || "Sketch curve";
+  return `${ownName} · ${sketch?.label || "Sketch"}`;
 }
 
 function getSketchDefinitionPoint(

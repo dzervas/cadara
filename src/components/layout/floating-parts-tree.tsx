@@ -158,8 +158,10 @@ export function FloatingPartsTree({
       style={{
         left: VIEWPORT_OVERLAY_INSET_PX,
         top: VIEWPORT_OVERLAY_TOP_INSET_STYLE,
-        // Clear the bottom history, document tabs, and collapsed debugger.
-        maxHeight: `calc(100% - ${VIEWPORT_OVERLAY_TOP_INSET_STYLE} - 208px)`,
+        // Clear the bottom history, document tabs and collapsed debugger,
+        // plus the measure readout's full height (cadara-h026.4): it shares
+        // the debugger's row, so this over-reserves by about one chip.
+        maxHeight: `calc(100% - ${VIEWPORT_OVERLAY_TOP_INSET_STYLE} - 208px - var(--workbench-measure-readout-height, 0px))`,
         width: FLOATING_PARTS_TREE_WIDTH_PX,
         zIndex: 15,
         color: "var(--workbench-shell-text)",
