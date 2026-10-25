@@ -71,9 +71,9 @@ import {
   sparkLogoClassName,
   toolbarActionIconClassName,
 } from "@/theme/workbench-toolbar-styles";
+import { DISCORD_URL } from "@/components/layout/community-links";
 
 const REPOSITORY_URL = "https://github.com/dzervas/cadara";
-const DISCORD_URL = "https://discord.gg/T2dBRp4SAQ";
 const TOOLBAR_GAP_PX = 8;
 const TOOLBAR_PILL_GAP_PX = 2;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;

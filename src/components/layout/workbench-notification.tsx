@@ -23,8 +23,13 @@ import {
 interface WorkbenchNotificationProps extends WorkbenchNotificationModel {
   className?: string;
   dismissLabel?: string;
+  /** External page opened in a new tab, rendered beside the action. */
+  link?: { label: string; href: string };
   style?: CSSProperties;
 }
+
+const notificationActionClassName =
+  "pointer-events-auto border-[var(--cad-border-strong)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]";
 
 const notificationIcons: Record<WorkbenchNotificationType, WorkbenchIconName> =
   {
@@ -37,6 +42,7 @@ export function WorkbenchNotification({
   action,
   className,
   dismissLabel = "Dismiss notification",
+  link,
   message,
   onDismiss,
   placement,
@@ -120,16 +126,33 @@ export function WorkbenchNotification({
           >
             {message}
           </Text>
-          {action ? (
-            <Button
-              variant="default"
-              size="xs"
-              className="pointer-events-auto mt-1 self-start border-[var(--cad-border-strong)] bg-[var(--cad-surface)] text-[var(--cad-foreground)]"
-              disabled={action.disabled}
-              onClick={action.onClick}
-            >
-              {action.label}
-            </Button>
+          {action || link ? (
+            <Group gap="xs" className="mt-1">
+              {action ? (
+                <Button
+                  variant="default"
+                  size="xs"
+                  className={notificationActionClassName}
+                  disabled={action.disabled}
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </Button>
+              ) : null}
+              {link ? (
+                <Button
+                  component="a"
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="default"
+                  size="xs"
+                  className={notificationActionClassName}
+                >
+                  {link.label}
+                </Button>
+              ) : null}
+            </Group>
           ) : null}
         </Stack>
         {onDismiss ? (

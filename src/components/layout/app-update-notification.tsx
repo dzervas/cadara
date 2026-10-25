@@ -1,8 +1,14 @@
+import { DISCORD_URL } from "@/components/layout/community-links";
 import { WorkbenchNotification } from "@/components/layout/workbench-notification";
 import { useAppUpdate, type AppUpdatePhase } from "@/hooks/use-app-update";
 
 export const APP_UPDATE_NOTIFICATION_TITLE =
   "A new version of CADara is available";
+
+// The changelog is posted to Discord #announcements (changelog-post skill);
+// the public invite is used because channel deep links only work for members.
+export const APP_UPDATE_WHATS_NEW_LABEL =
+  "What's new · #announcements on Discord";
 
 const reloadLabels: Record<AppUpdatePhase, string> = {
   idle: "Reload",
@@ -49,6 +55,7 @@ export function AppUpdateNotificationView({
         disabled: phase !== "idle",
         onClick: onReload,
       }}
+      link={{ label: APP_UPDATE_WHATS_NEW_LABEL, href: DISCORD_URL }}
       placement={{ kind: "app-top-center" }}
       className="z-50"
     />
