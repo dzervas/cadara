@@ -102,6 +102,7 @@ import {
   seedArcCapacityRows,
   uSlotPolygon,
   withLineLength,
+  withoutFilletRelationships,
   type AcceptedPair,
   type Authored,
   type EndpointSnaps,
@@ -7786,10 +7787,12 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
     },
     // T08b-g7-F: the row's tangency is now the Fillet's own, so the 1e-4
     // centre drag is solved back (was 1_012_471 / 265_257 / 482).
+    // cadara-p4r5.2: the first-order tangency loss moves the solved seeds by
+    // ≤ 5.0e-5 (was 1_326_776 / 355_775 / 505).
     "rounded rect rotated 0.3, fillet centre dragged 1e-4 -0.01": {
-      operations: 1_326_776,
-      euclideanSteps: 355_775,
-      integerBits: 505,
+      operations: 1_168_501,
+      euclideanSteps: 312_270,
+      integerBits: 487,
     },
     "rect + 1 fillet 0.01": {
       operations: 93_682,
@@ -9087,11 +9090,16 @@ describe("T08b-g7a: kinked line↔arc corners (P2 re-query rung, P3 two-leaf see
         (_, k): Vector => polarPoint([0, 0], 1, 60 * k + 5.7),
       ),
     );
-    const definition = harness.fillet(
-      hexagon.definition,
-      hexagon.ids[0]!,
-      hexagon.ids[1]!,
-      1e-3,
+    // cadara-p4r5.2: the kink is authored (the Fillet's tangents removed):
+    // it was the second-order |d| − r residual's (≈ 2.1° under the BFGS stop),
+    // which the first-order tangency row now solves away.
+    const definition = withoutFilletRelationships(
+      harness.fillet(
+        hexagon.definition,
+        hexagon.ids[0]!,
+        hexagon.ids[1]!,
+        1e-3,
+      ),
     );
     const seeds = harness.lineArcSeeds(definition);
     const line = seeds.find(

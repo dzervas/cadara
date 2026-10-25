@@ -859,27 +859,41 @@ test("T18 drag frames: target, translate, radius, tangent-vector, exact-zero, an
   );
 });
 
-test("T18 fillet tangent A: the first-order tangency row is the data form of its second-order |d| \u2212 r", () => {
+test("T18 fillet tangents (cadara-p4r5.2): the start contact's loss component 0 is its first-order oriented row; the end contact keeps |d| \u2212 r", () => {
   const row = dragConditioningFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
   const { program, values } = startConditioningReplay(row);
-  const oriented = program.system.orientedTangencies.find((record) =>
-    record.requirementId.startsWith("constraint_17_fillet-tangent-a_"),
-  )!;
-  expect(oriented).toBeDefined();
-  const tangency = program.system.scalarConstraints.find(
-    (record) => record.id === oriented.requirementId,
-  )!;
-  const norm = (vector: Float64Array) => Math.hypot(...vector);
-  const second = tangency.evaluateComponentJacobian(values);
-  const first = oriented.evaluate(values);
-  // Accepted state: |d| \u2212 r \u2248 \u22123.8e-11 but (s \u2212 c)\u00b7u \u2248 1.1e-5 (= \u221a(2r\u00b7|d \u2212 r|)),
-  // and only the first-order row keeps rank there.
-  expect(Math.abs(second.components[0]!)).toBeLessThan(1e-9);
-  expect(Math.abs(first.components[0]!)).toBeGreaterThan(1e-6);
-  expect(norm(second.rows[0]!)).toBeLessThan(1e-3);
-  expect(norm(first.rows[0]!)).toBeGreaterThan(0.5);
+  const pair = (prefix: string) => {
+    const oriented = program.system.orientedTangencies.find((record) =>
+      record.requirementId.startsWith(prefix),
+    )!;
+    const tangency = program.system.scalarConstraints.find(
+      (record) => record.id === oriented.requirementId,
+    )!;
+    const arc = program.definition.entities.find(
+      (entity) => entity.entityId === oriented.arcEntityId,
+    );
+    return {
+      atStart:
+        arc?.kind === "arc" && arc.startPointId === oriented.contactPointId,
+      oriented: oriented.evaluate(values),
+      loss: tangency.evaluateComponentJacobian(values),
+      components: tangency.evaluateComponents(values),
+    };
+  };
+  const a = pair("constraint_17_fillet-tangent-a_");
+  const b = pair("constraint_17_fillet-tangent-b_");
+  expect([a.atStart, b.atStart]).toEqual([true, false]);
+  // Tangent A: the loss reads (s \u2212 c)\u00b7u (rank 1, \u2016\u2207\u2016 \u2248 1.5), not the
+  // second-order |d| \u2212 r (\u2016\u2207\u2016 \u2248 1e-5 at satisfaction).
+  expect(Object.is(a.components[0], a.oriented.components[0])).toBe(true);
+  expect(Object.is(a.loss.components[0], a.oriented.components[0])).toBe(true);
+  expect([...a.loss.rows[0]!]).toEqual([...a.oriented.rows[0]!]);
+  expect(Math.hypot(...a.loss.rows[0]!)).toBeGreaterThan(0.5);
+  // Tangent B keeps |d| \u2212 r: its oriented row reads ~2e-3 at this state.
+  expect(Math.abs(b.oriented.components[0]!)).toBeGreaterThan(1e-4);
+  expect(Math.abs(b.components[0]!)).toBeLessThan(1e-5);
 });
 
 /**

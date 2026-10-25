@@ -5908,16 +5908,32 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
    * fillet ends keep a ≈ 0.2° kink; at |d| = 0.5 that is δ ≈ 2e-3 ≥ τ and
    * the outward corner needs an arc that rule Z cannot place. Routed to T12
    * (a linear G1 residual).
+   * cadara-p4r5.2: the start contacts' tangency is first order now, so their
+   * kinks vanish (≤ 2e-4°), but the residual redistributes to the end
+   * contacts, still second order jointly with the common-radius row. The
+   * −0.5 0.2 cells now end topology-changed (were spline-joint-unsupported),
+   * and rounded rect −0.5 0.05 moved certified → uncertain (fillet 171's
+   * end kink 0.049° → 0.185°, its seeds moved ≤ 1.5e-3). [H] attributed to
+   * that end kink; max kink alone does not decide verdicts here (the slot
+   * cells certify with larger kinks), and the verdict is not shown to be the
+   * only truthful one.
    */
   const FAILURES = new Map<string, string>(
     ["rounded rect", "rounded rect rotated 0.3"].flatMap((row) =>
-      (["unhinted", "hinted"] as const).map(
-        (label) =>
-          [
-            `${row} -0.5 0.2 ${label}`,
-            "derived-offset-spline-joint-unsupported",
-          ] as const,
-      ),
+      (["unhinted", "hinted"] as const).flatMap((label) => [
+        [
+          `${row} -0.5 0.2 ${label}`,
+          "derived-offset-topology-changed",
+        ] as const,
+        ...(row === "rounded rect"
+          ? ([
+              [
+                `${row} -0.5 0.05 ${label}`,
+                "derived-offset-topology-uncertain",
+              ],
+            ] as const)
+          : []),
+      ]),
     ),
   );
 
@@ -6022,24 +6038,15 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
   );
 
   /**
-   * Recorded slot cells that do not certify, by final code: the same R15
-   * limit (a ≈ 0.27° residual kink times |d| = 0.25 is δ ≥ τ).
+   * Recorded slot cells that do not certify, by final code. cadara-p4r5.2:
+   * none; the R15 limit cells (slot 0.25 0.05 / 0.2, slot rotated 0.3 0.25
+   * 0.05: a ≈ 0.27° residual kink times |d| = 0.25 is δ ≥ τ) certify since
+   * the start contacts' tangency is first order (seeds moved ≤ 6.0e-3).
    */
-  const SLOT_FAILURES = new Map<string, string>(
-    ["slot 0.25 0.05", "slot 0.25 0.2", "slot rotated 0.3 0.25 0.05"].flatMap(
-      (cell) =>
-        (["unhinted", "hinted"] as const).map(
-          (label) =>
-            [
-              `${cell} ${label}`,
-              "derived-offset-spline-joint-unsupported",
-            ] as const,
-        ),
-    ),
-  );
+  const SLOT_FAILURES = new Map<string, string>();
 
   test.each(["slot", "slot rotated 0.3"])(
-    "%s (native Slot relationships): an edit of a side line keeps every cell solved and certified, unhinted and hinted, except the recorded |d| = 0.25 limit cells",
+    "%s (native Slot relationships): an edit of a side line keeps every cell solved and certified, unhinted and hinted (the recorded |d| = 0.25 limit cells certify since cadara-p4r5.2)",
     (row) => {
       const spec = seedArcRows().find((item) => item.row === row)!;
       const sketch = spec.build(offsetArcHarness);

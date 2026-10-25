@@ -36,12 +36,16 @@ export const dragConditioningFixture = captured as unknown as {
   cases: CapturedDragCase[];
 };
 
-export function startConditioningReplay(row: CapturedDragCase) {
+export function startConditioningReplay(
+  row: CapturedDragCase,
+  compileOverrides: Pick<CompileInput, "dragStep"> = {},
+) {
   const started = startCompiledSketchSolveSession({
     sessionId: "interactive_sketch_solve_conditioning_replay",
     program: compileSketchSolveProgram({
       ...dragConditioningFixture.compile,
       ...row.compileOptions,
+      ...compileOverrides,
     }),
     priorSolvedSnapshot: dragConditioningFixture.priorSolvedSnapshot,
   });
@@ -56,13 +60,15 @@ export function startConditioningReplay(row: CapturedDragCase) {
 
 // Uninterrupted GN10 preview, then the real zero-delta/unchanged-goal release
 // protocol. Recorded before the continuation port (not recomputed by the test).
+// cadara-p4r5.2: re-recorded for the first-order tangency loss (Fillet 17
+// tangent A, the arc start contact): the accepted frames move by ≤ 2.6e-3.
 export const uninterruptedFarDragDigests = {
   "drag-large": {
-    preview: "dffe51dd7afa6434507bda5145ce75a10109a93f3cb8ae8e44bde8e99a524c51",
-    release: "86abce3941277cf6aa0356e0be173d920d5ce02630542d378cb024a981eeea58",
+    preview: "14ff12bc9d6f2283ea9fba2c74912b38e480a79e18dd55d400bd7f93a9626650",
+    release: "c72622b837af488cf4990136f2eb66da77ddbbe974e730972dbdec7a3e1c7703",
   },
   "drag-corner": {
-    preview: "aac4200b99063feac2ad43038235dd046bca06a596920b64208af869625b0d09",
-    release: "aac4200b99063feac2ad43038235dd046bca06a596920b64208af869625b0d09",
+    preview: "fd9dbc7fab96aa82027ce99f12e6e4f2ca1e7f2fb9d07fda9f8ade6264bad2c0",
+    release: "fd9dbc7fab96aa82027ce99f12e6e4f2ca1e7f2fb9d07fda9f8ade6264bad2c0",
   },
 };

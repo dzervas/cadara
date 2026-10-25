@@ -49,6 +49,7 @@ import {
   type Dual2,
   type DualColumns,
 } from "@/contracts/sketch/solver-core-jacobian";
+import { solveConstrainedMinimumMotionSteps } from "@/contracts/sketch/solver-core-constrained-step";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { isOffsetPublicationSolveAccepted } from "@/contracts/sketch/offset-publication";
 import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
@@ -95,6 +96,30 @@ export type SketchSolveStrategy =
   | "gradientDescent"
   | "gaussNewton"
   | "levenbergMarquardt";
+
+/**
+ * cadara-p4r5.2: how a drag frame stage moves the geometry (default
+ * "penalty"):
+ * - "penalty": phases A and B (hard rows, soft goal and minimum-motion anchor
+ *   in one BFGS objective, then a hard-row projection when A is refused);
+ * - "constrained": the equality-constrained minimum-motion step
+ *   (`solveConstrainedMinimumMotionSteps`: the goal and the anchor minimised
+ *   subject to the hard rows), with phases A and B only for a frame where
+ *   that step is unavailable. Experimental; measured on the k5d study
+ *   harness.
+ * Test-only override: `CADARA_SKETCH_DRAG_CONSTRAINED_STEP=1` in the process
+ * environment (read once at module load) makes "constrained" the default of
+ * every compiled program; the study harness has no other way to set it.
+ * Any Node/Bun process honours it (the CLI too; browsers have no
+ * `process`); remove it when the flag is promoted or dropped.
+ */
+export type SketchDragStep = "penalty" | "constrained";
+
+const DEFAULT_SKETCH_DRAG_STEP: SketchDragStep =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.CADARA_SKETCH_DRAG_CONSTRAINED_STEP === "1"
+    ? "constrained"
+    : "penalty";
 
 export interface SketchDraggedPointTarget {
   kind: "sketchPoint";
@@ -210,7 +235,8 @@ type ScalarConstraintRecord = {
   /**
    * cadara-p4r5.1: `evaluateComponents` with its analytic first-order
    * Jacobian (a piecewise component differentiates the branch active at
-   * `values`). No solve reads it yet: `evaluate` keeps the loss path.
+   * `values`). `evaluate` keeps the loss path; only the constrained drag
+   * step (`SketchDragStep`, cadara-p4r5.2) reads it.
    */
   evaluateComponentJacobian(values: Float64Array): ComponentJacobian;
   /**
@@ -320,7 +346,10 @@ type BuildSystemResult = {
   shellSourceVariables: ReadonlyMap<SketchEntityId, readonly number[]>;
   /** cadara-p4r5.1: explicit inequalities g(x) ≥ 0, data only (no solve enforces them). */
   inequalities: readonly SolverInequalityRecord[];
-  /** cadara-p4r5.1: first-order line↔arc tangency rows, data only (no solve reads them). */
+  /**
+   * cadara-p4r5.1: first-order line↔arc tangency rows. cadara-p4r5.2: a
+   * start-contact row is also component 0 of its requirement's loss.
+   */
   orientedTangencies: readonly SolverOrientedTangencyRecord[];
 };
 
@@ -341,8 +370,7 @@ type BuildSystemResult = {
  * `ComponentJacobian`).
  */
 /**
- * cadara-p4r5.1: the first-order form of a line↔arc tangency, data only (no
- * solve reads it; cadara-p4r5.2 swaps it in). For a tangent between a line
+ * cadara-p4r5.1: the first-order form of a line↔arc tangency. For a tangent between a line
  * and a point-defined arc (an offset seed) whose contact is an arc endpoint
  * s at a line endpoint (the same point id, or joined by coincident
  * constraints), the component is (s − c)·u, with c the arc centre and u the
@@ -353,6 +381,9 @@ type BuildSystemResult = {
  * is second order (so is σ·d − r, since σ·d ≤ |d| ≤ r) and only this row
  * keeps rank. At the arc end it holds through the internal common-radius
  * row, and |d| − r is already first order.
+ * cadara-p4r5.2: so a start-contact record's component is also component 0
+ * of its requirement's loss (bitwise); an end-contact record stays data
+ * only (on T18 swapping it would move the accepted state by about 2e-3).
  */
 type SolverOrientedTangencyRecord = {
   id: string;
@@ -415,6 +446,11 @@ export interface SketchCompiledSolveProgram {
   offsetPlans: readonly SolvedOffsetFramePlanRecord[] | undefined;
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy: SketchSolveStrategy;
+  /**
+   * cadara-p4r5.2: set (to "constrained") only when the drag step is not the
+   * default "penalty" (`SketchDragStep`).
+   */
+  dragStep?: "constrained";
   diagnostics: readonly SketchSolveDiagnostic[];
   validation: SketchCoreValidationResult;
   /**
@@ -5764,7 +5800,7 @@ function buildSystem(
               dual.mul(signedDistance, dual.neg(unit[0])),
             ),
           ];
-          return { circleLike, signedDistance, contactPoint };
+          return { circleLike, signedDistance, contactPoint, unit };
         };
         if (curve.kind === "arc")
           addArcSweepInequalities(
@@ -5782,6 +5818,14 @@ function buildSystem(
                 : null;
             },
           );
+        // cadara-p4r5.2: where the oriented row's contact is the arc start (it
+        // defines the point-defined arc's radius, so |d| − r is second order
+        // there), the oriented component (s − c)·u is component 0 of this
+        // row's loss. An end contact keeps |d| − r (already first order).
+        let radiusContact: {
+          contact: SolverPointRecord;
+          center: SolverPointRecord;
+        } | null = null;
         if (curve.kind === "arc" && offsetSeedArcIds.has(curve.entityId)) {
           const contactPointId = [curve.startPointId, curve.endPointId].find(
             (pointId) =>
@@ -5790,6 +5834,8 @@ function buildSystem(
           );
           const contact = contactPointId && pointRecords.get(contactPointId);
           const center = pointRecords.get(curve.centerPointId);
+          if (contactPointId === curve.startPointId && contact && center)
+            radiusContact = { contact, center };
           if (contactPointId && contact && center)
             orientedTangencyRows.push({
               record: {
@@ -5834,9 +5880,18 @@ function buildSystem(
               (columns) => {
                 const tangency = lineCurveTangencyDual(columns);
                 if (!tangency) return [columns.constant(0)];
-                const { circleLike, signedDistance, contactPoint } = tangency;
+                const { circleLike, signedDistance, contactPoint, unit } =
+                  tangency;
                 return [
-                  dual.sub(dual.abs(signedDistance), circleLike.radius),
+                  radiusContact
+                    ? dual2.dot(
+                        dual2.sub(
+                          pointDual(columns, radiusContact.contact),
+                          pointDual(columns, radiusContact.center),
+                        ),
+                        unit,
+                      )
+                    : dual.sub(dual.abs(signedDistance), circleLike.radius),
                   circleLike.arc
                     ? arcSweepViolationDual(contactPoint, circleLike.arc)
                     : columns.constant(0),
@@ -5867,8 +5922,15 @@ function buildSystem(
                 circleLike.center[0] - signedDistance * lineNormal[0],
                 circleLike.center[1] - signedDistance * lineNormal[1],
               ];
-              const tangentResidual =
-                Math.abs(signedDistance) - circleLike.radius;
+              const tangentResidual = radiusContact
+                ? dot2(
+                    subtract(
+                      getPoint(values, radiusContact.contact),
+                      getPoint(values, radiusContact.center),
+                    ),
+                    unit,
+                  )
+                : Math.abs(signedDistance) - circleLike.radius;
               const arcViolation = circleLike.arc
                 ? localArcSweepViolation(contactPoint, circleLike.arc)
                 : 0;
@@ -5897,8 +5959,15 @@ function buildSystem(
                 circleLike.center[0] - signedDistance * lineNormal[0],
                 circleLike.center[1] - signedDistance * lineNormal[1],
               ];
-              const tangentResidual =
-                Math.abs(signedDistance) - circleLike.radius;
+              const tangentResidual = radiusContact
+                ? dot2(
+                    subtract(
+                      getPoint(values, radiusContact.contact),
+                      getPoint(values, radiusContact.center),
+                    ),
+                    unit,
+                  )
+                : Math.abs(signedDistance) - circleLike.radius;
               const arcViolation = circleLike.arc
                 ? localArcSweepViolation(contactPoint, circleLike.arc)
                 : 0;
@@ -9766,6 +9835,18 @@ export interface SketchSolverWorkTrace {
   lineSearchTrials: number;
   constrainednessClassifications: number;
   componentResidualEvaluations: number;
+  /** cadara-p4r5.2: drag stages that ran the constrained step (`SketchDragStep`). */
+  constrainedStepStages: number;
+  constrainedStepIterations: number;
+  constrainedStepNewtonIterations: number;
+  /** Stages whose step was unavailable (a row's Jacobian unavailable or non-finite). */
+  constrainedStepJacobianUnavailable: number;
+  /** Stages whose start could not be corrected onto the hard rows. */
+  constrainedStepStartNotCorrectable: number;
+  /** Stages stopped by a row unavailable after an accepted move (stop `rowUnavailable`). */
+  constrainedStepRowUnavailableStops: number;
+  /** Hard-row hinge components replaced by their restating inequalities, summed over stages. */
+  constrainedStepRestatedComponents: number;
 }
 
 let solverWorkTrace: SketchSolverWorkTrace | null = null;
@@ -9794,6 +9875,13 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     lineSearchTrials: 0,
     constrainednessClassifications: 0,
     componentResidualEvaluations: 0,
+    constrainedStepStages: 0,
+    constrainedStepIterations: 0,
+    constrainedStepNewtonIterations: 0,
+    constrainedStepJacobianUnavailable: 0,
+    constrainedStepStartNotCorrectable: 0,
+    constrainedStepRowUnavailableStops: 0,
+    constrainedStepRestatedComponents: 0,
   };
   gaussNewtonFallbackTrace = trace;
   solverWorkTrace = work;
@@ -10580,6 +10668,14 @@ export function compileSketchSolveProgram(input: {
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
   /**
+   * cadara-p4r5.2: the drag frames' step (default "penalty", or the test-only
+   * environment override, see `SketchDragStep`). Not part of the
+   * compatibility key and not carried over when a session recompiles its
+   * program: a recompiled program takes the process default (only specs
+   * pass it explicitly).
+   */
+  dragStep?: SketchDragStep;
+  /**
    * T17c5: the point a drag moves. A spline whose only authored errors are
    * coincident spans at this point, not joined by Coincident constraints,
    * is judged at each solve's values (the drag may separate them).
@@ -10650,6 +10746,9 @@ export function compileSketchSolveProgram(input: {
     offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy,
+    ...((input.dragStep ?? DEFAULT_SKETCH_DRAG_STEP) === "constrained"
+      ? { dragStep: "constrained" as const }
+      : {}),
     diagnostics: derived.diagnostics,
     validation,
     degenerateSplineSpanRecovery,
@@ -13195,6 +13294,29 @@ function* solveDragFrameStage(
     });
   }
 
+  // cadara-p4r5.2: the constrained step replaces phases A and B; where it is
+  // unavailable at this frame, they run as without it.
+  if (program.dragStep === "constrained") {
+    const constrained = yield* solveConstrainedDragStage({
+      program,
+      hardConstraints,
+      objective: [
+        ...input.dragConstraints,
+        createMinimumMotionAnchorConstraint({
+          id: `constraint_drag_minimum_motion_${input.constraintLabel}` as ConstraintId,
+          parameterCount,
+          anchorValues: previousFrame,
+          variableIndices: nonDraggedVariableIndices,
+          weight: DRAG_MINIMUM_MOTION_EPSILON,
+          parameterProjection: program.system.parameterProjection,
+        }),
+      ],
+      start: input.startValues ?? session.values,
+      variables: solvedVariables,
+    });
+    if (constrained) return exactReach(judge(candidateOf(constrained)));
+  }
+
   // Phase A: hard constraints + soft cursor target + uniform minimum motion.
   const phaseAConstraints: ScalarConstraintRecord[] = [
     ...hardConstraints,
@@ -13266,6 +13388,69 @@ function* solveDragFrameStage(
     program.strategy,
   );
   return exactReach({ ...judge(candidateOf(solvedB.values)), curvature });
+}
+
+/**
+ * cadara-p4r5.2: one drag stage by the equality-constrained minimum-motion
+ * step (`SketchDragStep` "constrained"), on row data only:
+ * - equalities: every component of the stage's hard rows, except a component
+ *   that an inequality restates (`hingeComponentIndices` with its
+ *   `requirement`): that inequality is enforced instead (active set);
+ * - objective: the drag goal rows and the minimum-motion anchor.
+ * Validity inequalities (segment length, radius) are not enforced: the
+ * acceptance judge and its entity guard decide those frames as without the
+ * step. Null when the step is unavailable at this frame (counted in the work
+ * trace), so the caller runs phases A and B.
+ */
+function* solveConstrainedDragStage(input: {
+  program: SketchCompiledSolveProgram;
+  hardConstraints: readonly ScalarConstraintRecord[];
+  objective: readonly ScalarConstraintRecord[];
+  start: Float64Array;
+  variables: readonly number[];
+}): SolveSteps<Float64Array | null> {
+  const restated = input.program.system.inequalities.filter((inequality) =>
+    input.hardConstraints.some(
+      (row) =>
+        row.id === inequality.requirement?.id &&
+        row.hingeComponentIndices?.includes(
+          inequality.requirement.componentIndex,
+        ),
+    ),
+  );
+  const result = yield* solveConstrainedMinimumMotionSteps({
+    start: input.start,
+    variables: input.variables,
+    equalities: input.hardConstraints.map((row) => ({
+      evaluate: (values) => row.evaluateComponentJacobian(values),
+      excludedComponents: restated.flatMap((inequality) =>
+        inequality.requirement!.id === row.id
+          ? [inequality.requirement!.componentIndex]
+          : [],
+      ),
+    })),
+    inequalities: restated.map(
+      (inequality) => (values: Float64Array) => inequality.evaluate(values),
+    ),
+    objective: input.objective.map((row) => ({
+      evaluate: (values: Float64Array) => row.evaluateComponentJacobian(values),
+    })),
+  });
+  if (solverWorkTrace) {
+    solverWorkTrace.constrainedStepStages += 1;
+    solverWorkTrace.constrainedStepRestatedComponents += restated.length;
+    if (result.kind === "solved" && result.stop === "rowUnavailable")
+      solverWorkTrace.constrainedStepRowUnavailableStops += 1;
+    solverWorkTrace.constrainedStepIterations += result.stats.iterations;
+    solverWorkTrace.constrainedStepNewtonIterations +=
+      result.stats.newtonIterations;
+    if (result.kind === "unavailable") {
+      if (result.reason === "jacobianUnavailable")
+        solverWorkTrace.constrainedStepJacobianUnavailable += 1;
+      else solverWorkTrace.constrainedStepStartNotCorrectable += 1;
+    }
+  }
+  return result.kind === "solved" ? result.values : null;
 }
 
 /**
