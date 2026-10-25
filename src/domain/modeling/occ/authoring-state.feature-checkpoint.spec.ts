@@ -16,6 +16,7 @@ import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-histo
 import {
   checkpointOccFeatureStage,
   findReusableOccFeatureCheckpoint,
+  getResumableUnappliedTail,
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
 } from "@/domain/modeling/occ/authoring-state";
@@ -133,11 +134,14 @@ function createBase(overrides: Partial<OccAuthoringState> = {}) {
 }
 
 const previousBuild = createBase();
-/** Checkpoints of `previousBuild`; from feature index `diagnosticsFrom` on,
- * each holds a rebuild diagnostic. */
-const createStages = (diagnosticsFrom = Infinity): OccFeatureTopologyStageMap =>
+/** Checkpoints of `previousBuild`, which evaluated `evaluated` in order; from
+ * feature index `diagnosticsFrom` on, each holds a rebuild diagnostic. */
+const createStages = (
+  diagnosticsFrom = Infinity,
+  evaluated = features,
+): OccFeatureTopologyStageMap =>
   new Map(
-    features.map((feature, index) => {
+    evaluated.map((feature, index) => {
       const featureId = feature.featureId;
       const state = {
         ...previousBuild,
@@ -146,7 +150,7 @@ const createStages = (diagnosticsFrom = Infinity): OccFeatureTopologyStageMap =>
           .map((bodyId) => ({ bodyId, label: bodyLabels.get(bodyId) })),
         constructions: [],
         constructionPlanes: [],
-        features: features.slice(0, index + 1),
+        features: evaluated.slice(0, index + 1),
         entities: [],
         renderRecords: [],
         referenceState: {},
@@ -354,4 +358,69 @@ test("a feature or sketch relabel keeps the prefix unless a checkpoint holds dia
     ),
     "Only feature_3's checkpoint holds a diagnostic, so feature_2's takes the relabel.",
   ).toEqual(["feature_1", "feature_2"]);
+});
+
+test("a rollback keeps exactly the tail checkpoints a later Roll To End resumes, along the features array rebuilds evaluate (cadara-vjcv)", () => {
+  // historyOrder lists feature_1, feature_2, feature_3; the features array,
+  // which rebuilds evaluate and resume along, differs from it.
+  const evaluationOrder = [features[0]!, features[2]!, features[1]!];
+  const evaluated = createStages(Infinity, evaluationOrder);
+  /** Rolled back to feature_1, then edited by `edit`: the features whose
+   * checkpoint the rollback keeps, and the unapplied ones Roll To End resumes
+   * with every checkpoint and with only the applied and kept ones. */
+  const rollBackAndRollToEnd = (
+    edit: (feature: OccAuthoringFeatureRecord) => OccAuthoringFeatureRecord,
+  ) => {
+    const current = evaluationOrder.map(edit);
+    const applied = current.slice(0, 1);
+    const kept = getResumableUnappliedTail(current, applied, evaluated);
+    const unapplied = (reused: FeatureId[] | null) =>
+      (reused ?? []).filter((featureId) => featureId !== "feature_1");
+    return {
+      kept: [...kept],
+      reachable: unapplied(
+        reusedFeatureIds(createBase(), undefined, current, evaluated),
+      ),
+      resumedFromKept: unapplied(
+        reusedFeatureIds(
+          createBase(),
+          undefined,
+          current,
+          new Map(
+            [...evaluated].filter(
+              ([featureId]) => featureId === "feature_1" || kept.has(featureId),
+            ),
+          ),
+        ),
+      ),
+    };
+  };
+  const editing =
+    (featureId: FeatureId) => (feature: OccAuthoringFeatureRecord) =>
+      feature.featureId === featureId
+        ? {
+            ...feature,
+            definition: extrude(
+              `sketch_${featureId.slice(-1)}` as SketchId,
+              createLiteralAuthoredValue(99),
+            ),
+          }
+        : feature;
+
+  for (const [edit, tail] of [
+    [
+      (feature: OccAuthoringFeatureRecord) => feature,
+      ["feature_3", "feature_2"],
+    ],
+    // A history-order walk would keep feature_2's checkpoint here, which no
+    // resume reaches past the changed feature_3.
+    [editing("feature_3"), []],
+    [editing("feature_2"), ["feature_3"]],
+  ] as const) {
+    expect(rollBackAndRollToEnd(edit)).toEqual({
+      kept: tail,
+      reachable: tail,
+      resumedFromKept: tail,
+    });
+  }
 });

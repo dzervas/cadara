@@ -132,6 +132,7 @@ import {
   checkpointOccFeatureStage,
   createOccAuthoringState,
   findReusableOccFeatureCheckpoint,
+  getResumableUnappliedTail,
   getSketchIdsResolvingDifferently,
   renameOccAuthoringStateBody,
   renameOccAuthoringStateFeature,
@@ -1459,6 +1460,14 @@ function getAppliedFeatures(
   );
   return features.filter((feature) => appliedFeatureIds.has(feature.featureId));
 }
+
+const withoutStageCheckpoint = ({
+  featureId,
+  outputs,
+}: OccFeatureTopologyStage): OccFeatureTopologyStage => ({
+  featureId,
+  outputs,
+});
 
 function reorderFeaturesByDocumentHistory(
   features: readonly OccAuthoringFeatureRecord[],
@@ -3775,6 +3784,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const featureIds = new Set(features.map((feature) => feature.featureId));
     const cursor = input.cursor ?? runtimeState.authoringState.cursor;
     const deferredFeatureIds = input.deferredFeatureIds;
+    const historyOrder =
+      input.historyOrder ?? runtimeState.authoringState.historyOrder;
+    const appliedFeatures = getAppliedFeatures(features, cursor, historyOrder);
+    // The runtime's stages: current ones, and the unapplied tail's last
+    // evaluation, which keeps its checkpoint while it may still resume.
+    const runtimeStages = mergeOccFeatureTopologyStageMaps(
+      runtimeState.authoringState.previousFeatureTopologyStages,
+      runtimeState.authoringState.featureTopologyStages,
+    );
+    const resumableTail = getResumableUnappliedTail(
+      features,
+      appliedFeatures,
+      runtimeStages,
+    );
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
       documentId: this.documentId,
       name: runtimeState.authoringState.name,
@@ -3796,23 +3819,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
       constructions: runtimeState.authoringState.baseConstructions,
       constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
-      historyOrder:
-        input.historyOrder ?? runtimeState.authoringState.historyOrder,
+      historyOrder,
       previousReferenceState: runtimeState.authoringState.referenceState,
       // Cursor rollback leaves later stages unapplied, not forgotten. Reuse
       // their last evaluation on return just as a current-cursor rebuild does;
       // otherwise fresh native hashes can claim non-replayable fallback inputs.
-      // Only current stages keep their checkpoint (the rebuild resumes from
-      // those), so superseded evaluations retain no more than their outputs.
+      // Superseded evaluations retain no more than their outputs, except the
+      // resumable unapplied tail, whose checkpoints a later Roll To End
+      // resumes (cadara-vjcv).
       previousFeatureTopologyStages: new Map(
-        [...mergeOccFeatureTopologyStageMaps(
-          runtimeState.authoringState.previousFeatureTopologyStages,
-          runtimeState.authoringState.featureTopologyStages,
-        )]
+        [...runtimeStages]
           .filter(([featureId]) => featureIds.has(featureId))
-          .map(([featureId, { featureId: stageFeatureId, outputs }]) => [
+          .map(([featureId, stage]) => [
             featureId,
-            { featureId: stageFeatureId, outputs },
+            resumableTail.has(featureId)
+              ? stage
+              : withoutStageCheckpoint(stage),
           ]),
       ),
       previousFeatureTopologyLineage:
@@ -3848,18 +3870,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     // Resume after the leading applied features this rebuild leaves unchanged
-    // instead of replaying them (cadara-di5).
-    const appliedFeatures = getAppliedFeatures(
-      features,
-      cursor,
-      baseState.historyOrder,
-    );
-    const checkpointState =
-      input.resumeFrom?.state ?? runtimeState.authoringState;
+    // instead of replaying them (cadara-di5), up to the end of the resumable
+    // unapplied tail (cadara-vjcv).
+    const checkpointStages =
+      input.resumeFrom?.state.featureTopologyStages ?? runtimeStages;
     const reusable = deferredFeatureIds
       ? null
       : findReusableOccFeatureCheckpoint(
-          checkpointState.featureTopologyStages,
+          checkpointStages,
           baseState,
           appliedFeatures,
           (feature) =>
@@ -3870,7 +3888,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ? resumeOccAuthoringStateFromCheckpoint(
           baseState,
           reusable.checkpoint,
-          checkpointState.featureTopologyStages,
+          checkpointStages,
           reusable.prefixFeatures,
           runtimeState.authoringState.referenceState,
         )
@@ -4012,6 +4030,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       ),
       cursor,
       diagnostics: [...current.diagnostics, ...diagnostics],
+      // A tail checkpoint resumes only on the stages it was evaluated after:
+      // once this rebuild evaluated a feature, release the tail's.
+      previousFeatureTopologyStages:
+        evaluatedFeatures.length === 0
+          ? current.previousFeatureTopologyStages
+          : new Map(
+              [...current.previousFeatureTopologyStages].map(
+                ([featureId, stage]) => [
+                  featureId,
+                  withoutStageCheckpoint(stage),
+                ],
+              ),
+            ),
       previousFeatureTopologyLineage: new Map(),
     };
 

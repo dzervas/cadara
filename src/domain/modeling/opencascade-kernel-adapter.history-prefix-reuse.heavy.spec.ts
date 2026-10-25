@@ -22,6 +22,11 @@
 // restore must equal a cold open with exact topology tokens (cadara-797), and
 // still re-places a face sketch whose supporting face moved.
 //
+// cadara-vjcv: a cursor rollback keeps the stage checkpoint of each
+// rolled-back feature, so Roll To End resumes the tail instead of running it
+// again and shows the bodies (and native payloads) it showed before. A rebuild
+// that evaluates a feature releases the kept tail.
+//
 // Cold opens and rebuilds are not a fixed point on topology tokens (each
 // evaluation re-mints fallback ids `…_t0019_1` -> `…_t0020_1`, see the
 // body-rename heavy spec) and stamp their revision; comparisons normalize
@@ -68,6 +73,7 @@ vi.mock("@/domain/modeling/occ/sketch-profile", async (importOriginal) => {
 });
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import { createExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureDefinition,
   WorkspaceSnapshot,
@@ -221,6 +227,23 @@ async function open(document: AuthoredModelDocument) {
 
 type Session = Awaited<ReturnType<typeof open>>;
 
+/** Features whose unapplied stage keeps its checkpoint (cadara-vjcv). */
+const keptTailCheckpoints = (session: Session) =>
+  [
+    ...(
+      session.adapter as unknown as {
+        runtimeState: {
+          authoringState: {
+            previousFeatureTopologyStages: ReadonlyMap<
+              FeatureId,
+              { checkpoint?: unknown }
+            >;
+          };
+        };
+      }
+    ).runtimeState.authoringState.previousFeatureTopologyStages,
+  ].flatMap(([featureId, stage]) => (stage.checkpoint ? [featureId] : []));
+
 /** Live bodies of the adapter's runtime state (premise checks only). */
 const runtimeBodies = (session: Session) =>
   (
@@ -284,6 +307,18 @@ function evaluatedModel(
       .sort(),
   };
 }
+
+/** The evaluated model with exact topology tokens and only live references:
+ * invalidated ones depend on session history. */
+const shownModel = (snapshot: WorkspaceSnapshot) => {
+  const model = evaluatedModel(snapshot, "exact");
+  return {
+    ...model,
+    references: model.references.filter((reference) =>
+      reference.includes('"invalidation":null'),
+    ),
+  };
+};
 
 /** A preview's diagnostics and a digest of every render record's geometry. */
 const previewModel = (preview: Awaited<ReturnType<Session["preview"]>>) => ({
@@ -548,9 +583,10 @@ test.each(Object.entries(models))(
 
       featureRuns.count = 0;
       await session.setCursor(end);
-      expect(featureRuns.count, "rolling to the end runs only the tail").toBe(
-        1,
-      );
+      expect(
+        featureRuns.count,
+        "rolling to the end resumes the tail's kept checkpoint and runs none (cadara-vjcv)",
+      ).toBe(0);
       await expectColdEquivalent(session, opened, "roll to end");
 
       featureRuns.count = 0;
@@ -889,7 +925,7 @@ test("a preview of a feature before the tail that joins an earlier body, after a
   }
 }, 900_000);
 
-test("snapshots after a cursor rollback it already showed or a tail plane add/delete reuse every native body payload (cadara-rgq)", async () => {
+test("snapshots after a cursor rollback it already showed, the Roll To End back, or a tail plane add/delete reuse every native body payload (cadara-rgq, cadara-vjcv)", async () => {
   const source = JSON.parse(
     await readFile(
       new URL(
@@ -921,9 +957,10 @@ test("snapshots after a cursor rollback it already showed or a tail plane add/de
     return builtBodies;
   };
   try {
-    await session.snapshot();
+    const shownAtEnd = shownModel(await session.snapshot());
     const opened = await session.exported();
     const end = opened.cursor;
+    const tail = appliedFeatureIds(opened).at(-1)!;
     const rolledBack = {
       kind: "feature",
       featureId: appliedFeatureIds(opened).at(-2)!,
@@ -936,14 +973,32 @@ test("snapshots after a cursor rollback it already showed or a tail plane add/de
       "premise: the tail feature changes a body, which the rollback shows as it was before",
     ).toBeGreaterThan(0);
     const firstRollback = evaluatedModel(lastSnapshot!);
+    expect
+      .soft(
+        keptTailCheckpoints(session),
+        "the rollback keeps one checkpoint, the rolled-back feature's (cadara-vjcv)",
+      )
+      .toEqual([tail]);
+    featureRuns.count = 0;
     await session.setCursor(end);
-    // Deliberate tripwire: Roll To End re-executes the tail from its
-    // checkpoint, so it builds new bodies. Update this when the unapplied
-    // tail keeps its stage checkpoint (cadara-vjcv).
+    expect
+      .soft(
+        featureRuns.count,
+        "rolling to the end resumes the tail's kept checkpoint (cadara-vjcv)",
+      )
+      .toBe(0);
     expect(
       await snapshotBuilds(),
-      "rolling to the end evaluates the tail again and builds its bodies",
-    ).toEqual(tailBodies);
+      "and shows the bodies it showed before the rollback",
+    ).toEqual([]);
+    expect(
+      shownModel(lastSnapshot!),
+      "rolling to the end shows the model shown before the rollback",
+    ).toEqual(shownAtEnd);
+    expect(
+      keptTailCheckpoints(session),
+      "moving the cursor past the tail releases its kept checkpoint",
+    ).toEqual([]);
     await session.setCursor(rolledBack);
     expect(
       await snapshotBuilds(),
@@ -953,6 +1008,22 @@ test("snapshots after a cursor rollback it already showed or a tail plane add/de
       evaluatedModel(lastSnapshot!),
       "the reused payloads show the same model as the first rollback",
     ).toEqual(firstRollback);
+
+    // A rebuild that evaluates a feature releases the kept tail checkpoint,
+    // which holds a history without that evaluation; the tail runs again.
+    const inserted = await session.create(tailPlane);
+    expect(
+      keptTailCheckpoints(session),
+      "inserting a feature behind the tail releases its kept checkpoint",
+    ).toEqual([]);
+    featureRuns.count = 0;
+    await session.deleteFeature(inserted);
+    await session.setCursor(end);
+    expect(
+      featureRuns.count,
+      "deleting it and rolling to the end after the release runs the tail again",
+    ).toBe(1);
+    await expectColdEquivalent(session, opened, "roll to end after release");
 
     await session.setCursor(end);
     await session.snapshot();
@@ -965,6 +1036,99 @@ test("snapshots after a cursor rollback it already showed or a tail plane add/de
     ).toEqual([]);
   } finally {
     native.BuildJson = buildJson;
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+test("a rolled-back tail whose definition or variable changes runs again on Roll To End and equals a cold open (cadara-vjcv)", async () => {
+  const session = await open(await loadLandingModel("bracket"));
+  try {
+    await session.snapshot();
+    const opened = await session.exported();
+    const end = opened.cursor;
+    const tailEdit = tailParameterEdits.bracket!;
+    const tail = appliedFeatureIds(opened).at(-1)!;
+    expect(tail, "premise: the edited feature is the tail").toBe(
+      tailEdit.featureId,
+    );
+    const rolledBack = {
+      kind: "feature",
+      featureId: appliedFeatureIds(opened).at(-2)!,
+    } as const;
+    const definition = (document: AuthoredModelDocument) =>
+      document.features.find((feature) => feature.featureId === tail)!
+        .definition;
+
+    await session.setCursor(rolledBack);
+    expect(
+      keptTailCheckpoints(session),
+      "premise: the rollback keeps the tail's checkpoint",
+    ).toEqual([tail]);
+    const definitionEdited = withEditedFeature(opened, tailEdit);
+    featureRuns.count = 0;
+    await session.update(tail, definition(definitionEdited));
+    expect(
+      featureRuns.count,
+      "premise: editing the unapplied tail evaluates nothing",
+    ).toBe(0);
+    expect(
+      keptTailCheckpoints(session),
+      "editing the tail's definition discards its kept checkpoint",
+    ).toEqual([]);
+    await session.setCursor(end);
+    expect(featureRuns.count, "rolling to the end runs the edited tail").toBe(
+      1,
+    );
+    await expectColdEquivalent(
+      session,
+      definitionEdited,
+      "roll to end after a tail definition edit",
+    );
+
+    // The kept checkpoint's definition matches; the resume rejects it on the
+    // variable the tail resolves differently.
+    const variableId = await session.addVariable("tailChamfer", "0.5");
+    const readsVariable = structuredClone(definition(opened));
+    (
+      readsVariable.parameters as unknown as {
+        options: { distance: unknown };
+      }
+    ).options.distance = createExpressionAuthoredValue("tailChamfer");
+    await session.update(tail, readsVariable);
+    const beforeVariableEdit = await session.exported();
+    await session.setCursor(rolledBack);
+    expect(
+      keptTailCheckpoints(session),
+      "premise: the rollback keeps the tail's checkpoint",
+    ).toEqual([tail]);
+    featureRuns.count = 0;
+    await session.setVariable(variableId, "tailChamfer", "0.4");
+    expect(
+      featureRuns.count,
+      "premise: no applied feature reads the variable",
+    ).toBe(0);
+    await session.setCursor(end);
+    expect(
+      featureRuns.count,
+      "rolling to the end runs the tail the variable changed",
+    ).toBe(1);
+    expect(
+      keptTailCheckpoints(session),
+      "and leaves no kept checkpoint",
+    ).toEqual([]);
+    await expectColdEquivalent(
+      session,
+      {
+        ...beforeVariableEdit,
+        variables: beforeVariableEdit.variables.map((variable) =>
+          variable.variableId === variableId
+            ? { ...variable, valueText: "0.4" }
+            : variable,
+        ),
+      },
+      "roll to end after a tail variable edit",
+    );
+  } finally {
     session.adapter.dispose();
   }
 }, 900_000);
@@ -1085,12 +1249,50 @@ test.each(Object.keys(tailParameterEdits))(
         .toEqual(tail);
       await expectColdEquivalent(session, edited, "redo", "exact");
 
-      // Rolling back and to the end evaluates the tail again in the session,
-      // which advances its topology token past the one `edited` persists. A
-      // cold open keeps the persisted one, so the restore must not take the
-      // session's tail stage.
+      // Rolling back and to the end resumes the tail's kept checkpoint, which
+      // the redo evaluated from `edited` (cadara-vjcv): the session keeps the
+      // persisted lineage, and a restore of `edited` takes that tail stage.
       const end = edited.cursor;
-      await session.setCursor({ kind: "feature", featureId: applied.at(-2)! });
+      const rolledBack = {
+        kind: "feature",
+        featureId: applied.at(-2)!,
+      } as const;
+      await session.setCursor(rolledBack);
+      featureRuns.count = 0;
+      await session.setCursor(end);
+      expect
+        .soft(featureRuns.count, "rolling to the end runs no feature")
+        .toBe(0);
+      expect(
+        (await session.exported()).topologyLineage,
+        "rolling to the end keeps the persisted lineage",
+      ).toEqual(edited.topologyLineage);
+      await expectColdEquivalent(
+        session,
+        edited,
+        "roll to end resumed the kept tail",
+        "exact",
+      );
+      expect
+        .soft(
+          await restoreAndSnapshot(session, edited),
+          "a restore after Roll To End evaluates and meshes nothing",
+        )
+        .toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+      await expectColdEquivalent(
+        session,
+        edited,
+        "restore after Roll To End resumed the kept tail",
+        "exact",
+      );
+
+      // Rolling back, adding and deleting a feature behind the tail (which
+      // releases the tail's kept checkpoint, cadara-vjcv) and rolling to the
+      // end evaluates the tail again in the session, which advances its
+      // topology token past the one `edited` persists. A cold open keeps the
+      // persisted one, so the restore must not take the session's tail stage.
+      await session.setCursor(rolledBack);
+      await session.deleteFeature(await session.create(tailPlane));
       await session.setCursor(end);
       expect(
         (await session.exported()).topologyLineage,

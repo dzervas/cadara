@@ -26,7 +26,10 @@ export interface OccTopologyStageOutput {
 export interface OccFeatureTopologyStage {
   featureId: FeatureId;
   outputs: ReadonlyMap<OccTopologyOutputSlot, OccTopologyStageOutput>;
-  /** The history state right after this evaluation, on current-build stages only. */
+  /**
+   * The history state right after this evaluation, on current-build stages
+   * and on the previous stages of a rollback's resumable unapplied tail.
+   */
   checkpoint?: OccFeatureStageCheckpoint;
 }
 

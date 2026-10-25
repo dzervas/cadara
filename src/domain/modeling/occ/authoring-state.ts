@@ -426,6 +426,46 @@ export function findReusableOccFeatureCheckpoint(
 }
 
 /**
+ * The unapplied features whose stage checkpoint a cursor rollback keeps so
+ * that a later cursor move forward resumes them instead of running them again
+ * (cadara-vjcv): the leading run after `appliedFeatures` with a checkpoint on
+ * `stages` evaluated from the feature's current record. That is at most one
+ * kept state per rolled-back feature; a missing or changed feature ends the
+ * run, since no rebuild can resume past it.
+ *
+ * The run follows `features`, not the history order, because rebuilds
+ * evaluate and findReusableOccFeatureCheckpoint resumes along that array (the
+ * history order only selects which features apply), so each checkpoint holds
+ * the features before it in this order. This is a pre-filter on definitions:
+ * the resume still checks every input with findReusableOccFeatureCheckpoint.
+ */
+export function getResumableUnappliedTail(
+  features: readonly OccAuthoringFeatureRecord[],
+  appliedFeatures: readonly OccAuthoringFeatureRecord[],
+  stages: OccFeatureTopologyStageMap,
+): ReadonlySet<FeatureId> {
+  const applied = new Set(appliedFeatures.map(({ featureId }) => featureId));
+  const tail = new Set<FeatureId>();
+  for (const feature of features) {
+    if (applied.has(feature.featureId)) continue;
+    const evaluated = stages
+      .get(feature.featureId)
+      ?.checkpoint?.features.at(-1);
+    if (
+      evaluated?.featureId !== feature.featureId ||
+      evaluated.suppressed ||
+      feature.suppressed ||
+      JSON.stringify(evaluated.definition) !==
+        JSON.stringify(feature.definition)
+    ) {
+      break;
+    }
+    tail.add(feature.featureId);
+  }
+  return tail;
+}
+
+/**
  * Continues the rebuild `base` after its first `prefixFeatures`, which
  * `checkpoint` evaluated and whose `stages` are reused as they are. The caller
  * proves the prefix unchanged against `base`, so its bodies, labels,
@@ -469,6 +509,26 @@ export function resumeOccAuthoringStateFromCheckpoint(
     },
     provedLiveReferenceKeys: new Set(
       checkpoint.referenceState.liveReferencesByKey.keys(),
+    ),
+    // A reference `previousReferenceState` holds live but the checkpoint's
+    // evaluation invalidated (a resume past a rollback, cadara-vjcv) keeps the
+    // reason that evaluation gave it, not a generic missing reference.
+    historyInvalidations: new Map(
+      [...checkpoint.referenceState.invalidatedReferencesByKey].flatMap(
+        ([key, { invalidation }]) =>
+          invalidation
+            ? [
+                [
+                  key,
+                  {
+                    target: invalidation.target,
+                    reason: invalidation.reason,
+                    sourceTarget: invalidation.sourceTarget,
+                  },
+                ] as const,
+              ]
+            : [],
+      ),
     ),
   });
   const features = checkpoint.features.map((feature, index) => {
