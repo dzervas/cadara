@@ -571,3 +571,53 @@ function createDelayedUndoNotificationRepository(
     },
   };
 }
+
+// cadara-l99p review: the worker-backed repository sends the stored document
+// URL with a compensation, and a New document still in flight stores a new
+// one; reading it first would refuse this tab's own undo as superseded.
+test("a durable undo requested while New document runs reaches the repository only after New's initialize", async () => {
+  const repository = createMemoryDocumentRepository();
+  const modelingService = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: "doc_workspace",
+    documentRepository: repository,
+    documentRepositoryPersistence: "background",
+  });
+  const durableHistory = createDurableHistoryService({
+    documentRepository: repository,
+    modelingService,
+  });
+  try {
+    await modelingService.getCurrentDocumentSnapshot();
+    await modelingService.waitForPersistence();
+    const calls: string[] = [];
+    let releaseInitialize!: () => void;
+    const initialize = repository.initialize.bind(repository);
+    repository.initialize = async (input) => {
+      calls.push("initialize");
+      await new Promise<void>((resolve) => (releaseInitialize = resolve));
+      const result = await initialize(input);
+      calls.push("initialized");
+      return result;
+    };
+    const undoDurableHistory = repository.undoDurableHistory.bind(repository);
+    repository.undoDurableHistory = (...args) => {
+      calls.push("undo");
+      return undoDurableHistory(...args);
+    };
+
+    const created = modelingService.createNewDocument();
+    const undo = durableHistory.undo({ documentId: "doc_workspace" });
+    await expect.poll(() => calls).toEqual(["initialize"]);
+    // Give an undo that skipped the wait time to reach the repository.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls, "the undo waits for the in-flight New document").toEqual([
+      "initialize",
+    ]);
+    releaseInitialize();
+    expect((await created).ok, "premise: New document succeeded").toBe(true);
+    await undo;
+    expect(calls).toEqual(["initialize", "initialized", "undo"]);
+  } finally {
+    modelingService.dispose();
+  }
+});

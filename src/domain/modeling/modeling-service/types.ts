@@ -53,6 +53,11 @@ export interface ModelingService {
     listener: (event: ModelingServiceDocumentChangeEvent) => void,
   ): () => void;
   waitForPersistence(): Promise<void>;
+  /**
+   * Settles after every local mutation requested so far has run (New,
+   * Import, edits), without their repository writes; never rejects.
+   */
+  waitForLocalMutations(): Promise<void>;
   /** Settles after every local mutation requested so far and its repository writes. */
   waitForLocalChanges(): Promise<void>;
   /** The current local save state; the same object until it changes. */

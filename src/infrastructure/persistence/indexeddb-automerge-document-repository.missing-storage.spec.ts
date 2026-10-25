@@ -4,6 +4,10 @@
 // document-sync worker shares one IndexedDB database. cadara-rnsb: restore
 // reports missing and incomplete storage distinctly, and "Reset stored
 // history" stores the displayed document so later edits persist.
+// cadara-l99p: with one URL store shared by all tabs (localStorage, forwarded
+// with every worker request), a tab never writes a document another tab reset
+// or replaced, so no incomplete storage is produced. Rows that model older
+// builds keep a URL store per tab.
 import { afterEach, expect, test } from "vitest";
 import {
   Automerge,
@@ -49,6 +53,12 @@ class SharedMemoryStorage implements StorageAdapterInterface {
     for (const chunk of await this.loadRange(prefix))
       this.chunks.delete(chunk.key.join("/"));
   }
+  documentChunkKeys(url: AutomergeUrl) {
+    const documentId = url.slice("automerge:".length);
+    return [...this.chunks.keys()]
+      .filter((key) => key.startsWith(documentId))
+      .sort();
+  }
   documentChunkKinds(url: AutomergeUrl) {
     const documentId = url.slice("automerge:".length);
     return [...this.chunks.values()]
@@ -66,7 +76,11 @@ afterEach(() => {
 
 async function tab(
   storage: SharedMemoryStorage,
-  options: { channelName?: string } = {},
+  options: {
+    channelName?: string;
+    /** The tabs' shared localStorage URL store (cadara-l99p). */
+    urls?: MemoryDocumentRepositoryUrlStore;
+  } = {},
 ) {
   await initializeBase64Wasm(automergeWasmBase64);
   const repo = new Repo({
@@ -81,8 +95,9 @@ async function tab(
       : [],
   });
   repos.push(repo);
-  // The worker's URL store is per-tab memory fed from localStorage on load.
-  const urls = new MemoryDocumentRepositoryUrlStore();
+  // Without a shared store: an older build, whose worker URL store was
+  // per-tab memory fed from localStorage on load only.
+  const urls = options.urls ?? new MemoryDocumentRepositoryUrlStore();
   const repository = new IndexedDbAutomergeDocumentRepository({
     repo: repo as unknown as AutomergeRepositoryLike,
     urlStore: urls,
@@ -91,9 +106,12 @@ async function tab(
   return { repo, urls, repository };
 }
 
-async function seedOnce(storage: SharedMemoryStorage) {
+async function seedOnce(
+  storage: SharedMemoryStorage,
+  urls?: MemoryDocumentRepositoryUrlStore,
+) {
   const seed = await createSeedAuthoredModelDocument();
-  const writer = await tab(storage);
+  const writer = await tab(storage, { urls });
   const seeded = await writer.repository.load({
     documentId: seed.documentId,
     seedDocument: seed,
@@ -376,4 +394,256 @@ test("a 'Reset stored history' whose export throws reports the exception and kee
     kind: "failed",
     diagnostics: [{ reasonCode: "repository-reset-exception" }],
   });
+});
+
+const SUPERSEDED = {
+  reasonCode: "automerge-document-superseded",
+  message:
+    "This document was reset or replaced in another tab, so this tab can no longer save to it. Reload the tab to open the stored version.",
+};
+
+/** Tab A seeds; tab B opens the same document; both share one URL store. */
+async function openInTwoTabsSharingUrls(storage: SharedMemoryStorage) {
+  const urls = new MemoryDocumentRepositoryUrlStore();
+  const { seed, url, writer: tabA } = await seedOnce(storage, urls);
+  const tabB = await tab(storage, { urls });
+  const opened = await tabB.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(opened.ok && opened.status.kind).toBe("restored");
+  return { seed, url, urls, tabA, tabB };
+}
+
+test("a stale tab's edit after another tab's reset is refused as superseded and writes nothing (cadara-l99p)", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, url, urls, tabA, tabB } =
+    await openInTwoTabsSharingUrls(storage);
+
+  expect((await tabA.repository.reset(seed.documentId)).kind).toBe("reset");
+  expect(storage.documentChunkKinds(url)).toEqual([]);
+
+  const edited = await tabB.repository.mutate({
+    documentId: seed.documentId,
+    expected: seed,
+    document: { ...seed, name: "Edited in the stale tab" },
+  });
+  expect(edited).toEqual({
+    ok: false,
+    status: {
+      kind: "failed",
+      documentId: seed.documentId,
+      diagnostic: SUPERSEDED,
+    },
+  });
+  expect(
+    storage.documentChunkKinds(url),
+    "no incremental chunk without its snapshot",
+  ).toEqual([]);
+  expect(urls.get(seed.documentId)).toBeNull();
+
+  // The next tab seeds a fresh document instead of reading incomplete storage.
+  const fresh = await tab(storage, { urls });
+  const reopened = await fresh.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(reopened.ok && reopened.status.kind).toBe("seeded");
+  expect(reopened.ok && reopened.document.name).toBe(seed.name);
+});
+
+test("a tab whose document another tab replaced refuses mutate, undo and redo, and reloading it restores the replacement (cadara-l99p)", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, url, urls, tabA, tabB } =
+    await openInTwoTabsSharingUrls(storage);
+  // tabB can undo its edit; tabC can redo its undone edit.
+  const bEdit = { ...seed, name: "Edited in tab B" };
+  const bEdited = await tabB.repository.mutate({
+    documentId: seed.documentId,
+    expected: seed,
+    document: bEdit,
+  });
+  expect(bEdited.ok).toBe(true);
+  const tabC = await tab(storage, { urls });
+  const cOpened = await tabC.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(cOpened.ok && cOpened.document.name).toBe(bEdit.name);
+  const cEdited = await tabC.repository.mutate({
+    documentId: seed.documentId,
+    expected: cOpened.ok ? cOpened.document : seed,
+    document: { ...bEdit, name: "Edited in tab C" },
+  });
+  expect(cEdited.ok).toBe(true);
+  expect((await tabC.repository.undoDurableHistory(seed.documentId))?.ok).toBe(
+    true,
+  );
+  const tabD = await tab(storage, { urls });
+  const dOpened = await tabD.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(dOpened.ok).toBe(true);
+  const tabE = await tab(storage, { urls });
+  expect(
+    (
+      await tabE.repository.load({
+        documentId: seed.documentId,
+        seedDocument: seed,
+      })
+    ).ok,
+  ).toBe(true);
+
+  // Tab A replaces the document (Import, or rnsb's reset + initialize).
+  const replaced = await tabA.repository.initialize({
+    documentId: seed.documentId,
+    document: { ...seed, name: "Replaced in tab A" },
+  });
+  expect(replaced.ok && replaced.status.kind).toBe("seeded");
+  const replacementUrl = urls.get(seed.documentId);
+  expect(replacementUrl).not.toBe(url);
+  const oldChunks = storage.documentChunkKeys(url);
+
+  const refused = {
+    ok: false,
+    status: {
+      kind: "failed",
+      documentId: seed.documentId,
+      diagnostic: SUPERSEDED,
+    },
+  };
+  expect(await tabB.repository.undoDurableHistory(seed.documentId)).toEqual(
+    refused,
+  );
+  expect(
+    await tabB.repository.mutate({
+      documentId: seed.documentId,
+      expected: bEdit,
+      document: { ...bEdit, name: "Edited in tab B after its refused undo" },
+    }),
+    "the released handle keeps the superseded refusal, not document-not-initialized",
+  ).toEqual(refused);
+  expect(await tabC.repository.redoDurableHistory(seed.documentId)).toEqual(
+    refused,
+  );
+  expect(
+    await tabD.repository.mutate({
+      documentId: seed.documentId,
+      expected: dOpened.ok ? dOpened.document : seed,
+      document: { ...seed, name: "Edited in tab D" },
+    }),
+  ).toEqual(refused);
+  expect(
+    storage.documentChunkKeys(url),
+    "the replaced document is not written",
+  ).toEqual(oldChunks);
+  expect(urls.get(seed.documentId)).toBe(replacementUrl);
+
+  const fresh = await tab(storage, { urls });
+  const reopened = await fresh.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  expect(reopened.ok && reopened.status.kind).toBe("restored");
+  expect(reopened.ok && reopened.document.name).toBe("Replaced in tab A");
+
+  // Reloading a tab still holding the replaced document (tab E never wrote)
+  // drops its stale handle and restores the replacement; so does tab B's.
+  for (const stale of [tabE, tabB]) {
+    const reloaded = await stale.repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(reloaded.ok && reloaded.status.kind).toBe("restored");
+    expect(reloaded.ok && reloaded.document.name).toBe("Replaced in tab A");
+  }
+  const replacement = { ...seed, name: "Replaced in tab A" };
+  const bReloadedEdit = await tabB.repository.mutate({
+    documentId: seed.documentId,
+    expected: replacement,
+    document: { ...replacement, name: "Edited in tab B after reloading" },
+  });
+  expect(bReloadedEdit.ok, "reloading clears the superseded refusal").toBe(
+    true,
+  );
+  expect(storage.documentChunkKeys(url)).toEqual(oldChunks);
+});
+
+// cadara-rnsb review: automerge-repo 2.5.5 Repo.delete() also drops the
+// handle from its cache, so the same tab reopening its deleted URL never gets
+// find()'s "Document ... was deleted" (a generic automerge-load-failed). It
+// reads storage again: missing, or incomplete after an older build's write.
+test("a tab reopening a URL its own reset deleted fails as missing or incomplete storage, never as a generic load failure", async () => {
+  async function reopenAfterOwnReset(staleWrite: boolean) {
+    const storage = new SharedMemoryStorage();
+    const { seed, url, writer } = await seedOnce(storage);
+    const olderBuildTab = await tab(storage);
+    olderBuildTab.urls.set(seed.documentId, url);
+    await olderBuildTab.repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect((await writer.repository.reset(seed.documentId)).kind).toBe("reset");
+    if (staleWrite)
+      await olderBuildTab.repository.mutate({
+        documentId: seed.documentId,
+        expected: seed,
+        document: { ...seed, name: "Edited in the stale tab" },
+      });
+    // The older build's tab wrote the URL back into localStorage.
+    writer.urls.set(seed.documentId, url);
+    const reopened = await writer.repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    return !reopened.ok && reopened.status.diagnostic.reasonCode;
+  }
+  expect(await reopenAfterOwnReset(false)).toBe("automerge-document-missing");
+  expect(await reopenAfterOwnReset(true)).toBe("automerge-document-incomplete");
+});
+
+test("an edit in a tab whose document another tab reset is one unsaved repository change with the superseded reason, kept in memory (cadara-l99p)", async () => {
+  const storage = new SharedMemoryStorage();
+  const urls = new MemoryDocumentRepositoryUrlStore();
+  const { seed, url, writer: tabA } = await seedOnce(storage, urls);
+  const tabB = await tab(storage, { urls });
+  const service = createModelingService(new MockKernelAdapter(), {
+    currentDocumentId: seed.documentId,
+    documentRepository: tabB.repository,
+    documentRepositoryPersistence: "background",
+  });
+  try {
+    expect(await service.getHistoryRestoreState()).toMatchObject({
+      kind: "restored",
+    });
+    await tabA.repository.reset(seed.documentId);
+
+    expect(
+      await service.renameDocument({ name: "Edited in the stale tab" }),
+    ).toMatchObject({ ok: true });
+    await service.waitForPersistence();
+    const status = service.getLocalSaveStatus();
+    expect(status).toEqual({
+      saving: false,
+      failure: {
+        documentId: seed.documentId,
+        target: "repository",
+        ...SUPERSEDED,
+      },
+    });
+    expect((await service.getCurrentDocumentSnapshot()).document.name).toBe(
+      "Edited in the stale tab",
+    );
+
+    await service.renameDocument({ name: "Edited again" });
+    await service.waitForPersistence();
+    expect(
+      service.getLocalSaveStatus().failure,
+      "a later edit keeps the same failure, so it is reported once",
+    ).toBe(status.failure);
+    expect(storage.documentChunkKinds(url)).toEqual([]);
+  } finally {
+    service.dispose();
+  }
 });

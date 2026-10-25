@@ -548,6 +548,11 @@ export function createModelingService(
     return run;
   }
 
+  /** `localMutations` never rejects. */
+  async function waitForLocalMutations() {
+    await localMutations;
+  }
+
   /** Publishes a new status object only when the state changed. */
   function publishLocalSaveStatus() {
     const saving = runningLocalSaves > 0 || localFileWriting;
@@ -2069,9 +2074,10 @@ export function createModelingService(
       await waitForRepositoryChanges();
       await repositoryPersistencePromise;
     },
+    waitForLocalMutations,
     async waitForLocalChanges() {
       // A mutation queues its repository write only once it has run.
-      await localMutations;
+      await waitForLocalMutations();
       try {
         await ensureInitialized();
         await waitForRepositoryChanges();

@@ -80,6 +80,12 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
+  waitForLocalMutations() {
+    return this.measure("waitForLocalMutations", () =>
+      this.inner.waitForLocalMutations(),
+    );
+  }
+
   waitForLocalChanges() {
     return this.measure("waitForLocalChanges", () =>
       this.inner.waitForLocalChanges(),

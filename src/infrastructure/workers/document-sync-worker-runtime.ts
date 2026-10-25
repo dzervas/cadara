@@ -59,6 +59,23 @@ export function createDocumentSyncWorkerMessageHandler(
     return sequence;
   }
 
+  /** cadara-l99p: mirror the shared URL store sent with the request; a
+   * missing key (no shared store) keeps the worker's own. */
+  function adoptStorageKey(
+    documentId: DocumentId,
+    storageKey: string | null | undefined,
+  ) {
+    if (storageKey === undefined) return;
+    if (storageKey === null) {
+      options.repositoryUrlStore?.delete(documentId);
+      return;
+    }
+    options.repositoryUrlStore?.set(
+      documentId,
+      storageKey as Parameters<DocumentRepositoryUrlStore["set"]>[1],
+    );
+  }
+
   function publishWriteStatus(status: DocumentSyncWriteStatus) {
     writeStatuses.set(status.documentId, status);
     postMessage({ kind: "writeStatusChanged", status });
@@ -226,14 +243,7 @@ export function createDocumentSyncWorkerMessageHandler(
     try {
       switch (request.kind) {
         case "load": {
-          if (request.storageKey) {
-            options.repositoryUrlStore?.set(
-              request.documentId,
-              request.storageKey as Parameters<
-                DocumentRepositoryUrlStore["set"]
-              >[1],
-            );
-          }
+          adoptStorageKey(request.documentId, request.storageKey);
           const loadResult = await options.repository.load({
             documentId: request.documentId,
             seedDocument: request.seedDocument,
@@ -309,6 +319,8 @@ export function createDocumentSyncWorkerMessageHandler(
         }
         case "initialize":
         case "mutate": {
+          if (request.kind === "mutate")
+            adoptStorageKey(request.documentId, request.storageKey);
           const result =
             request.kind === "initialize"
               ? await options.repository.initialize({
@@ -475,6 +487,7 @@ export function createDocumentSyncWorkerMessageHandler(
           return;
         }
         case "undoDurableHistory": {
+          adoptStorageKey(request.documentId, request.storageKey);
           postMessage({
             kind: "durableHistoryMutated",
             requestId: request.requestId,
@@ -486,6 +499,7 @@ export function createDocumentSyncWorkerMessageHandler(
           return;
         }
         case "redoDurableHistory": {
+          adoptStorageKey(request.documentId, request.storageKey);
           postMessage({
             kind: "durableHistoryMutated",
             requestId: request.requestId,

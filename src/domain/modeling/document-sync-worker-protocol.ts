@@ -88,6 +88,9 @@ export type DocumentSyncWorkerRequest =
       requestId: RequestId;
       documentId: DocumentId;
       seedDocument: AuthoredModelDocument;
+      /** cadara-l99p: the URL the tabs' shared URL store holds for this
+       * document now (null: none), so the worker never writes a document
+       * another tab reset or replaced. Also on mutate/undo/redo. */
       storageKey?: string | null;
     }
   | {
@@ -98,6 +101,7 @@ export type DocumentSyncWorkerRequest =
       expected: AuthoredModelDocument;
       label?: string;
       assets?: readonly GeometryAssetBlobInput[];
+      storageKey?: string | null;
     }
   | {
       kind: "initialize";
@@ -165,12 +169,14 @@ export type DocumentSyncWorkerRequest =
       requestId: RequestId;
       documentId: DocumentId;
       actionSequence?: number;
+      storageKey?: string | null;
     }
   | {
       kind: "redoDurableHistory";
       requestId: RequestId;
       documentId: DocumentId;
       actionSequence?: number;
+      storageKey?: string | null;
     };
 
 export type DocumentSyncWorkerResponse =

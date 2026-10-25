@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
+import type { DocumentRepositoryChangeSource } from "@/domain/modeling/document-repository";
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
@@ -109,8 +110,8 @@ test("src/infrastructure/modeling/worker-backed-document-repository.spec.ts", as
     ).toBeTruthy();
     expect(
       urlStore.get(seed.documentId),
-      "Worker-returned Automerge URLs should be persisted by the main-thread URL store.",
-    ).toBe("automerge:worker-url");
+      "A restore result must not overwrite the shared URL store (cadara-l99p).",
+    ).toBe("automerge:stored-url");
 
     const mutation = repository.mutate({
       expected: seed,
@@ -441,6 +442,7 @@ test("worker-backed reset preserves URL and actor/heads on rejection, clearing o
     source: "restore" as const,
     storageKey: url,
   };
+  urlStore.set(seed.documentId, url);
   const repository = createWorkerBackedDocumentRepository({ client, urlStore });
   try {
     const load = repository.load({
@@ -505,6 +507,164 @@ test("worker-backed reset preserves URL and actor/heads on rejection, clearing o
     });
   } finally {
     client.dispose();
+  }
+});
+
+test("worker-backed writes carry the shared URL store's current URL and only seed results write it back (cadara-l99p)", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const worker = new FakeDocumentSyncWorker();
+  const client = new DocumentSyncWorkerClient({ worker });
+  const urlStore = createMemoryUrlStore();
+  type Url = Parameters<DocumentRepositoryUrlStore["set"]>[1];
+  const loadedUrl = "automerge:loaded" as Url;
+  const replacedUrl = "automerge:replaced" as Url;
+  urlStore.set(seed.documentId, loadedUrl);
+  const repository = createWorkerBackedDocumentRepository({ client, urlStore });
+  const metadata = (source: DocumentRepositoryChangeSource, url: string) => ({
+    actorId: "tab-actor",
+    documentId: seed.documentId,
+    heads: [`head_${source}`],
+    source,
+    storageKey: url,
+  });
+  /** Answers the posted request and its follow-up normalize request. */
+  async function answer(
+    response: DocumentSyncWorkerResponse,
+    responseMetadata: ReturnType<typeof metadata>,
+  ) {
+    worker.emit(response);
+    await flushAsync();
+    const normalize = worker.takePosted("normalize");
+    worker.emit({
+      kind: "normalized",
+      requestId: normalize.requestId,
+      result: { document: seed, diagnostics: [], metadata: responseMetadata },
+    });
+  }
+  try {
+    // Restore and local results report the URL they were loaded from.
+    const load = repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    const loadRequest = worker.takePosted("load");
+    expect(loadRequest.storageKey).toBe(loadedUrl);
+    urlStore.delete(seed.documentId); // another tab resets meanwhile
+    await answer(
+      {
+        kind: "loaded",
+        requestId: loadRequest.requestId,
+        result: {
+          ok: true,
+          document: seed,
+          status: { kind: "restored", documentId: seed.documentId },
+          metadata: metadata("restore", loadedUrl),
+        },
+      },
+      metadata("restore", loadedUrl),
+    );
+    expect((await load).ok).toBe(true);
+    expect(
+      urlStore.get(seed.documentId),
+      "A restore result must not resurrect a URL another tab deleted.",
+    ).toBeNull();
+
+    const mutation = repository.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document: seed,
+    });
+    const mutateRequest = worker.takePosted("mutate");
+    expect(
+      mutateRequest.storageKey,
+      "A write carries null when the shared URL store has no URL.",
+    ).toBeNull();
+    await answer(
+      {
+        kind: "mutated",
+        requestId: mutateRequest.requestId,
+        result: {
+          ok: true,
+          document: seed,
+          status: { kind: "restored", documentId: seed.documentId },
+          metadata: metadata("local", loadedUrl),
+        },
+      },
+      metadata("local", loadedUrl),
+    );
+    expect((await mutation).ok).toBe(true);
+    expect(urlStore.get(seed.documentId)).toBeNull();
+
+    // Another tab replaced the document.
+    urlStore.set(seed.documentId, replacedUrl);
+    for (const direction of ["undo", "redo"] as const) {
+      const pending =
+        direction === "undo"
+          ? repository.undoDurableHistory(seed.documentId, 3)
+          : repository.redoDurableHistory(seed.documentId, 3);
+      const request = worker.takePosted(
+        direction === "undo" ? "undoDurableHistory" : "redoDurableHistory",
+      );
+      expect(request.storageKey).toBe(replacedUrl);
+      await answer(
+        {
+          kind: "durableHistoryMutated",
+          requestId: request.requestId,
+          result: {
+            ok: true,
+            document: seed,
+            status: { kind: "restored", documentId: seed.documentId },
+            metadata: metadata(direction, loadedUrl),
+          },
+        },
+        metadata(direction, loadedUrl),
+      );
+      expect((await pending)?.ok).toBe(true);
+      expect(
+        urlStore.get(seed.documentId),
+        `A ${direction} result must not overwrite a URL another tab moved.`,
+      ).toBe(replacedUrl);
+    }
+
+    // A seed result is a URL this tab just created.
+    const seeding = repository.initialize({
+      documentId: seed.documentId,
+      document: seed,
+    });
+    const initializeRequest = worker.takePosted("initialize");
+    await answer(
+      {
+        kind: "mutated",
+        requestId: initializeRequest.requestId,
+        result: {
+          ok: true,
+          document: seed,
+          status: { kind: "seeded", documentId: seed.documentId },
+          metadata: metadata("seed", "automerge:seeded"),
+        },
+      },
+      metadata("seed", "automerge:seeded"),
+    );
+    expect((await seeding).ok).toBe(true);
+    expect(urlStore.get(seed.documentId)).toBe("automerge:seeded");
+  } finally {
+    client.dispose();
+  }
+
+  // Without a shared URL store the worker keeps its own URL.
+  const standaloneWorker = new FakeDocumentSyncWorker();
+  const standaloneClient = new DocumentSyncWorkerClient({
+    worker: standaloneWorker,
+  });
+  try {
+    const pending = createWorkerBackedDocumentRepository({
+      client: standaloneClient,
+    }).mutate({ documentId: seed.documentId, expected: seed, document: seed });
+    // Disposing the client below rejects the unanswered request.
+    void pending.catch(() => undefined);
+    expect(standaloneWorker.takePosted("mutate").storageKey).toBeUndefined();
+  } finally {
+    standaloneClient.dispose();
   }
 });
 

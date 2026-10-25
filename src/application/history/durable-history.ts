@@ -21,6 +21,7 @@ interface HistoryRepository {
 }
 interface HistoryModel {
   waitForPersistence(): Promise<void>;
+  waitForLocalMutations(): Promise<void>;
   trackLocalSave(work: Promise<unknown>): void;
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
   subscribeToDocumentChanges(listener: (event: { documentId: DocumentId; metadata: RepositoryMetadata }) => void): () => void;
@@ -149,6 +150,10 @@ export function createDurableHistoryService(input: {
     actionSequence?: number,
   ): Promise<DurableHistoryActionResult | null> {
     if (!documentRepository) return null;
+    // cadara-l99p: the repository sends the stored document URL with the
+    // compensation; a New or Import still in flight stores a new one, which
+    // the worker would otherwise see as another tab's replacement.
+    await modelingService.waitForLocalMutations();
     await modelingService.waitForPersistence();
     const waiter = createRepositoryChangeWaiter(documentId);
     try {

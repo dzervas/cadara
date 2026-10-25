@@ -47,7 +47,7 @@ export class WorkerBackedDocumentRepository
   ): Promise<DocumentRepositoryLoadResult> {
     const result = await this.client.load({
       ...input,
-      storageKey: this.urlStore?.get(input.documentId) ?? null,
+      storageKey: this.storageKey(input.documentId),
     });
     if (!result.ok) return this.normalizeFailure(result);
 
@@ -65,7 +65,10 @@ export class WorkerBackedDocumentRepository
   async mutate(
     input: Parameters<DocumentRepository["mutate"]>[0],
   ): Promise<DocumentRepositoryMutationResult> {
-    const result = await this.client.mutate(input);
+    const result = await this.client.mutate({
+      ...input,
+      storageKey: this.storageKey(input.documentId),
+    });
     if (!result.ok) return this.normalizeFailure(result);
 
     return this.normalizeResult(result);
@@ -155,6 +158,7 @@ export class WorkerBackedDocumentRepository
     const result = await this.client.undoDurableHistory({
       documentId,
       actionSequence,
+      storageKey: this.storageKey(documentId),
     });
     if (!result?.ok) return result ? this.normalizeFailure(result) : result;
 
@@ -168,6 +172,7 @@ export class WorkerBackedDocumentRepository
     const result = await this.client.redoDurableHistory({
       documentId,
       actionSequence,
+      storageKey: this.storageKey(documentId),
     });
     if (!result?.ok) return result ? this.normalizeFailure(result) : result;
 
@@ -284,8 +289,17 @@ export class WorkerBackedDocumentRepository
     };
   }
 
+  /** cadara-l99p: the shared URL store (localStorage) is what every tab's
+   * worker checks before writing; without one the worker keeps its own. */
+  private storageKey(documentId: DocumentId) {
+    return this.urlStore ? this.urlStore.get(documentId) : undefined;
+  }
+
+  /** Only a seed creates a URL. Writing back the URL any other result was
+   * loaded from would resurrect a pointer another tab deleted (reset) or
+   * moved (replace) since (cadara-l99p). */
   private persistMetadata(metadata: DocumentRepositoryMetadata) {
-    if (metadata.storageKey) {
+    if (metadata.source === "seed" && metadata.storageKey) {
       this.urlStore?.set(
         metadata.documentId,
         metadata.storageKey as Parameters<DocumentRepositoryUrlStore["set"]>[1],

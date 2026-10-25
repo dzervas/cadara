@@ -1297,6 +1297,74 @@ class FailingLocalFileBindingStore implements LocalFileBindingStore {
   }
 }
 
+test("the runtime mirrors the shared URL store sent with load, mutate, undo and redo before the repository runs (cadara-l99p)", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const repository = createMemoryDocumentRepository();
+  const repositoryUrlStore = new MemoryDocumentRepositoryUrlStore();
+  const seen: (string | null)[] = [];
+  const observe =
+    <A extends unknown[], R>(call: (...args: A) => R) =>
+    (...args: A) => {
+      seen.push(repositoryUrlStore.get(seed.documentId));
+      return call(...args);
+    };
+  repository.load = observe(repository.load.bind(repository));
+  repository.mutate = observe(repository.mutate.bind(repository));
+  repository.undoDurableHistory = observe(
+    repository.undoDurableHistory.bind(repository),
+  );
+  repository.redoDurableHistory = observe(
+    repository.redoDurableHistory.bind(repository),
+  );
+  const handler = createDocumentSyncWorkerMessageHandler(
+    { repository, repositoryUrlStore },
+    () => undefined,
+  );
+  const base = {
+    requestId: "request_l99p" as const,
+    documentId: seed.documentId,
+  };
+  await handler({
+    ...base,
+    kind: "load",
+    seedDocument: seed,
+    storageKey: "automerge:a",
+  });
+  // A load without a URL means the shared store has none (another tab reset).
+  await handler({
+    ...base,
+    kind: "load",
+    seedDocument: seed,
+    storageKey: null,
+  });
+  const write = {
+    ...base,
+    kind: "mutate" as const,
+    expected: seed,
+    document: seed,
+  };
+  await handler({ ...write, storageKey: "automerge:b" });
+  await handler({ ...write, storageKey: null });
+  await handler({
+    ...base,
+    kind: "undoDurableHistory",
+    storageKey: "automerge:c",
+  });
+  await handler({ ...base, kind: "redoDurableHistory", storageKey: null });
+  // No shared store at all: the worker keeps its own URL.
+  repositoryUrlStore.set(seed.documentId, "automerge:own");
+  await handler({ ...write });
+  expect(seen).toEqual([
+    "automerge:a",
+    null,
+    "automerge:b",
+    null,
+    "automerge:c",
+    null,
+    "automerge:own",
+  ]);
+});
+
 class MemoryDocumentRepositoryUrlStore implements DocumentRepositoryUrlStore {
   values = new Map<string, string>();
   deleted: string[] = [];

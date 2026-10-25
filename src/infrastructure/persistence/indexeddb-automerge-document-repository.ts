@@ -109,6 +109,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     Set<(event: DocumentRepositoryChangeEvent) => void>
   >();
   private readonly localChanges = new Set<DocumentId>();
+  /** Released by releaseSupersededHandle until a load or initialize installs a handle. */
+  private readonly supersededDocuments = new Set<DocumentId>();
   private readonly queues = new Map<DocumentId, Promise<unknown>>();
   private readonly options: IndexedDbAutomergeDocumentRepositoryOptions;
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
@@ -160,6 +162,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     return this.enqueue(input.documentId, async () => {
       try {
         const repo = await this.getRepo();
+        // Never flushes a released handle's pending durability retry.
+        this.releaseSupersededHandle(input.documentId);
         const existing = this.handles.get(input.documentId);
         const url = this.urlStore.get(input.documentId);
         if (!existing && !url)
@@ -274,6 +278,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     input: Parameters<DocumentRepository["mutate"]>[0],
   ): Promise<DocumentRepositoryMutationResult> {
     return this.enqueue(input.documentId, async () => {
+      if (this.releaseSupersededHandle(input.documentId))
+        return this.superseded(input.documentId);
       const unresolved = this.durabilityFailures.get(input.documentId);
       if (unresolved) return { ok: false, status: unresolved };
       const parsed = parseAuthoredModelDocument(
@@ -454,9 +460,11 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
-      (await this.getDurableHistoryAvailability(documentId)).canUndo
-        ? this.transact(documentId, "undo", undefined, actionSequence)
-        : null,
+      this.releaseSupersededHandle(documentId)
+        ? this.superseded(documentId)
+        : (await this.getDurableHistoryAvailability(documentId)).canUndo
+          ? this.transact(documentId, "undo", undefined, actionSequence)
+          : null,
     );
   }
   redoDurableHistory(
@@ -464,15 +472,53 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult | null> {
     return this.enqueue(documentId, async () =>
-      (await this.getDurableHistoryAvailability(documentId)).canRedo
-        ? this.transact(documentId, "redo", undefined, actionSequence)
-        : null,
+      this.releaseSupersededHandle(documentId)
+        ? this.superseded(documentId)
+        : (await this.getDurableHistoryAvailability(documentId)).canRedo
+          ? this.transact(documentId, "redo", undefined, actionSequence)
+          : null,
     );
+  }
+  /**
+   * cadara-l99p: every tab's worker has its own Repo over one IndexedDB
+   * database, and automerge-repo tells no other tab about a delete. The URL
+   * store, which each request refreshes from the tabs' shared localStorage,
+   * is the pointer they share: a reset deletes it and a replace (initialize)
+   * moves it. Writing a handle it no longer points at would leave changes
+   * without their deleted snapshot (incomplete storage, CADARA-14) or edit
+   * a replaced document, so such a handle is dropped unwritten, like reset()
+   * drops it but without deleting anything. Returns whether the handle was
+   * released, now or by an earlier request: later writes keep the superseded
+   * refusal, not "Load or initialize the document before editing."
+   */
+  private releaseSupersededHandle(documentId: DocumentId) {
+    const handle = this.handles.get(documentId);
+    if (!handle || handle.url === this.urlStore.get(documentId))
+      return this.supersededDocuments.has(documentId);
+    this.supersededDocuments.add(documentId);
+    this.handles.delete(documentId);
+    this.actions.delete(documentId);
+    this.metadata.delete(documentId);
+    this.publishedEvents.delete(documentId);
+    this.durabilityFailures.delete(documentId);
+    this.publicationVersions.set(
+      documentId,
+      (this.publicationVersions.get(documentId) ?? 0) + 1,
+    );
+    return true;
+  }
+  private superseded(documentId: DocumentId) {
+    return this.fail(documentId, {
+      reasonCode: "automerge-document-superseded",
+      message:
+        "This document was reset or replaced in another tab, so this tab can no longer save to it. Reload the tab to open the stored version.",
+    });
   }
   private install(
     documentId: DocumentId,
     handle: AutomergeHandleLike<CollaborativeDocument>,
   ) {
+    this.supersededDocuments.delete(documentId);
     if (this.handles.get(documentId) === handle) return;
     this.handles.set(documentId, handle);
     this.publicationVersions.set(
