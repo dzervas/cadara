@@ -22,6 +22,7 @@ import {
   createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
   createProjectedPickCandidate,
+  dropFaceHiddenProjectedVertexCandidates,
   getVisibleMarkerRadius,
   getWorldUnitsPerPixelAt,
   intersectObjectsWithLinePickRadius,
@@ -1091,7 +1092,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       renderable: vertexRenderable,
       semanticClass: "featureVertex",
       priority: vertexRenderable.binding.pickPriority,
-      screenDistance: 40,
+      screenDistance: 15,
       depth: 0.4,
     });
 
@@ -1103,7 +1104,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
     assertDeepEqual(
       resolved?.target,
       vertexRenderable.binding.target,
-      "Unified picking must prefer an in-radius projected vertex over a raycast face.",
+      "Unified picking must prefer a projected vertex within the line band over a raycast face.",
     );
   }
 
@@ -1711,4 +1712,154 @@ test("document material factories preserve tint and honour context alpha", () =>
       material.dispose();
     }
   }
+});
+
+// cadara-1lzw. Lane: ui (docs/testing.md: `src/infrastructure/viewport`;
+// a pure resolver seam: candidate filtering and ordering, real three.js
+// meshes and cameras, no DOM). Seams: the part-mode
+// occlusion of projected feature vertices
+// (`dropFaceHiddenProjectedVertexCandidates`) and their reach over a face in
+// `resolveAllCandidates`. The fixture is a 20 × 20 slab's top (z = 8) and
+// bottom (z = 0) faces, as the wheel's disk seen from a view-cube corner.
+
+/** A bodyFace quad of the slab at height `z`, bound for picking. */
+function boundSlabFace(faceId: `face_${string}`, z: number) {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(20, 20).translate(0, 0, z),
+    new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+  );
+  mesh.updateMatrixWorld();
+  bindRenderableObject(
+    mesh,
+    `pick_${faceId}`,
+    { kind: "face", bodyId: "body_slab", faceId },
+    "bodyFace",
+    "document",
+  );
+  return mesh;
+}
+
+/** A raycast hit on `object` at ray distance `distance`. */
+function rayHitOn(object: THREE.Object3D, distance: number) {
+  return { distance, object, point: new THREE.Vector3() };
+}
+
+/** A projected feature-vertex candidate of the slab at `position`. */
+function slabVertexCandidate(
+  vertexId: `vertex_${string}`,
+  position: readonly [number, number, number],
+  screenDistance: number,
+) {
+  const target = { kind: "vertex", bodyId: "body_slab", vertexId } as const;
+  return createProjectedPickCandidate({
+    pickId: `pick_${vertexId}`,
+    target,
+    renderable: {
+      id: `renderable_${vertexId}`,
+      label: vertexId,
+      ownerBodyId: "body_slab",
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${vertexId}`,
+        pickPriority: 0,
+        target,
+        topology: "vertex",
+        semanticClass: "featureVertex",
+      },
+      geometry: { kind: "marker", position, displayRadius: 0.25 },
+    },
+    semanticClass: "featureVertex",
+    priority: 0,
+    screenDistance,
+    depth: 0,
+  });
+}
+
+/** A camera looking at the slab from the frontRightTop view-cube corner. */
+function cornerCameras() {
+  const position = new THREE.Vector3(1, -1, 1).multiplyScalar(40);
+  const orthographic = new THREE.OrthographicCamera(
+    -24,
+    24,
+    16,
+    -16,
+    0.1,
+    1000,
+  );
+  const perspective = new THREE.PerspectiveCamera(45, 1.5, 0.1, 1000);
+  return [orthographic, perspective].map((camera) => {
+    camera.up.set(0, 0, 1);
+    camera.position.copy(position);
+    camera.lookAt(0, 0, 4);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    return camera;
+  });
+}
+
+test("cadara-1lzw: a projected feature vertex a body face hides is dropped; one on a visible face's boundary stays", () => {
+  const top = boundSlabFace("face_top", 8);
+  const bottom = boundSlabFace("face_bottom", 0);
+  const faceHit = collectRaycastPickCandidates([rayHitOn(top, 60)]);
+  const candidates = [
+    ...faceHit,
+    // Under the top face's middle: hidden from every top corner.
+    slabVertexCandidate("vertex_under_top", [0, 0, 0], 10),
+    // The top face's far corner: on its boundary, visible.
+    slabVertexCandidate("vertex_top_corner", [-10, 10, 8], 10),
+    // Above the top face: nothing in front of it.
+    slabVertexCandidate("vertex_above_top", [0, 0, 12], 10),
+  ];
+
+  for (const camera of cornerCameras()) {
+    const kept = dropFaceHiddenProjectedVertexCandidates({
+      candidates,
+      objects: [top, bottom],
+      camera,
+      layers: new THREE.Layers(),
+    });
+    expect(
+      kept.map((candidate) => candidate.stableKey),
+      `${camera.type}: only the vertex under the top face is dropped`,
+    ).toEqual(
+      candidates
+        .filter((candidate) => candidate.pickId !== "pick_vertex_under_top")
+        .map((candidate) => candidate.stableKey),
+    );
+    expect(
+      dropFaceHiddenProjectedVertexCandidates({
+        candidates,
+        objects: [bottom],
+        camera,
+        layers: new THREE.Layers(),
+      }),
+      `${camera.type}: without the top face nothing hides the vertices`,
+    ).toEqual(candidates);
+  }
+});
+
+test("cadara-1lzw: over a pickable face a projected vertex wins only within the 21 px line band; off a face it keeps its 48 px reach", () => {
+  const top = boundSlabFace("face_top", 8);
+  const faceHit = collectRaycastPickCandidates([rayHitOn(top, 60)]);
+  const edgeHit = collectRaycastPickCandidates([
+    rayHitOn(boundCurve("rim", 0), 60),
+  ]);
+  const at = (screenDistance: number) =>
+    slabVertexCandidate("vertex_top_corner", [-10, 10, 8], screenDistance);
+  const kindOf = (
+    candidates: Parameters<typeof resolveAllCandidates>[0],
+    acceptsTarget: Parameters<typeof resolveAllCandidates>[1] = null,
+  ) => resolveAllCandidates(candidates, acceptsTarget)?.target.kind;
+
+  expect(DEFAULT_LINE_PICK_RADIUS_PX).toBe(21);
+  expect(kindOf([...faceHit, at(30)]), "30 px over the face").toBe("face");
+  expect(kindOf([...faceHit, at(20)]), "20 px over the face").toBe("vertex");
+  expect(kindOf([at(30)]), "30 px in blank space").toBe("vertex");
+  expect(kindOf([...edgeHit, at(30)]), "30 px over an edge only").toBe(
+    "vertex",
+  );
+  expect(
+    kindOf([...faceHit, at(30)], (target) => target.kind === "vertex"),
+    "30 px over a face the selection filter rejects",
+  ).toBe("vertex");
 });

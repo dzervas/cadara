@@ -130,6 +130,7 @@ import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/sch
 import {
   collectBindings,
   collectRaycastPickCandidates,
+  dropFaceHiddenProjectedVertexCandidates,
   type CollectedBindings,
   intersectObjectsWithLinePickRadius,
   isSeededDatumPlaneRenderable,
@@ -2265,7 +2266,16 @@ function ThreeCadViewportScene({
       if (!sketchSession || !sketchDisplayDefinition) {
         return {
           top: resolveAllCandidates(
-            candidates,
+            // Part mode: no feature vertex is picked through a body face
+            // (cadara-1lzw).
+            dropFaceHiddenProjectedVertexCandidates({
+              candidates,
+              objects: bindings.pickables,
+              camera,
+              layers: raycasterRef.current.layers,
+              wireOcclusionTolerance:
+                pickTuning.resolutionOptions.wireOcclusionTolerance,
+            }),
             acceptsViewportTarget,
             pickTuning.resolutionOptions,
           ),

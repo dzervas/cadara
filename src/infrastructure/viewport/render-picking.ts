@@ -104,7 +104,10 @@ export const DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX =
 /**
  * Projected feature (model) vertex radii: in sketch mode they are reference
  * points beside sketch points and use the sketch point radii (T11c review
- * ADV-3); part mode keeps 48/56 px.
+ * ADV-3); part mode keeps 48/56 px, except over a pickable face, where
+ * `resolveAllCandidates` limits them to `DEFAULT_LINE_PICK_RADIUS_PX`
+ * (21 px, the uncapped line-band radius) in every part-mode tool, Measure
+ * included (cadara-1lzw).
  */
 export function getProjectedFeatureVertexPickRadii(inSketchSession: boolean) {
   return inSketchSession
@@ -444,6 +447,116 @@ export function shouldIncludeProjectedPickCandidate({
   return screenDistance <= radius;
 }
 
+/**
+ * Drops the projected feature-vertex candidates a body face hides
+ * (cadara-1lzw). A projected vertex is picked within a screen radius of the
+ * pointer, not on the pointer ray, so the pointer's raycast cannot occlude
+ * it, and it outranks any raycast face; without this, vertices behind a
+ * body (e.g. a disk's bottom rim, seen through its top face from an oblique
+ * camera) were picked through it. Each vertex is raycast along its own
+ * camera ray against the body face meshes in `objects`; it is hidden when a
+ * face lies more than `wireOcclusionTolerance` in front of it (the tolerance
+ * edges get against the face under the pointer), so vertices on the
+ * boundary of a visible face stay. Other candidates pass unchanged.
+ */
+export function dropFaceHiddenProjectedVertexCandidates(input: {
+  candidates: readonly PickCandidate[];
+  objects: readonly THREE.Object3D[];
+  camera: ViewportCamera;
+  layers: THREE.Layers;
+  wireOcclusionTolerance?: number;
+}): PickCandidate[] {
+  const tolerance =
+    input.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE;
+  const raycaster = new THREE.Raycaster();
+  raycaster.layers.mask = input.layers.mask;
+  // three-mesh-bvh: the nearest hit per mesh is enough here.
+  (raycaster as THREE.Raycaster & { firstHitOnly?: boolean }).firstHitOnly =
+    true;
+  const hits: THREE.Intersection<THREE.Object3D>[] = [];
+  const point = new THREE.Vector3();
+  const pointer = new THREE.Vector2();
+  // World bounding spheres, computed once: three's Mesh.raycast would
+  // re-derive each per call, which dominates on models with thousands of
+  // faces (cadara-1lzw review).
+  let faceMeshes: { mesh: THREE.Mesh; sphere: THREE.Sphere }[] | null = null;
+  const collectFaceMeshes = () => {
+    const meshes = new Set<THREE.Mesh>();
+    const visit = (object: THREE.Object3D) => {
+      if (
+        object instanceof THREE.Mesh &&
+        object.layers.test(raycaster.layers) &&
+        !getBoundPickExcluded(object)
+      ) {
+        const semanticClass = getBoundSemanticClass(object);
+
+        if (semanticClass && isOccludingFaceSemanticClass(semanticClass)) {
+          meshes.add(object);
+        }
+      }
+
+      object.children.forEach(visit);
+    };
+    input.objects.forEach(visit);
+    return [...meshes].map((mesh) => {
+      if (!mesh.geometry.boundingSphere) {
+        mesh.geometry.computeBoundingSphere();
+      }
+
+      return {
+        mesh,
+        sphere: mesh.geometry
+          .boundingSphere!.clone()
+          .applyMatrix4(mesh.matrixWorld),
+      };
+    });
+  };
+  const isFaceHit = ({
+    mesh,
+    sphere,
+  }: {
+    mesh: THREE.Mesh;
+    sphere: THREE.Sphere;
+  }) => {
+    if (
+      !raycaster.ray.intersectsSphere(sphere) ||
+      raycaster.ray.origin.distanceTo(sphere.center) - sphere.radius >
+        raycaster.far
+    ) {
+      return false;
+    }
+
+    hits.length = 0;
+    mesh.raycast(raycaster, hits);
+    return hits.length > 0;
+  };
+
+  return input.candidates.filter((candidate) => {
+    const geometry = candidate.renderable?.geometry;
+
+    if (
+      candidate.source !== "projected" ||
+      candidate.semanticClass !== "featureVertex" ||
+      geometry?.kind !== "marker"
+    ) {
+      return true;
+    }
+
+    point.set(...geometry.position);
+    const ndc = point.clone().project(input.camera);
+    raycaster.setFromCamera(pointer.set(ndc.x, ndc.y), input.camera);
+    raycaster.near = 0;
+    // Any face hit nearer than this hides the vertex.
+    raycaster.far =
+      point.sub(raycaster.ray.origin).dot(raycaster.ray.direction) -
+      tolerance -
+      PICK_DISTANCE_EPSILON;
+
+    faceMeshes ??= collectFaceMeshes();
+    return raycaster.far <= 0 || !faceMeshes.some(isFaceHit);
+  });
+}
+
 export function resolveAllCandidates(
   candidates: PickCandidate[],
   acceptsTarget: ((target: PrimitiveRef) => boolean) | null = null,
@@ -464,6 +577,18 @@ export function resolveAllCandidates(
 
   const nearestOccludingFaceDistance =
     getNearestOccludingFaceDistance(resolvedHits);
+  // cadara-1lzw: over a pickable face, a projected feature vertex wins only
+  // within `DEFAULT_LINE_PICK_RADIUS_PX` (21 px, the uncapped line-band
+  // radius; the actual edge band can be narrower: world cap, Measure's
+  // 3.4 px), not its 48 px off-body radius, so the face between a face's
+  // corners stays pickable. Applies to every tool, Measure included.
+  const isOverPickableFace = resolvedHits.some(
+    (hit) =>
+      hit.source === "raycast" &&
+      isOccludingFaceSemanticClass(hit.semanticClass) &&
+      hit.rayDistance === nearestOccludingFaceDistance &&
+      getAcceptedPickTarget(hit, acceptsTarget) !== null,
+  );
 
   for (const hit of resolvedHits) {
     if (
@@ -472,7 +597,11 @@ export function resolveAllCandidates(
         nearestOccludingFaceDistance,
         wireOcclusionTolerance,
         isWireSemanticClass,
-      )
+      ) ||
+      (isOverPickableFace &&
+        hit.source === "projected" &&
+        hit.semanticClass === "featureVertex" &&
+        getSortableScreenDistance(hit) > DEFAULT_LINE_PICK_RADIUS_PX)
     ) {
       continue;
     }
