@@ -287,3 +287,287 @@ test("undo and redo of a feature relabel on the landing wheel run no feature and
     service.dispose();
   }
 }, 900_000);
+
+// cadara-8dai: a relabel falls back to a rebuild only when a diagnostic can
+// name the relabelled feature or sketch, so one unrelated diagnostic no longer
+// costs every relabel a rebuild. Either way the diagnostics read as a cold
+// rebuild (a reopen of the exported document) words them.
+
+/** The landing wheel with one change, as `change` makes it. */
+async function readWheelWith(
+  change: (document: AuthoredModelDocument) => void,
+) {
+  const document = await readWheel();
+  change(document);
+  return document;
+}
+
+const feature = (document: AuthoredModelDocument, featureId: string) =>
+  document.features.find((entry) => entry.featureId === featureId)!;
+
+/** Extrude 26 joins a body no feature makes: one diagnostic, of a feature
+ * that does not name Extrude 2 or sketch_cab48b16 (Extrude 1's sketch), but
+ * builds from sketch_abf31fd2 (Extrude 26's sketch). */
+const withUnrelatedDiagnostic = (document: AuthoredModelDocument) => {
+  const definition = feature(document, "feature_extrude-26").definition;
+  if (
+    definition.kind !== "extrude" ||
+    definition.parameters.resultBodyType !== "solid"
+  ) {
+    throw new Error("Extrude 26 is no longer a solid extrude");
+  }
+  definition.parameters.booleanScope = {
+    kind: "targetBody",
+    bodyId: "body_feature_missing-8dai",
+  };
+};
+
+/** The diagnostics without revision stamps or topology tokens. */
+const diagnosticsOf = (snapshot: WorkspaceSnapshot) =>
+  liveModel(snapshot).diagnostics;
+
+test("relabels on a wheel with an unrelated feature diagnostic run no feature, and a relabel of a sketch the failed feature builds from rebuilds; both read as a cold rebuild", async () => {
+  const wheel = await open(await readWheelWith(withUnrelatedDiagnostic));
+  const before = await wheel.snapshot();
+  expect(
+    before.document.diagnostics.map((diagnostic) => diagnostic.featureId),
+    "premise: the wheel holds one diagnostic, of Extrude 26",
+  ).toEqual(["feature_extrude-26"]);
+  expect(
+    before.document.diagnostics[0]!.message,
+    "premise: it names its own feature",
+  ).toContain("Extrude 26");
+
+  featureRuns.count = 0;
+  await wheel.renameFeature("feature_extrude-2", "Relabelled feature");
+  await wheel.renameSketch(
+    "sketch_cab48b16-6c10-4afb-9a5d-92b0eccca249",
+    "Relabelled sketch",
+  );
+  expect(featureRuns.count, "an unrelated diagnostic forces no rebuild").toBe(
+    0,
+  );
+  const relabelled = await wheel.snapshot();
+  const cold = await open(await wheel.exported());
+  expect(
+    liveModel(await cold.snapshot()),
+    "the in-place relabels equal a cold rebuild, diagnostics included",
+  ).toEqual(liveModel(relabelled));
+  cold.adapter.dispose();
+
+  featureRuns.count = 0;
+  const sketchRelabel = await wheel.adapter.renameSketch({
+    contractVersion: CONTRACT_VERSION,
+    documentId: relabelled.document.documentId,
+    baseRevisionId: relabelled.document.revisionId,
+    sketchId: "sketch_abf31fd2-2293-4e50-8684-ee483704a665",
+    sketchLabel: "Relabelled profile sketch",
+  });
+  expect(sketchRelabel.revisionState.kind).toBe("accepted");
+  expect(
+    featureRuns.count,
+    "a diagnostic of a feature building from the sketch can name it: rebuild",
+  ).toBeGreaterThan(0);
+  const rebuilt = await wheel.snapshot();
+  const coldAgain = await open(await wheel.exported());
+  expect(diagnosticsOf(await coldAgain.snapshot())).toEqual(
+    diagnosticsOf(rebuilt),
+  );
+  coldAgain.adapter.dispose();
+
+  featureRuns.count = 0;
+  const ownRelabel = await wheel.adapter.renameFeature({
+    contractVersion: CONTRACT_VERSION,
+    documentId: rebuilt.document.documentId,
+    baseRevisionId: rebuilt.document.revisionId,
+    featureId: "feature_extrude-26",
+    featureLabel: "Relabelled failing feature",
+  });
+  expect(ownRelabel.revisionState.kind).toBe("accepted");
+  expect(
+    featureRuns.count,
+    "a feature's own diagnostic names it: rebuild",
+  ).toBeGreaterThan(0);
+  const ownRebuilt = await wheel.snapshot();
+  expect(
+    ownRebuilt.document.diagnostics.map((diagnostic) => [
+      diagnostic.message,
+      diagnostic.repairGuidance,
+    ]),
+  ).toEqual([
+    [
+      "Relabelled failing feature boolean target is incorrect.",
+      "Edit Relabelled failing feature and choose a valid boolean target.",
+    ],
+  ]);
+  const coldOwn = await open(await wheel.exported());
+  expect(
+    liveModel(await coldOwn.snapshot()),
+    "the relabel equals a cold rebuild, diagnostics included",
+  ).toEqual(liveModel(ownRebuilt));
+  coldOwn.adapter.dispose();
+  wheel.adapter.dispose();
+}, 900_000);
+
+/** Extrude 26's sketch gains a constraint on an entity it does not hold: the
+ * sketch is invalid, and Extrude 26's diagnostic names it by label. */
+const withInvalidProfileSketch = (document: AuthoredModelDocument) => {
+  const sketch = document.sketches.find(
+    (entry) => entry.sketchId === "sketch_abf31fd2-2293-4e50-8684-ee483704a665",
+  )!;
+  const constraint = structuredClone(sketch.definition.constraints[0]!);
+  if (constraint.kind !== "equalLength") {
+    throw new Error(
+      "the sketch no longer starts with an equal-length constraint",
+    );
+  }
+  constraint.constraintId = "constraint_missing-entity-8dai";
+  constraint.entityIds = [
+    constraint.entityIds[0]!,
+    "sketch_entity_missing-8dai",
+  ];
+  sketch.definition.constraints.push(constraint);
+  sketch.definition.constraintIds.push(constraint.constraintId);
+};
+
+test("relabelling a sketch a diagnostic names rebuilds, and the diagnostic names the new label as a cold rebuild does", async () => {
+  const wheel = await open(await readWheelWith(withInvalidProfileSketch));
+  const before = await wheel.snapshot();
+  expect(
+    before.document.diagnostics.map((diagnostic) => [
+      diagnostic.featureId,
+      diagnostic.message,
+    ]),
+    "premise: Extrude 26 waits for its invalid sketch, which it names",
+  ).toEqual([
+    [
+      "feature_extrude-26",
+      "Extrude 26 profile region waits for Sketch Draft, whose derived output is invalid.",
+    ],
+  ]);
+
+  featureRuns.count = 0;
+  const response = await wheel.adapter.renameSketch({
+    contractVersion: CONTRACT_VERSION,
+    documentId: before.document.documentId,
+    baseRevisionId: before.document.revisionId,
+    sketchId: "sketch_abf31fd2-2293-4e50-8684-ee483704a665",
+    sketchLabel: "Relabelled profile sketch",
+  });
+  expect(response.revisionState.kind).toBe("accepted");
+  expect(
+    featureRuns.count,
+    "the diagnostic names the sketch: rebuild",
+  ).toBeGreaterThan(0);
+  const relabelled = await wheel.snapshot();
+  expect(
+    relabelled.document.diagnostics.map((diagnostic) => diagnostic.message),
+  ).toEqual([
+    "Extrude 26 profile region waits for Relabelled profile sketch, whose derived output is invalid.",
+  ]);
+  const cold = await open(await wheel.exported());
+  expect(
+    liveModel(await cold.snapshot()),
+    "the relabel equals a cold rebuild, diagnostics included",
+  ).toEqual(liveModel(relabelled));
+  cold.adapter.dispose();
+  wheel.adapter.dispose();
+}, 900_000);
+
+test("relabelling a suppressed feature whose dependents are blocked rebuilds, and their diagnostics name the new label as a cold rebuild does", async () => {
+  const wheel = await open(
+    await readWheelWith((document) => {
+      feature(document, "feature_extrude-5").suppressed = true;
+    }),
+  );
+  const before = await wheel.snapshot();
+  const blocked = before.document.diagnostics.filter(
+    (diagnostic) => diagnostic.code === "feature-dependency-blocked",
+  );
+  expect(
+    blocked.map((diagnostic) => diagnostic.repairGuidance),
+    "premise: Extrude 25 and 26 join Extrude 5's body and are blocked by it; Extrude 29 is blocked by Extrude 25",
+  ).toEqual([
+    "Repair Extrude 5, then rebuild Extrude 25.",
+    "Repair Extrude 5, then rebuild Extrude 26.",
+    "Repair Extrude 25, then rebuild Extrude 29.",
+  ]);
+  expect(
+    before.document.diagnostics.filter(
+      (diagnostic) => diagnostic.featureId === "feature_extrude-5",
+    ),
+    "premise: the suppressed feature has no diagnostic of its own",
+  ).toEqual([]);
+
+  featureRuns.count = 0;
+  await wheel.renameFeature("feature_extrude-5", "Relabelled feature");
+  expect(
+    featureRuns.count,
+    "a dependency-blocked diagnostic names the blocking feature: rebuild",
+  ).toBeGreaterThan(0);
+  const relabelled = await wheel.snapshot();
+  expect(
+    relabelled.document.diagnostics
+      .filter((diagnostic) => diagnostic.code === "feature-dependency-blocked")
+      .map((diagnostic) => diagnostic.repairGuidance),
+  ).toEqual([
+    "Repair Relabelled feature, then rebuild Extrude 25.",
+    "Repair Relabelled feature, then rebuild Extrude 26.",
+    "Repair Extrude 25, then rebuild Extrude 29.",
+  ]);
+  const cold = await open(await wheel.exported());
+  expect(
+    liveModel(await cold.snapshot()),
+    "the relabel equals a cold rebuild, diagnostics included",
+  ).toEqual(liveModel(relabelled));
+  cold.adapter.dispose();
+  wheel.adapter.dispose();
+}, 900_000);
+
+test("undo and redo of a feature relabel on a wheel with an unrelated feature diagnostic run no feature and restore no document", async () => {
+  const source = await readWheelWith(withUnrelatedDiagnostic);
+  const adapter = createAdapter(source);
+  const repository = createMemoryDocumentRepository([source]);
+  const service = createModelingService(adapter, {
+    currentDocumentId: source.documentId,
+    documentRepository: repository,
+  });
+  try {
+    const initial = await service.getCurrentDocumentSnapshot();
+    expect(
+      initial.document.diagnostics.map((diagnostic) => diagnostic.featureId),
+      "premise: the wheel holds one diagnostic, of Extrude 26",
+    ).toEqual(["feature_extrude-26"]);
+    const label = async () =>
+      (await service.getCurrentDocumentSnapshot()).document.features.find(
+        (entry) => entry.featureId === "feature_extrude-2",
+      )!.label;
+    const restore = vi.spyOn(adapter, "restoreAuthoredModelDocument");
+    featureRuns.count = 0;
+
+    const renamed = await service.renameFeature({
+      baseRevisionId: initial.document.revisionId,
+      featureId: "feature_extrude-2",
+      featureLabel: "Relabelled feature",
+    });
+    expect(renamed.isOk()).toBe(true);
+    await service.waitForPersistence();
+    expect(await label()).toBe("Relabelled feature");
+    expect((await repository.undoDurableHistory(source.documentId))?.ok).toBe(
+      true,
+    );
+    expect(await label()).toBe("Extrude 2");
+    expect((await repository.redoDurableHistory(source.documentId))?.ok).toBe(
+      true,
+    );
+    expect(await label()).toBe("Relabelled feature");
+
+    expect(featureRuns.count, "no feature runs again").toBe(0);
+    expect(restore).not.toHaveBeenCalled();
+    expect(
+      liveModel(await service.getCurrentDocumentSnapshot()).diagnostics,
+    ).toEqual(liveModel(initial).diagnostics);
+  } finally {
+    service.dispose();
+  }
+}, 900_000);

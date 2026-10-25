@@ -686,7 +686,8 @@ export function renameOccAuthoringStateBody(
  * feature runs again. Bodies named after the feature keep their names, as in a
  * rebuild: those names entered `bodyLabels` when the bodies were first
  * evaluated. References name a feature by its id. Rebuild diagnostics name
- * features by label, so a caller relabels in place only a state without them.
+ * features by label, so a caller relabels in place only a state none of whose
+ * diagnostics names the feature.
  */
 export function renameOccAuthoringStateFeature(
   state: OccAuthoringState,
@@ -712,8 +713,8 @@ export function renameOccAuthoringStateFeature(
  * label (cadara-kv69): the sketch is not solved again and no feature runs
  * again. The features' checkpoints still hold the previous record, which
  * countUnchangedCheckpointFeatures accepts as unchanged. Rebuild diagnostics
- * name sketches by label, so a caller relabels in place only a state without
- * them.
+ * name sketches by label, so a caller relabels in place only a state none of
+ * whose diagnostics names the sketch.
  */
 export function renameOccAuthoringStateSketch(
   state: OccAuthoringState,

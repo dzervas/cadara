@@ -1707,11 +1707,63 @@ function getPersistentAuthoringDiagnostics(
   return diagnostics.filter((diagnostic) => diagnostic.featureId == null);
 }
 
-/** Whether `state` holds diagnostics its last rebuild made, whose messages
- * name features and sketches by label (cadara-kv69): a relabel then rebuilds
- * instead of changing the label in place. */
-function hasRebuildDiagnostics(state: OccAuthoringState) {
-  return state.diagnostics.some((diagnostic) => diagnostic.featureId != null);
+/** The features whose definition names `id`, a feature or sketch id,
+ * directly or through another such feature: a feature replaying another one
+ * evaluates that feature's sketches too. */
+function getFeaturesDependingOn(
+  features: readonly OccAuthoringFeatureRecord[],
+  id: FeatureId | SketchId,
+) {
+  const definitions = features.map(
+    (feature) =>
+      [feature.featureId, JSON.stringify(feature.definition)] as const,
+  );
+  const dependents = new Set<FeatureId>();
+  const named: string[] = [id];
+  for (let index = 0; index < named.length; index += 1) {
+    const quoted = `"${named[index]}"`;
+    for (const [featureId, definition] of definitions) {
+      if (
+        featureId !== id &&
+        !dependents.has(featureId) &&
+        definition.includes(quoted)
+      ) {
+        dependents.add(featureId);
+        named.push(featureId);
+      }
+    }
+  }
+  return dependents;
+}
+
+/** Whether a diagnostic of `state`'s last rebuild can name `target` by its
+ * label (cadara-kv69, narrowed in cadara-8dai), so a relabel rebuilds instead
+ * of changing the label in place. A feature diagnostic names its own feature
+ * (feature-diagnostic-mapping), a dependency-blocked one also the feature
+ * blocking it, and a profile failure the sketch it builds from. A diagnostic
+ * of a feature names a sketch or another feature only when its definition
+ * reaches it, or, for a dependency-blocked diagnostic, when it lists that
+ * feature as its blocker in `affectedFeatureIds`. Any other diagnostic reads
+ * the same after a rebuild. */
+function hasRebuildDiagnosticNaming(
+  state: OccAuthoringState,
+  target:
+    | { kind: "feature"; featureId: FeatureId }
+    | { kind: "sketch"; sketchId: SketchId },
+) {
+  const attributed = getFeaturesDependingOn(
+    state.features,
+    target.kind === "feature" ? target.featureId : target.sketchId,
+  );
+  if (target.kind === "feature") attributed.add(target.featureId);
+  return state.diagnostics.some(
+    (diagnostic) =>
+      (diagnostic.featureId != null && attributed.has(diagnostic.featureId)) ||
+      (target.kind === "feature" &&
+        diagnostic.code === "feature-dependency-blocked" &&
+        diagnostic.detail?.kind === "rebuildFailure" &&
+        diagnostic.detail.affectedFeatureIds.includes(target.featureId)),
+  );
 }
 
 function mergeModelingDiagnostics(
@@ -5960,7 +6012,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ),
       });
     }
-    if (hasRebuildDiagnostics(runtimeState.authoringState)) {
+    if (
+      hasRebuildDiagnosticNaming(runtimeState.authoringState, {
+        kind: "feature",
+        featureId: request.featureId,
+      })
+    ) {
       return this.updateFeatureSerialized({
         ...request,
         definition: feature.definition,
@@ -6026,7 +6083,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ),
       });
     }
-    if (hasRebuildDiagnostics(runtimeState.authoringState)) {
+    if (
+      hasRebuildDiagnosticNaming(runtimeState.authoringState, {
+        kind: "sketch",
+        sketchId: request.sketchId,
+      })
+    ) {
       return this.commitSketchSerialized({
         contractVersion: request.contractVersion,
         documentId: request.documentId,
