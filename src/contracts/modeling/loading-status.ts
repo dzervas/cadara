@@ -8,16 +8,19 @@ export type LoadingPhase =
 /**
  * Measured progress within the current phase, reported only at real producer
  * boundaries (cadara-ku5k): the kernel's feature rebuild during a document
- * restore posts one update before each feature it evaluates.
+ * restore posts one update before each feature it evaluates, and a slow
+ * kernel wasm download reports decoded bytes (cadara-5hlf).
  */
-export interface LoadingProgress {
-  stage: "rebuilding-features";
-  /** Features evaluated so far (failed and suppressed ones included). */
-  completed: number;
-  total: number;
-  /** The feature evaluated next; null once all are done. */
-  label: string | null;
-}
+export type LoadingProgress =
+  | {
+      stage: "rebuilding-features";
+      /** Features evaluated so far (failed and suppressed ones included). */
+      completed: number;
+      total: number;
+      /** The feature evaluated next; null once all are done. */
+      label: string | null;
+    }
+  | { stage: "downloading-engine"; completed: number; total: number; label: null };
 
 export interface LoadingStatusSource {
   getSnapshot(): LoadingPhase;
@@ -75,7 +78,7 @@ export function createLoadingStatus(initial: LoadingPhase) {
       ) {
         return;
       }
-      progress = { stage: next.stage, completed, total, label: next.label };
+      progress = { ...next, completed, total };
       notify();
     },
     dispose() {

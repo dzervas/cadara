@@ -46,6 +46,7 @@ import type {
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { OccWorkerRestoreProgressMessage } from "@/domain/modeling/occ/worker-restore-progress.runtime-schema";
+import type { OccWorkerEngineDownloadProgressMessage } from "@/domain/modeling/occ/worker-engine-download-progress.runtime-schema";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -392,6 +393,7 @@ export type OccWorkerResponse =
       reference: BakedGeometryAssetReference;
     }
   | OccWorkerRestoreProgressMessage
+  | OccWorkerEngineDownloadProgressMessage
   | OccWorkerFailureMessage;
 
 export interface OccWorkerFailureMessage {

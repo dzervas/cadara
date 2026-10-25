@@ -16,11 +16,22 @@ const sentences: Record<Exclude<LoadingPhase, "ready">, string> = {
 const trackColor = "color-mix(in oklch, var(--workbench-shell-accent) 22%, transparent)";
 const barColor = "var(--workbench-shell-accent)";
 
-const rebuildingFeaturesSentence = "Rebuilding features.";
+const progressSentences: Record<LoadingProgress["stage"], string> = {
+  "rebuilding-features": "Rebuilding features.",
+  "downloading-engine": "Downloading the geometry engine.",
+};
 
-function describeProgress({ completed, total, label }: LoadingProgress) {
+/** Visible text and the bar's aria-valuetext for a measured stage. */
+function describeProgress({ stage, completed, total, label }: LoadingProgress) {
+  if (stage === "downloading-engine") {
+    const percent = `${Math.floor((completed / total) * 100)}%`;
+    return { text: `Downloading the geometry engine ${percent}`, valueText: percent };
+  }
   const count = `Rebuilding features ${completed}/${total}`;
-  return label === null ? count : `${count} · ${label}`;
+  return {
+    text: label === null ? count : `${count} · ${label}`,
+    valueText: `${completed} of ${total} features`,
+  };
 }
 
 export function InitialLoadingStatus({
@@ -35,7 +46,8 @@ export function InitialLoadingStatus({
   const measured = phase !== "failed" && progress && progress.total > 0 ? progress : null;
   // The live region names the stage only, so screen readers are not handed a
   // new announcement per feature; the count lives in the bar's aria-valuetext.
-  const sentence = measured ? rebuildingFeaturesSentence : sentences[phase];
+  const sentence = measured ? progressSentences[measured.stage] : sentences[phase];
+  const description = measured ? describeProgress(measured) : null;
   return (
     <Stack
       gap="xs"
@@ -44,10 +56,10 @@ export function InitialLoadingStatus({
       aria-live="polite"
       aria-label={sentence}
     >
-      {measured ? (
+      {description ? (
         <>
           <Text size="sm" c="dimmed" truncate="end" aria-hidden="true">
-            {describeProgress(measured)}
+            {description.text}
           </Text>
           <span className="sr-only">{sentence}</span>
         </>
@@ -56,7 +68,7 @@ export function InitialLoadingStatus({
           {sentence}
         </Text>
       )}
-      {phase === "failed" ? null : measured ? (
+      {phase === "failed" ? null : measured && description ? (
         <Progress.Root
           size={4}
           bg={trackColor}
@@ -65,7 +77,7 @@ export function InitialLoadingStatus({
           aria-valuemin={0}
           aria-valuemax={measured.total}
           aria-valuenow={measured.completed}
-          aria-valuetext={`${measured.completed} of ${measured.total} features`}
+          aria-valuetext={description.valueText}
           data-loading-progress="determinate"
         >
           <Progress.Section

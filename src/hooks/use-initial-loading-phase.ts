@@ -15,6 +15,11 @@ export function useInitialLoadingPhase(
     browserOccLoadingStatus.getSnapshot,
     browserOccLoadingStatus.getSnapshot,
   );
+  const engineProgress = useSyncExternalStore(
+    browserOccLoadingStatus.subscribe,
+    browserOccLoadingStatus.getProgress,
+    browserOccLoadingStatus.getProgress,
+  );
   const document = useSyncExternalStore(
     service.initialLoadingStatus.subscribe,
     service.initialLoadingStatus.getSnapshot,
@@ -65,8 +70,15 @@ export function useInitialLoadingPhase(
     file === "ready" ? selectInitialLoadingPhase(engine, document) : file;
   return {
     phase,
-    // Measured progress belongs to the document phase it was reported in.
-    progress: file === "ready" && phase === document ? documentProgress : null,
+    // Measured progress belongs to the phase it was reported in.
+    progress:
+      file !== "ready"
+        ? null
+        : phase === "preparing-engine"
+          ? engineProgress
+          : phase === document
+            ? documentProgress
+            : null,
     filePhase: file,
     openDocument: opening.openDocument,
   };

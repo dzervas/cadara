@@ -21,7 +21,8 @@ import type { DocumentId } from "@/contracts/shared/ids";
 
 const browserGeometryAssetResolver =
   getBrowserGeometryAssetComposition().resolver;
-// The initializer is opaque: do not invent separate WASM download/compile progress.
+// Only a slow wasm download is measured (decoded bytes, cadara-5hlf); compile
+// and instantiate stay indeterminate.
 export const browserOccLoadingStatus = createLoadingStatus("preparing-engine");
 let lastWorkerFailure: Error | null = null;
 const workerFailureListeners = new Set<(error: Error) => void>();
@@ -38,6 +39,12 @@ const browserOccWorkerClient =
     ? null
     : createBrowserOccWorkerClient({
         assetResolver: browserGeometryAssetResolver,
+        onEngineDownloadProgress: ({ completedBytes, totalBytes }) =>
+          browserOccLoadingStatus.setProgress(
+            completedBytes < totalBytes
+              ? { stage: "downloading-engine", completed: completedBytes, total: totalBytes, label: null }
+              : null,
+          ),
         onFatalError: (error) => {
           lastWorkerFailure = error;
           browserOccLoadingStatus.set("failed");

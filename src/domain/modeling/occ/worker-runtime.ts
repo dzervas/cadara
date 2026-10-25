@@ -1,4 +1,7 @@
-import { OccWorkerClient } from "@/domain/modeling/occ/worker-client";
+import {
+  OccWorkerClient,
+  type OccWorkerClientOptions,
+} from "@/domain/modeling/occ/worker-client";
 import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 
 export function canUseOccModuleWorker() {
@@ -8,6 +11,7 @@ export function canUseOccModuleWorker() {
 export function createBrowserOccWorkerClient(options: {
   assetResolver?: GeometryAssetResolver;
   onFatalError?: (error: Error) => void;
+  onEngineDownloadProgress?: OccWorkerClientOptions["onEngineDownloadProgress"];
 } = {}) {
   if (!canUseOccModuleWorker()) {
     return null;
@@ -20,6 +24,7 @@ export function createBrowserOccWorkerClient(options: {
     worker: createWorker(),
     createWorker,
     onFatalError: options.onFatalError,
+    onEngineDownloadProgress: options.onEngineDownloadProgress,
     assetResolver: options.assetResolver,
     requestTimeoutMs: 30 * 60 * 1000,
   });

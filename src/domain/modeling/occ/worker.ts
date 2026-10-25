@@ -10,6 +10,8 @@ import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { packWorkspaceSnapshotRenderMeshes } from "@/domain/modeling/occ/mesh-transport";
 import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
+import { createEngineDownloadInstantiateWasm } from "@/infrastructure/occ/engine-download";
+import { OCC_WASM_BYTE_LENGTH } from "@/domain/modeling/occ/asset-version";
 import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
@@ -85,11 +87,23 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
   };
 
   if (!openCascadePromise) {
+    const download = createEngineDownloadInstantiateWasm({
+      url: lastAssets.mainWasm ?? getVersionedOpenCascadeRuntimeAssetUrls().mainWasm,
+      totalBytes: OCC_WASM_BYTE_LENGTH,
+      onProgress: (progress) =>
+        postOccWorkerMessage({ kind: "engineDownloadProgress", ...progress }),
+    });
     openCascadePromise = loadDefaultOpenCascadeFactory({ isNodeRuntime: false })
-      .then((initializeOpenCascade) => initializeOpenCascade({
-        ...lastAssets,
-        module: { onAbort: (reason: unknown) => reportRuntimeAbort(reason) },
-      }))
+      .then((initializeOpenCascade) => Promise.race([
+        initializeOpenCascade({
+          ...lastAssets,
+          module: {
+            onAbort: (reason: unknown) => reportRuntimeAbort(reason),
+            instantiateWasm: download.instantiateWasm,
+          },
+        }),
+        download.failure,
+      ]))
       .catch((error: unknown) => {
         openCascadePromise = null;
         throw error;

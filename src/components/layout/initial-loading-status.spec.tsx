@@ -80,6 +80,23 @@ test("measured feature rebuild progress names the stage, count and feature with 
   })).toContain("Unable to prepare the document.");
 });
 
+test("a measured engine download shows its percentage with a determinate bar (cadara-5hlf)", () => {
+  const markup = render("preparing-engine", {
+    stage: "downloading-engine",
+    completed: 4_250_000,
+    total: 17_000_000,
+    label: null,
+  });
+  expect(markup).toMatch(/aria-hidden="true"[^>]*>Downloading the geometry engine 25%</);
+  expect(markup).toContain('role="status" aria-live="polite" aria-label="Downloading the geometry engine."');
+  expect(withoutHidden(markup)).not.toContain("25%<");
+  expect(markup).toContain('data-loading-progress="determinate"');
+  expect(markup).toContain('aria-valuenow="4250000"');
+  expect(markup).toContain('aria-valuetext="25%"');
+  expect(markup).toContain("--progress-section-size:25%");
+  expect(markup).not.toContain("Preparing the geometry engine.");
+});
+
 test("a measured total of zero falls back to the phase sentence, never a 0/0 count (cadara-ku5k)", () => {
   const markup = render("preparing-geometry", {
     stage: "rebuilding-features",

@@ -70,6 +70,10 @@ import {
 } from "@/domain/modeling/occ/mesh-transport";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import { validateOccWorkerRestoreProgressMessage } from "@/domain/modeling/occ/worker-restore-progress.runtime-schema";
+import {
+  validateOccWorkerEngineDownloadProgressMessage,
+  type OccWorkerEngineDownloadProgressMessage,
+} from "@/domain/modeling/occ/worker-engine-download-progress.runtime-schema";
 import type {
   OccSnapshotLodRefinementOutcome,
   OccWorkerAssetConfig,
@@ -127,6 +131,9 @@ export interface OccWorkerClientOptions {
   worker: OccWorkerLike;
   createWorker?: () => OccWorkerLike;
   onFatalError?: (error: Error) => void;
+  onEngineDownloadProgress?: (
+    progress: Omit<OccWorkerEngineDownloadProgressMessage, "kind">,
+  ) => void;
   assetResolver?: GeometryAssetResolver;
   requestTimeoutMs?: number | null;
 }
@@ -256,6 +263,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   private worker: OccWorkerLike;
   private readonly createWorker: (() => OccWorkerLike) | undefined;
   private readonly onFatalError: ((error: Error) => void) | undefined;
+  private readonly onEngineDownloadProgress: OccWorkerClientOptions["onEngineDownloadProgress"];
   private documentsInvalidated = false;
   private readonly restoredDocuments = new Set<string>();
   private readonly assetResolver: GeometryAssetResolver | undefined;
@@ -270,6 +278,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.worker = options.worker;
     this.createWorker = options.createWorker;
     this.onFatalError = options.onFatalError;
+    this.onEngineDownloadProgress = options.onEngineDownloadProgress;
     this.assetResolver = options.assetResolver;
     this.requestTimeoutMs = options.requestTimeoutMs ?? null;
     this.attachListeners();
@@ -791,6 +800,18 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
           );
         },
       );
+      return;
+    }
+
+    if (message.kind === "engineDownloadProgress") {
+      const validated = validateOccWorkerEngineDownloadProgressMessage(message);
+      if (!validated.success) {
+        this.enterTerminalState(new Error(
+          `Invalid OCC worker engine download progress: ${validated.errors[0]?.path}.`,
+        ));
+        return;
+      }
+      this.onEngineDownloadProgress?.(validated.data);
       return;
     }
 

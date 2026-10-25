@@ -985,3 +985,35 @@ test("restore progress reaches only its own restore's callback, validated, and n
   await expect(snapshot).rejects.toThrow("not a restore request");
   client.dispose();
 });
+
+test("engine download progress is worker-global, validated, and a malformed one is a fatal protocol fault (cadara-5hlf)", () => {
+  const worker = new FakeOccWorker();
+  const seen: unknown[] = [];
+  const fatal: Error[] = [];
+  const client = new OccWorkerClient({
+    worker,
+    onEngineDownloadProgress: (progress) => seen.push(progress),
+    onFatalError: (error) => fatal.push(error),
+  });
+  worker.emit({ kind: "engineDownloadProgress", completedBytes: 10, totalBytes: 100 });
+  expect(seen).toEqual([{ kind: "engineDownloadProgress", completedBytes: 10, totalBytes: 100 }]);
+  expect(fatal).toEqual([]);
+  client.dispose();
+
+  for (const [malformed, path] of [
+    [{ kind: "engineDownloadProgress", completedBytes: 20, totalBytes: 100, extra: true }, "$input.extra"],
+    [{ kind: "engineDownloadProgress", completedBytes: 20 }, "$input.totalBytes"],
+  ] as const) {
+    const faulty = new FakeOccWorker();
+    const faultyClient = new OccWorkerClient({
+      worker: faulty,
+      onEngineDownloadProgress: (progress) => seen.push(progress),
+      onFatalError: (error) => fatal.push(error),
+    });
+    faulty.emit(malformed as unknown as OccWorkerResponse);
+    expect(faulty.terminateCalls).toBe(1);
+    expect(fatal.at(-1)?.message).toBe(`Invalid OCC worker engine download progress: ${path}.`);
+    faultyClient.dispose();
+  }
+  expect(seen).toHaveLength(1);
+});
