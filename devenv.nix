@@ -37,6 +37,8 @@ in {
   };
 
   packages = with pkgs; [
+    # Demo GIFs for the changelog-post skill.
+    ffmpeg
     libsecret
     playwright-driver
     playwright-test
@@ -46,6 +48,9 @@ in {
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
     PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "1";
     PLAYWRIGHT_BROWSERS_PATH = "${playwright-driver}";
+    # Without any fontconfig font, headless Chromium lays text out at zero
+    # height, so screenshots/GIFs show no text at all (cadara-m4ti).
+    FONTCONFIG_FILE = pkgs.makeFontsConf {fontDirectories = [pkgs.dejavu_fonts];};
   };
 
   # The project imports "@playwright/test" from playwright.config.ts, so the
