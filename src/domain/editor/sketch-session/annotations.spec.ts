@@ -24,6 +24,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { describeSketchSessionUnsatisfiedRequirements } from "@/domain/editor/sketch-session/internals";
+import { buildCommittedDimensionOverlays } from "@/domain/editor/sketch-session/annotations";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -345,9 +346,11 @@ test("T14e Q1/T-17: a problem binding is drawn and listed first (still without d
 // descriptor anchor plus the pointer's sketch displacement since the grab.
 // For every draggable dimension kind, placing at the label's own anchor
 // changes nothing (no jump when a drag starts), and a displacement moves
-// the label the way its placement allows. (`pointDatumDistance`,
-// `lineDistance` and `linePointDistance` share the point-pair and line
-// placement functions covered here.)
+// the label the way its placement allows. cadara-bmy0: every dimension-line
+// label follows the pointer in 2D (the offset and its position along the
+// line), including point-to-origin, point-to-axis-datum and point-to-axis
+// (point-line) distances; red before: pointDatumDistance had no drag handle
+// and every label followed only the offset.
 test("T17j F-1: for every draggable dimension kind a placement at the label's own anchor changes nothing, and a displacement moves the label as its placement allows", () => {
   const fresh = enterSketchSession(
     createNewSketchSession(
@@ -363,9 +366,15 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
     startSketchDraw(beginSketchTool(session, "circle"), [8, 1]),
     [10, 1],
   );
-  const [lineA, lineB, circle] = session.definition.entities;
-  if (lineA?.kind !== "lineSegment" || !lineB || !circle)
-    throw new Error("premise: two lines and a circle");
+  session = line(session, [0, 6], [4, 6]);
+  const [lineA, lineB, circle, lineC] = session.definition.entities;
+  if (
+    lineA?.kind !== "lineSegment" ||
+    lineB?.kind !== "lineSegment" ||
+    !circle ||
+    !lineC
+  )
+    throw new Error("premise: three lines and a circle");
   const aPoints = [lineA.startPointId, lineA.endPointId] as const;
   const local = (entityId: SketchEntityId) =>
     ({ kind: "localEntity", entityId }) as const;
@@ -373,6 +382,27 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
     { kind: "lineLength", entityId: lineA.entityId },
     { kind: "distance", axis: "aligned", pointIds: aPoints },
     { kind: "horizontalDistance", pointIds: aPoints },
+    {
+      kind: "pointDatumDistance",
+      axis: "horizontal",
+      point: { kind: "localPoint", pointId: lineA.endPointId },
+      datum: { kind: "sketchDatum", datum: "origin" },
+    },
+    {
+      kind: "pointDatumDistance",
+      axis: "vertical",
+      point: { kind: "localPoint", pointId: lineB.endPointId },
+      datum: { kind: "sketchDatum", datum: "xAxis" },
+    },
+    {
+      kind: "linePointDistance",
+      line: { kind: "sketchDatum", datum: "xAxis" },
+      point: { kind: "localPoint", pointId: lineB.endPointId },
+    },
+    {
+      kind: "lineDistance",
+      lines: [local(lineA.entityId), local(lineC.entityId)],
+    },
     { kind: "circleRadius", entityId: circle.entityId },
     { kind: "diameter", entityId: circle.entityId },
     {
@@ -424,23 +454,6 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
       id,
     );
     switch (kind) {
-      case "lineLength":
-      case "distance":
-      case "horizontalDistance":
-        // Line A is horizontal: the label follows the normal (y) part.
-        close(moved, [anchor[0], anchor[1] + delta[1]], kind);
-        break;
-      case "circleRadius":
-      case "diameter": {
-        const target = [anchor[0] + delta[0] - 8, anchor[1] + delta[1] - 1];
-        const length = Math.hypot(target[0]!, target[1]!);
-        close(
-          moved,
-          [8 + (2 * target[0]!) / length, 1 + (2 * target[1]!) / length],
-          `${kind}: the label turns to the pointer's direction on the rim`,
-        );
-        break;
-      }
       case "lineAngle": {
         // The lines' corner is their intersection (-1, 0).
         const radius = (point: SketchPoint) =>
@@ -451,8 +464,29 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
         );
         break;
       }
+      default:
+        // The label follows the pointer along its line and across it (a
+        // radius or diameter turns to the pointer and slides along it).
+        close(moved, [anchor[0] + delta[0], anchor[1] + delta[1]], kind);
     }
   }
+  // cadara-bmy0: a point-to-axis-datum distance measures to the point's
+  // perpendicular foot on the axis: its datum extension line starts there,
+  // not at the origin. Line B's end (-1, 4) to the X axis: the foot (-1, 0).
+  const axisDatum = buildCommittedDimensionOverlays(
+    session,
+    session.definition,
+  ).find(
+    (overlay) => overlay.id === "dimension_t17j_4_pointDatumDistance-overlay",
+  );
+  expect(
+    axisDatum?.kind === "dimensionLine" &&
+      axisDatum.extensionLines?.map((line) => line.start),
+    "extension lines from the point and from its foot on the X axis",
+  ).toEqual([
+    [-1, 4],
+    [-1, 0],
+  ]);
 });
 
 test("unsupported constraint diagnostics reach annotation and list explanations", () => {

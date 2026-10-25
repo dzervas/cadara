@@ -181,14 +181,21 @@ export function SketchConstraintAnnotations({
       layerElementRef.current = null;
     };
   }, []);
-  // T14d (A-7): the chip being dragged keeps its dragged position: where it
-  // was when the drag started, moved with its anchor (the label placement
-  // the drag writes). It is placed first and never re-placed by the layout.
+  // T14d (A-7): the chip being dragged keeps its dragged position: it is
+  // placed first, at its anchor plus `labelDragOffset`, and never re-placed
+  // by the layout. cadara-bmy0: a dimension-line label the layout had
+  // displaced is dragged from where it is drawn: the drag's press is moved by
+  // that displacement (`labelDragPressShiftRef`) and the chip sits on its
+  // anchor, so the first placement brings the anchor under the chip and the
+  // release leaves the label where it was dropped. An angle label's
+  // placement cannot follow the pointer off its bisector, so it keeps the
+  // displacement as its offset instead.
   const [labelDragOffset, setLabelDragOffset] = useState<{
     handleId: string;
     dx: number;
     dy: number;
   } | null>(null);
+  const labelDragPressShiftRef = useRef({ dx: 0, dy: 0 });
   const onTrackedDimensionDrag: DimensionAnnotationDragListener = (
     handle,
     clientX,
@@ -203,19 +210,27 @@ export function SketchConstraintAnnotations({
       const id = annotation ? getAnnotationProjectionId(annotation.id) : null;
       const placed = id ? projectionById.get(id) : undefined;
       const anchor = id ? anchorById.get(id) : undefined;
-      setLabelDragOffset(
+      const displacement =
         placed && anchor
-          ? {
-              handleId: handle.id,
-              dx: placed.x - anchor.x,
-              dy: placed.y - anchor.y,
-            }
-          : { handleId: handle.id, dx: 0, dy: 0 },
-      );
+          ? { dx: placed.x - anchor.x, dy: placed.y - anchor.y }
+          : { dx: 0, dy: 0 };
+      const followsAlongLine = annotation?.glyphKind !== "dimensionAngle";
+      labelDragPressShiftRef.current = followsAlongLine
+        ? displacement
+        : { dx: 0, dy: 0 };
+      setLabelDragOffset({
+        handleId: handle.id,
+        ...(followsAlongLine ? { dx: 0, dy: 0 } : displacement),
+      });
     } else if (phase === "end" || phase === "cancel") {
       setLabelDragOffset(null);
     }
-    onDimensionDrag?.(handle, clientX, clientY, phase, grab);
+    const { dx, dy } = labelDragPressShiftRef.current;
+    onDimensionDrag?.(handle, clientX, clientY, phase, {
+      ...grab,
+      clientX: grab.clientX - dx,
+      clientY: grab.clientY - dy,
+    });
   };
 
   const layer = resolveSketchAnnotationLayer(annotations, {
@@ -592,6 +607,38 @@ export function SketchConstraintAnnotations({
     return null;
   }
 
+  // cadara-bmy0: a dimension label the layout moved off its anchor keeps a
+  // leader to its point on the dimension line (the anchor without its
+  // label offset), so it never reads as detached from its line.
+  const leaders = visibleAnnotations.flatMap(({ annotation }) => {
+    const id = getAnnotationProjectionId(annotation.id);
+    const placed = projectionById.get(id);
+    const anchor = anchorById.get(id);
+    if (
+      annotation.status !== "dimension" ||
+      !placed ||
+      !anchor ||
+      Math.hypot(placed.x - anchor.x, placed.y - anchor.y) < 1
+    ) {
+      return [];
+    }
+    const offset =
+      annotation.anchor.kind === "sketchPoint"
+        ? annotation.anchor.offset
+        : null;
+    return [
+      {
+        id: annotation.id,
+        color: getAnnotationConstraintColor(annotation),
+        from: placed,
+        to: {
+          x: anchor.x - (offset?.x ?? 0),
+          y: anchor.y - (offset?.y ?? 0),
+        },
+      },
+    ];
+  });
+
   return (
     <div
       className="pointer-events-none absolute inset-0 z-30"
@@ -603,6 +650,25 @@ export function SketchConstraintAnnotations({
       }
       ref={layerRef}
     >
+      {leaders.length > 0 ? (
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+        >
+          {leaders.map((leader) => (
+            <line
+              key={leader.id}
+              data-sketch-annotation-leader={leader.id}
+              x1={leader.from.x}
+              y1={leader.from.y}
+              x2={leader.to.x}
+              y2={leader.to.y}
+              stroke={leader.color}
+              strokeWidth="1"
+            />
+          ))}
+        </svg>
+      ) : null}
       {visibleAnnotations.map(
         ({ annotation, visibility, isInteractive, isSelected, isLast }) => {
           const projection = projectionById.get(

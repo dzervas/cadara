@@ -777,6 +777,111 @@ function getLineDimensionPlacement(
   };
 }
 
+/**
+ * cadara-bmy0: a point-to-line (or point-to-axis) distance runs from the
+ * point's perpendicular foot on the line to the point, shifted along the line
+ * by the placement's `offset` (perpendicular to itself, as every dimension
+ * line's offset is). The foot and the point keep extension lines to it.
+ */
+export function createPlacedLinePointDistance(
+  line: NonNullable<SketchConstraintTargetRecord["line"]>,
+  point: readonly [number, number],
+  placement: DimensionAnnotationPlacement | null | undefined,
+): {
+  foot: readonly [number, number];
+  start: readonly [number, number];
+  end: readonly [number, number];
+} {
+  const axis = normalize(lineVector(line));
+  const signedDistance = pointLineSignedDistance(point, line.start, line.end);
+  const foot = [
+    point[0] + axis[1] * signedDistance,
+    point[1] - axis[0] * signedDistance,
+  ] as const;
+  const offset = placement?.kind === "dimensionLine" ? placement.offset : 0;
+  return {
+    foot,
+    start: [foot[0] + axis[0] * offset, foot[1] + axis[1] * offset],
+    end: [point[0] + axis[0] * offset, point[1] + axis[1] * offset],
+  };
+}
+
+/** cadara-bmy0: the point-to-line placement whose label sits at `pointer`. */
+export function inferLinePointDimensionPlacement(
+  line: NonNullable<SketchConstraintTargetRecord["line"]>,
+  point: readonly [number, number],
+  pointer: readonly [number, number] | null,
+): DimensionLineAnnotationPlacement | null {
+  if (!pointer) return null;
+  const axis = normalize(lineVector(line));
+  const { foot } = createPlacedLinePointDistance(line, point, null);
+  const placement: DimensionLineAnnotationPlacement = {
+    kind: "dimensionLine",
+    offset: (pointer[0] - foot[0]) * axis[0] + (pointer[1] - foot[1]) * axis[1],
+  };
+  return withDimensionLabelPosition(
+    placement,
+    createPlacedLinePointDistance(line, point, placement),
+    pointer,
+  );
+}
+
+/**
+ * cadara-bmy0: the label's point on a placed dimension line: the placement's
+ * `labelPosition` (a fraction from start to end) or `fallback`.
+ */
+export function getDimensionLabelPoint(
+  line: { start: readonly [number, number]; end: readonly [number, number] },
+  placement: DimensionAnnotationPlacement | null | undefined,
+  fallback = 0.5,
+): [number, number] {
+  const position =
+    placement?.kind === "dimensionLine"
+      ? (placement.labelPosition ?? fallback)
+      : fallback;
+  return [
+    line.start[0] + (line.end[0] - line.start[0]) * position,
+    line.start[1] + (line.end[1] - line.start[1]) * position,
+  ];
+}
+
+/**
+ * cadara-bmy0: `placement` with its label at `point`'s foot on the placed
+ * `line` (unchanged on a zero-length line, which has no direction).
+ */
+export function withDimensionLabelPosition(
+  placement: DimensionLineAnnotationPlacement,
+  line: { start: readonly [number, number]; end: readonly [number, number] },
+  point: readonly [number, number],
+): DimensionLineAnnotationPlacement {
+  const delta = [line.end[0] - line.start[0], line.end[1] - line.start[1]];
+  const lengthSquared = delta[0] ** 2 + delta[1] ** 2;
+  if (lengthSquared <= 1e-18) return placement;
+  return {
+    ...placement,
+    labelPosition:
+      ((point[0] - line.start[0]) * delta[0] +
+        (point[1] - line.start[1]) * delta[1]) /
+      lengthSquared,
+  };
+}
+
+/** cadara-bmy0: a label placed past either end keeps its line running to it. */
+export function extendDimensionLineToLabel(
+  line: { start: readonly [number, number]; end: readonly [number, number] },
+  placement: DimensionAnnotationPlacement | null | undefined,
+): { start: readonly [number, number]; end: readonly [number, number] } {
+  const position =
+    placement?.kind === "dimensionLine" ? placement.labelPosition : undefined;
+  if (position === undefined || (position >= 0 && position <= 1)) {
+    return line;
+  }
+  const label = getDimensionLabelPoint(line, placement);
+  return position < 0
+    ? { start: label, end: line.end }
+    : { start: line.start, end: label };
+}
+
 export function inferParallelLineDimensionPlacement(
   line: NonNullable<SketchConstraintTargetRecord["line"]>,
   point: readonly [number, number] | null,
@@ -969,6 +1074,10 @@ function orderPointPairAlongAxis<T>(
       ...linePlacement,
       offset:
         linePlacement.offset + first.anchor[across] - second.anchor[across],
+      // cadara-bmy0: the swapped ends reverse the line.
+      ...(linePlacement.labelPosition === undefined
+        ? {}
+        : { labelPosition: 1 - linePlacement.labelPosition }),
     },
   };
 }
@@ -1121,6 +1230,14 @@ export function inferDimensionAnnotationPlacement(
 
   if (first?.line && second?.line) {
     return inferParallelLineDimensionPlacement(first.line, point);
+  }
+
+  if (first?.line && second && !second.circle) {
+    return inferLinePointDimensionPlacement(first.line, second.anchor, point);
+  }
+
+  if (second?.line && first && !first.circle) {
+    return inferLinePointDimensionPlacement(second.line, first.anchor, point);
   }
 
   if (first?.line) {
@@ -1616,30 +1733,20 @@ function buildLinePointDistancePreview(
     );
   }
 
-  const axis = normalize(lineVector(lineTarget.line));
-  const normal: readonly [number, number] = [-axis[1], axis[0]];
-  const signedDistance = pointLineSignedDistance(
-    pointTarget.anchor,
-    lineTarget.line.start,
-    lineTarget.line.end,
-  );
   const placement =
     input.annotationPlacement?.kind === "dimensionLine"
       ? input.annotationPlacement
-      : getLineDimensionPlacement(lineTarget.line, input.pointer);
-  const offset = placement?.offset ?? signedDistance;
-  const projectedPoint: readonly [number, number] = [
-    pointTarget.anchor[0] - normal[0] * signedDistance,
-    pointTarget.anchor[1] - normal[1] * signedDistance,
-  ];
-  const start: readonly [number, number] = [
-    projectedPoint[0] + normal[0] * offset,
-    projectedPoint[1] + normal[1] * offset,
-  ];
-  const end: readonly [number, number] = [
-    pointTarget.anchor[0] + normal[0] * (offset - signedDistance),
-    pointTarget.anchor[1] + normal[1] * (offset - signedDistance),
-  ];
+      : inferLinePointDimensionPlacement(
+          lineTarget.line,
+          pointTarget.anchor,
+          input.pointer,
+        );
+  const line = createPlacedLinePointDistance(
+    lineTarget.line,
+    pointTarget.anchor,
+    placement,
+  );
+  const { start, end } = extendDimensionLineToLabel(line, placement);
 
   return [
     {
@@ -1657,21 +1764,21 @@ function buildLinePointDistancePreview(
       },
       labelAnchor: {
         kind: "sketchPoint",
-        point: midpoint(start, end),
+        point: getDimensionLabelPoint(line, placement),
         offset: { x: 0, y: -18 },
       },
       extensionLines: [
         {
           id: "line-point-distance-preview-extension-a",
           label: "Extension",
-          start: projectedPoint,
-          end: start,
+          start: line.foot,
+          end: line.start,
         },
         {
           id: "line-point-distance-preview-extension-b",
           label: "Extension",
           start: pointTarget.anchor,
-          end,
+          end: line.end,
         },
       ],
     },

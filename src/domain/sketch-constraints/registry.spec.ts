@@ -3122,7 +3122,8 @@ for (const row of [
           committedDefinition.dimensions[0]!,
           pointer,
         ),
-      ).toEqual(placement);
+        // cadara-bmy0: a committed label drag also keeps its place along the line.
+      ).toEqual({ ...placement, labelPosition: expect.any(Number) });
       const committed = buildCommittedDimensionOverlays(
         session,
         committedDefinition,
@@ -3158,3 +3159,116 @@ for (const row of [
     });
   });
 }
+
+// cadara-bmy0, logic lane (registry preview + committed placement seams): a
+// point-to-axis distance (linePointDistance against the X datum) runs from
+// the point's perpendicular foot on the axis to the point, shifted along the
+// axis by the offset, with its label where the pointer placed it and
+// extension lines from the foot and the point. The authoring preview and the
+// committed dimension draw the same line, label and extension lines for the
+// same pointer. Red before: both drew a zero-length line (start == end) and
+// the committed dimension had no extension lines.
+test("cadara-bmy0: a point-to-axis distance preview and its committed dimension draw the same foot-to-point line, label and extension lines", () => {
+  const fixture = makeSketchFixture();
+  fixture.point("p", 3, 5);
+  const definition = fixture.definition();
+  const registry = getSketchConstraintDefinition("dimensionDistance");
+  const axisTarget = registry.resolveTarget(definition, {
+    kind: "sketchDatumReference",
+    sketchId: FIXTURE_SKETCH_ID,
+    datumId: "xAxis",
+    geometryKind: "lineSegment",
+  });
+  const pointTarget = registry.resolveTarget(definition, {
+    kind: "sketchPoint",
+    sketchId: FIXTURE_SKETCH_ID,
+    pointId: definition.points[0]!.pointId,
+  });
+  if (!axisTarget?.line || !pointTarget) {
+    throw new Error("premise: the X axis and the point resolve as targets");
+  }
+  const pointer = [5, 4] as const;
+  const placement = inferDimensionAnnotationPlacement(
+    [axisTarget, pointTarget],
+    pointer,
+  );
+  expect(
+    placement,
+    "offset along the axis, label at 4/5 of foot-to-point",
+  ).toEqual({
+    kind: "dimensionLine",
+    offset: expect.closeTo(2, 10),
+    labelPosition: expect.closeTo(0.8, 10),
+  });
+  const preview = registry
+    .buildPreview({
+      selectedTargets: [axisTarget, pointTarget],
+      hoverTarget: null,
+      pointer,
+      value: 5,
+      annotationPlacement: placement,
+    })
+    .find((overlay) => overlay.kind === "dimensionLine");
+  if (preview?.kind !== "dimensionLine") {
+    throw new Error("premise: a dimension-line preview");
+  }
+  const session = createNewSketchSession(
+    createStandardPlaneDefinition("xy"),
+    OCC_KERNEL_SETTINGS,
+  );
+  const committedDefinition = {
+    ...definition,
+    dimensions: [
+      {
+        dimensionId: "dimension_point_axis" as DimensionId,
+        kind: "linePointDistance" as const,
+        label: "Point-line distance",
+        line: { kind: "sketchDatum" as const, datum: "xAxis" as const },
+        point: {
+          kind: "localPoint" as const,
+          pointId: definition.points[0]!.pointId,
+        },
+        value: createLiteralAuthoredValue(5),
+        annotationPlacement:
+          placement?.kind === "dimensionLine" ? placement : undefined,
+      },
+    ],
+  };
+  const committed = buildCommittedDimensionOverlays(
+    session,
+    committedDefinition,
+  )[0];
+  if (committed?.kind !== "dimensionLine") {
+    throw new Error("premise: a committed dimension line");
+  }
+  const close = (point: readonly [number, number]) => [
+    expect.closeTo(point[0], 10),
+    expect.closeTo(point[1], 10),
+  ];
+  for (const [name, overlay] of [
+    ["preview", preview],
+    ["committed", committed],
+  ] as const) {
+    expect(overlay.start, `${name}: from the foot`).toEqual(close([5, 0]));
+    expect(overlay.end, `${name}: to the point`).toEqual(close([5, 5]));
+    expect(overlay.labelAnchor?.point, `${name}: label at the pointer`).toEqual(
+      close(pointer),
+    );
+    expect(
+      overlay.extensionLines?.map((line) => [line.start, line.end]),
+      `${name}: extension lines from the foot and the point`,
+    ).toEqual([
+      [close([3, 0]), close([5, 0])],
+      [close([3, 5]), close([5, 5])],
+    ]);
+  }
+  expect(
+    inferCommittedDimensionAnnotationPlacement(
+      session,
+      committedDefinition,
+      committedDefinition.dimensions[0]!,
+      pointer,
+    ),
+    "a committed drag to the same pointer stores the same placement",
+  ).toEqual(placement);
+});

@@ -1,6 +1,11 @@
 import {
+  createPlacedLinePointDistance,
   createPlacedParallelLineDistance,
+  extendDimensionLineToLabel,
+  getDimensionLabelPoint,
+  inferLinePointDimensionPlacement,
   inferParallelLineDimensionPlacement,
+  withDimensionLabelPosition,
 } from "@/core/sketch-constraints/registry";
 import {
   resolveSketchDimensionValues,
@@ -34,6 +39,7 @@ import type {
   ConstraintDefinition,
   DimensionAnnotationPlacement,
   DimensionDefinition,
+  DimensionLineAnnotationPlacement,
   LocalCollinearTargetOperand,
   ProjectedSketchGeometryRef,
   RegionRecord,
@@ -911,6 +917,10 @@ function orientSignedPointPairDimension(
               annotationPlacement: {
                 ...placement,
                 offset: placement.offset + first[across] - second[across],
+                // cadara-bmy0: the swapped ends reverse the line.
+                ...(placement.labelPosition === undefined
+                  ? {}
+                  : { labelPosition: 1 - placement.labelPosition }),
               },
             }
           : {}),
@@ -1295,28 +1305,18 @@ export function inferCommittedDimensionAnnotationPlacement(
           : dimension.kind === "horizontalDistance"
             ? "horizontal"
             : "vertical";
-      return getPointPairAnnotationPlacementFromPoint(
-        first,
-        second,
-        axis,
-        point,
-      );
+      return inferPointPairLabelPlacement(first, second, axis, point);
     }
     case "pointDatumDistance": {
-      const first = getReferencePointGeometry(
+      const measured = getPointDatumDistanceGeometry(
         definition,
         session,
-        dimension.point,
+        dimension,
       );
-      const second = getReferencePointGeometry(
-        definition,
-        session,
-        dimension.datum,
-      );
-      return first && second
-        ? getPointPairAnnotationPlacementFromPoint(
-            first,
-            second,
+      return measured
+        ? inferPointPairLabelPlacement(
+            measured.point,
+            measured.datum,
             dimension.axis,
             point,
           )
@@ -1329,7 +1329,7 @@ export function inferCommittedDimensionAnnotationPlacement(
         return null;
       }
 
-      return {
+      const placement: DimensionLineAnnotationPlacement = {
         kind: "dimensionLine",
         offset: 0,
         angleRadians: Math.atan2(
@@ -1337,18 +1337,45 @@ export function inferCommittedDimensionAnnotationPlacement(
           point[0] - circle.center[0],
         ),
       };
+      return withDimensionLabelPosition(
+        placement,
+        createPlacedCircleDimensionLine(circle, dimension.kind, placement),
+        point,
+      );
     }
     case "lineLength": {
       const line = getLineSegmentGeometry(definition, dimension.entityId);
-      return line ? getLineAnnotationPlacementFromPoint(line, point) : null;
+      if (!line) {
+        return null;
+      }
+      const placement = getLineAnnotationPlacementFromPoint(line, point);
+      return withDimensionLabelPosition(
+        placement,
+        createPlacedLineLength(line, placement),
+        point,
+      );
     }
     case "lineDistance": {
-      const line = getReferenceLineGeometry(
+      const first = getReferenceLineGeometry(
         definition,
         session,
         dimension.lines[0],
       );
-      return line ? inferParallelLineDimensionPlacement(line, point) : null;
+      const second = getReferenceLineGeometry(
+        definition,
+        session,
+        dimension.lines[1],
+      );
+      const placement = first
+        ? inferParallelLineDimensionPlacement(first, point)
+        : null;
+      return placement && first && second
+        ? withDimensionLabelPosition(
+            placement,
+            createPlacedParallelLineDistance(first, second, placement),
+            point,
+          )
+        : placement;
     }
     case "linePointDistance": {
       const line = getReferenceLineGeometry(
@@ -1356,7 +1383,14 @@ export function inferCommittedDimensionAnnotationPlacement(
         session,
         dimension.line,
       );
-      return line ? getLineAnnotationPlacementFromPoint(line, point) : null;
+      const measured = getReferencePointGeometry(
+        definition,
+        session,
+        dimension.point,
+      );
+      return line && measured
+        ? inferLinePointDimensionPlacement(line, measured, point)
+        : null;
     }
     case "lineAngle": {
       const first = getReferenceLineGeometry(
@@ -2345,6 +2379,7 @@ export function createDimensionAnnotationDragHandle(
 ): SketchDimensionAnnotationDragHandle | undefined {
   switch (dimension.kind) {
     case "distance":
+    case "pointDatumDistance":
     case "horizontalDistance":
     case "verticalDistance":
     case "circleRadius":
@@ -2830,34 +2865,29 @@ export function createDimensionAnnotationAnchor(
       );
       return {
         kind: "sketchPoint",
-        point: getSketchMidpoint(line.start, line.end),
+        point: getDimensionLabelPoint(line, dimension.annotationPlacement),
         offset: { x: 0, y: -18 },
       };
     }
     case "pointDatumDistance": {
-      const first = getReferencePointGeometry(
+      const measured = getPointDatumDistanceGeometry(
         definition,
         session,
-        dimension.point,
+        dimension,
       );
-      const second = getReferencePointGeometry(
-        definition,
-        session,
-        dimension.datum,
-      );
-      if (!first || !second) {
+      if (!measured) {
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 });
       }
 
       const line = createPlacedPointDimensionLine(
-        first,
-        second,
+        measured.point,
+        measured.datum,
         dimension.axis,
         dimension.annotationPlacement,
       );
       return {
         kind: "sketchPoint",
-        point: getSketchMidpoint(line.start, line.end),
+        point: getDimensionLabelPoint(line, dimension.annotationPlacement),
         offset: { x: 0, y: -18 },
       };
     }
@@ -2871,12 +2901,19 @@ export function createDimensionAnnotationAnchor(
         );
       }
 
-      const angle = dimension.annotationPlacement?.angleRadians ?? 0;
-      const end: SketchPoint = [
-        circle.center[0] + Math.cos(angle) * circle.radius,
-        circle.center[1] + Math.sin(angle) * circle.radius,
-      ];
-      return { kind: "sketchPoint", point: end, offset: { x: 16, y: -16 } };
+      return {
+        kind: "sketchPoint",
+        point: getDimensionLabelPoint(
+          createPlacedCircleDimensionLine(
+            circle,
+            dimension.kind,
+            dimension.annotationPlacement,
+          ),
+          dimension.annotationPlacement,
+          1,
+        ),
+        offset: { x: 16, y: -16 },
+      };
     }
     case "lineLength": {
       const lineGeometry = getLineSegmentGeometry(
@@ -2896,7 +2933,7 @@ export function createDimensionAnnotationAnchor(
       );
       return {
         kind: "sketchPoint",
-        point: getSketchMidpoint(line.start, line.end),
+        point: getDimensionLabelPoint(line, dimension.annotationPlacement),
         offset: { x: 0, y: -18 },
       };
     }
@@ -2922,7 +2959,7 @@ export function createDimensionAnnotationAnchor(
       );
       return {
         kind: "sketchPoint",
-        point: getSketchMidpoint(line.start, line.end),
+        point: getDimensionLabelPoint(line, dimension.annotationPlacement),
         offset: { x: 0, y: -18 },
       };
     }
@@ -2941,14 +2978,14 @@ export function createDimensionAnnotationAnchor(
         return createOffsetAnnotationAnchor(null, { x: 0, y: -28 });
       }
 
-      const line = createPlacedLineDistance(
+      const line = createPlacedLinePointDistance(
         lineGeometry,
         point,
         dimension.annotationPlacement,
       );
       return {
         kind: "sketchPoint",
-        point: getSketchMidpoint(line.start, line.end),
+        point: getDimensionLabelPoint(line, dimension.annotationPlacement),
         offset: { x: 0, y: -18 },
       };
     }
@@ -3026,19 +3063,26 @@ export function buildCommittedDimensionOverlays(
             axis,
             dimension.annotationPlacement,
           );
+          const drawn = extendDimensionLineToLabel(
+            line,
+            dimension.annotationPlacement,
+          );
           return [
             {
               id: `${dimension.dimensionId}-overlay`,
               kind: "dimensionLine",
               label: dimension.label,
               referenceKind: axis,
-              start: line.start,
-              end: line.end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchMidpoint(line.start, line.end),
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                ),
                 offset: { x: 0, y: -18 },
               },
               extensionLines: [
@@ -3059,24 +3103,23 @@ export function buildCommittedDimensionOverlays(
           ];
         }
         case "pointDatumDistance": {
-          const first = getReferencePointGeometry(
+          const measured = getPointDatumDistanceGeometry(
             definition,
             session,
-            dimension.point,
+            dimension,
           );
-          const second = getReferencePointGeometry(
-            definition,
-            session,
-            dimension.datum,
-          );
-          if (!first || !second) {
+          if (!measured) {
             return [];
           }
 
           const line = createPlacedPointDimensionLine(
-            first,
-            second,
+            measured.point,
+            measured.datum,
             dimension.axis,
+            dimension.annotationPlacement,
+          );
+          const drawn = extendDimensionLineToLabel(
+            line,
             dimension.annotationPlacement,
           );
           return [
@@ -3085,26 +3128,29 @@ export function buildCommittedDimensionOverlays(
               kind: "dimensionLine",
               label: dimension.label,
               referenceKind: dimension.axis,
-              start: line.start,
-              end: line.end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchMidpoint(line.start, line.end),
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                ),
                 offset: { x: 0, y: -18 },
               },
               extensionLines: [
                 {
                   id: `${dimension.dimensionId}-extension-a`,
                   label: "Extension",
-                  start: first,
+                  start: measured.point,
                   end: line.start,
                 },
                 {
                   id: `${dimension.dimensionId}-extension-b`,
                   label: "Extension",
-                  start: second,
+                  start: measured.datum,
                   end: line.end,
                 },
               ],
@@ -3118,19 +3164,15 @@ export function buildCommittedDimensionOverlays(
             return [];
           }
 
-          const angle = dimension.annotationPlacement?.angleRadians ?? 0;
-          const direction: SketchPoint = [Math.cos(angle), Math.sin(angle)];
-          const start: SketchPoint =
-            dimension.kind === "diameter"
-              ? [
-                  circle.center[0] - direction[0] * circle.radius,
-                  circle.center[1] - direction[1] * circle.radius,
-                ]
-              : circle.center;
-          const end: SketchPoint = [
-            circle.center[0] + direction[0] * circle.radius,
-            circle.center[1] + direction[1] * circle.radius,
-          ];
+          const line = createPlacedCircleDimensionLine(
+            circle,
+            dimension.kind,
+            dimension.annotationPlacement,
+          );
+          const drawn = extendDimensionLineToLabel(
+            line,
+            dimension.annotationPlacement,
+          );
           return [
             {
               id: `${dimension.dimensionId}-overlay`,
@@ -3138,13 +3180,17 @@ export function buildCommittedDimensionOverlays(
               label: dimension.label,
               referenceKind:
                 dimension.kind === "diameter" ? "diameter" : "radius",
-              start,
-              end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: end,
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                  1,
+                ),
                 offset: { x: 16, y: -16 },
               },
             },
@@ -3163,19 +3209,26 @@ export function buildCommittedDimensionOverlays(
             lineGeometry,
             dimension.annotationPlacement,
           );
+          const drawn = extendDimensionLineToLabel(
+            line,
+            dimension.annotationPlacement,
+          );
           return [
             {
               id: `${dimension.dimensionId}-overlay`,
               kind: "dimensionLine",
               label: dimension.label,
               referenceKind: "lineLength",
-              start: line.start,
-              end: line.end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchMidpoint(line.start, line.end),
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                ),
                 offset: { x: 0, y: -18 },
               },
               extensionLines:
@@ -3218,19 +3271,26 @@ export function buildCommittedDimensionOverlays(
             second,
             dimension.annotationPlacement,
           );
+          const drawn = extendDimensionLineToLabel(
+            line,
+            dimension.annotationPlacement,
+          );
           return [
             {
               id: `${dimension.dimensionId}-overlay`,
               kind: "dimensionLine",
               label: dimension.label,
               referenceKind: "lineDistance",
-              start: line.start,
-              end: line.end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchMidpoint(line.start, line.end),
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                ),
                 offset: { x: 0, y: -18 },
               },
             },
@@ -3251,26 +3311,49 @@ export function buildCommittedDimensionOverlays(
             return [];
           }
 
-          const line = createPlacedLineDistance(
+          const line = createPlacedLinePointDistance(
             lineGeometry,
             point,
             dimension.annotationPlacement,
           );
+          const drawn = extendDimensionLineToLabel(
+            line,
+            dimension.annotationPlacement,
+          );
+          // cadara-bmy0: the foot on the line and the point keep extension
+          // lines to the dimension line (as its authoring preview draws).
           return [
             {
               id: `${dimension.dimensionId}-overlay`,
               kind: "dimensionLine",
               label: dimension.label,
               referenceKind: "pointLineDistance",
-              start: line.start,
-              end: line.end,
+              start: drawn.start,
+              end: drawn.end,
               value: dimensionOverlayValue(dimension),
               unit: "mm",
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchMidpoint(line.start, line.end),
+                point: getDimensionLabelPoint(
+                  line,
+                  dimension.annotationPlacement,
+                ),
                 offset: { x: 0, y: -18 },
               },
+              extensionLines: [
+                {
+                  id: `${dimension.dimensionId}-extension-a`,
+                  label: "Extension",
+                  start: line.foot,
+                  end: line.start,
+                },
+                {
+                  id: `${dimension.dimensionId}-extension-b`,
+                  label: "Extension",
+                  start: point,
+                  end: line.end,
+                },
+              ],
             },
           ];
         }
@@ -3536,7 +3619,7 @@ export function getPointPairAnnotationPlacementFromPoint(
   second: SketchPoint,
   axis: "aligned" | "horizontal" | "vertical",
   point: SketchPoint,
-): DimensionAnnotationPlacement {
+): DimensionLineAnnotationPlacement {
   if (axis === "horizontal") {
     return { kind: "dimensionLine", offset: point[1] - first[1] };
   }
@@ -3560,7 +3643,7 @@ export function getPointPairAnnotationPlacementFromPoint(
 export function getLineAnnotationPlacementFromPoint(
   line: { start: SketchPoint; end: SketchPoint },
   point: SketchPoint,
-): DimensionAnnotationPlacement {
+): DimensionLineAnnotationPlacement {
   return {
     kind: "dimensionLine",
     offset: getSketchLineSignedDistance(point, line),
@@ -3654,35 +3737,75 @@ export function createPlacedPointDimensionLine(
   };
 }
 
-export function createPlacedLineDistance(
-  line: { start: SketchPoint; end: SketchPoint },
-  point: SketchPoint,
+/**
+ * cadara-bmy0: a radius runs from the centre and a diameter from the opposite
+ * rim to the rim at the placement's angle (its label's default end).
+ */
+function createPlacedCircleDimensionLine(
+  circle: { center: SketchPoint; radius: number },
+  kind: "circleRadius" | "diameter",
   placement: DimensionAnnotationPlacement | undefined,
 ): { start: SketchPoint; end: SketchPoint } {
-  const axisVector = normalizeSketchVector([
-    line.end[0] - line.start[0],
-    line.end[1] - line.start[1],
-  ]);
-  const normal: SketchPoint = [-axisVector[1], axisVector[0]];
-  const signedDistance =
-    (point[0] - line.start[0]) * normal[0] +
-    (point[1] - line.start[1]) * normal[1];
-  const offset =
-    placement?.kind === "dimensionLine" ? placement.offset : signedDistance;
-  const projected: SketchPoint = [
-    point[0] - normal[0] * signedDistance,
-    point[1] - normal[1] * signedDistance,
-  ];
+  const angle =
+    placement?.kind === "dimensionLine" ? (placement.angleRadians ?? 0) : 0;
+  const direction: SketchPoint = [Math.cos(angle), Math.sin(angle)];
   return {
-    start: [
-      projected[0] + normal[0] * offset,
-      projected[1] + normal[1] * offset,
-    ],
+    start:
+      kind === "diameter"
+        ? [
+            circle.center[0] - direction[0] * circle.radius,
+            circle.center[1] - direction[1] * circle.radius,
+          ]
+        : circle.center,
     end: [
-      point[0] + normal[0] * (offset - signedDistance),
-      point[1] + normal[1] * (offset - signedDistance),
+      circle.center[0] + direction[0] * circle.radius,
+      circle.center[1] + direction[1] * circle.radius,
     ],
   };
+}
+
+/**
+ * cadara-bmy0: a point-to-datum distance's two measured features: the point
+ * and the datum's point nearest it (the origin, or the point's perpendicular
+ * foot on an axis datum).
+ */
+function getPointDatumDistanceGeometry(
+  definition: SketchDefinition,
+  session: SketchSessionState,
+  dimension: Extract<DimensionDefinition, { kind: "pointDatumDistance" }>,
+): { point: SketchPoint; datum: SketchPoint } | null {
+  const point = getReferencePointGeometry(definition, session, dimension.point);
+  if (!point) {
+    return null;
+  }
+  switch (dimension.datum.datum) {
+    case "origin":
+      return { point, datum: [0, 0] };
+    case "xAxis":
+      return { point, datum: [point[0], 0] };
+    case "yAxis":
+      return { point, datum: [0, point[1]] };
+  }
+}
+
+/** cadara-bmy0: the point-pair placement whose label sits at `point`. */
+function inferPointPairLabelPlacement(
+  first: SketchPoint,
+  second: SketchPoint,
+  axis: "aligned" | "horizontal" | "vertical",
+  point: SketchPoint,
+): DimensionLineAnnotationPlacement {
+  const placement = getPointPairAnnotationPlacementFromPoint(
+    first,
+    second,
+    axis,
+    point,
+  );
+  return withDimensionLabelPosition(
+    placement,
+    createPlacedPointDimensionLine(first, second, axis, placement),
+    point,
+  );
 }
 
 export function createPlacedLineLength(

@@ -22,6 +22,7 @@ import {
   finishSketchGeometryDrag,
   getSketchAnnotationDescriptors,
   patchSketchConstraintValue,
+  patchSketchDimensionAnnotationPlacement,
   pinSketchConstraintPreview,
   selectSketchConstraintTarget,
   startSketchDraw,
@@ -559,6 +560,8 @@ function dimensioned_(opened: SketchSessionState) {
 // T13d review R-1: a signed point-pair reference dragged across its points
 // measures negative; it shows the magnitude and Make driving at the prefill
 // stores the points in the measured direction, so nothing moves.
+// cadara-bmy0: a label dragged along its line keeps its place through the
+// swap (its stored position along the line is taken from the other end).
 test("T13d R-1: a horizontal-distance reference dragged across shows its magnitude and Make driving keeps the geometry with a positive value", () => {
   let session = draw(rectangleAndCircle(), "line", [
     [25, 0],
@@ -599,7 +602,24 @@ test("T13d R-1: a horizontal-distance reference dragged across shows its magnitu
   expect(status.solvedValue, "the status stays signed").toBeCloseTo(-3, 9);
   expect(descriptor(crossed, index).visibleLabel).toBe("(3.00)");
 
-  const editing = openEdit(crossed, crossed.definition.dimensions[index]!);
+  // cadara-bmy0: the label dragged to a fifth of the way along its line.
+  const placedLabel = patchSketchDimensionAnnotationPlacement(crossed, {
+    intent: "setDimensionAnnotationPlacement",
+    dimensionId: created.dimensionId,
+    point: [fixedX - 0.6, from.position[1] - 2],
+  });
+  const placedDimension = placedLabel.definition.dimensions[index]!;
+  const placedPosition =
+    placedDimension.kind === "distance"
+      ? placedDimension.annotationPlacement?.labelPosition
+      : undefined;
+  expect(placedPosition, "premise: off the midpoint").toBeCloseTo(0.2, 9);
+  const labelPoint = descriptor(placedLabel, index).anchor;
+
+  const editing = openEdit(
+    placedLabel,
+    placedLabel.definition.dimensions[index]!,
+  );
   expect(editing.toolPresentation?.floatingInput).toMatchObject({
     value: "3",
     readout: "Measured 3.00 mm",
@@ -627,6 +647,14 @@ test("T13d R-1: a horizontal-distance reference dragged across shows its magnitu
     expect(after[1]).toBeCloseTo(point.position[1], 9);
   }
   expect(descriptor(driving, index).visibleLabel).toBe("3.00");
+  expect(
+    committed.kind === "distance" &&
+      committed.annotationPlacement?.labelPosition,
+    "cadara-bmy0: the swapped line keeps the label's place from its other end",
+  ).toBeCloseTo(0.8, 9);
+  expect(descriptor(driving, index).anchor, "the label does not move").toEqual(
+    labelPoint,
+  );
 });
 
 // T13d review A-5: a reference angle's accessible detail names its unit once.

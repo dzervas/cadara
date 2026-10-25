@@ -766,3 +766,32 @@ test("T17p2 F-2: solver requests carry the resolved definition; every numeric ki
       ).toBe(false);
   }
 });
+
+// cadara-bmy0, logic lane (contract seam `validateSketchDefinition`): a
+// dimension-line placement may carry the label's position along its line;
+// documents without it (every older file) still validate, and a non-number
+// position is refused.
+test("cadara-bmy0: a dimension-line placement may store its label position along the line", () => {
+  const sketch = makeReferenceDimensionSketch();
+  const pointDatum = makeReferenceDimensionCases().find(
+    (entry) => entry.driving.kind === "pointDatumDistance",
+  )!.driving;
+  const placed = (annotationPlacement: unknown) =>
+    validateSketchDefinition(
+      withDimensions(sketch, [
+        { ...pointDatum, annotationPlacement } as DimensionDefinition,
+      ]),
+    ).success;
+  expect(placed(undefined), "no placement").toBe(true);
+  expect(placed({ kind: "dimensionLine", offset: 1 }), "offset only").toBe(
+    true,
+  );
+  expect(
+    placed({ kind: "dimensionLine", offset: 1, labelPosition: 1.25 }),
+    "with a label position past the end",
+  ).toBe(true);
+  expect(
+    placed({ kind: "dimensionLine", offset: 1, labelPosition: "end" }),
+    "a non-number label position",
+  ).toBe(false);
+});

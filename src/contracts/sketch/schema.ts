@@ -551,6 +551,13 @@ export type DimensionLineAnnotationPlacement = {
   kind: "dimensionLine";
   offset: number;
   angleRadians?: number;
+  /**
+   * cadara-bmy0: where the label sits along the placed dimension line, as a
+   * fraction from its start (0) to its end (1); outside [0, 1] the line runs
+   * on to the label. Absent: the kind's default (the midpoint; a radius or
+   * diameter at its rim end).
+   */
+  labelPosition?: number;
 };
 
 export type DimensionAngleAnnotationPlacement = {

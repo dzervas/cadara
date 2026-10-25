@@ -1642,6 +1642,42 @@ test("T14d: two colliding chips: clicking (selecting) chip B keeps A and B in pl
   expect(clicked, "selecting B moves neither chip").toEqual(idle);
 });
 
+// cadara-bmy0, UI lane (static markup of the annotation layer): a dimension
+// chip the layout displaced keeps a leader from its placed centre to its
+// point on the dimension line (its anchor without the label offset); a chip
+// on its anchor draws none. Red before: no leader existed.
+test("cadara-bmy0: a layout-displaced dimension chip keeps a leader to its line point", () => {
+  const a = makeDimensionDescriptor("dimension_a_distance", "10.00");
+  const b = makeDimensionDescriptor("dimension_b_angle", "90.0°");
+  const anchors = [
+    { x: 500, y: 400 },
+    { x: 500, y: 400 },
+  ];
+  const markup = renderLaidOut([a, b], anchors);
+  const [placedA, placedB] = renderedLabelRects(markup, [a, b]);
+  expect(placedA!.centre, "premise: A sits on its anchor").toEqual(anchors[0]);
+  expect(placedB!.centre, "premise: B is displaced").not.toEqual(anchors[1]);
+  const leaders = [
+    ...markup.matchAll(
+      /<line [^>]*data-sketch-annotation-leader="([^"]+)"[^>]*>/g,
+    ),
+  ];
+  expect(
+    leaders.map((match) => match[1]),
+    "only the displaced chip",
+  ).toEqual([b.id]);
+  const attribute = (name: string) =>
+    Number(new RegExp(` ${name}="([^"]+)"`).exec(leaders[0]![0])![1]);
+  expect(
+    { x1: attribute("x1"), y1: attribute("y1") },
+    "from the chip's centre",
+  ).toEqual({ x1: placedB!.centre.x, y1: placedB!.centre.y });
+  expect(
+    { x2: attribute("x2"), y2: attribute("y2") },
+    "to the anchor without its (18, -18) label offset",
+  ).toEqual({ x2: 500 - 18, y2: 400 + 18 });
+});
+
 test("T14d: clicking a pinned glyph among colliding siblings moves no rendered label", () => {
   const siblings = [
     "c_parallel",
