@@ -35,7 +35,20 @@ import {
   type SketchDerivationVariation,
   type SketchDerivedEntityVariation,
 } from "@/contracts/sketch/derived-geometry";
-import { offsetFrameCurveResidual } from "@/contracts/sketch/offset-derivation-frame";
+import {
+  localQueryDomain,
+  offsetFrameCurveResidual,
+  type OffsetFrameVariation,
+} from "@/contracts/sketch/offset-derivation-frame";
+import {
+  dual,
+  dual2,
+  dualColumns,
+  type ComponentJacobian,
+  type Dual,
+  type Dual2,
+  type DualColumns,
+} from "@/contracts/sketch/solver-core-jacobian";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { isOffsetPublicationSolveAccepted } from "@/contracts/sketch/offset-publication";
 import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
@@ -44,6 +57,7 @@ import {
   evaluateSplineSpan,
   orderedSplineOccurrences,
   reconstructSplineAggregate,
+  type SplinePoles,
 } from "@/contracts/sketch/spline-geometry";
 import type {
   ProjectedSketchReferenceGeometry,
@@ -194,6 +208,17 @@ type ScalarConstraintRecord = {
   /** Unsquared geometric equations; unlike the loss gradient, these retain rank at satisfaction. */
   evaluateComponents(values: Float64Array): readonly number[];
   /**
+   * cadara-p4r5.1: `evaluateComponents` with its analytic first-order
+   * Jacobian (a piecewise component differentiates the branch active at
+   * `values`). No solve reads it yet: `evaluate` keeps the loss path.
+   */
+  evaluateComponentJacobian(values: Float64Array): ComponentJacobian;
+  /**
+   * cadara-p4r5.1: the components that are arc-sweep hinges (0 inside the
+   * sweep). `BuildSystemResult.inequalities` states each one explicitly.
+   */
+  hingeComponentIndices?: readonly number[];
+  /**
    * The variables of an internal record (no authored constraint or
    * dimension to derive them from structurally). Without it the record is
    * projected on every evaluation and its support is found by perturbation,
@@ -224,10 +249,9 @@ type ScalarConstraintRecord = {
  *   singular; the requirement keeps its real residual, only its gradient
  *   through the offset is dropped, and it carries a targeted warning.
  */
-type OffsetRequirementBlocker = {
-  derivationId: string;
-  reason: "failed" | "failedDuringSolve" | "derivativeUnavailable";
-};
+type OffsetRequirementBlocker = NonNullable<
+  ComponentJacobian["unavailable"]
+>[number];
 
 type ConstraintEvaluationRecord = {
   id: ConstraintId | DimensionId;
@@ -255,6 +279,14 @@ type SolverParameterProjection = {
     constraint: ScalarConstraintRecord,
     variableIndices?: readonly number[],
   ): ScalarConstraintRecord;
+  /**
+   * cadara-p4r5.1: a component Jacobian on projected values, pulled back onto
+   * the authority variables (as `wrapConstraint` pulls back a gradient).
+   */
+  wrapComponentJacobian(
+    evaluate: (values: Float64Array) => ComponentJacobian,
+    variableIndices?: readonly number[],
+  ): (values: Float64Array) => ComponentJacobian;
   /**
    * [TECH] G16‴ + T15b (T-16): the relationships failing at `values`: the
    * offset failures and the derived (mirror, unresolved) failures.
@@ -286,6 +318,63 @@ type BuildSystemResult = {
   scalarConstraints: ScalarConstraintRecord[];
   /** Per derived shell: the variables of its owning offset's seeds (its curve's support). */
   shellSourceVariables: ReadonlyMap<SketchEntityId, readonly number[]>;
+  /** cadara-p4r5.1: explicit inequalities g(x) ≥ 0, data only (no solve enforces them). */
+  inequalities: readonly SolverInequalityRecord[];
+  /** cadara-p4r5.1: first-order line↔arc tangency rows, data only (no solve reads them). */
+  orientedTangencies: readonly SolverOrientedTangencyRecord[];
+};
+
+/**
+ * cadara-p4r5.1: one explicit inequality g(x) ≥ 0 with its analytic gradient
+ * (`evaluate` returns one component). Data only: no solve reads it yet.
+ * - `segmentLength`: |end − start| − τ of a line segment;
+ * - `radius`: r − τ of a circle or arc (a point-defined arc's radius is its
+ *   driven slot, |start − centre|, through the projection);
+ * - `arcSweepStart` / `arcSweepEnd`: a requirement's contact point inside
+ *   its arc's sweep (`arcSweepMarginsDual`), the explicit form of that
+ *   requirement's hinge component `requirement.componentIndex`. Where the
+ *   contact cannot be located (a degenerate line or arc) the margin and its
+ *   gradient are NaN: undefined, never an active constraint with a zero
+ *   gradient.
+ * τ is the document's modeling tolerance. A row reading a failed or
+ * singular derived relationship carries `unavailable` (see
+ * `ComponentJacobian`).
+ */
+/**
+ * cadara-p4r5.1: the first-order form of a line↔arc tangency, data only (no
+ * solve reads it; cadara-p4r5.2 swaps it in). For a tangent between a line
+ * and a point-defined arc (an offset seed) whose contact is an arc endpoint
+ * s at a line endpoint (the same point id, or joined by coincident
+ * constraints), the component is (s − c)·u, with c the arc centre and u the
+ * line's unit direction. With s on the line and r = |s − c|,
+ * r² = d² + ((s − c)·u)², so it is zero exactly where the requirement's
+ * |d| − r is. r = |s − c| holds identically when s is the arc start (it
+ * defines a point-defined arc's radius): there |d| − r ≈ −((s − c)·u)²/(2r)
+ * is second order (so is σ·d − r, since σ·d ≤ |d| ≤ r) and only this row
+ * keeps rank. At the arc end it holds through the internal common-radius
+ * row, and |d| − r is already first order.
+ */
+type SolverOrientedTangencyRecord = {
+  id: string;
+  /** The tangent constraint whose component 0 (|d| − r) it restates. */
+  requirementId: ConstraintId;
+  arcEntityId: SketchEntityId;
+  /** The arc endpoint s. */
+  contactPointId: SketchPointId;
+  /** The authority variables it reads. */
+  variableIndices: readonly number[];
+  evaluate(values: Float64Array): ComponentJacobian;
+};
+
+type SolverInequalityRecord = {
+  id: string;
+  kind: "segmentLength" | "radius" | "arcSweepStart" | "arcSweepEnd";
+  /** The entity whose validity it states, or the arc of a sweep margin (local or projected). */
+  entityId: SketchEntityId | null;
+  requirement?: { id: ConstraintId | DimensionId; componentIndex: number };
+  /** The authority variables it reads. */
+  variableIndices: readonly number[];
+  evaluate(values: Float64Array): ComponentJacobian;
 };
 
 interface BuildSystemOptions {
@@ -1184,6 +1273,7 @@ function createDerivedParameterProjection(input: {
         (_, index) => index,
       ),
       wrapConstraint: (constraint) => constraint,
+      wrapComponentJacobian: (evaluate) => evaluate,
       relationshipFailuresAt: () => new Set(),
       withBlockedRelationships: (_blocked, run) => run(),
       failedAtSolveStart: () => false,
@@ -1640,6 +1730,261 @@ function createDerivedParameterProjection(input: {
     };
   };
 
+  /**
+   * The driven states a row on `variableIndices` reads (every driven state
+   * without them); null when it reads none, so its row needs no projection.
+   */
+  const drivenScope = (variableIndices: readonly number[] | undefined) => {
+    const support = variableIndices ? new Set(variableIndices) : null;
+    const projectedSupport = variableIndices
+      ? projectVariableIndices(variableIndices)
+      : [];
+    const points = support
+      ? drivenPointRecords.filter(
+          ({ record }) =>
+            support.has(record.baseIndex) || support.has(record.baseIndex + 1),
+        )
+      : drivenPointRecords;
+    const entities = support
+      ? drivenEntityStates.filter(({ state }) =>
+          entityIndices(state.entityId).some((index) => support.has(index)),
+        )
+      : drivenEntityStates;
+    const tangents = support
+      ? drivenTangentStates.filter(
+          ({ state }) =>
+            support.has(state.baseIndex) || support.has(state.baseIndex + 1),
+        )
+      : drivenTangentStates;
+    if (points.length === 0 && entities.length === 0 && tangents.length === 0)
+      return null;
+    return {
+      projectionValidationIndices:
+        projectedSupport.length > 0 ? projectedSupport : undefined,
+      points,
+      entities,
+      tangents,
+    };
+  };
+  /**
+   * The pullback of one row gradient (or Jacobian row) at a projected
+   * iterate onto the authority variables; null when it has no driven
+   * cotangent (the gradient is already on authority variables).
+   */
+  const pullBackGradient = (
+    scope: NonNullable<ReturnType<typeof drivenScope>>,
+    projected: ReturnType<typeof project>,
+    inputGradient: Float64Array,
+  ): {
+    gradient: Float64Array;
+    derivativeUnavailable?: readonly string[];
+  } | null => {
+    const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> = {};
+    const entityCotangent: Partial<
+      Record<SketchEntityId, SketchDerivedEntityVariation>
+    > = {};
+    const tangentCotangent: Partial<
+      Record<SketchEntityId, Record<string, SketchPoint2D>>
+    > = {};
+    let hasDrivenCotangent = false;
+    const addPointCotangent = (
+      pointId: SketchPointId,
+      value: SketchPoint2D,
+    ) => {
+      const current = pointCotangent[pointId] ?? [0, 0];
+      pointCotangent[pointId] = [current[0] + value[0], current[1] + value[1]];
+    };
+    for (const { record } of scope.points) {
+      const x = inputGradient[record.baseIndex]!;
+      const y = inputGradient[record.baseIndex + 1]!;
+      if (x === 0 && y === 0) continue;
+      addPointCotangent(record.pointId, [x, y]);
+      hasDrivenCotangent = true;
+    }
+    for (const { state } of scope.entities) {
+      if (state.kind === "circle") {
+        const radius = inputGradient[state.baseIndex]!;
+        if (radius !== 0) {
+          entityCotangent[state.entityId] = { kind: "circle", radius };
+          hasDrivenCotangent = true;
+        }
+        continue;
+      }
+
+      const radius = inputGradient[state.baseIndex]!;
+      const startAngle = inputGradient[state.baseIndex + 1]!;
+      const endAngle = inputGradient[state.baseIndex + 2]!;
+      if (radius === 0 && startAngle === 0 && endAngle === 0) continue;
+      const entity = entityById.get(state.entityId);
+      if (
+        entity?.kind === "arc" &&
+        pointDefinedArcEntityIds.has(entity.entityId)
+      ) {
+        const centerRecord = pointRecords.get(entity.centerPointId);
+        const startRecord = pointRecords.get(entity.startPointId);
+        const endRecord = pointRecords.get(entity.endPointId);
+        if (!centerRecord || !startRecord || !endRecord) continue;
+        const center = getPoint(projected.values, centerRecord);
+        const start = getPoint(projected.values, startRecord);
+        const end = getPoint(projected.values, endRecord);
+        const startOffset = subtract(start, center);
+        const endOffset = subtract(end, center);
+        const startLengthSquared = startOffset[0] ** 2 + startOffset[1] ** 2;
+        const endLengthSquared = endOffset[0] ** 2 + endOffset[1] ** 2;
+        if (
+          startLengthSquared <= DEGENERATE_NORM_EPSILON ** 2 ||
+          endLengthSquared <= DEGENERATE_NORM_EPSILON ** 2
+        ) {
+          continue;
+        }
+        const startCotangent: SketchPoint2D = [
+          (radius * startOffset[0]) / Math.sqrt(startLengthSquared) -
+            (startAngle * startOffset[1]) / startLengthSquared,
+          (radius * startOffset[1]) / Math.sqrt(startLengthSquared) +
+            (startAngle * startOffset[0]) / startLengthSquared,
+        ];
+        const endCotangent: SketchPoint2D = [
+          (-endAngle * endOffset[1]) / endLengthSquared,
+          (endAngle * endOffset[0]) / endLengthSquared,
+        ];
+        addPointCotangent(entity.startPointId, startCotangent);
+        addPointCotangent(entity.endPointId, endCotangent);
+        addPointCotangent(entity.centerPointId, [
+          -startCotangent[0] - endCotangent[0],
+          -startCotangent[1] - endCotangent[1],
+        ]);
+      } else {
+        entityCotangent[state.entityId] = {
+          kind: "arc",
+          radius,
+          startAngle,
+          endAngle,
+        };
+      }
+      hasDrivenCotangent = true;
+    }
+    for (const { state } of scope.tangents) {
+      const x = inputGradient[state.baseIndex]!;
+      const y = inputGradient[state.baseIndex + 1]!;
+      if (x === 0 && y === 0) continue;
+      const entity = tangentCotangent[state.entityId] ?? {};
+      entity[state.occurrenceId] = [x, y];
+      tangentCotangent[state.entityId] = entity;
+      hasDrivenCotangent = true;
+    }
+    if (!hasDrivenCotangent) return null;
+
+    const gradient = inputGradient.slice();
+    for (const { record } of scope.points) {
+      gradient[record.baseIndex] = 0;
+      gradient[record.baseIndex + 1] = 0;
+    }
+    for (const { state } of scope.entities) {
+      for (const index of entityIndices(state.entityId)) {
+        gradient[index] = 0;
+      }
+    }
+    for (const { state } of scope.tangents) {
+      gradient[state.baseIndex] = 0;
+      gradient[state.baseIndex + 1] = 0;
+    }
+    const cotangent: SketchDerivationVariation = {
+      points: pointCotangent,
+      entities: entityCotangent,
+      splineTangents: tangentCotangent,
+    };
+    const pulled = projected.pullback(cotangent);
+    // Review A4: a singular offset derivative is never zero motion
+    // (`wrapConstraint` keeps the requirement's residual and warns).
+    if (pulled.derivativeUnavailable)
+      return {
+        gradient,
+        derivativeUnavailable: pulled.derivativeUnavailable,
+      };
+    for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
+      const record = pointRecords.get(pointId as SketchPointId);
+      if (!record || !value) continue;
+      gradient[record.baseIndex] += value[0];
+      gradient[record.baseIndex + 1] += value[1];
+    }
+    for (const [entityId, value] of Object.entries(pulled.entities ?? {})) {
+      const state = entityStates.get(entityId as SketchEntityId);
+      if (!state || !value || state.kind !== value.kind) continue;
+      gradient[state.baseIndex] += value.radius;
+      if (state.kind === "arc" && value.kind === "arc") {
+        gradient[state.baseIndex + 1] += value.startAngle;
+        gradient[state.baseIndex + 2] += value.endAngle;
+      }
+    }
+    for (const [entityId, occurrences] of Object.entries(
+      pulled.splineTangents ?? {},
+    )) {
+      for (const [occurrenceId, value] of Object.entries(occurrences ?? {})) {
+        const state = splineTangentStates.get(
+          splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
+        );
+        if (!state || !value) continue;
+        gradient[state.baseIndex] += value[0];
+        gradient[state.baseIndex + 1] += value[1];
+      }
+    }
+    return { gradient };
+  };
+
+  /**
+   * A row's Jacobian pulled back onto the authority variables. Where
+   * `wrapConstraint` would block the row or drop its gradient (a named
+   * relationship failed, or its pullback is singular), the rows are NaN and
+   * `unavailable` says why: never a zero row that reads as a valid one.
+   */
+  const pullBackComponentJacobian =
+    (
+      evaluate: (values: Float64Array) => ComponentJacobian,
+      scope: NonNullable<ReturnType<typeof drivenScope>>,
+      blockingOffsets: readonly string[],
+    ) =>
+    (values: Float64Array): ComponentJacobian => {
+      const projected = project(values, scope.projectionValidationIndices);
+      const inner = evaluate(projected.values);
+      const failing = new Set(
+        [
+          ...projected.evaluation.offsetFailures,
+          ...projected.evaluation.derivedFailures,
+        ].map((failure) => failure.derivationId),
+      );
+      const unavailable = new Map<string, OffsetRequirementBlocker>(
+        (inner.unavailable ?? []).map((entry) => [entry.derivationId, entry]),
+      );
+      for (const derivationId of blockingOffsets)
+        if (startFailedOffsets.has(derivationId))
+          unavailable.set(derivationId, { derivationId, reason: "failed" });
+        else if (failing.has(derivationId))
+          unavailable.set(derivationId, {
+            derivationId,
+            reason: "failedDuringSolve",
+          });
+      const rows =
+        unavailable.size > 0
+          ? []
+          : inner.rows.map((row) => {
+              const pulled = pullBackGradient(scope, projected, row);
+              for (const derivationId of pulled?.derivativeUnavailable ?? [])
+                unavailable.set(derivationId, {
+                  derivationId,
+                  reason: "derivativeUnavailable",
+                });
+              return pulled?.gradient ?? row;
+            });
+      if (unavailable.size === 0) return { components: inner.components, rows };
+      return {
+        components: inner.components,
+        rows: inner.rows.map(() =>
+          new Float64Array(parameterCount).fill(Number.NaN),
+        ),
+        unavailable: [...unavailable.values()],
+      };
+    };
+
   return {
     projectValues: (values) => cloneValues(project(values).values),
     projectionDiagnostics: (values) => [...project(values).diagnostics],
@@ -1664,38 +2009,20 @@ function createDerivedParameterProjection(input: {
       }
     },
     failedAtSolveStart: (derivationId) => startFailedOffsets.has(derivationId),
+    wrapComponentJacobian: (evaluate, variableIndices) => {
+      const scope = drivenScope(variableIndices);
+      return scope
+        ? pullBackComponentJacobian(
+            evaluate,
+            scope,
+            variableIndices ? relationshipsNamedBy(variableIndices) : [],
+          )
+        : evaluate;
+    },
     wrapConstraint: (constraint, variableIndices) => {
-      const support = variableIndices ? new Set(variableIndices) : null;
-      const projectedSupport = variableIndices
-        ? projectVariableIndices(variableIndices)
-        : [];
-      const projectionValidationIndices =
-        projectedSupport.length > 0 ? projectedSupport : undefined;
-      const relevantDrivenPointRecords = support
-        ? drivenPointRecords.filter(
-            ({ record }) =>
-              support.has(record.baseIndex) ||
-              support.has(record.baseIndex + 1),
-          )
-        : drivenPointRecords;
-      const relevantDrivenEntityStates = support
-        ? drivenEntityStates.filter(({ state }) =>
-            entityIndices(state.entityId).some((index) => support.has(index)),
-          )
-        : drivenEntityStates;
-      const relevantDrivenTangentStates = support
-        ? drivenTangentStates.filter(
-            ({ state }) =>
-              support.has(state.baseIndex) || support.has(state.baseIndex + 1),
-          )
-        : drivenTangentStates;
-      if (
-        relevantDrivenPointRecords.length === 0 &&
-        relevantDrivenEntityStates.length === 0 &&
-        relevantDrivenTangentStates.length === 0
-      ) {
-        return constraint;
-      }
+      const scope = drivenScope(variableIndices);
+      if (!scope) return constraint;
+      const { projectionValidationIndices } = scope;
       const blockingOffsets = variableIndices
         ? relationshipsNamedBy(variableIndices)
         : [];
@@ -1754,169 +2081,22 @@ function createDerivedParameterProjection(input: {
             })),
           );
         const evaluated = constraint.evaluate(projected.values);
-        const pointCotangent: Partial<Record<SketchPointId, SketchPoint2D>> =
-          {};
-        const entityCotangent: Partial<
-          Record<SketchEntityId, SketchDerivedEntityVariation>
-        > = {};
-        const tangentCotangent: Partial<
-          Record<SketchEntityId, Record<string, SketchPoint2D>>
-        > = {};
-        let hasDrivenCotangent = false;
-        const addPointCotangent = (
-          pointId: SketchPointId,
-          value: SketchPoint2D,
-        ) => {
-          const current = pointCotangent[pointId] ?? [0, 0];
-          pointCotangent[pointId] = [
-            current[0] + value[0],
-            current[1] + value[1],
-          ];
-        };
-        for (const { record } of relevantDrivenPointRecords) {
-          const x = evaluated.gradient[record.baseIndex]!;
-          const y = evaluated.gradient[record.baseIndex + 1]!;
-          if (x === 0 && y === 0) continue;
-          addPointCotangent(record.pointId, [x, y]);
-          hasDrivenCotangent = true;
-        }
-        for (const { state } of relevantDrivenEntityStates) {
-          if (state.kind === "circle") {
-            const radius = evaluated.gradient[state.baseIndex]!;
-            if (radius !== 0) {
-              entityCotangent[state.entityId] = { kind: "circle", radius };
-              hasDrivenCotangent = true;
-            }
-            continue;
-          }
-
-          const radius = evaluated.gradient[state.baseIndex]!;
-          const startAngle = evaluated.gradient[state.baseIndex + 1]!;
-          const endAngle = evaluated.gradient[state.baseIndex + 2]!;
-          if (radius === 0 && startAngle === 0 && endAngle === 0) continue;
-          const entity = entityById.get(state.entityId);
-          if (
-            entity?.kind === "arc" &&
-            pointDefinedArcEntityIds.has(entity.entityId)
-          ) {
-            const centerRecord = pointRecords.get(entity.centerPointId);
-            const startRecord = pointRecords.get(entity.startPointId);
-            const endRecord = pointRecords.get(entity.endPointId);
-            if (!centerRecord || !startRecord || !endRecord) continue;
-            const center = getPoint(projected.values, centerRecord);
-            const start = getPoint(projected.values, startRecord);
-            const end = getPoint(projected.values, endRecord);
-            const startOffset = subtract(start, center);
-            const endOffset = subtract(end, center);
-            const startLengthSquared =
-              startOffset[0] ** 2 + startOffset[1] ** 2;
-            const endLengthSquared = endOffset[0] ** 2 + endOffset[1] ** 2;
-            if (
-              startLengthSquared <= DEGENERATE_NORM_EPSILON ** 2 ||
-              endLengthSquared <= DEGENERATE_NORM_EPSILON ** 2
-            ) {
-              continue;
-            }
-            const startCotangent: SketchPoint2D = [
-              (radius * startOffset[0]) / Math.sqrt(startLengthSquared) -
-                (startAngle * startOffset[1]) / startLengthSquared,
-              (radius * startOffset[1]) / Math.sqrt(startLengthSquared) +
-                (startAngle * startOffset[0]) / startLengthSquared,
-            ];
-            const endCotangent: SketchPoint2D = [
-              (-endAngle * endOffset[1]) / endLengthSquared,
-              (endAngle * endOffset[0]) / endLengthSquared,
-            ];
-            addPointCotangent(entity.startPointId, startCotangent);
-            addPointCotangent(entity.endPointId, endCotangent);
-            addPointCotangent(entity.centerPointId, [
-              -startCotangent[0] - endCotangent[0],
-              -startCotangent[1] - endCotangent[1],
-            ]);
-          } else {
-            entityCotangent[state.entityId] = {
-              kind: "arc",
-              radius,
-              startAngle,
-              endAngle,
-            };
-          }
-          hasDrivenCotangent = true;
-        }
-        for (const { state } of relevantDrivenTangentStates) {
-          const x = evaluated.gradient[state.baseIndex]!;
-          const y = evaluated.gradient[state.baseIndex + 1]!;
-          if (x === 0 && y === 0) continue;
-          const entity = tangentCotangent[state.entityId] ?? {};
-          entity[state.occurrenceId] = [x, y];
-          tangentCotangent[state.entityId] = entity;
-          hasDrivenCotangent = true;
-        }
-        if (!hasDrivenCotangent) return { result: evaluated, blockers: [] };
-
-        const gradient = evaluated.gradient.slice();
-        for (const { record } of relevantDrivenPointRecords) {
-          gradient[record.baseIndex] = 0;
-          gradient[record.baseIndex + 1] = 0;
-        }
-        for (const { state } of relevantDrivenEntityStates) {
-          for (const index of entityIndices(state.entityId)) {
-            gradient[index] = 0;
-          }
-        }
-        for (const { state } of relevantDrivenTangentStates) {
-          gradient[state.baseIndex] = 0;
-          gradient[state.baseIndex + 1] = 0;
-        }
-        const cotangent: SketchDerivationVariation = {
-          points: pointCotangent,
-          entities: entityCotangent,
-          splineTangents: tangentCotangent,
-        };
-        const pulled = projected.pullback(cotangent);
+        const pulled = pullBackGradient(scope, projected, evaluated.gradient);
+        if (!pulled) return { result: evaluated, blockers: [] };
         // Review A4: a singular offset derivative is never zero motion.
         // [TECH] G16‴ (review R1): the requirement keeps its real residual
         // (its status follows it); only its gradient through the offset is
         // dropped, and it is reported with a targeted warning.
         if (pulled.derivativeUnavailable)
           return {
-            result: { residual: evaluated.residual, gradient },
+            result: { residual: evaluated.residual, gradient: pulled.gradient },
             blockers: pulled.derivativeUnavailable.map((derivationId) => ({
               derivationId,
               reason: "derivativeUnavailable" as const,
             })),
           };
-        for (const [pointId, value] of Object.entries(pulled.points ?? {})) {
-          const record = pointRecords.get(pointId as SketchPointId);
-          if (!record || !value) continue;
-          gradient[record.baseIndex] += value[0];
-          gradient[record.baseIndex + 1] += value[1];
-        }
-        for (const [entityId, value] of Object.entries(pulled.entities ?? {})) {
-          const state = entityStates.get(entityId as SketchEntityId);
-          if (!state || !value || state.kind !== value.kind) continue;
-          gradient[state.baseIndex] += value.radius;
-          if (state.kind === "arc" && value.kind === "arc") {
-            gradient[state.baseIndex + 1] += value.startAngle;
-            gradient[state.baseIndex + 2] += value.endAngle;
-          }
-        }
-        for (const [entityId, occurrences] of Object.entries(
-          pulled.splineTangents ?? {},
-        )) {
-          for (const [occurrenceId, value] of Object.entries(
-            occurrences ?? {},
-          )) {
-            const state = splineTangentStates.get(
-              splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
-            );
-            if (!state || !value) continue;
-            gradient[state.baseIndex] += value[0];
-            gradient[state.baseIndex + 1] += value[1];
-          }
-        }
         return {
-          result: { residual: evaluated.residual, gradient },
+          result: { residual: evaluated.residual, gradient: pulled.gradient },
           blockers: [],
         };
       };
@@ -1929,6 +2109,11 @@ function createDerivedParameterProjection(input: {
           constraint.evaluateComponents(
             project(values, projectionValidationIndices).values,
           ),
+        evaluateComponentJacobian: pullBackComponentJacobian(
+          constraint.evaluateComponentJacobian,
+          scope,
+          blockingOffsets,
+        ),
         ...(blockingOffsets.length > 0 || innerBlockers
           ? {
               offsetBlockers: (values: Float64Array) => {
@@ -2163,6 +2348,9 @@ function createNumericalScalarConstraint(input: {
   affectedVariableIndices?: readonly number[];
   evaluateResidual(values: Float64Array): number;
   evaluateComponents?(values: Float64Array): readonly number[];
+  /** Of `evaluateComponents`, or of `[evaluateResidual]` without it. */
+  evaluateComponentJacobian(values: Float64Array): ComponentJacobian;
+  hingeComponentIndices?: readonly number[];
 }): ScalarConstraintRecord {
   const indices = input.affectedVariableIndices;
   return {
@@ -2171,6 +2359,10 @@ function createNumericalScalarConstraint(input: {
     evaluateComponents:
       input.evaluateComponents ??
       ((values) => [input.evaluateResidual(values)]),
+    evaluateComponentJacobian: input.evaluateComponentJacobian,
+    ...(input.hingeComponentIndices
+      ? { hingeComponentIndices: input.hingeComponentIndices }
+      : {}),
     evaluate(values) {
       const residualValue = input.evaluateResidual(values);
       const gradient = zeroVector(input.parameterCount);
@@ -2190,6 +2382,354 @@ function createNumericalScalarConstraint(input: {
 
       return { residual: 0.5 * residualValue * residualValue, gradient };
     },
+  };
+}
+
+// cadara-p4r5.1: the dual twins of the geometry helpers above, for the rows'
+// analytic component Jacobians. Each mirrors its plain helper's operations
+// and branches exactly (see `solver-core-jacobian.ts`).
+
+function unitVectorDual(start: Dual2, end: Dual2): Dual2 | null {
+  const delta = dual2.sub(end, start);
+  const norm = dual2.length(delta);
+  return norm.value < DEGENERATE_NORM_EPSILON
+    ? null
+    : [dual.div(delta[0], norm), dual.div(delta[1], norm)];
+}
+
+function pointLineSignedDistanceDual(
+  point: Dual2,
+  start: Dual2,
+  end: Dual2,
+): Dual {
+  const unit = unitVectorDual(start, end);
+  return unit
+    ? dual2.cross(dual2.sub(point, start), unit)
+    : dual.constantLike(point[0], 0);
+}
+
+function lineNormalDirectionResidualDual(
+  lineStart: Dual2,
+  lineEnd: Dual2,
+  contactPoint: Dual2,
+  center: Dual2,
+): Dual {
+  const lineUnit = unitVectorDual(lineStart, lineEnd);
+  const radialUnit = unitVectorDual(center, contactPoint);
+  return lineUnit && radialUnit
+    ? dual2.cross(lineUnit, radialUnit)
+    : dual.constantLike(center[0], 0);
+}
+
+function lineParallelResidualDual(
+  firstStart: Dual2,
+  firstEnd: Dual2,
+  secondStart: Dual2,
+  secondEnd: Dual2,
+): Dual {
+  const firstUnit = unitVectorDual(firstStart, firstEnd);
+  const secondUnit = unitVectorDual(secondStart, secondEnd);
+  return firstUnit && secondUnit
+    ? dual2.cross(firstUnit, secondUnit)
+    : dual.constantLike(firstStart[0], Number.POSITIVE_INFINITY);
+}
+
+function midpointDual(start: Dual2, end: Dual2): Dual2 {
+  return [
+    dual.scale(dual.add(start[0], end[0]), 0.5),
+    dual.scale(dual.add(start[1], end[1]), 0.5),
+  ];
+}
+
+function lineAngleRadiansDual(
+  firstStart: Dual2,
+  firstEnd: Dual2,
+  secondStart: Dual2,
+  secondEnd: Dual2,
+): Dual | null {
+  const firstDelta = dual2.sub(firstEnd, firstStart);
+  const secondDelta = dual2.sub(secondEnd, secondStart);
+  const denominator = dual2.cross(firstDelta, secondDelta);
+  const center: Dual2 | null =
+    Math.abs(denominator.value) <= DEGENERATE_NORM_EPSILON
+      ? null
+      : (() => {
+          const delta = dual2.sub(secondStart, firstStart);
+          const t = dual.div(dual2.cross(delta, secondDelta), denominator);
+          return [
+            dual.add(firstStart[0], dual.mul(firstDelta[0], t)),
+            dual.add(firstStart[1], dual.mul(firstDelta[1], t)),
+          ];
+        })();
+  const firstUnit = lineAngleDirectionFromCenterDual(
+    firstStart,
+    firstEnd,
+    center,
+  );
+  const secondUnit = lineAngleDirectionFromCenterDual(
+    secondStart,
+    secondEnd,
+    center,
+  );
+  return firstUnit && secondUnit
+    ? dual.acosClamped(dual2.dot(firstUnit, secondUnit))
+    : null;
+}
+
+function lineAngleDirectionFromCenterDual(
+  start: Dual2,
+  end: Dual2,
+  center: Dual2 | null,
+): Dual2 | null {
+  const lineUnit = unitVectorDual(start, end);
+  if (!lineUnit || !center) return lineUnit;
+  const towardMidpoint = unitVectorDual(center, [
+    dual.scale(dual.add(start[0], end[0]), 0.5),
+    dual.scale(dual.add(start[1], end[1]), 0.5),
+  ]);
+  if (!towardMidpoint) return lineUnit;
+  return dual2.dot(towardMidpoint, lineUnit).value >= 0
+    ? lineUnit
+    : [dual.neg(lineUnit[0]), dual.neg(lineUnit[1])];
+}
+
+/** A local or projected arc; `plain` is its value for the sweep predicates. */
+type ArcDual = {
+  center: Dual2;
+  radius: Dual;
+  startAngle: Dual;
+  endAngle: Dual;
+  startPosition: Dual2;
+  endPosition: Dual2;
+  plain: ReturnType<typeof localArcData>;
+};
+
+function localArcDataDual(input: {
+  center: Dual2;
+  radius: Dual;
+  startAngle: Dual;
+  endAngle: Dual;
+  sweepDirection: Extract<
+    SketchEntityDefinition,
+    { kind: "arc" }
+  >["sweepDirection"];
+}): ArcDual {
+  const position = (angle: Dual): Dual2 => [
+    dual.add(input.center[0], dual.mul(dual.cos(angle), input.radius)),
+    dual.add(input.center[1], dual.mul(dual.sin(angle), input.radius)),
+  ];
+  return {
+    center: input.center,
+    radius: input.radius,
+    startAngle: input.startAngle,
+    endAngle: input.endAngle,
+    startPosition: position(input.startAngle),
+    endPosition: position(input.endAngle),
+    plain: localArcData({
+      center: dual2.values(input.center),
+      radius: input.radius.value,
+      startAngle: input.startAngle.value,
+      endAngle: input.endAngle.value,
+      sweepDirection: input.sweepDirection,
+    }),
+  };
+}
+
+function projectedArcDataDual(
+  like: Dual,
+  geometry: Extract<ProjectedSketchReferenceGeometry, { kind: "arc" }>,
+): ArcDual {
+  const plain = projectedArcData(geometry);
+  const constant = (value: number) => dual.constantLike(like, value);
+  return {
+    center: [constant(plain.center[0]), constant(plain.center[1])],
+    radius: constant(plain.radius),
+    startAngle: constant(plain.startAngle),
+    endAngle: constant(plain.endAngle),
+    startPosition: [
+      constant(plain.startPosition[0]),
+      constant(plain.startPosition[1]),
+    ],
+    endPosition: [
+      constant(plain.endPosition[0]),
+      constant(plain.endPosition[1]),
+    ],
+    plain,
+  };
+}
+
+/** The angle of `point` about the arc's centre (its start angle at the centre). */
+function arcContactAngleDual(point: Dual2, arc: ArcDual): Dual {
+  const offset = dual2.sub(point, arc.center);
+  return dual2.length(offset).value > DEGENERATE_NORM_EPSILON
+    ? dual.atan2(offset[1], offset[0])
+    : arc.startAngle;
+}
+
+function arcCirclePointDual(arc: ArcDual, angle: Dual): Dual2 {
+  return [
+    dual.add(arc.center[0], dual.mul(dual.cos(angle), arc.radius)),
+    dual.add(arc.center[1], dual.mul(dual.sin(angle), arc.radius)),
+  ];
+}
+
+/** `nearestPointOnLocalArcSweep` / `nearestPointOnProjectedArcSweep`. */
+function nearestPointOnArcSweepDual(point: Dual2, arc: ArcDual): Dual2 {
+  const angle = arcContactAngleDual(point, arc);
+  if (isAngleOnLocalArc(angle.value, arc.plain))
+    return arcCirclePointDual(arc, angle);
+  return dual2.length(dual2.sub(point, arc.startPosition)).value <=
+    dual2.length(dual2.sub(point, arc.endPosition)).value
+    ? arc.startPosition
+    : arc.endPosition;
+}
+
+/** `localArcSweepViolation` / `projectedArcSweepViolation`. */
+function arcSweepViolationDual(point: Dual2, arc: ArcDual): Dual {
+  const angle = arcContactAngleDual(point, arc);
+  if (isAngleOnLocalArc(angle.value, arc.plain))
+    return dual.constantLike(angle, 0);
+  const circlePoint = arcCirclePointDual(arc, angle);
+  return dual.min(
+    dual2.length(dual2.sub(circlePoint, arc.startPosition)),
+    dual2.length(dual2.sub(circlePoint, arc.endPosition)),
+  );
+}
+
+/**
+ * cadara-p4r5.1: the explicit form of an arc-sweep hinge (`arcSweepViolation`
+ * is 0 inside the sweep, so its derivative is undefined at the arc's ends):
+ * `contact` lies inside the sweep iff both returned values are ≥ 0. Each is
+ * the angular margin from one sweep end, measured about the sweep's middle,
+ * so both are smooth except at the antipode of that middle.
+ */
+function arcSweepMarginsDual(
+  contact: Dual2,
+  arc: ArcDual,
+): readonly [start: Dual, end: Dual] {
+  const direction = arc.plain.sweepDirection === "counterClockwise" ? 1 : -1;
+  const angle = arcContactAngleDual(contact, arc);
+  // The sweep is `arcSweepOffset(end, start)`; its derivative is the
+  // directed difference of the end angles (its 2π wrap is constant).
+  const halfSweep = dual.scale(
+    dual.add(
+      dual.scale(dual.sub(arc.endAngle, arc.startAngle), direction),
+      dual.constantLike(
+        angle,
+        arc.plain.sweep -
+          direction * (arc.plain.endAngle - arc.plain.startAngle),
+      ),
+    ),
+    0.5,
+  );
+  const offset = dual.sub(
+    dual.scale(dual.sub(angle, arc.startAngle), direction),
+    halfSweep,
+  );
+  const wrapped = dual.add(
+    offset,
+    dual.constantLike(
+      offset,
+      normalizeAngleRadians(offset.value + Math.PI) - Math.PI - offset.value,
+    ),
+  );
+  return [dual.add(halfSweep, wrapped), dual.sub(halfSweep, wrapped)];
+}
+
+function localCircleTangencyContactsDual(
+  first: { center: Dual2; radius: Dual },
+  second: { center: Dual2; radius: Dual },
+  relation: "external" | "internal",
+): [Dual2, Dual2] {
+  const centerDelta = dual2.sub(second.center, first.center);
+  const centerDistance = dual2.length(centerDelta);
+  const direction: Dual2 =
+    centerDistance.value > DEGENERATE_NORM_EPSILON
+      ? [
+          dual.div(centerDelta[0], centerDistance),
+          dual.div(centerDelta[1], centerDistance),
+        ]
+      : [
+          dual.constantLike(centerDistance, 1),
+          dual.constantLike(centerDistance, 0),
+        ];
+  const along = (
+    center: Dual2,
+    radius: Dual,
+    sign: number,
+    combineAxis: (left: Dual, right: Dual) => Dual,
+  ): Dual2 => [
+    combineAxis(center[0], dual.scale(dual.mul(direction[0], radius), sign)),
+    combineAxis(center[1], dual.scale(dual.mul(direction[1], radius), sign)),
+  ];
+  if (relation === "external")
+    return [
+      along(first.center, first.radius, 1, dual.add),
+      along(second.center, second.radius, 1, dual.sub),
+    ];
+  const contactSign = first.radius.value >= second.radius.value ? 1 : -1;
+  return [
+    along(first.center, first.radius, contactSign, dual.add),
+    along(second.center, second.radius, contactSign, dual.add),
+  ];
+}
+
+/**
+ * cadara-p4r5.1: the Jacobian of a closest-point residual r = P − C(u*),
+ * where u* minimises |P − C(u)| on a cubic span. With g(u) = (C − P)·C′ = 0
+ * at an interior minimum, du = −[(dC − dP)·C′ + (C − P)·dC′] / (C′·C′ +
+ * (C − P)·C″) and dr = dP − dC − C′·du. At a domain end where g is
+ * not ≈ 0 the minimum is clamped there and du = 0. (Orthogonality alone
+ * cannot decide it: near satisfaction |r| is tiny and the search's
+ * location noise dominates g.) `dP`, `dC` and `dC′` are per column (dC, dC′
+ * at fixed u).
+ */
+function closestPointResidualDuals(input: {
+  residual: SketchPoint2D;
+  atDomainEnd: boolean;
+  first: SketchPoint2D;
+  second: SketchPoint2D;
+  columns: number;
+  dPoint(column: number): SketchPoint2D;
+  dCurve(column: number): SketchPoint2D;
+  dFirst(column: number): SketchPoint2D;
+}): [Dual, Dual] {
+  const { residual, first, second } = input;
+  const curveMinusPoint: SketchPoint2D = [-residual[0], -residual[1]];
+  const interior =
+    !input.atDomainEnd ||
+    Math.abs(dot2(curveMinusPoint, first)) <=
+      1e-3 * length(residual) * length(first);
+  const curvature = dot2(first, first) + dot2(curveMinusPoint, second);
+  const x = new Float64Array(input.columns);
+  const y = new Float64Array(input.columns);
+  for (let column = 0; column < input.columns; column += 1) {
+    const dPoint = input.dPoint(column);
+    const dCurve = input.dCurve(column);
+    const du = interior
+      ? -(
+          dot2(subtract(dCurve, dPoint), first) +
+          dot2(curveMinusPoint, input.dFirst(column))
+        ) / curvature
+      : 0;
+    x[column] = dPoint[0] - dCurve[0] - first[0] * du;
+    y[column] = dPoint[1] - dCurve[1] - first[1] * du;
+  }
+  return [
+    { value: residual[0], derivative: x },
+    { value: residual[1], derivative: y },
+  ];
+}
+
+/** cadara-p4r5.1: a row's analytic component Jacobian from its dual twin. */
+function componentJacobianOver(
+  parameterCount: number,
+  support: readonly number[],
+  components: (columns: DualColumns) => readonly Dual[],
+) {
+  return (values: Float64Array): ComponentJacobian => {
+    const columns = dualColumns(values, support);
+    return columns.jacobian(components(columns), parameterCount);
   };
 }
 
@@ -2456,6 +2996,50 @@ function buildSystem(
         );
         return subtract(position, evaluated.position);
       },
+      evaluateComponentJacobian(values) {
+        const columns = dualColumns(values, affectedVariableIndices);
+        const position = getPoint(values, point);
+        const aggregate = currentSplineAggregate(values, entity);
+        const positions = currentSplinePositions(values, entity);
+        const geometry = reconstructSplineAggregate(aggregate, positions);
+        const closest = closestSplineLocation(position, geometry);
+        if (!closest || geometry.validity !== "valid")
+          return columns.jacobian(infiniteDuals(columns, 2), parameterCount);
+        const location = { kind: "local", value: closest.u } as const;
+        const evaluated = evaluateSplineSpan(
+          geometry.spans[closest.spanIndex]!,
+          location,
+        );
+        const variations = columns.support.map((variableIndex) => {
+          const varied = reconstructSplineAggregate(
+            aggregate,
+            positions,
+            splineVariationForVariable(entity, variableIndex),
+          );
+          return varied.validity === "valid"
+            ? evaluateSplineSpan(varied.spans[closest.spanIndex]!, location)
+                .differential
+            : null;
+        });
+        return columns.jacobian(
+          closestPointResidualDuals({
+            residual: subtract(position, evaluated.position),
+            atDomainEnd: closest.u === 0 || closest.u === 1,
+            first: evaluated.first,
+            second: evaluated.second,
+            columns: columns.support.length,
+            dPoint: (column) =>
+              columns.support[column] === point.baseIndex
+                ? [1, 0]
+                : columns.support[column] === point.baseIndex + 1
+                  ? [0, 1]
+                  : [0, 0],
+            dCurve: (column) => variations[column]?.position ?? [0, 0],
+            dFirst: (column) => variations[column]?.first ?? [0, 0],
+          }),
+          parameterCount,
+        );
+      },
 
       evaluate(values) {
         const gradient = zeroVector(parameterCount);
@@ -2616,6 +3200,120 @@ function buildSystem(
           point: getPoint(values, point),
         });
         return "code" in result ? [Infinity, Infinity] : result.value;
+      },
+      evaluateComponentJacobian(values) {
+        const rows = [zeroVector(parameterCount), zeroVector(parameterCount)];
+        const record = parameterProjection
+          .derivationEvaluation(values)
+          ?.offsetFrames.find(
+            (candidate) => candidate.derivationId === shell.derivationId,
+          );
+        const output = record?.outputs.shells.find(
+          (candidate) => candidate.entityId === shell.entityId,
+        );
+        if (!record || !output)
+          return { components: [Infinity, Infinity], rows };
+        const derivatives = offsetRecordDerivatives(record);
+        const result = offsetFrameCurveResidual({
+          frame: record.frame,
+          derivatives,
+          seedEntityId: output.seed,
+          point: getPoint(values, point),
+        });
+        if ("code" in result) return { components: [Infinity, Infinity], rows };
+        const addVariation = (
+          row: Float64Array,
+          variation: OffsetFrameVariation,
+        ) => {
+          for (const [pointId, value] of Object.entries(
+            variation.points ?? {},
+          )) {
+            const source = pointRecords.get(pointId as SketchPointId);
+            if (!source) continue;
+            row[source.baseIndex] += value[0];
+            row[source.baseIndex + 1] += value[1];
+          }
+          for (const [entityId, occurrences] of Object.entries(
+            variation.splineTangents ?? {},
+          ))
+            for (const [occurrenceId, value] of Object.entries(occurrences)) {
+              const state = splineTangentStates.get(
+                splineTangentStateKey(entityId as SketchEntityId, occurrenceId),
+              );
+              if (!state) continue;
+              row[state.baseIndex] += value[0];
+              row[state.baseIndex + 1] += value[1];
+            }
+          for (const [entityId, value] of Object.entries(
+            variation.circleRadii ?? {},
+          )) {
+            const state = entityStates.get(entityId as SketchEntityId);
+            if (state?.kind === "circle") row[state.baseIndex] += value;
+          }
+        };
+        // ∂r/∂x with the location (leaf, u) held, as `evaluate` uses it.
+        result.gradient.point.forEach((pointRow, axis) => {
+          rows[axis]![point.baseIndex] += pointRow[0];
+          rows[axis]![point.baseIndex + 1] += pointRow[1];
+          addVariation(rows[axis]!, result.gradient.source[axis]!);
+        });
+        // The location moves too (`closestPointResidualDuals`): with
+        // D = C′·C′ − r·C″, du = (∂r·C′ + r·∂C′) / D and dr = ∂r − C′·du;
+        // r·∂C′ is the pullback of the pole cotangent r·Bᵢ′(u).
+        const { leaf: leafIndex, u } = result.location;
+        const leaf = record.frame.cubics.get(output.seed)![leafIndex]!;
+        const curve = evaluateSplineSpan(
+          {
+            interval: leaf.sourceDomain,
+            poles: leaf.span.poles,
+            differential: {
+              interval: [0, 0],
+              poles: [
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                [0, 0],
+              ],
+            },
+          },
+          { kind: "local", value: u },
+        );
+        const residual = result.value;
+        const first = curve.first;
+        if (
+          localQueryDomain(leaf).includes(u) &&
+          Math.abs(dot2(residual, first)) >
+            1e-3 * length(residual) * length(first)
+        )
+          return { components: residual, rows };
+        const v = 1 - u;
+        const basisDerivatives = [
+          -3 * v * v,
+          3 * v * v - 6 * u * v,
+          6 * u * v - 3 * u * u,
+          3 * u * u,
+        ];
+        const cotangentLeaves: { poles: SplinePoles }[] = [];
+        cotangentLeaves[leafIndex] = {
+          poles: basisDerivatives.map((weight) => [
+            residual[0] * weight,
+            residual[1] * weight,
+          ]) as unknown as SplinePoles,
+        };
+        const firstVariation = derivatives.pullback({
+          cubics: new Map([[output.seed, cotangentLeaves]]),
+        });
+        const du = zeroVector(parameterCount);
+        for (let index = 0; index < parameterCount; index += 1)
+          du[index] = rows[0]![index]! * first[0] + rows[1]![index]! * first[1];
+        if (!("ok" in firstVariation)) addVariation(du, firstVariation);
+        const curvature = dot2(first, first) - dot2(residual, curve.second);
+        for (let index = 0; index < parameterCount; index += 1) {
+          const step = du[index]! / curvature;
+          rows[0]![index] -= first[0] * step;
+          rows[1]![index] -= first[1] * step;
+        }
+        return { components: residual, rows };
       },
       offsetBlockers: (values) => scoped(values).blockers,
     };
@@ -2854,11 +3552,370 @@ function buildSystem(
     return [];
   };
 
+  // cadara-p4r5.1: analytic component Jacobians. Each row's
+  // `evaluateComponentJacobian` is the dual twin of its `evaluateComponents`
+  // over the row's support (the variables those components read).
+  const componentJacobian = (
+    support: readonly number[],
+    components: (columns: DualColumns) => readonly Dual[],
+  ) => componentJacobianOver(parameterCount, support, components);
+  const pointDual = (columns: DualColumns, point: SolverPointRecord) =>
+    columns.point(point.baseIndex);
+  const infiniteDuals = (columns: DualColumns, count: number) =>
+    Array.from({ length: count }, () =>
+      columns.constant(Number.POSITIVE_INFINITY),
+    );
+  const constantLineDual = (
+    columns: DualColumns,
+    line: { start: SketchPoint2D; end: SketchPoint2D },
+  ) => ({
+    start: columns.constant2(line.start),
+    end: columns.constant2(line.end),
+  });
+  const localLineDual = (columns: DualColumns, entityId: SketchEntityId) => {
+    const line = lineEntityMap.get(entityId);
+    const start = line ? pointRecords.get(line.startPointId) : null;
+    const end = line ? pointRecords.get(line.endPointId) : null;
+    return start && end
+      ? { start: pointDual(columns, start), end: pointDual(columns, end) }
+      : null;
+  };
+  const lineDimensionOperandDual = (
+    columns: DualColumns,
+    operand: Extract<
+      DimensionDefinition,
+      { kind: "lineDistance" }
+    >["lines"][number],
+  ) => {
+    if (operand.kind === "localEntity")
+      return localLineDual(columns, operand.entityId);
+    const line = resolveLineDimensionOperand(
+      columns.values,
+      operand,
+      lineEntityMap,
+      pointRecords,
+      options.projectedReferences ?? [],
+    );
+    return line ? constantLineDual(columns, line) : null;
+  };
+  const pointDimensionOperandDual = (
+    columns: DualColumns,
+    operand: Extract<
+      DimensionDefinition,
+      { kind: "linePointDistance" }
+    >["point"],
+  ): Dual2 | null => {
+    if (operand.kind === "localPoint") {
+      const point = pointRecords.get(operand.pointId);
+      return point ? pointDual(columns, point) : null;
+    }
+    const point = resolvePointDimensionOperand(
+      columns.values,
+      operand,
+      pointRecords,
+      options.projectedReferences ?? [],
+    );
+    return point ? columns.constant2(point) : null;
+  };
+  const localCircleLikeDual = (
+    columns: DualColumns,
+    entity: SketchEntityDefinition,
+  ): { center: Dual2; radius: Dual; arc?: ArcDual } | null => {
+    const center =
+      entity.kind === "circle" || entity.kind === "arc"
+        ? pointRecords.get(entity.centerPointId)
+        : undefined;
+    const state = entityStates.get(entity.entityId);
+    if (entity.kind === "circle")
+      return center
+        ? {
+            center: pointDual(columns, center),
+            radius:
+              state?.kind === "circle"
+                ? columns.variable(state.baseIndex)
+                : columns.constant(entity.radius),
+          }
+        : null;
+    if (entity.kind !== "arc" || !center || state?.kind !== "arc") return null;
+    const arc = localArcDataDual({
+      center: pointDual(columns, center),
+      radius: columns.variable(state.baseIndex),
+      startAngle: columns.variable(state.baseIndex + 1),
+      endAngle: columns.variable(state.baseIndex + 2),
+      sweepDirection: entity.sweepDirection,
+    });
+    return { center: arc.center, radius: arc.radius, arc };
+  };
+  const pointOnLocalCurveResidualDual = (
+    columns: DualColumns,
+    point: SolverPointRecord,
+    entity: SketchEntityDefinition,
+  ): Dual => {
+    const position = pointDual(columns, point);
+    if (entity.kind === "lineSegment") {
+      const line = localLineDual(columns, entity.entityId);
+      return line
+        ? pointLineSignedDistanceDual(position, line.start, line.end)
+        : columns.constant(0);
+    }
+    const circleLike = localCircleLikeDual(columns, entity);
+    if (!circleLike) return columns.constant(0);
+    if (circleLike.arc)
+      return dual2.length(
+        dual2.sub(
+          position,
+          nearestPointOnArcSweepDual(position, circleLike.arc),
+        ),
+      );
+    return dual.sub(
+      dual2.length(dual2.sub(position, circleLike.center)),
+      circleLike.radius,
+    );
+  };
+  const localCurveComponentsDual = (
+    columns: DualColumns,
+    point: SolverPointRecord,
+    entity: SketchEntityDefinition,
+  ): readonly Dual[] => {
+    const position = pointDual(columns, point);
+    const circle = localCircleLikeDual(columns, entity);
+    return circle?.arc
+      ? dual2.sub(position, nearestPointOnArcSweepDual(position, circle.arc))
+      : [pointOnLocalCurveResidualDual(columns, point, entity)];
+  };
+  // A projected spline never reaches these two (its point-on-curve row has
+  // its own Jacobian; normal rows need a projected circle or arc).
+  const pointOnProjectedCurveResidualDual = (
+    position: Dual2,
+    projected: ProjectedSketchReferenceGeometry,
+  ): Dual => {
+    if (projected.kind === "lineSegment")
+      return pointLineSignedDistanceDual(
+        position,
+        [
+          dual.constantLike(position[0], projected.startPosition[0]),
+          dual.constantLike(position[0], projected.startPosition[1]),
+        ],
+        [
+          dual.constantLike(position[0], projected.endPosition[0]),
+          dual.constantLike(position[0], projected.endPosition[1]),
+        ],
+      );
+    if (projected.kind === "arc")
+      return dual2.length(
+        dual2.sub(
+          position,
+          nearestPointOnArcSweepDual(
+            position,
+            projectedArcDataDual(position[0], projected),
+          ),
+        ),
+      );
+    const circleLike = projectedCircleLikeGeometry(projected);
+    return circleLike
+      ? dual.sub(
+          dual2.length(
+            dual2.sub(position, [
+              dual.constantLike(position[0], circleLike.center[0]),
+              dual.constantLike(position[0], circleLike.center[1]),
+            ]),
+          ),
+          dual.constantLike(position[0], circleLike.radius),
+        )
+      : dual.constantLike(position[0], 0);
+  };
+  const projectedCurveComponentsDual = (
+    position: Dual2,
+    projected: ProjectedSketchReferenceGeometry,
+  ): readonly Dual[] =>
+    projected.kind === "arc"
+      ? dual2.sub(
+          position,
+          nearestPointOnArcSweepDual(
+            position,
+            projectedArcDataDual(position[0], projected),
+          ),
+        )
+      : [pointOnProjectedCurveResidualDual(position, projected)];
+  const symmetryComponentsDual = (
+    first: Dual2,
+    second: Dual2,
+    start: Dual2,
+    end: Dual2,
+  ): readonly Dual[] => {
+    const unit = unitVectorDual(start, end);
+    return unit
+      ? [
+          pointLineSignedDistanceDual(midpointDual(first, second), start, end),
+          dual2.dot(dual2.sub(second, first), unit),
+        ]
+      : [
+          dual.constantLike(first[0], Number.POSITIVE_INFINITY),
+          dual.constantLike(first[0], Number.POSITIVE_INFINITY),
+        ];
+  };
+  const normalResidualDual = (
+    columns: DualColumns,
+    line: Extract<SketchEntityDefinition, { kind: "lineSegment" }>,
+    contactPoint: Dual2,
+    center: Dual2,
+  ) => {
+    const local = localLineDual(columns, line.entityId);
+    return local
+      ? lineNormalDirectionResidualDual(
+          local.start,
+          local.end,
+          contactPoint,
+          center,
+        )
+      : columns.constant(0);
+  };
+  const lineContactResidualDual = (
+    columns: DualColumns,
+    line: Extract<SketchEntityDefinition, { kind: "lineSegment" }>,
+    contactPoint: Dual2,
+  ) => {
+    const local = localLineDual(columns, line.entityId);
+    return local
+      ? pointLineSignedDistanceDual(contactPoint, local.start, local.end)
+      : columns.constant(0);
+  };
+  const localCollinearComponentsDual = (
+    columns: DualColumns,
+    target: LocalCollinearTargetOperand,
+    reference: { start: Dual2; end: Dual2 },
+  ): readonly Dual[] => {
+    if (target.kind === "localPoint") {
+      const point = pointRecords.get(target.pointId);
+      return [
+        point
+          ? pointLineSignedDistanceDual(
+              pointDual(columns, point),
+              reference.start,
+              reference.end,
+            )
+          : columns.constant(Number.POSITIVE_INFINITY),
+      ];
+    }
+    const line = localLineDual(columns, target.entityId);
+    return line
+      ? [
+          pointLineSignedDistanceDual(
+            line.start,
+            reference.start,
+            reference.end,
+          ),
+          pointLineSignedDistanceDual(line.end, reference.start, reference.end),
+        ]
+      : infiniteDuals(columns, 2);
+  };
+  /** The poles of one span of a spline, with their derivatives per column. */
+  const splineSpanPoleDuals = (
+    columns: DualColumns,
+    entity: Extract<SketchEntityDefinition, { kind: "spline" }>,
+    selectSpan: (
+      spans: ReturnType<typeof reconstructSplineAggregate>["spans"],
+    ) =>
+      | ReturnType<typeof reconstructSplineAggregate>["spans"][number]
+      | undefined,
+  ): Dual2[] | null => {
+    const aggregate = currentSplineAggregate(columns.values, entity);
+    const positions = currentSplinePositions(columns.values, entity);
+    const span = selectSpan(
+      reconstructSplineAggregate(aggregate, positions).spans,
+    );
+    if (!span) return null;
+    const varied = columns.support.map((index) =>
+      selectSpan(
+        reconstructSplineAggregate(
+          aggregate,
+          positions,
+          splineVariationForVariable(entity, index),
+        ).spans,
+      ),
+    );
+    return span.poles.map(
+      (pole, poleIndex) =>
+        ([0, 1] as const).map((axis) =>
+          columns.fromColumns(
+            pole[axis],
+            varied.map(
+              (variedSpan) =>
+                variedSpan?.differential.poles[poleIndex]![axis] ?? 0,
+            ),
+          ),
+        ) as unknown as Dual2,
+    );
+  };
+
+  // cadara-p4r5.1: the explicit inequality rows (data only), wrapped through
+  // the projection once it exists.
+  const inequalityRows: {
+    record: Omit<SolverInequalityRecord, "evaluate" | "variableIndices">;
+    support: readonly number[];
+    inequality(columns: DualColumns): Dual;
+  }[] = [];
+  const addArcSweepInequalities = (
+    requirementId: ConstraintId,
+    componentIndex: number,
+    entityId: SketchEntityId | null,
+    support: readonly number[],
+    contactOnArc: (
+      columns: DualColumns,
+    ) => { contact: Dual2; arc: ArcDual } | null,
+  ) => {
+    for (const [side, kind] of [
+      [0, "arcSweepStart"],
+      [1, "arcSweepEnd"],
+    ] as const)
+      inequalityRows.push({
+        record: {
+          id: `${kind}_${requirementId}_${componentIndex}`,
+          kind,
+          entityId,
+          requirement: { id: requirementId, componentIndex },
+        },
+        support,
+        inequality: (columns) => {
+          const located = contactOnArc(columns);
+          return located
+            ? arcSweepMarginsDual(located.contact, located.arc)[side]
+            : columns.fromColumns(
+                Number.NaN,
+                columns.support.map(() => Number.NaN),
+              );
+        },
+      });
+  };
+
   const offsetSeedArcIds = new Set(
     (definition.derivedRelationships ?? []).flatMap((relationship) =>
       relationship.kind === "offset" ? relationship.seedEntityIds : [],
     ),
   );
+  // cadara-p4r5.1: the first-order tangency rows (data only), wrapped
+  // through the projection once it exists.
+  const orientedTangencyRows: {
+    record: Omit<SolverOrientedTangencyRecord, "evaluate" | "variableIndices">;
+    support: readonly number[];
+    component(columns: DualColumns): Dual;
+  }[] = [];
+  // Each point's class under the coincident constraints (transitively).
+  const coincidentClasses = new Map<
+    SketchPointId,
+    ReadonlySet<SketchPointId>
+  >();
+  for (const constraint of definition.constraints) {
+    if (constraint.kind !== "coincident") continue;
+    const joined = new Set(
+      constraint.pointIds.flatMap((pointId) => [
+        ...(coincidentClasses.get(pointId) ?? [pointId]),
+      ]),
+    );
+    for (const pointId of joined) coincidentClasses.set(pointId, joined);
+  }
+  const sameLocation = (first: SketchPointId, second: SketchPointId) =>
+    first === second || coincidentClasses.get(first)?.has(second) === true;
   for (const entity of definition.entities) {
     if (entity.kind !== "arc" || !offsetSeedArcIds.has(entity.entityId)) {
       continue;
@@ -2872,6 +3929,18 @@ function buildSystem(
       id: `constraint_internal_arc_common_radius_${entity.entityId}` as ConstraintId,
       targetKind: "constraint",
       structuralVariableIndices: pIdx(center, start, end),
+      evaluateComponentJacobian: componentJacobian(
+        pIdx(center, start, end),
+        (columns) => {
+          const origin = pointDual(columns, center);
+          return [
+            dual.sub(
+              dual2.length(dual2.sub(pointDual(columns, end), origin)),
+              dual2.length(dual2.sub(pointDual(columns, start), origin)),
+            ),
+          ];
+        },
+      ),
       evaluateComponents(values) {
         const origin = getPoint(values, center);
         return [
@@ -2957,6 +4026,42 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(
+          records.flatMap((record) =>
+            pIdx(
+              record.seedStart,
+              record.seedEnd,
+              record.offsetStart,
+              record.offsetEnd,
+            ),
+          ),
+          (columns) => {
+            const pairs = records.map((record) => {
+              const seedStart = pointDual(columns, record.seedStart!);
+              const seedEnd = pointDual(columns, record.seedEnd!);
+              const offsetStart = pointDual(columns, record.offsetStart!);
+              const offsetEnd = pointDual(columns, record.offsetEnd!);
+              const seedUnit = unitVectorDual(seedStart, seedEnd);
+              const offsetUnit = unitVectorDual(offsetStart, offsetEnd);
+              if (!seedUnit || !offsetUnit) return infiniteDuals(columns, 2);
+              return [
+                dual2.cross(seedUnit, offsetUnit),
+                dual.scale(
+                  dual2.dot(
+                    [dual.neg(seedUnit[1]), seedUnit[0]],
+                    dual2.sub(offsetStart, seedStart),
+                  ),
+                  record.pair.side === "left" ? 1 : -1,
+                ),
+              ];
+            });
+            return [
+              pairs[0]![0]!,
+              pairs[1]![0]!,
+              dual.sub(pairs[0]![1]!, pairs[1]![1]!),
+            ];
+          },
+        ),
         evaluateComponents(values) {
           const pairs = records.map((record) => {
             const seedStart = getPoint(values, record.seedStart!);
@@ -3180,6 +4285,11 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(left, right),
+          (columns) =>
+            dual2.sub(pointDual(columns, left), pointDual(columns, right)),
+        ),
         evaluateComponents(values) {
           return subtract(getPoint(values, left), getPoint(values, right));
         },
@@ -3214,6 +4324,14 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(start, end),
+          (columns) => [
+            dual2.sub(pointDual(columns, end), pointDual(columns, start))[
+              constraint.kind === "horizontal" ? 1 : 0
+            ],
+          ],
+        ),
         evaluateComponents(values) {
           const delta = subtract(
             getPoint(values, end),
@@ -3251,6 +4369,12 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(pIdx(point), (columns) =>
+          dual2.sub(
+            pointDual(columns, point),
+            columns.constant2(constraint.position),
+          ),
+        ),
         evaluateComponents(values) {
           return subtract(getPoint(values, point), constraint.position);
         },
@@ -3280,6 +4404,31 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(point1, point2, middle),
+          (columns) => {
+            const a = dual2.sub(
+              pointDual(columns, point1),
+              pointDual(columns, middle),
+            );
+            const b = dual2.sub(
+              pointDual(columns, point2),
+              pointDual(columns, middle),
+            );
+            const lengths = dual.mul(dual2.length(a), dual2.length(b));
+            if (
+              constraint.valueRadians === 0 ||
+              constraint.valueRadians === Math.PI
+            )
+              return [dual.div(dual2.cross(a, b), lengths)];
+            return [
+              dual.sub(
+                dual.acosClamped(dual.div(dual2.dot(a, b), lengths)),
+                columns.constant(constraint.valueRadians),
+              ),
+            ];
+          },
+        ),
         evaluateComponents(values) {
           const a = subtract(
             getPoint(values, point1),
@@ -3378,6 +4527,15 @@ function buildSystem(
         scalarConstraints.push({
           id: constraint.constraintId,
           targetKind: "constraint",
+          evaluateComponentJacobian: componentJacobian(
+            [a.baseIndex, b.baseIndex],
+            (columns) => [
+              dual.sub(
+                columns.variable(a.baseIndex),
+                columns.variable(b.baseIndex),
+              ),
+            ],
+          ),
           evaluateComponents(values) {
             return [getCircleRadius(values, a) - getCircleRadius(values, b)];
           },
@@ -3415,6 +4573,30 @@ function buildSystem(
       scalarConstraints.push({
         id: constraint.constraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(a0, a1, b0, b1),
+          (columns) => {
+            const da = dual2.sub(
+              pointDual(columns, a1),
+              pointDual(columns, a0),
+            );
+            const db = dual2.sub(
+              pointDual(columns, b1),
+              pointDual(columns, b0),
+            );
+            const na = dual2.length(da),
+              nb = dual2.length(db);
+            if (constraint.kind === "equalLength") return [dual.sub(na, nb)];
+            return [
+              dual.div(
+                constraint.kind === "parallel"
+                  ? dual2.cross(da, db)
+                  : dual2.dot(da, db),
+                dual.mul(na, nb),
+              ),
+            ];
+          },
+        ),
         evaluateComponents(values) {
           const da = subtract(getPoint(values, a1), getPoint(values, a0));
           const db = subtract(getPoint(values, b1), getPoint(values, b0));
@@ -3551,6 +4733,12 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponentJacobian: componentJacobian(pIdx(point), (columns) =>
+            dual2.sub(
+              pointDual(columns, point),
+              columns.constant2(targetPoint),
+            ),
+          ),
           evaluateComponents(values) {
             return subtract(getPoint(values, point), targetPoint);
           },
@@ -3591,6 +4779,33 @@ function buildSystem(
         scalarConstraints.push({
           id: constraint.constraintId,
           targetKind: "constraint",
+          evaluateComponentJacobian(values) {
+            const columns = dualColumns(values, pIdx(point));
+            const position = getPoint(values, point);
+            const closest = closestSplineSpanLocation(position, projectedSpans);
+            if (!closest)
+              return columns.jacobian(
+                infiniteDuals(columns, 2),
+                parameterCount,
+              );
+            const evaluated = evaluateSplineSpan(
+              projectedSpans[closest.spanIndex]!,
+              { kind: "local", value: closest.u },
+            );
+            return columns.jacobian(
+              closestPointResidualDuals({
+                residual: subtract(position, evaluated.position),
+                atDomainEnd: closest.u === 0 || closest.u === 1,
+                first: evaluated.first,
+                second: evaluated.second,
+                columns: 2,
+                dPoint: (column) => (column === 0 ? [1, 0] : [0, 1]),
+                dCurve: () => [0, 0],
+                dFirst: () => [0, 0],
+              }),
+              parameterCount,
+            );
+          },
           evaluateComponents(values) {
             const position = getPoint(values, point);
             const closest = closestSplineSpanLocation(position, projectedSpans);
@@ -3629,6 +4844,22 @@ function buildSystem(
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: pIdx(point),
+            evaluateComponentJacobian: componentJacobian(
+              pIdx(point),
+              (columns) =>
+                projected
+                  ? projectedCurveComponentsDual(
+                      pointDual(columns, point),
+                      projected,
+                    )
+                  : [
+                      pointLineSignedDistanceDual(
+                        pointDual(columns, point),
+                        columns.constant2(datumLine!.start),
+                        columns.constant2(datumLine!.end),
+                      ),
+                    ],
+            ),
             evaluateComponents(values) {
               return projected
                 ? projectedCurveComponents(getPoint(values, point), projected)
@@ -3676,6 +4907,17 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point, start, end),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(point, start, end),
+            (columns) =>
+              dual2.sub(
+                pointDual(columns, point),
+                midpointDual(
+                  pointDual(columns, start),
+                  pointDual(columns, end),
+                ),
+              ),
+          ),
           evaluateComponents(values) {
             return subtract(
               getPoint(values, point),
@@ -3720,6 +4962,9 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponentJacobian: componentJacobian(pIdx(point), (columns) =>
+            dual2.sub(pointDual(columns, point), columns.constant2(target)),
+          ),
           evaluateComponents(values) {
             return subtract(getPoint(values, point), target);
           },
@@ -3766,6 +5011,10 @@ function buildSystem(
                 ...pIdx(point),
                 ...entityIdx(curve.entityId),
               ],
+              evaluateComponentJacobian: componentJacobian(
+                [...pIdx(point), ...entityIdx(curve.entityId)],
+                (columns) => localCurveComponentsDual(columns, point, curve),
+              ),
               evaluateComponents(values) {
                 return localCurveComponents(values, point, curve);
               },
@@ -3800,6 +5049,18 @@ function buildSystem(
             ...lineIdx(constraint.line.entityId),
             ...collinearTargetIdx(constraint.target),
           ],
+          evaluateComponentJacobian: componentJacobian(
+            [
+              ...lineIdx(constraint.line.entityId),
+              ...collinearTargetIdx(constraint.target),
+            ],
+            (columns) => {
+              const line = localLineDual(columns, constraint.line.entityId);
+              return line
+                ? localCollinearComponentsDual(columns, constraint.target, line)
+                : infiniteDuals(columns, 2);
+            },
+          ),
           evaluateComponents(values) {
             const line = resolveLocalLineOperand(
               values,
@@ -3864,6 +5125,15 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: collinearTargetIdx(constraint.target),
+          evaluateComponentJacobian: componentJacobian(
+            collinearTargetIdx(constraint.target),
+            (columns) =>
+              localCollinearComponentsDual(
+                columns,
+                constraint.target,
+                constantLineDual(columns, projectedLine),
+              ),
+          ),
           evaluateComponents(values) {
             return localCollinearComponents(
               values,
@@ -3925,6 +5195,22 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(start, end),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(start, end),
+            (columns) => {
+              const localUnit = unitVectorDual(
+                pointDual(columns, start),
+                pointDual(columns, end),
+              );
+              if (!localUnit) return [columns.constant(0)];
+              const projected = columns.constant2(projectedUnit);
+              return [
+                constraint.kind === "parallelProjectedLine"
+                  ? dual2.cross(localUnit, projected)
+                  : dual2.dot(localUnit, projected),
+              ];
+            },
+          ),
           evaluateResidual(values) {
             const startPoint = getPoint(values, start);
             const endPoint = getPoint(values, end);
@@ -3986,6 +5272,80 @@ function buildSystem(
           ? [projectedArcSweepViolation(contact, projected)]
           : []),
       ];
+      const projectedTangentComponentsDual = (
+        residual: Dual,
+        contact: Dual2,
+      ) => [
+        residual,
+        ...(projected?.kind === "arc"
+          ? [
+              arcSweepViolationDual(
+                contact,
+                projectedArcDataDual(residual, projected),
+              ),
+            ]
+          : []),
+      ];
+      const projectedTangentHinge =
+        projected?.kind === "arc" ? { hingeComponentIndices: [1] } : {};
+      const projectedArcSweepInequalities = (
+        support: readonly number[],
+        tangency: (columns: DualColumns) => { contact: Dual2 } | null,
+      ) => {
+        if (projected?.kind === "arc")
+          addArcSweepInequalities(
+            constraint.constraintId,
+            1,
+            null,
+            support,
+            (columns) => {
+              const contact = tangency(columns)?.contact;
+              return contact
+                ? { contact, arc: projectedArcDataDual(contact[0], projected) }
+                : null;
+            },
+          );
+      };
+      // The circle and arc rows below: a local circle-like tangent to the
+      // projected circle.
+      const circleTangencyDual = (
+        columns: DualColumns,
+        localCenter: Dual2,
+        radius: Dual,
+      ) => {
+        const projectedCenter = columns.constant2(projectedCircle.center);
+        const projectedRadius = columns.constant(projectedCircle.radius);
+        const centerOffset = dual2.sub(localCenter, projectedCenter);
+        const centerDistance = dual2.length(centerOffset);
+        const direction: Dual2 =
+          centerDistance.value > DEGENERATE_NORM_EPSILON
+            ? [
+                dual.div(centerOffset[0], centerDistance),
+                dual.div(centerOffset[1], centerDistance),
+              ]
+            : [columns.constant(1), columns.constant(0)];
+        const targetDistance =
+          constraint.relation === "external"
+            ? dual.add(radius, projectedRadius)
+            : dual.abs(dual.sub(radius, projectedRadius));
+        const contactDirection: Dual2 =
+          constraint.relation === "external"
+            ? direction
+            : [dual.neg(direction[0]), dual.neg(direction[1])];
+        return {
+          residual: dual.sub(centerDistance, targetDistance),
+          contact: [
+            dual.add(
+              projectedCenter[0],
+              dual.mul(contactDirection[0], projectedRadius),
+            ),
+            dual.add(
+              projectedCenter[1],
+              dual.mul(contactDirection[1], projectedRadius),
+            ),
+          ] as Dual2,
+        };
+      };
 
       if (entity.kind === "lineSegment") {
         const start = pointRecords.get(entity.startPointId);
@@ -3993,6 +5353,29 @@ function buildSystem(
         if (!start || !end) {
           continue;
         }
+        const lineTangencyDual = (columns: DualColumns) => {
+          const startPoint = pointDual(columns, start);
+          const endPoint = pointDual(columns, end);
+          const unit = unitVectorDual(startPoint, endPoint);
+          if (!unit) return null;
+          const center = columns.constant2(projectedCircle.center);
+          const signedDistance = pointLineSignedDistanceDual(
+            center,
+            startPoint,
+            endPoint,
+          );
+          return {
+            residual: dual.sub(
+              dual.abs(signedDistance),
+              columns.constant(projectedCircle.radius),
+            ),
+            contact: [
+              dual.sub(center[0], dual.mul(signedDistance, unit[1])),
+              dual.sub(center[1], dual.mul(signedDistance, dual.neg(unit[0]))),
+            ] as Dual2,
+          };
+        };
+        projectedArcSweepInequalities(pIdx(start, end), lineTangencyDual);
 
         scalarConstraints.push(
           createNumericalScalarConstraint({
@@ -4000,6 +5383,19 @@ function buildSystem(
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: pIdx(start, end),
+            evaluateComponentJacobian: componentJacobian(
+              pIdx(start, end),
+              (columns) => {
+                const tangency = lineTangencyDual(columns);
+                return tangency
+                  ? projectedTangentComponentsDual(
+                      tangency.residual,
+                      tangency.contact,
+                    )
+                  : [columns.constant(0)];
+              },
+            ),
+            ...projectedTangentHinge,
             evaluateComponents(values) {
               const startPoint = getPoint(values, start);
               const endPoint = getPoint(values, end);
@@ -4052,12 +5448,39 @@ function buildSystem(
       }
 
       if (entity.kind === "circle") {
+        const localCircleTangencyDual = (columns: DualColumns) => {
+          const localCircle = localCircleLikeDual(columns, entity);
+          return localCircle
+            ? circleTangencyDual(
+                columns,
+                localCircle.center,
+                localCircle.radius,
+              )
+            : null;
+        };
+        projectedArcSweepInequalities(
+          entityIdx(entity.entityId),
+          localCircleTangencyDual,
+        );
         scalarConstraints.push(
           createNumericalScalarConstraint({
             id: constraint.constraintId,
             targetKind: "constraint",
             parameterCount,
             affectedVariableIndices: entityIdx(entity.entityId),
+            evaluateComponentJacobian: componentJacobian(
+              entityIdx(entity.entityId),
+              (columns) => {
+                const tangency = localCircleTangencyDual(columns);
+                return tangency
+                  ? projectedTangentComponentsDual(
+                      tangency.residual,
+                      tangency.contact,
+                    )
+                  : [columns.constant(0)];
+              },
+            ),
+            ...projectedTangentHinge,
             evaluateComponents(values) {
               const localCircle = getLocalCircleLike(values, entity);
               if (!localCircle) {
@@ -4145,6 +5568,16 @@ function buildSystem(
         if (!center || !arcState || arcState.kind !== "arc") {
           continue;
         }
+        const arcTangencyDual = (columns: DualColumns) =>
+          circleTangencyDual(
+            columns,
+            pointDual(columns, center),
+            columns.variable(arcState.baseIndex),
+          );
+        projectedArcSweepInequalities(
+          [...pIdx(center), ...eIdx(entity.entityId)],
+          arcTangencyDual,
+        );
 
         scalarConstraints.push(
           createNumericalScalarConstraint({
@@ -4155,6 +5588,17 @@ function buildSystem(
               ...pIdx(center),
               ...eIdx(entity.entityId),
             ],
+            evaluateComponentJacobian: componentJacobian(
+              [...pIdx(center), ...eIdx(entity.entityId)],
+              (columns) => {
+                const tangency = arcTangencyDual(columns);
+                return projectedTangentComponentsDual(
+                  tangency.residual,
+                  tangency.contact,
+                );
+              },
+            ),
+            ...projectedTangentHinge,
             evaluateComponents(values) {
               const { radius } = getArcParameters(values, arcState);
               const localCenter = getPoint(values, center);
@@ -4247,6 +5691,29 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: [...entityIdx(spline.entityId), ...entityIdx(arc.entityId)],
+          evaluateComponentJacobian: componentJacobian(
+            [...entityIdx(spline.entityId), ...entityIdx(arc.entityId)],
+            (columns) => {
+              const poles = splineSpanPoleDuals(columns, spline, (spans) =>
+                atStart ? spans[0] : spans.at(-1),
+              );
+              const circle = localCircleLikeDual(columns, arc);
+              if (!poles || !circle)
+                return [columns.constant(Number.POSITIVE_INFINITY)];
+              const point = atStart ? poles[0]! : poles[3]!;
+              const adjacent = atStart ? poles[1]! : poles[2]!;
+              const tangent = dual2.sub(point, adjacent);
+              const magnitude = dual2.length(tangent);
+              return [
+                magnitude.value > 1e-10
+                  ? dual.div(
+                      dual2.dot(dual2.sub(point, circle.center), tangent),
+                      magnitude,
+                    )
+                  : columns.constant(Number.POSITIVE_INFINITY),
+              ];
+            },
+          ),
           evaluateResidual(values) {
             const geometry = reconstructCurrentSpline(values, spline);
             const span = atStart ? geometry.spans[0] : geometry.spans.at(-1);
@@ -4278,6 +5745,80 @@ function buildSystem(
         if (!start || !end) {
           continue;
         }
+        const lineCurveTangencyDual = (columns: DualColumns) => {
+          const circleLike = localCircleLikeDual(columns, curve);
+          if (!circleLike) return null;
+          const startPoint = pointDual(columns, start);
+          const endPoint = pointDual(columns, end);
+          const unit = unitVectorDual(startPoint, endPoint);
+          if (!unit) return null;
+          const signedDistance = pointLineSignedDistanceDual(
+            circleLike.center,
+            startPoint,
+            endPoint,
+          );
+          const contactPoint: Dual2 = [
+            dual.sub(circleLike.center[0], dual.mul(signedDistance, unit[1])),
+            dual.sub(
+              circleLike.center[1],
+              dual.mul(signedDistance, dual.neg(unit[0])),
+            ),
+          ];
+          return { circleLike, signedDistance, contactPoint };
+        };
+        if (curve.kind === "arc")
+          addArcSweepInequalities(
+            constraint.constraintId,
+            1,
+            curve.entityId,
+            [...pIdx(start, end), ...entityIdx(curve.entityId)],
+            (columns) => {
+              const tangency = lineCurveTangencyDual(columns);
+              return tangency?.circleLike.arc
+                ? {
+                    contact: tangency.contactPoint,
+                    arc: tangency.circleLike.arc,
+                  }
+                : null;
+            },
+          );
+        if (curve.kind === "arc" && offsetSeedArcIds.has(curve.entityId)) {
+          const contactPointId = [curve.startPointId, curve.endPointId].find(
+            (pointId) =>
+              sameLocation(pointId, line.startPointId) ||
+              sameLocation(pointId, line.endPointId),
+          );
+          const contact = contactPointId && pointRecords.get(contactPointId);
+          const center = pointRecords.get(curve.centerPointId);
+          if (contactPointId && contact && center)
+            orientedTangencyRows.push({
+              record: {
+                id: `orientedTangency_${constraint.constraintId}`,
+                requirementId: constraint.constraintId,
+                arcEntityId: curve.entityId,
+                contactPointId,
+              },
+              support: pIdx(start, end, contact, center),
+              component: (columns) => {
+                const unit = unitVectorDual(
+                  pointDual(columns, start),
+                  pointDual(columns, end),
+                );
+                return unit
+                  ? dual2.dot(
+                      dual2.sub(
+                        pointDual(columns, contact),
+                        pointDual(columns, center),
+                      ),
+                      unit,
+                    )
+                  : columns.fromColumns(
+                      Number.NaN,
+                      columns.support.map(() => Number.NaN),
+                    );
+              },
+            });
+        }
 
         scalarConstraints.push(
           createNumericalScalarConstraint({
@@ -4288,6 +5829,21 @@ function buildSystem(
               ...pIdx(start, end),
               ...entityIdx(curve.entityId),
             ],
+            evaluateComponentJacobian: componentJacobian(
+              [...pIdx(start, end), ...entityIdx(curve.entityId)],
+              (columns) => {
+                const tangency = lineCurveTangencyDual(columns);
+                if (!tangency) return [columns.constant(0)];
+                const { circleLike, signedDistance, contactPoint } = tangency;
+                return [
+                  dual.sub(dual.abs(signedDistance), circleLike.radius),
+                  circleLike.arc
+                    ? arcSweepViolationDual(contactPoint, circleLike.arc)
+                    : columns.constant(0),
+                ];
+              },
+            ),
+            ...(curve.kind === "arc" ? { hingeComponentIndices: [1] } : {}),
             evaluateComponents(values) {
               const circleLike = getLocalCircleLike(values, curve);
               if (!circleLike) {
@@ -4359,6 +5915,51 @@ function buildSystem(
         (first.kind === "circle" || first.kind === "arc") &&
         (second.kind === "circle" || second.kind === "arc")
       ) {
+        const pairSupport = [
+          ...entityIdx(first.entityId),
+          ...entityIdx(second.entityId),
+        ];
+        const circlePairTangencyDual = (columns: DualColumns) => {
+          const firstCircle = localCircleLikeDual(columns, first);
+          const secondCircle = localCircleLikeDual(columns, second);
+          if (!firstCircle || !secondCircle) return null;
+          const [firstContact, secondContact] = localCircleTangencyContactsDual(
+            firstCircle,
+            secondCircle,
+            constraint.relation,
+          );
+          return {
+            firstCircle,
+            secondCircle,
+            centerDistance: dual2.length(
+              dual2.sub(firstCircle.center, secondCircle.center),
+            ),
+            firstContact,
+            secondContact,
+          };
+        };
+        for (const [index, entity] of [first, second].entries())
+          if (entity.kind === "arc")
+            addArcSweepInequalities(
+              constraint.constraintId,
+              index + 1,
+              entity.entityId,
+              pairSupport,
+              (columns) => {
+                const tangency = circlePairTangencyDual(columns);
+                const circle =
+                  index === 0 ? tangency?.firstCircle : tangency?.secondCircle;
+                return tangency && circle?.arc
+                  ? {
+                      contact:
+                        index === 0
+                          ? tangency.firstContact
+                          : tangency.secondContact,
+                      arc: circle.arc,
+                    }
+                  : null;
+              },
+            );
         scalarConstraints.push(
           createNumericalScalarConstraint({
             id: constraint.constraintId,
@@ -4368,6 +5969,38 @@ function buildSystem(
               ...entityIdx(first.entityId),
               ...entityIdx(second.entityId),
             ],
+            evaluateComponentJacobian: componentJacobian(
+              pairSupport,
+              (columns) => {
+                const tangency = circlePairTangencyDual(columns);
+                if (!tangency) return [columns.constant(0)];
+                const {
+                  firstCircle,
+                  secondCircle,
+                  centerDistance,
+                  firstContact,
+                  secondContact,
+                } = tangency;
+                const targetDistance =
+                  constraint.relation === "external"
+                    ? dual.add(firstCircle.radius, secondCircle.radius)
+                    : dual.abs(
+                        dual.sub(firstCircle.radius, secondCircle.radius),
+                      );
+                return [
+                  dual.sub(centerDistance, targetDistance),
+                  firstCircle.arc
+                    ? arcSweepViolationDual(firstContact, firstCircle.arc)
+                    : columns.constant(0),
+                  secondCircle.arc
+                    ? arcSweepViolationDual(secondContact, secondCircle.arc)
+                    : columns.constant(0),
+                ];
+              },
+            ),
+            hingeComponentIndices: [first, second].flatMap((entity, index) =>
+              entity.kind === "arc" ? [index + 1] : [],
+            ),
             evaluateComponents(values) {
               const firstCircle = getLocalCircleLike(values, first);
               const secondCircle = getLocalCircleLike(values, second);
@@ -4459,6 +6092,16 @@ function buildSystem(
             ...entityIdx(first.entityId),
             ...entityIdx(second.entityId),
           ],
+          evaluateComponentJacobian: componentJacobian(
+            [...entityIdx(first.entityId), ...entityIdx(second.entityId)],
+            (columns) => {
+              const a = localCircleLikeDual(columns, first),
+                b = localCircleLikeDual(columns, second);
+              return a && b
+                ? dual2.sub(a.center, b.center)
+                : infiniteDuals(columns, 2);
+            },
+          ),
           evaluateComponents(values) {
             const a = getLocalCircleLike(values, first),
               b = getLocalCircleLike(values, second);
@@ -4501,6 +6144,18 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: entityIdx(entity.entityId),
+          evaluateComponentJacobian: componentJacobian(
+            entityIdx(entity.entityId),
+            (columns) => {
+              const circle = localCircleLikeDual(columns, entity);
+              return circle
+                ? dual2.sub(
+                    circle.center,
+                    columns.constant2(projectedCircle.center),
+                  )
+                : infiniteDuals(columns, 2);
+            },
+          ),
           evaluateComponents(values) {
             const circle = getLocalCircleLike(values, entity);
             return circle
@@ -4543,6 +6198,24 @@ function buildSystem(
             ...lineIdx(line.entityId),
             ...entityIdx(curve.entityId),
           ],
+          evaluateComponentJacobian: componentJacobian(
+            [
+              ...pIdx(point),
+              ...lineIdx(line.entityId),
+              ...entityIdx(curve.entityId),
+            ],
+            (columns) => {
+              const circle = localCircleLikeDual(columns, curve);
+              const contact = pointDual(columns, point);
+              return circle
+                ? [
+                    ...localCurveComponentsDual(columns, point, curve),
+                    normalResidualDual(columns, line, contact, circle.center),
+                    lineContactResidualDual(columns, line, contact),
+                  ]
+                : infiniteDuals(columns, 1);
+            },
+          ),
           evaluateComponents(values) {
             const circle = getLocalCircleLike(values, curve);
             const contact = getPoint(values, point);
@@ -4608,6 +6281,22 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: [...pIdx(point), ...lineIdx(line.entityId)],
+          evaluateComponentJacobian: componentJacobian(
+            [...pIdx(point), ...lineIdx(line.entityId)],
+            (columns) => {
+              const contact = pointDual(columns, point);
+              return [
+                ...projectedCurveComponentsDual(contact, projected),
+                normalResidualDual(
+                  columns,
+                  line,
+                  contact,
+                  columns.constant2(projectedCircle.center),
+                ),
+                lineContactResidualDual(columns, line, contact),
+              ];
+            },
+          ),
           evaluateComponents(values) {
             const contact = getPoint(values, point);
             return [
@@ -4660,6 +6349,16 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(first, second, axisStart, axisEnd),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(first, second, axisStart, axisEnd),
+            (columns) =>
+              symmetryComponentsDual(
+                pointDual(columns, first),
+                pointDual(columns, second),
+                pointDual(columns, axisStart),
+                pointDual(columns, axisEnd),
+              ),
+          ),
           evaluateComponents(values) {
             return symmetryComponents(
               getPoint(values, first),
@@ -4706,6 +6405,16 @@ function buildSystem(
           targetKind: "constraint",
           parameterCount,
           affectedVariableIndices: pIdx(first, second),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(first, second),
+            (columns) =>
+              symmetryComponentsDual(
+                pointDual(columns, first),
+                pointDual(columns, second),
+                columns.constant2(projectedLine.start),
+                columns.constant2(projectedLine.end),
+              ),
+          ),
           evaluateComponents(values) {
             return symmetryComponents(
               getPoint(values, first),
@@ -4745,6 +6454,23 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(left, right),
+          (columns) => {
+            const delta = dual2.sub(
+              pointDual(columns, right),
+              pointDual(columns, left),
+            );
+            return [
+              dual.sub(
+                dimension.axis === "aligned"
+                  ? dual2.length(delta)
+                  : delta[dimension.axis === "horizontal" ? 0 : 1],
+                columns.constant(drivingValue),
+              ),
+            ];
+          },
+        ),
         evaluateComponents(values) {
           const delta = subtract(
             getPoint(values, right),
@@ -4808,6 +6534,17 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponentJacobian: componentJacobian(
+          pIdx(left, right),
+          (columns) => [
+            dual.sub(
+              dual2.sub(pointDual(columns, right), pointDual(columns, left))[
+                dimension.kind === "horizontalDistance" ? 0 : 1
+              ],
+              columns.constant(drivingValue),
+            ),
+          ],
+        ),
         evaluateComponents(values) {
           const delta = subtract(
             getPoint(values, right),
@@ -4851,6 +6588,20 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponentJacobian: componentJacobian(
+          eIdx(entity.entityId),
+          (columns) => {
+            const state = entityStates.get(entity.entityId);
+            return [
+              dual.sub(
+                state?.kind === "circle"
+                  ? columns.variable(state.baseIndex)
+                  : columns.constant(entity.radius),
+                columns.constant(drivingValue),
+              ),
+            ];
+          },
+        ),
         evaluateComponents(values) {
           const state = entityStates.get(entity.entityId);
           return [
@@ -4890,6 +6641,20 @@ function buildSystem(
           targetKind: "dimension",
           parameterCount,
           affectedVariableIndices: entityIdx(entity.entityId),
+          evaluateComponentJacobian: componentJacobian(
+            entityIdx(entity.entityId),
+            (columns) => {
+              const circleLike = localCircleLikeDual(columns, entity);
+              return [
+                circleLike
+                  ? dual.sub(
+                      dual.scale(circleLike.radius, 2),
+                      columns.constant(drivingValue),
+                    )
+                  : columns.constant(drivingValue),
+              ];
+            },
+          ),
           evaluateResidual(values) {
             const circleLike = getLocalCircleLike(values, entity);
             return circleLike
@@ -4920,6 +6685,27 @@ function buildSystem(
           targetKind: "dimension",
           parameterCount,
           affectedVariableIndices: pIdx(point),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(point),
+            (columns) => {
+              const delta = dual2.sub(
+                pointDual(columns, point),
+                columns.constant2(datumPoint),
+              );
+              if (drivingValue === 0)
+                return dimension.axis === "aligned"
+                  ? delta
+                  : [delta[dimension.axis === "horizontal" ? 0 : 1]];
+              return [
+                dual.sub(
+                  dimension.axis === "aligned"
+                    ? dual2.length(delta)
+                    : dual.abs(delta[dimension.axis === "horizontal" ? 0 : 1]),
+                  columns.constant(drivingValue),
+                ),
+              ];
+            },
+          ),
           evaluateComponents(values) {
             const delta = subtract(getPoint(values, point), datumPoint);
             if (drivingValue === 0)
@@ -4968,6 +6754,17 @@ function buildSystem(
           targetKind: "dimension",
           parameterCount,
           affectedVariableIndices: pIdx(start, end),
+          evaluateComponentJacobian: componentJacobian(
+            pIdx(start, end),
+            (columns) => [
+              dual.sub(
+                dual2.length(
+                  dual2.sub(pointDual(columns, end), pointDual(columns, start)),
+                ),
+                columns.constant(drivingValue),
+              ),
+            ],
+          ),
           evaluateResidual(values) {
             return (
               length(subtract(getPoint(values, end), getPoint(values, start))) -
@@ -5019,6 +6816,43 @@ function buildSystem(
               ...lineDimOperandIdx(dimension.lines[0]),
               ...lineDimOperandIdx(dimension.lines[1]),
             ],
+            evaluateComponentJacobian: componentJacobian(
+              [
+                ...lineDimOperandIdx(dimension.lines[0]),
+                ...lineDimOperandIdx(dimension.lines[1]),
+              ],
+              (columns) => {
+                const first = lineDimensionOperandDual(
+                  columns,
+                  dimension.lines[0],
+                );
+                const second = lineDimensionOperandDual(
+                  columns,
+                  dimension.lines[1],
+                );
+                if (!first || !second) return infiniteDuals(columns, 1);
+                if (component === "parallel")
+                  return [
+                    lineParallelResidualDual(
+                      first.start,
+                      first.end,
+                      second.start,
+                      second.end,
+                    ),
+                  ];
+                const distance = pointLineSignedDistanceDual(
+                  second.start,
+                  first.start,
+                  first.end,
+                );
+                return [
+                  dual.sub(
+                    drivingValue === 0 ? distance : dual.abs(distance),
+                    columns.constant(drivingValue),
+                  ),
+                ];
+              },
+            ),
             evaluateComponents(values) {
               const first = resolveLineDimensionOperand(
                 values,
@@ -5101,6 +6935,28 @@ function buildSystem(
             ...lineDimOperandIdx(dimension.line),
             ...pointDimOperandIdx(dimension.point),
           ],
+          evaluateComponentJacobian: componentJacobian(
+            [
+              ...lineDimOperandIdx(dimension.line),
+              ...pointDimOperandIdx(dimension.point),
+            ],
+            (columns) => {
+              const line = lineDimensionOperandDual(columns, dimension.line);
+              const point = pointDimensionOperandDual(columns, dimension.point);
+              if (!line || !point) return infiniteDuals(columns, 1);
+              const distance = pointLineSignedDistanceDual(
+                point,
+                line.start,
+                line.end,
+              );
+              return [
+                dual.sub(
+                  drivingValue === 0 ? distance : dual.abs(distance),
+                  columns.constant(drivingValue),
+                ),
+              ];
+            },
+          ),
           evaluateComponents(values) {
             const line = resolveLineDimensionOperand(
               values,
@@ -5187,6 +7043,36 @@ function buildSystem(
             ...lineDimOperandIdx(dimension.lines[0]),
             ...lineDimOperandIdx(dimension.lines[1]),
           ],
+          evaluateComponentJacobian: componentJacobian(
+            [
+              ...lineDimOperandIdx(dimension.lines[0]),
+              ...lineDimOperandIdx(dimension.lines[1]),
+            ],
+            (columns) => {
+              const first = lineDimensionOperandDual(
+                columns,
+                dimension.lines[0],
+              );
+              const second = lineDimensionOperandDual(
+                columns,
+                dimension.lines[1],
+              );
+              const angle =
+                first && second
+                  ? lineAngleRadiansDual(
+                      first.start,
+                      first.end,
+                      second.start,
+                      second.end,
+                    )
+                  : null;
+              return [
+                angle === null || angle.value <= DEGENERATE_NORM_EPSILON
+                  ? columns.constant(drivingValue)
+                  : dual.sub(angle, columns.constant(drivingValue)),
+              ];
+            },
+          ),
           evaluateResidual(values) {
             const first = resolveLineDimensionOperand(
               values,
@@ -5238,6 +7124,24 @@ function buildSystem(
       scalarConstraints.push({
         id: dimension.dimensionId,
         targetKind: "dimension",
+        evaluateComponentJacobian: componentJacobian(
+          [...pIdx(center, point), ...eIdx(arc.entityId)],
+          (columns) => {
+            const radius = columns.variable(arcState.baseIndex);
+            const angle = columns.variable(
+              arcState.baseIndex +
+                (dimension.kind === "arcStartPointCoincident" ? 1 : 2),
+            );
+            const centerDual = pointDual(columns, center);
+            return dual2.sub(
+              [
+                dual.add(centerDual[0], dual.mul(radius, dual.cos(angle))),
+                dual.add(centerDual[1], dual.mul(radius, dual.sin(angle))),
+              ],
+              pointDual(columns, point),
+            );
+          },
+        ),
         evaluateComponents(values) {
           const { radius, startAngle, endAngle } = getArcParameters(
             values,
@@ -5301,6 +7205,12 @@ function buildSystem(
       scalarConstraints.push({
         id: `constraint_drag_target_${options.dragTarget.pointId}` as ConstraintId,
         targetKind: "constraint",
+        evaluateComponentJacobian: componentJacobian(pIdx(point), (columns) =>
+          dual2.sub(
+            pointDual(columns, point),
+            columns.constant2(options.dragTarget!.position),
+          ),
+        ),
         evaluateComponents(values) {
           return subtract(
             getPoint(values, point),
@@ -5332,6 +7242,63 @@ function buildSystem(
     offsetPlans: options.offsetPlans,
   });
 
+  for (const entity of definition.entities) {
+    const state = entityStates.get(entity.entityId);
+    const tau = options.modelingTolerance;
+    if (entity.kind === "lineSegment") {
+      const start = pointRecords.get(entity.startPointId);
+      const end = pointRecords.get(entity.endPointId);
+      if (start && end)
+        inequalityRows.push({
+          record: {
+            id: `segmentLength_${entity.entityId}`,
+            kind: "segmentLength",
+            entityId: entity.entityId,
+          },
+          support: pIdx(start, end),
+          inequality: (columns) =>
+            dual.sub(
+              dual2.length(
+                dual2.sub(pointDual(columns, end), pointDual(columns, start)),
+              ),
+              columns.constant(tau),
+            ),
+        });
+    } else if (state?.kind === "circle" || state?.kind === "arc") {
+      inequalityRows.push({
+        record: {
+          id: `radius_${entity.entityId}`,
+          kind: "radius",
+          entityId: entity.entityId,
+        },
+        support: [state.baseIndex],
+        inequality: (columns) =>
+          dual.sub(columns.variable(state.baseIndex), columns.constant(tau)),
+      });
+    }
+  }
+  const inequalities = inequalityRows.map(
+    ({ record, support, inequality }): SolverInequalityRecord => ({
+      ...record,
+      variableIndices: parameterProjection.projectVariableIndices(support),
+      evaluate: parameterProjection.wrapComponentJacobian(
+        componentJacobian(support, (columns) => [inequality(columns)]),
+        support,
+      ),
+    }),
+  );
+
+  const orientedTangencies = orientedTangencyRows.map(
+    ({ record, support, component }): SolverOrientedTangencyRecord => ({
+      ...record,
+      variableIndices: parameterProjection.projectVariableIndices(support),
+      evaluate: parameterProjection.wrapComponentJacobian(
+        componentJacobian(support, (columns) => [component(columns)]),
+        support,
+      ),
+    }),
+  );
+
   const shellSourceVariables = new Map<SketchEntityId, readonly number[]>();
   for (const relationship of definition.derivedRelationships ?? []) {
     if (relationship.kind !== "offset") continue;
@@ -5350,6 +7317,8 @@ function buildSystem(
     parameterProjection,
     scalarConstraints,
     shellSourceVariables,
+    inequalities,
+    orientedTangencies,
   };
   const structuralVariables = structuralEquationVariableIndexMap(
     system,
@@ -10349,6 +12318,17 @@ function createDragTargetConstraint(
           (value) => Math.sqrt(weight) * value,
         );
       },
+      evaluateComponentJacobian: componentJacobianOver(
+        system.parameterCount,
+        [point.baseIndex, point.baseIndex + 1],
+        (columns) =>
+          dual2
+            .sub(
+              columns.point(point.baseIndex),
+              columns.constant2(dragTarget.position),
+            )
+            .map((value) => dual.scale(value, Math.sqrt(weight))),
+      ),
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const actual = getPoint(values, point);
@@ -10385,6 +12365,19 @@ function createDragRadiusConstraint(
       evaluateComponents(values) {
         return [Math.sqrt(weight) * (values[radiusIndex]! - targetRadius)];
       },
+      evaluateComponentJacobian: componentJacobianOver(
+        system.parameterCount,
+        [radiusIndex],
+        (columns) => [
+          dual.scale(
+            dual.sub(
+              columns.variable(radiusIndex),
+              columns.constant(targetRadius),
+            ),
+            Math.sqrt(weight),
+          ),
+        ],
+      ),
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const actual = values[radiusIndex]!;
@@ -10424,6 +12417,14 @@ function createDragTangentVectorConstraint(
           Math.sqrt(weight) * (values[by]! - targetVector[1]),
         ];
       },
+      evaluateComponentJacobian: componentJacobianOver(
+        system.parameterCount,
+        [bx, by],
+        (columns) =>
+          dual2
+            .sub(columns.point(bx), columns.constant2(targetVector))
+            .map((value) => dual.scale(value, Math.sqrt(weight))),
+      ),
       evaluate(values) {
         const gradient = zeroVector(system.parameterCount);
         const dx = values[bx]! - targetVector[0];
@@ -10521,6 +12522,11 @@ function resolveDragTargetFrame(
           {
             id: `constraint_drag_tangent_zero_x_${target.entityId}_${target.occurrenceId}` as ConstraintId,
             evaluateComponents: (values) => [values[bx]!],
+            evaluateComponentJacobian: componentJacobianOver(
+              system.parameterCount,
+              [bx],
+              (columns) => [columns.variable(bx)],
+            ),
             targetKind: "constraint",
             evaluate(values) {
               const gradient = zeroVector(system.parameterCount);
@@ -10535,6 +12541,11 @@ function resolveDragTargetFrame(
           {
             id: `constraint_drag_tangent_zero_y_${target.entityId}_${target.occurrenceId}` as ConstraintId,
             evaluateComponents: (values) => [values[by]!],
+            evaluateComponentJacobian: componentJacobianOver(
+              system.parameterCount,
+              [by],
+              (columns) => [columns.variable(by)],
+            ),
             targetKind: "constraint",
             evaluate(values) {
               const gradient = zeroVector(system.parameterCount);
@@ -10910,6 +12921,20 @@ function createMinimumMotionAnchorConstraint(input: {
             (values[index]! - input.anchorValues[index]!),
         );
       },
+      evaluateComponentJacobian: componentJacobianOver(
+        input.parameterCount,
+        indices,
+        (columns) =>
+          indices.map((index) =>
+            dual.scale(
+              dual.sub(
+                columns.variable(index),
+                columns.constant(input.anchorValues[index]!),
+              ),
+              Math.sqrt(input.weight),
+            ),
+          ),
+      ),
       evaluate(values) {
         const gradient = zeroVector(input.parameterCount);
         let residual = 0;
@@ -13647,6 +15672,66 @@ export function getSketchSolveInitialValuesForTest(
 ) {
   return buildSystem(definition, { tolerances, modelingTolerance })
     .initialValues;
+}
+
+/**
+ * cadara-p4r5.1: the drag-frame rows `resolveDragTargetFrame` builds for
+ * `target` at `values`, a minimum-motion anchor over
+ * `anchorVariableIndices`, and the `dragTarget` row `buildSystem` compiles
+ * for a point target, each with the authority variables it reads (for the
+ * Jacobian conformance spec).
+ */
+export function dragFrameRowsForTest(input: {
+  program: SketchCompiledSolveProgram;
+  target: SketchDragTarget;
+  values: Float64Array;
+  anchorVariableIndices: readonly number[];
+}) {
+  const { program, target, values } = input;
+  const { system } = program;
+  const projection = system.parameterProjection;
+  const frame = resolveDragTargetFrame(program, target, values, 1);
+  if (!frame) throw new Error(`No drag frame for ${target.kind}.`);
+  const rows = [
+    ...frame.constraints.map((record) => ({
+      record,
+      variableIndices: projection.projectVariableIndices(
+        frame.draggedVariableIndices,
+      ),
+    })),
+    {
+      record: createMinimumMotionAnchorConstraint({
+        id: "constraint_minimum_motion_anchor_test" as ConstraintId,
+        parameterCount: system.parameterCount,
+        anchorValues: values,
+        variableIndices: input.anchorVariableIndices,
+        weight: 1e-3,
+        parameterProjection: projection,
+      }),
+      variableIndices: projection.projectVariableIndices(
+        input.anchorVariableIndices,
+      ),
+    },
+  ];
+  if (target.kind !== "sketchPoint") return rows;
+  const dragTargetId = `constraint_drag_target_${target.pointId}`;
+  const compiled = buildSystem(program.definition, {
+    dragTarget: target,
+    projectedReferences: program.projectedReferences,
+    tolerances: program.tolerances,
+    modelingTolerance: program.modelingTolerance,
+    offsetPlans: program.offsetPlans,
+  }).scalarConstraints.find((record) => record.id === dragTargetId);
+  if (!compiled) throw new Error(`No ${dragTargetId} row.`);
+  return [
+    ...rows,
+    {
+      record: compiled,
+      variableIndices: projection.projectVariableIndices(
+        frame.draggedVariableIndices,
+      ),
+    },
+  ];
 }
 
 export function evaluateSketchScalarConstraintForTest(input: {

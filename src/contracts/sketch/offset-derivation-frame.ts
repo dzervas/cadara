@@ -2476,7 +2476,7 @@ export interface OffsetFrameCurveLocation {
 }
 
 /** The local sub-interval of one leaf's representative query domain (exact ends kept). */
-function localQueryDomain(
+export function localQueryDomain(
   span: OffsetFrameCubicSpan,
 ): readonly [number, number] {
   const [low, high] = span.sourceDomain;
