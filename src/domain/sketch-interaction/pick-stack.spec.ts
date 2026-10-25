@@ -734,3 +734,105 @@ test("T11d review R-1: a 1-entry stack never arms a cycle", () => {
     "The repeated click picks stack[0] again, as an ordinary click.",
   ).toBe(0);
 });
+
+// cadara-h026.1: a multi-selection cycle (`isSelected` on the pointer) ends
+// in a deselect entry (index = stack length) and skips entries selected by
+// other clicks; it only ever replaces or removes its own pick.
+test("h026.1 multi-selection cycle: line 1 → line 2 → line 3 → deselect → line 1", () => {
+  const selected = new Set<number>();
+  const pointer = () =>
+    cyclePointer({
+      retainsPick: (index) => selected.has(index),
+      isSelected: (index) => selected.has(index),
+    });
+  const picks: number[] = [];
+  let cycle: SketchPickCycle | null = null;
+  for (let click = 0; click < 6; click += 1) {
+    const own = cycle?.index;
+    cycle = reduceSketchPickCycle(cycle, {
+      type: "clicked",
+      detail: 1,
+      cycles: true,
+      toggles: true,
+      ...pointer(),
+    });
+    // What the viewport dispatches: the own pick replaced or removed.
+    if (own !== undefined) selected.delete(own);
+    if (cycle!.index < cycleStack.length) selected.add(cycle!.index);
+    picks.push(cycle!.index);
+  }
+  expect(picks, "Three entries, then the deselect entry, wrapping.").toEqual([
+    0, 1, 2, 3, 0, 1,
+  ]);
+});
+
+test("h026.1 multi-selection cycle: entries selected by other clicks are skipped; a one-entry stack toggles", () => {
+  const otherwiseSelected = (index: number) => index === 1;
+  const anchored = clickCycle(null, {
+    isSelected: (index) => index === 0 || otherwiseSelected(index),
+    retainsPick: (index) => index === 0,
+  });
+  expect(anchored?.index).toBe(0);
+  expect(
+    clickCycle(anchored, {
+      isSelected: (index) => index === 0 || otherwiseSelected(index),
+      retainsPick: (index) => index === 0,
+    })?.index,
+    "The construction line was selected by another click: skipped.",
+  ).toBe(2);
+
+  const single = ["line"];
+  const first = clickCycle(null, {
+    stackKeys: single,
+    isSelected: () => false,
+  });
+  expect(first?.index).toBe(0);
+  const deselect = clickCycle(first, {
+    stackKeys: single,
+    isSelected: () => true,
+    retainsPick: () => true,
+  });
+  expect(deselect?.index, "Select → deselect.").toBe(1);
+  expect(
+    clickCycle(deselect, {
+      stackKeys: single,
+      isSelected: () => false,
+      retainsPick: () => false,
+    })?.index,
+    "Deselect → select again.",
+  ).toBe(0);
+});
+
+test("h026.1 multi-selection cycle: an unarmed toggle on a selected stack[0] anchors at the deselect entry", () => {
+  const pointer = {
+    isSelected: (index: number) => index === 0,
+    retainsPick: () => false,
+  };
+  const removing = reduceSketchPickCycle(null, {
+    type: "clicked",
+    detail: 1,
+    cycles: true,
+    toggles: true,
+    ...cyclePointer(pointer),
+  });
+  expect(removing?.index, "The click removed stack[0].").toBe(
+    cycleStack.length,
+  );
+  expect(
+    reduceSketchPickCycle(null, {
+      type: "clicked",
+      detail: 1,
+      cycles: true,
+      toggles: false,
+      ...cyclePointer(pointer),
+    })?.index,
+    "A replacing click selects stack[0] alone.",
+  ).toBe(0);
+  expect(
+    getArmedSketchPickCycleIndex(
+      removing,
+      cyclePointer({ isSelected: () => false, retainsPick: () => false }),
+    ),
+    "The next click there adds stack[0] back.",
+  ).toBe(0);
+});

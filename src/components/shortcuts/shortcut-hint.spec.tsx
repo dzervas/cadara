@@ -45,6 +45,8 @@ test("src/components/shortcuts/shortcut-hint.spec.tsx", () => {
   const context = {
     pointingDevice: "mouse" as const,
     setPointingDevice: () => undefined,
+    selectionClickMode: "additive" as const,
+    setSelectionClickMode: () => undefined,
     activeScopes: ["global" as const],
     commands,
     effectiveKeymap,

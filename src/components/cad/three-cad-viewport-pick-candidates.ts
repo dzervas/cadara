@@ -37,6 +37,10 @@ import {
   isSketchInteractionCurveGeometry,
 } from "@/domain/sketch-interaction/geometry";
 import { mapWorldPointToWorkspaceSketch } from "@/core/workspace/sketch-plane-mapping";
+import {
+  sampleSketchMarqueeGeometry,
+  selectSketchMarqueeTargets,
+} from "@/domain/sketch-interaction/marquee";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,
@@ -61,10 +65,17 @@ import {
   createProjectedPickCandidate,
   DEFAULT_SKETCH_POINT_PICK_ENTER_RADIUS_PX,
   DEFAULT_SKETCH_POINT_PICK_EXIT_RADIUS_PX,
+  DEFAULT_WIRE_OCCLUSION_TOLERANCE,
+  getNearestOccludingFaceDistance,
   getProjectedFeatureVertexPickRadii,
+  isSeededDatumPlaneRenderable,
+  resolveAllCandidates,
   shouldIncludeProjectedPickCandidate,
   type PickCandidate,
+  type PickResolutionOptions,
+  type PickResult,
 } from "@/infrastructure/viewport/render-picking";
+import type { SelectionRequestMode } from "@/core/editor/state-machine/types";
 import type { ViewportCamera } from "@/infrastructure/viewport/viewport-projection";
 import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
@@ -904,6 +915,17 @@ export interface SketchPickCycleWiring {
   readonly hintStack?: readonly PrimitiveRef[];
   /** Whether the hint teaches a cycle (not in single-shot pickers). */
   readonly hintCycles?: boolean;
+  /**
+   * Multi-selection contexts only (cadara-h026.1): whether the selection
+   * holds a target; the cycle then has a deselect entry and skips entries
+   * selected by other clicks.
+   */
+  readonly selected?: (target: PrimitiveRef) => boolean;
+  /**
+   * Part mode (cadara-h026.1): a double click has no meaning of its own,
+   * so fast repeated clicks (`detail >= 2`) keep cycling.
+   */
+  readonly doubleClickCycles?: boolean;
 }
 
 /**
@@ -936,6 +958,90 @@ export function createSketchPickCycleWiring({
     hintStack: eligible,
     hintCycles:
       context.mode !== "none" && !isSketchSelectionContextSingleShot(session),
+    ...(context.mode === "multiSelect"
+      ? { selected: (target: PrimitiveRef) => isSelectedIn(selection, target) }
+      : {}),
+  };
+}
+
+function isSelectedIn(
+  selection: readonly PrimitiveRef[],
+  target: PrimitiveRef,
+): boolean {
+  return selection.some((selected) => primitiveRefEquals(selected, target));
+}
+
+/** Part-mode pick stacks hold at most this many entries (cadara-h026.1). */
+const PART_PICK_STACK_LIMIT = 6;
+
+/**
+ * The part-mode pick stack at one pointer position (cadara-h026.1): the
+ * overlapping vertices, edges and faces the repeated-click cycle walks.
+ * `candidates` are the part-mode candidates `resolveAllCandidates` picks
+ * from (hidden projected vertices already dropped). `stack[0]` is its pick;
+ * each next entry is its pick among the candidates not yet stacked. After
+ * the first entry, every ray-picked candidate beyond the nearest body face
+ * (+ the wire occlusion tolerance: hidden faces, construction planes,
+ * regions, images), background datum planes and owner-body fallbacks are
+ * left out, so the cycle never reaches hidden or implicit targets.
+ */
+export function resolvePartPickStack(
+  candidates: PickCandidate[],
+  acceptsTarget: (target: PrimitiveRef) => boolean,
+  options: PickResolutionOptions,
+): PickResult[] {
+  const first = resolveAllCandidates(candidates, acceptsTarget, options);
+  if (!first) return [];
+  const nearestFace = getNearestOccludingFaceDistance(candidates);
+  const tolerance =
+    options.wireOcclusionTolerance ?? DEFAULT_WIRE_OCCLUSION_TOLERANCE;
+  const visible = candidates.filter(
+    (candidate) =>
+      !(
+        candidate.renderable &&
+        isSeededDatumPlaneRenderable(candidate.renderable)
+      ) &&
+      !(
+        nearestFace !== null &&
+        candidate.rayDistance !== null &&
+        candidate.rayDistance > nearestFace + tolerance
+      ),
+  );
+  const stack = [first];
+  while (stack.length < PART_PICK_STACK_LIMIT) {
+    const next = resolveAllCandidates(
+      visible,
+      (target) =>
+        target.kind !== "body" &&
+        acceptsTarget(target) &&
+        !stack.some((entry) => primitiveRefEquals(entry.target, target)),
+      options,
+    );
+    if (!next) break;
+    stack.push(next);
+  }
+  return stack;
+}
+
+/**
+ * The cycle wiring of a part-mode pick stack (cadara-h026.1): the idle part
+ * selection is a multi-selection, so the cycle replaces its own pick in
+ * place and ends in a deselect entry.
+ */
+export function createPartPickCycleWiring({
+  selection,
+  stack,
+}: {
+  selection: readonly PrimitiveRef[];
+  stack: readonly PrimitiveRef[];
+}): SketchPickCycleWiring {
+  const selected = (target: PrimitiveRef) => isSelectedIn(selection, target);
+  return {
+    stack,
+    context: { mode: "multiSelect", key: "part:select" },
+    retains: selected,
+    selected,
+    doubleClickCycles: true,
   };
 }
 
@@ -953,6 +1059,14 @@ function toSketchPickCyclePointer(
       const target = wiring.stack[index];
       return target !== undefined && wiring.retains(target);
     },
+    ...(wiring.selected
+      ? {
+          isSelected: (index: number) => {
+            const target = wiring.stack[index];
+            return target !== undefined && wiring.selected!(target);
+          },
+        }
+      : {}),
   };
 }
 
@@ -1030,17 +1144,33 @@ export function resolveSketchPickChoice(
  * previous pick a cycle click replaces, and the hover preview after it.
  * A double click (`detail >= 2`, connected selection) resets the cycle and
  * works on `stack[0]`.
+ *
+ * In a multi-selection context (cadara-h026.1) the click also carries its
+ * `selectionMode`: an unarmed click acts on `stack[0]` with the click's own
+ * mode (`replace` or `toggle`, from the selection click setting); an armed
+ * one replaces its own pick (`toggle` adds when it has none), and its
+ * deselect entry removes that pick (`remove`; no target without one).
+ * In part mode (`doubleClickCycles`) every click is a single click.
  */
 export function resolveSketchPickClick(
   cycle: SketchPickCycle | null,
-  click: { x: number; y: number; detail: number },
+  click: {
+    x: number;
+    y: number;
+    detail: number;
+    selectionMode?: "replace" | "toggle";
+  },
   wiring: SketchPickCycleWiring,
 ): {
   cycle: SketchPickCycle | null;
   target: PrimitiveRef | null;
   replaces: PrimitiveRef | null;
   preview: PrimitiveRef | null;
+  selectionMode?: SelectionRequestMode;
 } {
+  if (wiring.doubleClickCycles && click.detail > 1) {
+    click = { ...click, detail: 1 };
+  }
   const pointer = toSketchPickCyclePointer(click.x, click.y, wiring);
   const cycles = wiring.context.mode !== "none";
   const armed =
@@ -1051,17 +1181,104 @@ export function resolveSketchPickClick(
     type: "clicked",
     detail: click.detail,
     cycles,
+    toggles: click.selectionMode === "toggle",
     ...pointer,
   });
   const count = wiring.stack.length;
+  const own =
+    armed !== null && cycle ? (wiring.stack[cycle.index] ?? null) : null;
+  const { isSelected } = pointer;
+  if (!isSelected) {
+    return {
+      cycle: next,
+      target: wiring.stack[next?.index ?? 0] ?? null,
+      replaces: own,
+      preview:
+        (next && count > 1
+          ? wiring.stack[(next.index + 1) % count]
+          : wiring.stack[0]) ?? null,
+    };
+  }
+
+  // A double click's second click: the first one already acted.
+  if (click.detail !== 1) {
+    return { cycle: null, target: null, replaces: null, preview: null };
+  }
+  const index = next?.index ?? 0;
+  const ownIndex = own && cycle ? cycle.index : null;
+  const selectionMode: SelectionRequestMode =
+    armed === null
+      ? (click.selectionMode ?? "replace")
+      : index === count
+        ? "remove"
+        : "toggle";
+  // The stack's selection after this click, for the next click's preview.
+  const selectedAfter = (entry: number) =>
+    selectionMode === "replace"
+      ? entry === index
+      : selectionMode === "remove"
+        ? entry !== ownIndex && isSelected(entry)
+        : armed === null
+          ? entry === 0
+            ? !isSelected(0)
+            : isSelected(entry)
+          : entry === index || (entry !== ownIndex && isSelected(entry));
+  const previewIndex = next
+    ? getArmedSketchPickCycleIndex(next, {
+        ...pointer,
+        retainsPick: selectedAfter,
+        isSelected: selectedAfter,
+      })
+    : null;
   return {
     cycle: next,
-    target: wiring.stack[next?.index ?? 0] ?? null,
-    replaces:
-      armed !== null && cycle ? (wiring.stack[cycle.index] ?? null) : null,
-    preview:
-      (next && count > 1
-        ? wiring.stack[(next.index + 1) % count]
-        : wiring.stack[0]) ?? null,
+    target:
+      (armed === null
+        ? wiring.stack[0]
+        : index === count
+          ? own
+          : wiring.stack[index]) ?? null,
+    replaces: armed !== null && index < count ? own : null,
+    preview: wiring.stack[previewIndex ?? 0] ?? null,
+    selectionMode,
   };
+}
+
+/**
+ * The edited sketch's points and curves a marquee from `start` to `end`
+ * (viewport px) selects (cadara-h026.1, `selectSketchMarqueeTargets`):
+ * its own geometry only (no datum, projected or external references, no
+ * tangent handles), projected to the screen; geometry with a point behind
+ * the camera is left out.
+ */
+export function collectSketchMarqueeTargets({
+  sketchSession,
+  camera,
+  viewportRect,
+  start,
+  end,
+}: {
+  sketchSession: SketchSessionState;
+  camera: ViewportCamera;
+  viewportRect: DOMRectReadOnly;
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+}): PrimitiveRef[] {
+  const candidates = collectSketchInteractionGeometry(sketchSession).flatMap(
+    (geometry) => {
+      if (
+        geometry.source !== "local" ||
+        geometry.target.kind === "sketchTangentHandle"
+      ) {
+        return [];
+      }
+      const points = sampleSketchMarqueeGeometry(geometry).map((point) =>
+        projectSketchPointToScreen(point, sketchSession, camera, viewportRect),
+      );
+      return points.every((point) => point.visible)
+        ? [{ target: geometry.target, points }]
+        : [];
+    },
+  );
+  return selectSketchMarqueeTargets(candidates, start, end);
 }

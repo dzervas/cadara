@@ -77,6 +77,7 @@ import {
   handleViewportHovered,
   handleSelectionCleared,
   handleViewportSelectionRequested,
+  handleSelectionTargetsRequested,
   handleAuthoringReopenRequested,
   handleSketchPlaneEditRequested,
 } from "./transitions-viewport";
@@ -618,6 +619,8 @@ function handleSharedEvent(
       return handleSelectionCleared(state, dependencies);
     case "viewport.selectionRequested":
       return handleViewportSelectionRequested(state, event, dependencies);
+    case "selection.targetsRequested":
+      return handleSelectionTargetsRequested(state, event, dependencies);
     case "authoring.reopenRequested":
       return handleAuthoringReopenRequested(state, event);
     case "sketchPlaneEdit.requested":

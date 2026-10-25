@@ -32,6 +32,10 @@ import {
   type ShortcutProfileRepository,
 } from "@/core/shortcuts/profile-repository";
 import { createShortcutResolver } from "@/core/shortcuts/resolver";
+import {
+  DEFAULT_SELECTION_CLICK_MODE,
+  type SelectionClickMode,
+} from "@/core/editor/selection-click-mode";
 import { ShortcutContext } from "@/hooks/shortcut-context";
 import { isTextEditingTarget } from "@/hooks/shortcut-targets";
 import { validateShortcutOverrideUpdate } from "@/hooks/shortcut-validation";
@@ -73,6 +77,8 @@ export function ShortcutProvider({
     [repository],
   );
   const [pointingDevice, setPointingDevice] = useState<"mouse" | "touchpad">("mouse");
+  const [selectionClickMode, setSelectionClickMode] =
+    useState<SelectionClickMode>(DEFAULT_SELECTION_CLICK_MODE);
   const [overrides, setOverrides] = useState<ShortcutProfileOverrides>({});
   const effectiveKeymap = useMemo(
     () => createEffectiveKeymap(registry, overrides),
@@ -88,6 +94,10 @@ export function ShortcutProvider({
 
     void resolvedRepository?.loadPointingDevice?.().then((scheme) => {
       if (!disposed) setPointingDevice(scheme);
+    });
+
+    void resolvedRepository?.loadSelectionClickMode?.().then((mode) => {
+      if (!disposed) setSelectionClickMode(mode);
     });
 
     void resolvedRepository?.load().then((loadedOverrides) => {
@@ -155,6 +165,11 @@ export function ShortcutProvider({
         setPointingDevice(scheme);
         void resolvedRepository?.savePointingDevice?.(scheme);
       },
+      selectionClickMode,
+      setSelectionClickMode: (mode: SelectionClickMode) => {
+        setSelectionClickMode(mode);
+        void resolvedRepository?.saveSelectionClickMode?.(mode);
+      },
       activeScopes,
       commands,
       effectiveKeymap,
@@ -197,6 +212,7 @@ export function ShortcutProvider({
     }),
     [
       pointingDevice,
+      selectionClickMode,
       resolvedRepository,
       activeScopes,
       commands,

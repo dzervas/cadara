@@ -3,6 +3,7 @@ import {
   useState,
   type CSSProperties,
   type HTMLAttributes,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import { ActionIcon, ScrollArea } from "@mantine/core";
@@ -41,13 +42,20 @@ import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
 import { getSketchErrorSummary } from "@/domain/modeling/document-snapshot-view";
 import { useEditorState } from "@/hooks/use-editor-state";
+import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
+import { createShellRowSelectRequest } from "@/core/editor/state-machine/selection-helpers";
 
 interface FloatingPartsTreeProps {
   snapshot: WorkspaceSnapshot | null;
   hiddenTargetKeys: Record<string, boolean>;
   objectLabelOverrides: Record<string, string>;
   visibleSelection: PrimitiveRef[];
-  onSelectTarget: (target: PrimitiveRef) => void;
+  /**
+   * List conventions (cadara-h026.1): a click selects the row alone,
+   * Ctrl/Cmd+click toggles it, Shift+click selects the range from the last
+   * clicked row (added with Ctrl/Cmd).
+   */
+  onSelectTarget: (target: PrimitiveRef, request?: ShellSelectRequest) => void;
   onReopenTarget: (target: PrimitiveRef) => void;
   onObjectDelete: (target: PrimitiveRef, label: string) => void;
   onObjectExport: (target: PrimitiveRef, label: string) => void;
@@ -105,6 +113,27 @@ export function FloatingPartsTree({
     state: { selection, selectionFilter, selectionCatalog },
   } = useEditorState();
   const objects = snapshot?.presentation.objects ?? [];
+  // The Shift range anchor: the last row clicked without Shift.
+  const [rangeAnchorKey, setRangeAnchorKey] = useState<string | null>(null);
+  const isRowSelectable = (target: PrimitiveRef) =>
+    hiddenTargetKeys[getPrimitiveRefKey(target)] !== true &&
+    selectionFilterAllowsTarget(
+      selectionFilter,
+      selection,
+      target,
+      selectionCatalog,
+    );
+  const activateRow = (target: PrimitiveRef, event: MouseEvent) => {
+    const request = createShellRowSelectRequest({
+      rows: objects.map((item) => item.target),
+      anchorKey: rangeAnchorKey,
+      target,
+      modifiers: event,
+      isSelectable: isRowSelectable,
+    });
+    if (!request?.range) setRangeAnchorKey(getPrimitiveRefKey(target));
+    onSelectTarget(target, request);
+  };
   const [customColor, setCustomColor] = useState<CustomColorSession | null>(
     null,
   );
@@ -227,9 +256,9 @@ export function FloatingPartsTree({
                 }
                 onRename={() => onRenameTarget(target, itemLabel)}
                 errorSummary={errorSummary}
-                onActivate={() => {
+                onActivate={(event) => {
                   if (!isAllowed || isHidden) return;
-                  onSelectTarget(target);
+                  activateRow(target, event);
                 }}
                 onReopen={
                   target.kind === "feature" || target.kind === "sketch"
@@ -278,7 +307,7 @@ interface RowProps extends HTMLAttributes<HTMLDivElement> {
   isAllowed: boolean;
   /** Why the row's sketch is not current (cadara-dyh); null when it is. */
   errorSummary: string | null;
-  onActivate: () => void;
+  onActivate: (event: MouseEvent) => void;
   onReopen?: () => void;
   onToggleHidden: () => void;
   onRename: () => void;

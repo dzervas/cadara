@@ -173,6 +173,8 @@ test("cadara-1lzw: from every top view-cube corner the wheel's top face is picke
 
     const project = await topFaceProjector(workbench);
     const interior = project(INTERIOR_RADIUS, corner.spokeDegrees);
+    // cadara-h026.1: clicks add to the selection; Escape clears it first.
+    await page.keyboard.press("Escape");
     await workbench.hoverViewportAtReal(interior);
     await workbench.clickViewportAtReal(interior);
     await expect
@@ -189,6 +191,7 @@ test("cadara-1lzw: from every top view-cube corner the wheel's top face is picke
       x: rim.x + ((interior.x - rim.x) * 3) / inward,
       y: rim.y + ((interior.y - rim.y) * 3) / inward,
     };
+    await page.keyboard.press("Escape");
     await workbench.hoverViewportAtReal(nearRim);
     await workbench.clickViewportAtReal(nearRim);
     await expect

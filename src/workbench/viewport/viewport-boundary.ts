@@ -6,7 +6,10 @@ import type {
   SketchSpecialModeHandleRef,
   SketchSpecialModeViewportPresentation,
 } from "@/core/sketch-special-modes/schema";
-import type { EditorViewState } from "@/domain/editor/state-machine";
+import type {
+  EditorViewState,
+  SelectionRequestMode,
+} from "@/domain/editor/state-machine";
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
@@ -46,6 +49,8 @@ export interface ViewportModel {
     selectionCatalog: EditorViewState["selectionCatalog"];
     sketchSession: SketchSessionState | null;
     isEditorRenderIdle: boolean;
+    /** Clicks combine by `SelectionRequestMode` here (cadara-h026.1). */
+    multiSelection: boolean;
   };
   capabilities: {
     acceptsSpecialModeTarget(input: ViewportSpecialModeTargetInput): boolean;
@@ -65,6 +70,14 @@ export type ViewportIntent =
       cameraPosition?: Vec3;
       /** The previous pick a repeated-click cycle replaces (T11d). */
       cycleReplaces?: PrimitiveRef;
+      /** How a multi-selection click combines (cadara-h026.1). */
+      selectionMode?: SelectionRequestMode;
+    }
+  /** cadara-h026.1: the sketch marquee's targets, in selection order. */
+  | {
+      type: "targetsSelected";
+      targets: PrimitiveRef[];
+      mode: "replace" | "add";
     }
   | { type: "connectedSketchSelected"; target: PrimitiveRef }
   | { type: "deselected" }

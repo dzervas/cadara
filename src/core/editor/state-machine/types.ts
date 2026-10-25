@@ -382,6 +382,30 @@ export interface ViewportHoverClearedEvent {
   type: "viewport.hoverCleared";
 }
 
+/**
+ * How a pick combines with the selection in a multi-selection context
+ * (cadara-h026.1: idle part selection, and sketch selection with no tool;
+ * `isMultiSelectionContext`):
+ * - `replace`: the selection becomes the target alone.
+ * - `toggle`: a selected target is removed, any other is appended.
+ * - `remove`: the target is removed (the pick cycle's deselect entry).
+ * The selection stays ordered by pick (tools adopting a preselection read
+ * that order). Other contexts (tools, feature dialogs, pickers) ignore the
+ * mode, except that `remove` changes nothing there.
+ */
+export type SelectionRequestMode = "replace" | "toggle" | "remove";
+
+/**
+ * How a sidebar or parts-tree row click combines with the selection
+ * (cadara-h026.1; list conventions, not the viewport click setting): `mode`
+ * for one row (Ctrl/Cmd toggles), `range` for a Shift range of rows in
+ * selection order (added to the selection with Ctrl/Cmd).
+ */
+export interface ShellSelectRequest {
+  mode?: "replace" | "toggle";
+  range?: PrimitiveRef[];
+}
+
 /** Requests selection of a durable target from the viewport or sidebar. */
 export interface ViewportSelectionRequestedEvent {
   type: "viewport.selectionRequested";
@@ -390,10 +414,30 @@ export interface ViewportSelectionRequestedEvent {
   /** Current viewport camera position when the selection came from the viewport. */
   cameraPosition?: Vec3;
   /**
-   * A repeated single click on the same sketch pick stack (T11d): the
-   * previous click's pick, which this target replaces in the selection.
+   * A repeated single click on the same pick stack (T11d; part mode too
+   * since cadara-h026.1): the previous click's pick, which this target
+   * replaces in the selection (in place in a multi-selection context).
    */
   cycleReplaces?: PrimitiveRef;
+  /** Absent means `replace` (sidebar rows, chips, tool flows). */
+  selectionMode?: SelectionRequestMode;
+}
+
+/**
+ * Requests several targets at once (cadara-h026.1: the sketch marquee, a
+ * parts-tree Shift range). In a multi-selection context `replace` makes
+ * them the selection and `add` appends those not yet selected; targets the
+ * selection filter refuses are dropped. Elsewhere only the last target is
+ * requested, as a plain `viewport.selectionRequested`. Order: a marquee
+ * sends the sketch's points first, then its curves, each in definition
+ * order (not pick order); a tree range runs from the anchor row to the
+ * clicked one.
+ */
+export interface SelectionTargetsRequestedEvent {
+  type: "selection.targetsRequested";
+  /** Targets in selection order. */
+  targets: PrimitiveRef[];
+  mode: "replace" | "add";
 }
 
 /** Requests connected local sketch-entity selection from a viewport double-click. */
@@ -773,6 +817,7 @@ export type EditorEvent =
   | ViewportHoveredEvent
   | ViewportHoverClearedEvent
   | ViewportSelectionRequestedEvent
+  | SelectionTargetsRequestedEvent
   | SketchConnectedSelectionRequestedEvent
   | SelectionClearedEvent
   | AuthoringReopenRequestedEvent

@@ -45,15 +45,19 @@ import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
+  collectSketchMarqueeTargets,
+  createPartPickCycleWiring,
   createSketchPickCycleWiring,
   getAnnotationHighlightTargets,
   getSketchPickChooserTargets,
   getSketchPickPreviewTarget,
   isProjectedSketchDisplayPointTarget,
+  resolvePartPickStack,
   resolveSketchPickChoice,
   resolveSketchPickClick,
   type SketchPickCycleWiring,
 } from "@/components/cad/three-cad-viewport-pick-candidates";
+import { applyMultiSelectionRequest } from "@/core/editor/state-machine/selection-helpers";
 import {
   createDisplayRenderableForProjectedGeometry,
   createDisplayRenderableForReferenceRecord,
@@ -2795,8 +2799,7 @@ describe("T16f: linked mirror highlights in the annotation highlight list", () =
           session,
           session.definition.derivedRelationships![0]!.outputs.find(
             (output) => output.seedEntityId === eid("ab"),
-          )!
-            .outputEntityId,
+          )!.outputEntityId,
         ),
       ]),
     );
@@ -2819,5 +2822,205 @@ describe("T16f: linked mirror highlights in the annotation highlight list", () =
         broken,
       ),
     ).toEqual([]);
+  });
+});
+
+// cadara-h026.1 (pure wiring seam, no DOM): the multi-selection click as
+// the viewport composes it: `resolveSketchPickClick` gives the selection
+// event (target, `cycleReplaces`, `selectionMode`) that
+// `applyMultiSelectionRequest` then applies.
+describe("h026.1: multi-selection clicks", () => {
+  function clickSequence(
+    initial: readonly PrimitiveRef[],
+    wiringFor: (selection: readonly PrimitiveRef[]) => SketchPickCycleWiring,
+    clicks: number,
+    selectionMode: "replace" | "toggle" = "toggle",
+    detail = 1,
+  ) {
+    let selection = initial;
+    let cycle: SketchPickCycle | null = null;
+    const selections: PrimitiveRef[][] = [];
+    for (let click = 0; click < clicks; click += 1) {
+      const clicked = resolveSketchPickClick(
+        cycle,
+        { x: 120, y: 102, detail, selectionMode },
+        wiringFor(selection),
+      );
+      cycle = clicked.cycle;
+      if (clicked.target) {
+        selection = applyMultiSelectionRequest(selection, {
+          target: clicked.target,
+          selectionMode: clicked.selectionMode,
+          ...(clicked.replaces ? { cycleReplaces: clicked.replaces } : {}),
+        });
+      }
+      selections.push([...selection]);
+    }
+    return selections;
+  }
+
+  test("sketch: line → construction → X axis → deselect → line, keeping an earlier pick", () => {
+    const { session, lineTarget, constructionTarget, xAxisTarget } =
+      makeAxisLineSession({ withConstruction: true });
+    const stack = pickSketchStackAt(session, 120, 102).map(
+      (entry) => entry.target,
+    );
+    expect(stack).toEqual([lineTarget, constructionTarget, xAxisTarget]);
+    const other: PrimitiveRef = {
+      kind: "sketchEntity",
+      sketchId:
+        lineTarget.kind === "sketchEntity"
+          ? lineTarget.sketchId
+          : ("" as SketchId),
+      entityId: "sketch_entity_other" as SketchEntityId,
+    };
+    const wiringFor = (selection: readonly PrimitiveRef[]) =>
+      createSketchPickCycleWiring({
+        session,
+        selection,
+        selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+        stack,
+      });
+    expect(clickSequence([other], wiringFor, 5)).toEqual([
+      [other, lineTarget],
+      [other, constructionTarget],
+      [other, xAxisTarget],
+      [other],
+      [other, lineTarget],
+    ]);
+    expect(
+      clickSequence([lineTarget, other], wiringFor, 3),
+      "A selected stack[0] is toggled off first; the cycle then re-adds it.",
+    ).toEqual([[other], [other, lineTarget], [other, constructionTarget]]);
+    expect(
+      clickSequence([other, constructionTarget], wiringFor, 3),
+      "Entries selected by other clicks are skipped.",
+    ).toEqual([
+      [other, constructionTarget, lineTarget],
+      [other, constructionTarget, xAxisTarget],
+      [other, constructionTarget],
+    ]);
+    expect(
+      clickSequence([other], wiringFor, 2, "replace"),
+      "Shift-to-add, plain click: replace, then cycle in place.",
+    ).toEqual([[lineTarget], [constructionTarget]]);
+  });
+
+  test("a one-entry stack toggles: select → deselect → select", () => {
+    const { lineTarget } = makeAxisLineSession();
+    const wiringFor = (selection: readonly PrimitiveRef[]) =>
+      createPartPickCycleWiring({ selection, stack: [lineTarget] });
+    expect(clickSequence([], wiringFor, 3)).toEqual([
+      [lineTarget],
+      [],
+      [lineTarget],
+    ]);
+  });
+
+  test("sketch: a double click's second click selects nothing more; part mode: fast clicks (detail 2) keep cycling", () => {
+    const { session, lineTarget } = makeAxisLineSession();
+    const clicked = resolveSketchPickClick(
+      null,
+      { x: 120, y: 102, detail: 2, selectionMode: "toggle" },
+      createSketchPickCycleWiring({
+        session,
+        selection: [lineTarget],
+        selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+        stack: [lineTarget],
+      }),
+    );
+    expect(clicked.target).toBeNull();
+    const face = {
+      kind: "face",
+      bodyId: "body_a",
+      faceId: "face_a",
+    } as PrimitiveRef;
+    const wiringFor = (selection: readonly PrimitiveRef[]) =>
+      createPartPickCycleWiring({ selection, stack: [lineTarget, face] });
+    expect(clickSequence([], wiringFor, 4, "toggle", 2)).toEqual([
+      [lineTarget],
+      [face],
+      [],
+      [lineTarget],
+    ]);
+  });
+
+  test("part stack: overlapping edge and face, never a hidden face, a construction plane behind the body, a datum plane or the owner body", () => {
+    const bodyId = "body_a";
+    const candidate = (
+      target: PrimitiveRef,
+      semanticClass: PickCandidate["semanticClass"],
+      rayDistance: number,
+    ): PickCandidate => ({
+      pickId: getPrimitiveRefKey(target),
+      target,
+      renderable: null,
+      source: "raycast",
+      semanticClass,
+      priority: 0,
+      rayDistance,
+      screenDistance: null,
+      depth: 0,
+      stableKey: getPrimitiveRefKey(target),
+    });
+    const front = {
+      kind: "face",
+      bodyId,
+      faceId: "face_front",
+    } as PrimitiveRef;
+    const back = { kind: "face", bodyId, faceId: "face_back" } as PrimitiveRef;
+    const rim = { kind: "edge", bodyId, edgeId: "edge_rim" } as PrimitiveRef;
+    const planeBehind = {
+      kind: "construction",
+      constructionId: "construction_user-plane",
+    } as PrimitiveRef;
+    const candidates = [
+      candidate(front, "bodyFace", 10),
+      candidate(rim, "featureEdge", 10),
+      candidate(back, "bodyFace", 20),
+      candidate(planeBehind, "construction", 15),
+    ];
+    const accepts = (target: PrimitiveRef) => target.kind !== "body";
+    const stack = resolvePartPickStack(candidates, accepts, {});
+    expect(stack[0]?.target).toEqual(
+      resolveAllCandidates(candidates, accepts, {})?.target,
+    );
+    expect(
+      stack.map((entry) => getPrimitiveRefKey(entry.target)).sort(),
+    ).toEqual([front, rim].map(getPrimitiveRefKey).sort());
+    const bodyFallback = resolvePartPickStack(
+      candidates,
+      (target) => target.kind === "body" || target.kind === "edge",
+      {},
+    );
+    expect(
+      bodyFallback.filter((entry) => entry.target.kind === "body").length,
+      "An owner body is only ever the first entry.",
+    ).toBeLessThanOrEqual(1);
+  });
+
+  test("sketch marquee: left to right encloses, right to left also crosses", () => {
+    const { session, lineTarget, startPointTarget } = makeAxisLineSession();
+    // The line runs from screen (60, 100) to (140, 100).
+    const boxed = (
+      start: { x: number; y: number },
+      end: { x: number; y: number },
+    ) =>
+      collectSketchMarqueeTargets({
+        sketchSession: session,
+        camera: createStackCamera(),
+        viewportRect: stackViewportRect,
+        start,
+        end,
+      }).map(getPrimitiveRefKey);
+    expect(boxed({ x: 50, y: 90 }, { x: 100, y: 110 })).toEqual([
+      getPrimitiveRefKey(startPointTarget),
+    ]);
+    expect(boxed({ x: 100, y: 90 }, { x: 50, y: 110 })).toEqual(
+      [startPointTarget, lineTarget].map(getPrimitiveRefKey),
+    );
+    expect(boxed({ x: 50, y: 90 }, { x: 150, y: 110 })).toContain(
+      getPrimitiveRefKey(lineTarget),
+    );
   });
 });

@@ -139,7 +139,7 @@ const constraintTargets = (state: SketchEditorState) =>
   ) ?? [];
 
 describe("T11d per-context cycle table", () => {
-  test("each context gets its mode: replace, replace-last-added or none", async () => {
+  test("each context gets its mode: multi-select, replace, replace-last-added or none", async () => {
     const mode = async (toolId: SketchAuthoringToolId | null) => {
       const { state } = await makeOverlapState(toolId);
       return getSketchSelectionCycleContext(
@@ -147,7 +147,10 @@ describe("T11d per-context cycle table", () => {
         state.selectionFilter,
       ).mode;
     };
-    expect(await mode(null), "No tool: replace.").toBe("replace");
+    expect(
+      await mode(null),
+      "No tool: the multi-selection (cadara-h026.1).",
+    ).toBe("multiSelect");
     expect(await mode("projectReference"), "Reference picker: replace.").toBe(
       "replace",
     );
@@ -229,7 +232,7 @@ describe("T11d per-context cycle table", () => {
 });
 
 describe("T11d cycle selection through the editor transition", () => {
-  test("replace (no tool): the cycle pick replaces the previous one", async () => {
+  test("multi-select (no tool): the cycle pick replaces the previous one", async () => {
     const { state, line, construction, xAxis } = await makeOverlapState();
     const first = select(state, line);
     expect(first.selection).toEqual([line]);

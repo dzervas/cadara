@@ -85,6 +85,8 @@ test("edge priority and enlarged vertex hitboxes resolve at fixed viewport point
     .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
     .toBe(EDGE_TARGET);
 
+  // cadara-h026.1: clicks add to the selection; Escape clears it first.
+  await page.keyboard.press("Escape");
   await workbench.hoverViewportAtReal(VERTEX_POINT);
   await expect
     .poll(() => workbench.currentHoverTarget(), { timeout: 10_000 })
@@ -110,11 +112,15 @@ test("reload preserves the same topology targets and blank-space behavior", asyn
     .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
     .toBe(FACE_TARGET);
 
+  // cadara-h026.1: clicks add to the selection; Escape clears it first.
+  await page.keyboard.press("Escape");
   await workbench.clickViewportAtReal(EDGE_POINT);
   await expect
     .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
     .toBe(EDGE_TARGET);
 
+  // cadara-h026.1: clicks add to the selection; Escape clears it first.
+  await page.keyboard.press("Escape");
   await workbench.clickViewportAtReal(VERTEX_POINT);
   await expect
     .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })

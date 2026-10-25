@@ -27,6 +27,7 @@ test("workbench viewport adapter exposes typed model and command ports", () => {
     selectionCatalog: null,
     sketchSession: null,
     isEditorRenderIdle: true,
+    multiSelection: true,
     acceptsSpecialModeTarget: () => true,
     annotationContext: null,
     showAllAnnotations: false,
@@ -37,6 +38,7 @@ test("workbench viewport adapter exposes typed model and command ports", () => {
   expect(model.hoverTarget).toBe(target);
   expect(model.interaction.mode).toBe("part");
   expect(model.interaction.isEditorRenderIdle).toBe(true);
+  expect(model.interaction.multiSelection).toBe(true);
   expect(model.capabilities.acceptsSpecialModeTarget).toBeTypeOf("function");
   expect(
     getLatestViewportFitViewRequestId(

@@ -498,7 +498,11 @@ test("T12d: press on zero handle without cycling drags the fit point; cycle then
   await workbench.waitForAnimationFrames(4);
 
   // Without cycling, a press-drag at the coincident position drags the
-  // fit point (stack[0]), not the zero handle (stack[1]).
+  // fit point (stack[0]), not the zero handle (stack[1]). cadara-h026.1:
+  // the handle drag's release added the handle to the selection, so a
+  // click there selects the fit point (stack[0]), the latest pick.
+  await workbench.page.mouse.click(box!.x + 500, box!.y + 300);
+  await workbench.waitForAnimationFrames(3);
   const snapBeforeFitDrag = await readLiveSketch(workbench);
   const preFitPos = snapBeforeFitDrag.points.find(
     (p) =>
@@ -783,9 +787,11 @@ test("T17f: a clicked tangent handle (seed and mirror copy) is selected, and Set
     await glideClick(workbench, handle);
     await expect
       .poll(() => workbench.currentEditorSelection(), {
-        message: `the ${side}'s handle is the selection`,
+        // cadara-h026.1: the click adds the handle to the spline selected
+        // to reveal it.
+        message: `the ${side}'s handle is selected`,
       })
-      .toBe(handleLabel);
+      .toContain(handleLabel);
     await waitForCommittedAction(page, "Zero Tangent", () =>
       glidePress(page, page.getByRole("button", { name: /Set to zero/i })),
     );

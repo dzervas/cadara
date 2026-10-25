@@ -67,11 +67,14 @@ import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
   collectProjectedVertexCandidates,
+  collectSketchMarqueeTargets,
+  createPartPickCycleWiring,
   createSketchPickCycleWiring,
   getAnnotationHighlightTargets,
   getSketchPickChooserTargets,
   getSketchPickPreviewTarget,
   isAnnotationTarget,
+  resolvePartPickStack,
   resolveSketchPickChoice,
   resolveSketchPickClick,
   type SketchPickCycleWiring,
@@ -141,9 +144,17 @@ import {
 } from "@/infrastructure/viewport/render-picking";
 import {
   resolveSketchPickStack,
+  SKETCH_PICK_CLASSES,
   type SketchPickClass,
   type SketchPickCycle,
 } from "@/domain/sketch-interaction/pick-stack";
+import { getSketchMarqueeMode } from "@/domain/sketch-interaction/marquee";
+import {
+  getSelectionClickRequestMode,
+  getSelectionMarqueeMode,
+} from "@/core/editor/selection-click-mode";
+import type { SelectionRequestMode } from "@/core/editor/state-machine/types";
+import { getSketchSelectionCycleContext } from "@/domain/editor/sketch-session/selection";
 import {
   findNearGapEndpoints,
   getSketchNearGapBasis,
@@ -493,24 +504,39 @@ function ThreeCadViewportScene({
     selectionCatalog,
     sketchSession,
     isEditorRenderIdle,
+    multiSelection,
   } = interaction;
   const fitViewRequestId = getLatestViewportFitViewRequestId(commands);
   const onHover = useCallback(
     (target: PrimitiveRef) => onIntent({ type: "hovered", target }),
     [onIntent],
   );
+  // Set while a viewport selection dispatch is in flight: any other
+  // selection change resets the pick cycle (cadara-h026.1).
+  const viewportSelectionPendingRef = useRef(false);
   const onSelect = useCallback(
     (
       target: PrimitiveRef,
       cameraPosition?: Vec3,
       cycleReplaces?: PrimitiveRef,
-    ) =>
+      selectionMode?: SelectionRequestMode,
+    ) => {
+      viewportSelectionPendingRef.current = true;
       onIntent({
         type: "selected",
         target,
         cameraPosition,
         ...(cycleReplaces ? { cycleReplaces } : {}),
-      }),
+        ...(selectionMode ? { selectionMode } : {}),
+      });
+    },
+    [onIntent],
+  );
+  const onTargetsSelect = useCallback(
+    (targets: PrimitiveRef[], mode: "replace" | "add") => {
+      viewportSelectionPendingRef.current = true;
+      onIntent({ type: "targetsSelected", targets, mode });
+    },
     [onIntent],
   );
   const onConnectedSketchSelect = useCallback(
@@ -643,7 +669,11 @@ function ThreeCadViewportScene({
   const viewCubeRef = useRef<HTMLDivElement | null>(null);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRef = useRef<ViewportCamera | null>(null);
-  const { pointingDevice } = useShortcuts();
+  const { pointingDevice, selectionClickMode } = useShortcuts();
+  const selectionClickModeRef = useRef(selectionClickMode);
+  useEffect(() => {
+    selectionClickModeRef.current = selectionClickMode;
+  }, [selectionClickMode]);
   const controlsRef = useRef<ViewportCameraControls | null>(null);
   const controlsInitializedRef = useRef(false);
   const pendingProjectionFrameRef = useRef<ViewportCameraFrame | null>(null);
@@ -698,6 +728,20 @@ function ThreeCadViewportScene({
     target: PrimitiveRef;
     startPoint: readonly [number, number];
   } | null>(null);
+  // The sketch marquee (cadara-h026.1): armed by a press on empty canvas,
+  // active past the drag threshold; its box is drawn in `marqueeElementRef`.
+  const marqueeRef = useRef<{
+    x: number;
+    y: number;
+    pointerId: number;
+    active: boolean;
+  } | null>(null);
+  const marqueeElementRef = useRef<HTMLDivElement | null>(null);
+  // A marquee's release must not also click (an empty click clears).
+  const marqueeClickSuppressedRef = useRef(false);
+  // The target a geometry drag just moved: its release `click` keeps the
+  // multi-selection and only adds that target (cadara-h026.1).
+  const dragReleaseTargetRef = useRef<PrimitiveRef | null>(null);
   const pickRootRef = useRef<THREE.Group | null>(null);
   const bindingsRef = useRef<CollectedBindings | null>(null);
   const bindingsSceneKeyRef = useRef<string | null>(null);
@@ -717,6 +761,17 @@ function ThreeCadViewportScene({
   // The repeated-click cycle (T11d): a pure reducer's state kept in a ref,
   // and the pick resolved at the last pointer-up for its `click`.
   const pickCycleRef = useRef<SketchPickCycle | null>(null);
+  const selectionKey = selection.map(getPrimitiveRefKey).join("|");
+  const lastSelectionKeyRef = useRef(selectionKey);
+  useEffect(() => {
+    if (lastSelectionKeyRef.current === selectionKey) return;
+    lastSelectionKeyRef.current = selectionKey;
+    if (viewportSelectionPendingRef.current) {
+      viewportSelectionPendingRef.current = false;
+    } else {
+      pickCycleRef.current = null;
+    }
+  }, [selectionKey]);
   // The last dispatched fit-point release, for the double-click
   // de-duplication (T11-D13).
   const fitPointReleaseRef = useRef<{ x: number; y: number } | null>(null);
@@ -819,6 +874,7 @@ function ThreeCadViewportScene({
   const lastFitViewRequestIdRef = useRef(fitViewRequestId);
   const pendingFitViewRequestIdRef = useRef<number | null>(null);
   const selectRef = useRef(onSelect);
+  const targetsSelectRef = useRef(onTargetsSelect);
   const connectedSketchSelectRef = useRef(onConnectedSketchSelect);
   const deselectRef = useRef(onDeselect);
   const annotationEditRef = useRef(onAnnotationEdit);
@@ -1043,6 +1099,7 @@ function ThreeCadViewportScene({
     ],
   );
   const selectionFilterRef = useRef(selectionFilter);
+  const multiSelectionRef = useRef(multiSelection);
   const selectionCatalogRef = useRef(selectionCatalog);
   const bvhSceneKey = useMemo(
     () => createViewportBvhSceneKey(renderables, sketchDisplayRenderables),
@@ -1122,6 +1179,7 @@ function ThreeCadViewportScene({
   useEffect(() => {
     hoverRef.current = onHover;
     selectRef.current = onSelect;
+    targetsSelectRef.current = onTargetsSelect;
     connectedSketchSelectRef.current = onConnectedSketchSelect;
     deselectRef.current = onDeselect;
     annotationEditRef.current = onAnnotationEdit;
@@ -1150,6 +1208,7 @@ function ThreeCadViewportScene({
     acceptsSpecialModeTargetRef.current = capabilities.acceptsSpecialModeTarget;
     sectionViewRef.current = activeSectionView;
     selectionFilterRef.current = selectionFilter;
+    multiSelectionRef.current = multiSelection;
     selectionCatalogRef.current = selectionCatalog;
   }, [
     activeSectionView,
@@ -1158,6 +1217,7 @@ function ThreeCadViewportScene({
     onAnnotationEdit,
     onHover,
     onSelect,
+    onTargetsSelect,
     onConnectedSketchSelect,
     onSpecialModeClick,
     onSpecialModeDoubleClick,
@@ -1180,6 +1240,7 @@ function ThreeCadViewportScene({
     onFirstNonEmptyGeometryFrame,
     selection,
     sketchSession,
+    multiSelection,
     selectionCatalog,
     selectionFilter,
     capabilities.acceptsSpecialModeTarget,
@@ -1501,6 +1562,14 @@ function ThreeCadViewportScene({
           ? [camera.position.x, camera.position.y, camera.position.z]
           : undefined,
         choice.replaces ?? undefined,
+        // A multi-selection chooser pick is a plain click on the item.
+        open.wiring.selected
+          ? getSelectionClickRequestMode(selectionClickModeRef.current, {
+              shiftKey: false,
+              ctrlKey: false,
+              metaKey: false,
+            })
+          : undefined,
       );
     },
     [clearSketchPickHint, detachSketchPickChooser, focusCanvas],
@@ -2191,6 +2260,11 @@ function ThreeCadViewportScene({
     ): {
       top: PickResult | null;
       sketch: SketchStackPick | null;
+      /**
+       * Part mode: the overlapping targets the pick cycle walks
+       * (cadara-h026.1), resolved on first use.
+       */
+      part?: () => readonly PickResult[];
     } => {
       const camera = cameraRef.current;
       const bindings = getCachedBindings();
@@ -2264,22 +2338,30 @@ function ThreeCadViewportScene({
       ];
 
       if (!sketchSession || !sketchDisplayDefinition) {
+        // Part mode: no feature vertex is picked through a body face
+        // (cadara-1lzw), neither by a click nor by the pick cycle.
+        const partCandidates = dropFaceHiddenProjectedVertexCandidates({
+          candidates,
+          objects: bindings.pickables,
+          camera,
+          layers: raycasterRef.current.layers,
+          wireOcclusionTolerance:
+            pickTuning.resolutionOptions.wireOcclusionTolerance,
+        });
+        let partStack: readonly PickResult[] | undefined;
         return {
           top: resolveAllCandidates(
-            // Part mode: no feature vertex is picked through a body face
-            // (cadara-1lzw).
-            dropFaceHiddenProjectedVertexCandidates({
-              candidates,
-              objects: bindings.pickables,
-              camera,
-              layers: raycasterRef.current.layers,
-              wireOcclusionTolerance:
-                pickTuning.resolutionOptions.wireOcclusionTolerance,
-            }),
+            partCandidates,
             acceptsViewportTarget,
             pickTuning.resolutionOptions,
           ),
           sketch: null,
+          part: () =>
+            (partStack ??= resolvePartPickStack(
+              partCandidates,
+              acceptsViewportTarget,
+              pickTuning.resolutionOptions,
+            )),
         };
       }
 
@@ -2338,6 +2420,49 @@ function ThreeCadViewportScene({
         selectionFilter: selectionFilterRef.current,
         stack: stack.map((entry) => entry.target),
       });
+    };
+
+    /**
+     * The cycle wiring of a pick: the sketch stack's, or in the part
+     * multi-selection (`isMultiSelectionContext`) the part stack's
+     * (cadara-h026.1).
+     */
+    const getPickCycleWiring = (pick: {
+      sketch: SketchStackPick | null;
+      part?: () => readonly PickResult[];
+    }): SketchPickCycleWiring | null => {
+      if (pick.sketch) return getSketchPickCycleWiring(pick.sketch.stack);
+      const stack = multiSelectionRef.current ? pick.part?.() : undefined;
+      return stack && stack.length > 0
+        ? createPartPickCycleWiring({
+            selection: selectionRef.current,
+            stack: stack.map((entry) => entry.target),
+          })
+        : null;
+    };
+
+    /** Hides the marquee box and forgets the marquee. */
+    const cancelMarquee = () => {
+      marqueeRef.current = null;
+      if (marqueeElementRef.current) {
+        marqueeElementRef.current.style.display = "none";
+      }
+    };
+
+    /** Draws the active marquee box from its press to (clientX, clientY). */
+    const drawMarquee = (clientX: number, clientY: number) => {
+      const marquee = marqueeRef.current;
+      const element = marqueeElementRef.current;
+      const container = viewportRef.current?.getBoundingClientRect();
+      if (!marquee || !element || !container) return;
+      element.style.display = "block";
+      element.style.left = `${Math.min(marquee.x, clientX) - container.left}px`;
+      element.style.top = `${Math.min(marquee.y, clientY) - container.top}px`;
+      element.style.width = `${Math.abs(clientX - marquee.x)}px`;
+      element.style.height = `${Math.abs(clientY - marquee.y)}px`;
+      const mode = getSketchMarqueeMode(marquee, { x: clientX, y: clientY });
+      element.dataset.selectionMarquee = mode;
+      element.style.borderStyle = mode === "enclosed" ? "solid" : "dashed";
     };
 
     /**
@@ -2716,6 +2841,30 @@ function ThreeCadViewportScene({
         return;
       }
 
+      // The sketch marquee (cadara-h026.1) starts past the drag threshold.
+      const marquee = marqueeRef.current;
+      if (marquee) {
+        if ((event.buttons & 1) === 0) {
+          cancelMarquee();
+        } else {
+          if (
+            !marquee.active &&
+            Math.hypot(event.clientX - marquee.x, event.clientY - marquee.y) >
+              SKETCH_DRAG_THRESHOLD_PX
+          ) {
+            marquee.active = true;
+            canvasElement.setPointerCapture(marquee.pointerId);
+            updateSketchHoverStack([]);
+            clearHover();
+          }
+          if (marquee.active) {
+            drawMarquee(event.clientX, event.clientY);
+            event.preventDefault();
+            return;
+          }
+        }
+      }
+
       // Sketch drag gesture: delegate threshold, cursor, and capture
       // decisions to the extracted reducer.
       {
@@ -2781,14 +2930,13 @@ function ThreeCadViewportScene({
         event.clientY,
         viewportRect,
       );
-      const wiring = pick.sketch
-        ? getSketchPickCycleWiring(pick.sketch.stack)
-        : null;
+      const wiring = getPickCycleWiring(pick);
       updateSketchHoverStack(
         pick.sketch?.stack.map((entry) => entry.target) ?? [],
       );
       // Hover highlights exactly what the next click picks: `stack[0]`, or
-      // `stack[next]` while a cycle is armed (T11d).
+      // `stack[next]` while a cycle is armed (T11d; nothing before its
+      // deselect entry, cadara-h026.1).
       const target = wiring
         ? getSketchPickPreviewTarget(
             pickCycleRef.current,
@@ -2870,6 +3018,9 @@ function ThreeCadViewportScene({
       // returned early is stale (review A-2).
       releasedPickRef.current = null;
       chooserDismissPressRef.current = false;
+      marqueeClickSuppressedRef.current = false;
+      dragReleaseTargetRef.current = null;
+      cancelMarquee();
 
       // A press on the canvas only dismisses an open chooser; its
       // pointer-up and click are swallowed (T11e review R-2).
@@ -2963,12 +3114,62 @@ function ThreeCadViewportScene({
           target: dragTarget,
           startPoint: point,
         };
+      } else if (
+        // cadara-h026.1: a press on empty canvas (nothing above a region
+        // under it) in the no-tool sketch selection may start a marquee.
+        activeSketchSession.activeTool == null &&
+        getSketchSelectionCycleContext(
+          activeSketchSession,
+          selectionFilterRef.current,
+        ).mode === "multiSelect" &&
+        (stack[0] === undefined ||
+          SKETCH_PICK_CLASSES.indexOf(stack[0].pickClass) >=
+            SKETCH_PICK_CLASSES.indexOf("region"))
+      ) {
+        marqueeRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+          pointerId: event.pointerId,
+          active: false,
+        };
       }
     };
 
     const handlePointerUp = (event: PointerEvent) => {
       if (event.button === 0 && chooserDismissPressRef.current) {
         return;
+      }
+
+      const marquee = marqueeRef.current;
+      if (event.button === 0 && marquee) {
+        cancelMarquee();
+        const session = sketchSessionRef.current;
+        const camera = cameraRef.current;
+        if (marquee.active) {
+          primaryPointerDownRef.current = null;
+          marqueeClickSuppressedRef.current = true;
+          if (canvasElement.hasPointerCapture(marquee.pointerId)) {
+            canvasElement.releasePointerCapture(marquee.pointerId);
+          }
+          if (session && camera) {
+            const viewportRect = canvasElement.getBoundingClientRect();
+            const local = (x: number, y: number) => ({
+              x: x - viewportRect.left,
+              y: y - viewportRect.top,
+            });
+            targetsSelectRef.current(
+              collectSketchMarqueeTargets({
+                sketchSession: session,
+                camera,
+                viewportRect,
+                start: local(marquee.x, marquee.y),
+                end: local(event.clientX, event.clientY),
+              }),
+              getSelectionMarqueeMode(selectionClickModeRef.current, event),
+            );
+          }
+          return;
+        }
       }
 
       if (event.button !== 0) {
@@ -3039,6 +3240,7 @@ function ThreeCadViewportScene({
           }
           applyDragGestureActions(actions, canvasElement);
           primaryPointerDownRef.current = null;
+          dragReleaseTargetRef.current = gesturePhase.target;
           return;
         }
       }
@@ -3073,6 +3275,7 @@ function ThreeCadViewportScene({
         });
         applyDragGestureActions(actions, canvasElement);
         if (actions.consumed) {
+          dragReleaseTargetRef.current = pending.target;
           return;
         }
         // Sub-threshold: fall through to click path (pending already cleared
@@ -3161,6 +3364,9 @@ function ThreeCadViewportScene({
         primaryPointerDownRef.current = null;
         pendingSketchGeometryDragRef.current = null;
       }
+      if (!marqueeRef.current?.active) {
+        cancelMarquee();
+      }
       updateSketchHoverStack([]);
       // T14b (T-18/R-2): annotation hover is its own channel. A leave into an
       // interactive annotation hands the hover to it: the chip's own enter and
@@ -3196,6 +3402,14 @@ function ThreeCadViewportScene({
         chooserDismissPressRef.current = false;
         return;
       }
+
+      if (event.button === 0 && marqueeClickSuppressedRef.current) {
+        marqueeClickSuppressedRef.current = false;
+        return;
+      }
+      const draggedTarget =
+        event.button === 0 ? dragReleaseTargetRef.current : null;
+      if (event.button === 0) dragReleaseTargetRef.current = null;
 
       if (
         event.button !== 0 ||
@@ -3258,6 +3472,26 @@ function ThreeCadViewportScene({
         return;
       }
 
+      // A geometry drag's release keeps the multi-selection: the dragged
+      // target is added when not yet selected (cadara-h026.1).
+      if (draggedTarget && multiSelectionRef.current) {
+        pickCycleRef.current = null;
+        if (
+          !selectionRef.current.some((target) =>
+            primitiveRefEquals(target, draggedTarget),
+          )
+        ) {
+          lastPickedTargetRef.current = draggedTarget;
+          selectRef.current(
+            draggedTarget,
+            getViewportCameraPosition() ?? undefined,
+            undefined,
+            "toggle",
+          );
+        }
+        return;
+      }
+
       if (
         shouldViewportClickEventRequestConnectedSketchSelection({
           activeSketchTool: sketchSessionRef.current?.activeTool,
@@ -3305,9 +3539,7 @@ function ThreeCadViewportScene({
         return;
       }
 
-      const wiring = pick.sketch
-        ? getSketchPickCycleWiring(pick.sketch.stack)
-        : null;
+      const wiring = draggedTarget ? null : getPickCycleWiring(pick);
 
       if (!wiring) {
         lastPickedTargetRef.current = resolvedTarget.target;
@@ -3343,7 +3575,15 @@ function ThreeCadViewportScene({
 
       const clicked = resolveSketchPickClick(
         pickCycleRef.current,
-        { x: event.clientX, y: event.clientY, detail: event.detail },
+        {
+          x: event.clientX,
+          y: event.clientY,
+          detail: event.detail,
+          selectionMode: getSelectionClickRequestMode(
+            selectionClickModeRef.current,
+            event,
+          ),
+        },
         wiring,
       );
       pickCycleRef.current = clicked.cycle;
@@ -3357,6 +3597,7 @@ function ThreeCadViewportScene({
         clicked.target,
         getViewportCameraPosition() ?? undefined,
         clicked.replaces ?? undefined,
+        clicked.selectionMode,
       );
 
       if (at) {
@@ -3371,6 +3612,12 @@ function ThreeCadViewportScene({
       ) {
         hoverTargetRef.current = clicked.preview;
         hoverRef.current(clicked.preview);
+      }
+      // Before a multi-selection cycle's deselect entry nothing is
+      // previewed (cadara-h026.1).
+      if (clicked.selectionMode && !clicked.preview) {
+        hoverTargetRef.current = null;
+        clearHoverRef.current();
       }
     };
 
@@ -3464,6 +3711,7 @@ function ThreeCadViewportScene({
       });
       applyDragGestureActions(actions, canvasElement);
       primaryPointerDownRef.current = null;
+      cancelMarquee();
     };
 
     // D2: lost pointer capture (not caused by our own release) cancels the drag.
@@ -3473,6 +3721,7 @@ function ThreeCadViewportScene({
         kind: "lostPointerCapture",
       });
       applyDragGestureActions(actions, canvasElement);
+      cancelMarquee();
       if (gesturePhase.kind === "active") {
         primaryPointerDownRef.current = null;
       }
@@ -3906,6 +4155,18 @@ function ThreeCadViewportScene({
         />
       </div>
       <SketchNearGapGlyphs gaps={sketchSession ? sketchNearGaps : []} />
+      {/* The sketch marquee box (cadara-h026.1), drawn by the pointer handlers. */}
+      <div
+        ref={marqueeElementRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute z-10"
+        style={{
+          display: "none",
+          border: "1px solid var(--workbench-shell-accent)",
+          background:
+            "color-mix(in srgb, var(--workbench-shell-accent) 12%, transparent)",
+        }}
+      />
       <SketchPickChooser
         chooser={sketchSession ? chooser : null}
         onPick={pickFromSketchPickChooser}

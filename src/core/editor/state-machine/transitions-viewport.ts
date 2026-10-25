@@ -74,9 +74,12 @@ import {
   getDefaultImportSelectionField,
 } from "./form-traversal";
 import {
+  applyMultiSelectionRequest,
+  applyMultiSelectionTargets,
   createFeatureSelectionPreview,
   createImportSelectionPreview,
   createSelectionPreview,
+  isMultiSelectionContext,
 } from "./selection-helpers";
 import {
   createCommandState,
@@ -739,10 +742,51 @@ function handleEditingSketchViewportSelection(
     : { state, effects: [] };
 }
 
+/**
+ * A click in the no-tool sketch selection (cadara-h026.1): the geometry
+ * selection accumulates by the event's mode (`applyMultiSelectionRequest`);
+ * an active annotation leaves it. A sketch point added becomes the edit
+ * target, as a plain point click makes it.
+ */
+function selectSketchMultiSelectionTarget(
+  state: SketchEditorState,
+  event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
+): EditorTransitionResult {
+  const selection = applyMultiSelectionRequest(
+    state.selection.filter((target) => !isAnnotationRef(target)),
+    event,
+  );
+  const added = selection.some((target) =>
+    primitiveRefEquals(target, event.target),
+  );
+  const session =
+    added && event.target.kind === "sketchPoint"
+      ? selectSketchEditTarget(state.session, event.target)
+      : state.session;
+  return {
+    state: {
+      ...createSketchPreviewState(state, session),
+      selection,
+      hoverTarget: event.target,
+      annotationContext: getSketchGeometrySelectionContext(state, selection),
+    },
+    effects: [],
+  };
+}
+
 function selectEditingSketchViewportTarget(
   state: SketchEditorState,
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
 ): EditorTransitionResult {
+  if (
+    (event.selectionMode || event.cycleReplaces) &&
+    !isAnnotationRef(event.target) &&
+    getSketchSelectionCycleContext(state.session, state.selectionFilter)
+      .mode === "multiSelect"
+  ) {
+    return selectSketchMultiSelectionTarget(state, event);
+  }
+
   if (getActiveSketchStyleToolId(state.session)) {
     const session = updateSketchStyleFocusTarget(state.session, [event.target]);
     return {
@@ -983,6 +1027,11 @@ export function handleViewportSelectionRequested(
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
+  // Only a multi-selection removes a pick (its cycle's deselect entry).
+  if (event.selectionMode === "remove" && !isMultiSelectionContext(state)) {
+    return { state, effects: [] };
+  }
+
   // A cycle click is gated on the selection without the pick it replaces
   // (T11d review A-6; matters for multi-slot filters).
   const gateSelection =
@@ -1032,6 +1081,17 @@ export function handleViewportSelectionRequested(
     return { state, effects: [] };
   }
 
+  if (state.kind === "idle" && (event.selectionMode || event.cycleReplaces)) {
+    return {
+      state: {
+        ...state,
+        selection: applyMultiSelectionRequest(state.selection, event),
+        hoverTarget: event.target,
+      },
+      effects: [],
+    };
+  }
+
   const candidate = resolveSelectionCandidate(
     state.selectionFilter,
     state.selection,
@@ -1072,6 +1132,63 @@ export function handleViewportSelectionRequested(
       ...state,
       selection: candidate.nextSelection,
       hoverTarget: event.target,
+    },
+    effects: [],
+  };
+}
+
+/**
+ * The sketch marquee or a parts-tree range (cadara-h026.1); see
+ * `SelectionTargetsRequestedEvent`.
+ */
+export function handleSelectionTargetsRequested(
+  state: EditorState,
+  event: Extract<EditorEvent, { type: "selection.targetsRequested" }>,
+  dependencies: EditorExtensionDependencies,
+): EditorTransitionResult {
+  if (!isMultiSelectionContext(state)) {
+    const last = event.targets.at(-1);
+    return last
+      ? handleViewportSelectionRequested(
+          state,
+          { type: "viewport.selectionRequested", target: last },
+          dependencies,
+        )
+      : { state, effects: [] };
+  }
+
+  const targets = event.targets.filter((target) =>
+    selectionFilterAllowsTarget(
+      state.selectionFilter,
+      [],
+      target,
+      state.selectionCatalog,
+    ),
+  );
+  if (state.kind !== "editingSketch") {
+    return {
+      state: {
+        ...state,
+        selection: applyMultiSelectionTargets(
+          state.selection,
+          targets,
+          event.mode,
+        ),
+      },
+      effects: [],
+    };
+  }
+
+  const selection = applyMultiSelectionTargets(
+    state.selection.filter((target) => !isAnnotationRef(target)),
+    targets,
+    event.mode,
+  );
+  return {
+    state: {
+      ...state,
+      selection,
+      annotationContext: getSketchGeometrySelectionContext(state, selection),
     },
     effects: [],
   };

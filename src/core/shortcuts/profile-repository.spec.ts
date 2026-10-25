@@ -66,3 +66,19 @@ test("pointing device defaults to Mouse and persists independently of keymap res
   expect(await createLocalShortcutProfileRepository(storage).loadPointingDevice?.()).toBe("touchpad");
   expect(await repository.load()).toEqual({});
 });
+
+test("cadara-h026.1: the selection click setting defaults to additive and persists independently of keymap resets", async () => {
+  const values = new Map<string, string>();
+  const storage: ShortcutStorageLike = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); },
+    removeItem: (key) => { values.delete(key); },
+  };
+  const repository = createLocalShortcutProfileRepository(storage);
+  expect(await repository.loadSelectionClickMode?.()).toBe("additive");
+  await repository.saveSelectionClickMode?.("shiftToAdd");
+  await repository.save({});
+  expect(
+    await createLocalShortcutProfileRepository(storage).loadSelectionClickMode?.(),
+  ).toBe("shiftToAdd");
+});

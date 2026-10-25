@@ -18,7 +18,7 @@ const line = "sketch_entity_2_line";
 const xAxis = "xAxis";
 const at = { x: 950, y: 452 };
 
-test("repeated single clicks cycle line → construction line → X axis and wrap; the hint teaches it", async ({
+test("repeated single clicks cycle line → construction line → X axis → deselect and wrap; the hint teaches it", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
@@ -29,19 +29,33 @@ test("repeated single clicks cycle line → construction line → X axis and wra
   const hint = page.getByTestId("sketch-pick-hint");
   await expect(hint).toContainText("2 more here — click again to cycle");
 
+  // cadara-h026.1: the cycle ends in a deselect entry before it wraps.
   for (const [expected, next] of [
     [line, construction],
     [construction, xAxis],
-    [xAxis, line],
+    [xAxis, null],
+    [null, line],
     [line, construction],
   ] as const) {
     await workbench.clickViewportAt(at);
-    await expectOnlySelected(workbench, expected);
-    await expectHover(
-      workbench,
-      next,
-      `After selecting ${expected} the hover previews ${next}, the next click's pick.`,
-    );
+    if (expected) {
+      await expectOnlySelected(workbench, expected);
+    } else {
+      await expect
+        .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+        .toBe("Nothing selected");
+    }
+    if (next) {
+      await expectHover(
+        workbench,
+        next,
+        `After selecting ${expected} the hover previews ${next}, the next click's pick.`,
+      );
+    } else {
+      await expect
+        .poll(() => workbench.currentHoverTarget(), { timeout: 10_000 })
+        .toBe("none");
+    }
   }
 });
 
@@ -69,10 +83,15 @@ test("a real double click never advances the cycle", async ({ page }) => {
     "After a double click the hover previews stack[0] again: the cycle was reset.",
   );
 
-  // The next single click starts a fresh cycle at the line.
+  // The next single click starts a fresh cycle at the line: being selected
+  // (in the chain), the line is removed (cadara-h026.1); a cycle click would
+  // have acted on the construction line instead.
   await page.waitForTimeout(600);
   await workbench.clickViewportAt(at);
-  await expectOnlySelected(workbench, line);
+  await expect
+    .poll(() => workbench.currentEditorSelection(), { timeout: 10_000 })
+    .not.toContain(line);
+  expect(await workbench.currentEditorSelection()).toContain(construction);
 });
 
 test("Offset targets: a cycle click replaces the last-added target instead of adding a second", async ({

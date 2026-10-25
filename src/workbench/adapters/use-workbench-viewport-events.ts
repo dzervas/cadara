@@ -3,8 +3,10 @@ import { useMemo } from "react";
 import type {
   EditorEvent,
   EditorViewState,
+  SelectionRequestMode,
 } from "@/domain/editor/state-machine";
 import type { PrimitiveRef } from "@/core/editor/schema";
+import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
 import { getNavigationReopenRequest } from "@/domain/editor/workbench-interactions";
 import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
@@ -66,8 +68,24 @@ export function useWorkbenchViewportEvents({
           offset,
         });
       },
-      handleShellSelect(target: PrimitiveRef) {
-        dispatch({ type: "viewport.selectionRequested", target });
+      /**
+       * A sidebar or parts-tree row (cadara-h026.1: the tree's Ctrl/Cmd
+       * click toggles, its Shift click selects a range of rows).
+       */
+      handleShellSelect(target: PrimitiveRef, request?: ShellSelectRequest) {
+        if (request?.range) {
+          dispatch({
+            type: "selection.targetsRequested",
+            targets: request.range,
+            mode: request.mode === "toggle" ? "add" : "replace",
+          });
+        } else {
+          dispatch({
+            type: "viewport.selectionRequested",
+            target,
+            ...(request?.mode ? { selectionMode: request.mode } : {}),
+          });
+        }
         dispatch({ type: "viewport.hoverCleared" });
       },
       handleSketchGeometryDragEnd(
@@ -161,12 +179,14 @@ export function useWorkbenchViewportEvents({
         target: PrimitiveRef,
         cameraPosition?: readonly [number, number, number],
         cycleReplaces?: PrimitiveRef,
+        selectionMode?: SelectionRequestMode,
       ) {
         dispatch({
           type: "viewport.selectionRequested",
           target,
           cameraPosition,
           ...(cycleReplaces ? { cycleReplaces } : {}),
+          ...(selectionMode ? { selectionMode } : {}),
         });
       },
     }),

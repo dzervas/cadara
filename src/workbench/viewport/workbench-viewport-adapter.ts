@@ -9,6 +9,7 @@ import type {
 import type {
   EditorEvent,
   EditorViewState,
+  SelectionRequestMode,
 } from "@/domain/editor/state-machine";
 import type {
   SketchAnnotationDescriptor,
@@ -44,6 +45,8 @@ interface WorkbenchViewportModelInput {
   selectionCatalog: EditorViewState["selectionCatalog"];
   sketchSession: EditorViewState["sketchSession"];
   isEditorRenderIdle: boolean;
+  /** `isMultiSelectionContext(state)` (cadara-h026.1). */
+  multiSelection: boolean;
   acceptsSpecialModeTarget: ViewportModel["capabilities"]["acceptsSpecialModeTarget"];
 }
 
@@ -67,6 +70,7 @@ export function createWorkbenchViewportModel({
   selectionCatalog,
   sketchSession,
   isEditorRenderIdle,
+  multiSelection,
   acceptsSpecialModeTarget,
 }: WorkbenchViewportModelInput): ViewportModel {
   return {
@@ -90,6 +94,7 @@ export function createWorkbenchViewportModel({
       selectionCatalog,
       sketchSession,
       isEditorRenderIdle,
+      multiSelection,
     },
     capabilities: {
       acceptsSpecialModeTarget,
@@ -110,6 +115,7 @@ interface WorkbenchViewportIntentActions {
     target: PrimitiveRef,
     cameraPosition?: Vec3,
     cycleReplaces?: PrimitiveRef,
+    selectionMode?: SelectionRequestMode,
   ) => void;
   onConnectedSketchSelect: (target: PrimitiveRef) => void;
   onDeselect: () => void;
@@ -193,7 +199,20 @@ export function createWorkbenchViewportIntentHandler({
         onHover(intent.target);
         return;
       case "selected":
-        onSelect(intent.target, intent.cameraPosition, intent.cycleReplaces);
+        onSelect(
+          intent.target,
+          intent.cameraPosition,
+          intent.cycleReplaces,
+          intent.selectionMode,
+        );
+        return;
+      case "targetsSelected":
+        dispatch({
+          type: "selection.targetsRequested",
+          targets: intent.targets,
+          mode: intent.mode,
+        });
+        dispatch({ type: "viewport.hoverCleared" });
         return;
       case "connectedSketchSelected":
         onConnectedSketchSelect(intent.target);

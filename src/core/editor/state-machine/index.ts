@@ -21,6 +21,8 @@ export type {
   ViewportHoveredEvent,
   ViewportHoverClearedEvent,
   ViewportSelectionRequestedEvent,
+  SelectionRequestMode,
+  SelectionTargetsRequestedEvent,
   SketchConnectedSelectionRequestedEvent,
   SelectionClearedEvent,
   AuthoringReopenRequestedEvent,
@@ -92,3 +94,4 @@ export {
   getPeerDeletedSketchNotice,
   hydrateFeatureSessionFromSnapshot,
 } from "./selectors";
+export { isMultiSelectionContext } from "./selection-helpers";

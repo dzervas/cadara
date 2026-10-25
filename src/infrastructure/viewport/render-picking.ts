@@ -120,7 +120,7 @@ export function getProjectedFeatureVertexPickRadii(inSketchSession: boolean) {
         exitRadius: DEFAULT_PROJECTED_POINT_PICK_EXIT_RADIUS_PX,
       };
 }
-const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01;
+export const DEFAULT_WIRE_OCCLUSION_TOLERANCE = 0.01;
 const DEFAULT_SAME_LAYER_TOLERANCE = 0.004;
 const PICK_DISTANCE_EPSILON = 1e-9;
 
@@ -672,7 +672,7 @@ export function toSketchPickStackCandidates(
   );
 }
 
-function getNearestOccludingFaceDistance(hits: readonly PickCandidate[]) {
+export function getNearestOccludingFaceDistance(hits: readonly PickCandidate[]) {
   return hits.reduce<number | null>((nearest, hit) => {
     if (
       !isOccludingFaceSemanticClass(hit.semanticClass) ||

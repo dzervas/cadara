@@ -3,10 +3,16 @@ import type {
   ShortcutCommandRegistry,
 } from "@/core/shortcuts/commands";
 import type { ShortcutProfileOverrides } from "@/core/shortcuts/keymap";
+import {
+  parseSelectionClickMode,
+  type SelectionClickMode,
+} from "@/core/editor/selection-click-mode";
 
 export interface ShortcutProfileRepository {
   loadPointingDevice?(): Promise<"mouse" | "touchpad">;
   savePointingDevice?(scheme: "mouse" | "touchpad"): Promise<void>;
+  loadSelectionClickMode?(): Promise<SelectionClickMode>;
+  saveSelectionClickMode?(mode: SelectionClickMode): Promise<void>;
   load(): Promise<ShortcutProfileOverrides>;
   save(overrides: ShortcutProfileOverrides): Promise<void>;
 }
@@ -31,6 +37,14 @@ export function createLocalShortcutProfileRepository(
     },
     async savePointingDevice(scheme) {
       storage.setItem(`${key}.pointingDevice`, scheme);
+    },
+    async loadSelectionClickMode() {
+      return parseSelectionClickMode(
+        storage.getItem(`${key}.selectionClickMode`),
+      );
+    },
+    async saveSelectionClickMode(mode) {
+      storage.setItem(`${key}.selectionClickMode`, mode);
     },
     async load() {
       const raw = storage.getItem(key);

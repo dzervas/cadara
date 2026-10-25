@@ -37,6 +37,8 @@ function renderBodyMenu(appearance: BodyAppearance | null) {
         value={{
           pointingDevice: "mouse" as const,
           setPointingDevice: () => undefined,
+          selectionClickMode: "additive" as const,
+          setSelectionClickMode: () => undefined,
           activeScopes: ["global"],
           commands: [],
           effectiveKeymap,

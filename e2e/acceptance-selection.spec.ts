@@ -165,15 +165,29 @@ test("§3 E2E-3 selection: authored geometry on the X datum axis over a coincide
   await expectOnly(line, "the first click selects the authored line");
   await expectHover(construction, "then the hover previews the next pick");
 
-  // Step 4: repeated clicks on the spot cycle through the stack and wrap.
+  // Step 4: repeated clicks on the spot cycle through the stack, then its
+  // deselect entry (cadara-h026.1), and wrap.
   for (const [expected, next] of [
     [construction, "xAxis"],
-    ["xAxis", line],
+    ["xAxis", null],
+    [null, line],
     [line, construction],
   ] as const) {
     await glideClick(workbench, OVERLAP);
-    await expectOnly(expected, `the cycle selects ${expected}`);
-    await expectHover(next, `after ${expected} the hover previews ${next}`);
+    if (expected) {
+      await expectOnly(expected, `the cycle selects ${expected}`);
+    } else {
+      await expect
+        .poll(selected, { message: "the deselect entry clears the pick" })
+        .toBe(NOTHING);
+    }
+    if (next) {
+      await expectHover(next, `after ${expected} the hover previews ${next}`);
+    } else {
+      await expect
+        .poll(hovered, { message: "nothing is previewed before the deselect entry" })
+        .toBe("none");
+    }
   }
 
   // Step 5: a blank click clears the selection; the next click on the

@@ -23,6 +23,7 @@ import {
   startShortcutRecording,
 } from "@/components/shortcuts/shortcut-settings-model";
 import type { ShortcutCommandId } from "@/core/shortcuts/commands";
+import { parseSelectionClickMode } from "@/core/editor/selection-click-mode";
 import { createShortcutReferenceGroups } from "@/core/shortcuts/reference";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import {
@@ -124,6 +125,24 @@ export function ShortcutSettings() {
         description={shortcuts.pointingDevice === "touchpad"
           ? "Two-finger scroll pans · Shift+scroll orbits · Pinch zooms"
           : "Scroll zooms · Right-drag orbits · Middle-drag pans"}
+      />
+      <NativeSelect
+        label="Selection click"
+        value={shortcuts.selectionClickMode}
+        onChange={(event) =>
+          shortcuts.setSelectionClickMode(
+            parseSelectionClickMode(event.currentTarget.value),
+          )
+        }
+        data={[
+          { value: "additive", label: "Click adds to the selection" },
+          { value: "shiftToAdd", label: "Shift+click adds to the selection" },
+        ]}
+        description={
+          shortcuts.selectionClickMode === "additive"
+            ? "Click a selected item again to remove it · Click empty space or press Esc to clear"
+            : "Click replaces the selection · Shift+click adds or removes"
+        }
       />
       <Group justify="space-between" gap="sm">
         <Text size="sm" c="dimmed">

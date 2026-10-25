@@ -59,6 +59,8 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
         value={{
           pointingDevice: "mouse" as const,
           setPointingDevice: () => undefined,
+          selectionClickMode: "additive" as const,
+          setSelectionClickMode: () => undefined,
           activeScopes: ["global"],
           commands,
           effectiveKeymap,

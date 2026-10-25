@@ -177,7 +177,10 @@ export interface SketchPickCycle {
   readonly y: number;
   /** Ordered target keys (`getPrimitiveRefKey`) of the stack it resolved. */
   readonly stackKeys: readonly string[];
-  /** Index in that stack of the target it picked. */
+  /**
+   * Index in that stack of the target it picked; in a multi-selection
+   * cycle, `stackKeys.length` is the deselect entry (no own pick).
+   */
   readonly index: number;
   /** Its selection context (`getSketchSelectionCycleContext().key`). */
   readonly contextKey: string;
@@ -194,6 +197,12 @@ export interface SketchPickCyclePointer {
    * this index (per the context's cycle mode).
    */
   readonly retainsPick: (index: number) => boolean;
+  /**
+   * Multi-selection contexts only (cadara-h026.1): whether the selection
+   * holds the stack entry at this index. The cycle then ends in a deselect
+   * entry (index = stack length) and skips entries selected by other clicks.
+   */
+  readonly isSelected?: (index: number) => boolean;
 }
 
 export type SketchPickCycleEvent =
@@ -203,36 +212,55 @@ export type SketchPickCycleEvent =
       readonly detail: number;
       /** False where the context does not cycle (mode `none`). */
       readonly cycles: boolean;
+      /**
+       * A multi-selection click that toggles (not replaces): unarmed on a
+       * selected `stack[0]` it deselects it, which anchors the cycle at its
+       * deselect entry.
+       */
+      readonly toggles?: boolean;
     } & SketchPickCyclePointer)
   /** Escape, a selection change from elsewhere, an Undo, a stack change. */
   | { readonly type: "reset" };
 
 /**
  * The stack index the next single click advances to, or `null` when no
- * cycle is armed. Armed: the stack has at least 2 entries (with one there
+ * cycle is armed. Armed: the cycle has at least 2 entries (with one there
  * is nothing to cycle, and a repeated click keeps its ordinary meaning,
  * e.g. toggling an Offset target off; T11d review R-1), the pointer is
  * within `SKETCH_PICK_CYCLE_RADIUS_PX` of the previous selecting click, in
  * the same context, on a stack with equal ordered keys, and the selection
  * still holds what that click picked.
+ *
+ * A multi-selection cycle (`isSelected`, cadara-h026.1) has one more entry,
+ * the deselect entry at index `stackKeys.length`: line 1 → line 2 → … →
+ * deselect → line 1. It skips entries selected by other clicks, so it only
+ * ever replaces or removes its own pick; a one-entry stack toggles.
  */
 export function getArmedSketchPickCycleIndex(
   cycle: SketchPickCycle | null,
   pointer: SketchPickCyclePointer,
 ): number | null {
+  const count = cycle?.stackKeys.length ?? 0;
+  const { isSelected } = pointer;
   if (
     !cycle ||
-    cycle.stackKeys.length < 2 ||
+    count + (isSelected ? 1 : 0) < 2 ||
     Math.hypot(pointer.x - cycle.x, pointer.y - cycle.y) >
       SKETCH_PICK_CYCLE_RADIUS_PX ||
     pointer.contextKey !== cycle.contextKey ||
-    pointer.stackKeys.length !== cycle.stackKeys.length ||
+    pointer.stackKeys.length !== count ||
     pointer.stackKeys.some((key, index) => key !== cycle.stackKeys[index]) ||
-    !pointer.retainsPick(cycle.index)
+    !(
+      (isSelected && cycle.index === count) ||
+      pointer.retainsPick(cycle.index)
+    )
   ) {
     return null;
   }
-  return (cycle.index + 1) % cycle.stackKeys.length;
+  if (!isSelected) return (cycle.index + 1) % count;
+  let next = (cycle.index + 1) % (count + 1);
+  while (next < count && isSelected(next)) next = (next + 1) % (count + 1);
+  return next;
 }
 
 /**
@@ -265,11 +293,14 @@ export function reduceSketchPickCycle(
   ) {
     return null;
   }
+  const armed = getArmedSketchPickCycleIndex(cycle, event);
   return {
     x: event.x,
     y: event.y,
     stackKeys: event.stackKeys,
-    index: getSketchPickPreviewIndex(cycle, event),
+    index:
+      armed ??
+      (event.toggles && event.isSelected?.(0) ? event.stackKeys.length : 0),
     contextKey: event.contextKey,
   };
 }

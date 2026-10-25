@@ -61,9 +61,16 @@ export function getSelectedSketchGeometryIds(
  * - `replaceLastAdded`: the context accumulates or toggles targets; a cycle
  *   click replaces the last-added target (one event, never a second
  *   toggle/append), and only when that target is the previous click's pick.
+ * - `multiSelect` (cadara-h026.1): the selection accumulates; a cycle click
+ *   replaces its own previous pick in place, the cycle ends in a deselect
+ *   entry that removes it, and entries selected by other clicks are skipped.
  * - `none`: the first click already acts (or places a point); no cycle.
  */
-export type SketchSelectionCycleMode = "replace" | "replaceLastAdded" | "none";
+export type SketchSelectionCycleMode =
+  | "replace"
+  | "replaceLastAdded"
+  | "multiSelect"
+  | "none";
 
 export interface SketchSelectionCycleContext {
   readonly mode: SketchSelectionCycleMode;
@@ -97,7 +104,7 @@ const IMMEDIATE_ACTION_EDIT_TOOLS = new Set([
  * | other edit tools (Offset targets, Fillet, Chamfer, Slot, patterns, Transform, Merge Points) | `replaceLastAdded` |
  * | constraint authoring that auto-commits, or whose next click pins the preview | `none` |
  * | other constraint authoring | `replaceLastAdded` |
- * | no tool, single-slot filter | `replace` |
+ * | no tool, single-slot filter (the sketch selection) | `multiSelect` |
  * | no tool, multi-slot filter | `replaceLastAdded` |
  *
  * Multi-slot rows: the transition's selection-filter gate runs on the
@@ -149,7 +156,7 @@ export function getSketchSelectionCycleContext(
       (requirement) => requirement.slots.length > 1,
     )
       ? "replaceLastAdded"
-      : "replace",
+      : "multiSelect",
     "select",
   );
 }
@@ -223,7 +230,8 @@ interface SketchSelectionCycleState {
 
 /**
  * Whether the selection still holds `target`, a previous cycle pick, the
- * way the context's mode needs it: in the selection (`replace`), or as the
+ * way the context's mode needs it: in the selection (`replace`,
+ * `multiSelect`), or as the
  * last-added target (`replaceLastAdded`; for constraint authoring compared
  * after the tool's own target resolution). `mode` defaults to the current
  * context's; a transition checks its result with the mode it started in.
@@ -238,7 +246,7 @@ export function isSketchSelectionCyclePickRetained(
 ): boolean {
   const { session, selection } = state;
   if (mode === "none") return false;
-  if (mode === "replace")
+  if (mode === "replace" || mode === "multiSelect")
     return selection.some((selected) => primitiveRefEquals(selected, target));
   if (session.constructionTargetPicking) return false;
   if (session.activeEditTool) {
@@ -269,8 +277,8 @@ export function isSketchSelectionCyclePickRetained(
  * pick (`replaces`) removed as the last-added target, so that selecting
  * the next stack entry adds it once instead of toggling or appending a
  * second target. `null` when the context does not hold `replaces` as its
- * last-added target (the click must not cycle). `replace` contexts are
- * returned unchanged: selecting replaces there already.
+ * last-added target (the click must not cycle). `replace` and `multiSelect`
+ * contexts are returned unchanged: selecting replaces there already.
  */
 export function withoutSketchSelectionCyclePick<
   TState extends SketchSelectionCycleState,
@@ -281,7 +289,7 @@ export function withoutSketchSelectionCyclePick<
     session,
     state.selectionFilter,
   );
-  if (mode === "replace") return state;
+  if (mode === "replace" || mode === "multiSelect") return state;
   if (session.activeEditTool) {
     const selectedTargets = session.activeEditTool.selectedTargets.slice(0, -1);
     return {

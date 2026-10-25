@@ -15,7 +15,10 @@ import {
   SketchValidationStatus,
 } from "@/components/cad/sketch-selection-context";
 import { SketchDeletedNotice } from "@/components/cad/sketch-deleted-notice";
-import { getPeerDeletedSketchNotice } from "@/core/editor/state-machine";
+import {
+  getPeerDeletedSketchNotice,
+  isMultiSelectionContext,
+} from "@/core/editor/state-machine";
 import { SketchConstraintList } from "@/components/cad/sketch-constraint-list";
 import {
   solvedCubicSpans,
@@ -1429,6 +1432,8 @@ export function CadWorkbench({
       ),
     [sketchSpecialModes],
   );
+  // cadara-h026.1: the viewport's click and cycle follow the reducer's rule.
+  const multiSelection = isMultiSelectionContext(machineState);
   const viewportModel = useMemo(
     () =>
       createWorkbenchViewportModel({
@@ -1454,10 +1459,12 @@ export function CadWorkbench({
         selectionCatalog,
         sketchSession,
         isEditorRenderIdle: machineState.kind === "idle",
+        multiSelection,
         acceptsSpecialModeTarget,
       }),
     [
       acceptsSpecialModeTarget,
+      multiSelection,
       activeSectionView,
       annotationContext,
       machineState.kind,

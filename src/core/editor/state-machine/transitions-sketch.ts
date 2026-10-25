@@ -1,3 +1,7 @@
+import {
+  applyMultiSelectionTargets,
+  isMultiSelectionContext,
+} from "./selection-helpers";
 import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
@@ -855,8 +859,14 @@ export function handleSketchGeometryDragStarted(
   return {
     state: {
       ...state,
+      // A dragged point is selected; a multi-selection keeps the rest
+      // (cadara-h026.1).
       selection:
-        event.target.kind === "sketchPoint" ? [event.target] : state.selection,
+        event.target.kind !== "sketchPoint"
+          ? state.selection
+          : isMultiSelectionContext(state)
+            ? applyMultiSelectionTargets(state.selection, [event.target], "add")
+            : [event.target],
       hoverTarget:
         event.target.kind === "sketchPoint" ? event.target : state.hoverTarget,
       session,
