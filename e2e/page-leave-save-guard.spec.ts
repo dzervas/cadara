@@ -1,5 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
+import {
+  countHeldDocumentWrites,
+  holdDocumentWrites,
+  installDocumentWriteHold,
+  releaseDocumentWrites,
+} from "./helpers/document-write-hold";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import {
   createBaseExtrudeOperationHistory,
@@ -11,48 +17,6 @@ test.use({ viewport: { width: 1440, height: 960 } });
 
 const SAVING_MESSAGE =
   "Your latest change is still being saved. It's safe to leave once this message disappears.";
-
-declare global {
-  interface Window {
-    __e2eHoldDocumentWrites?: boolean;
-    __e2eHeldDocumentWrites?: (() => void)[];
-  }
-}
-
-/**
- * Holds the document sync worker's repository writes while
- * `__e2eHoldDocumentWrites` is set: the edit is accepted but not yet stored.
- */
-async function installDocumentWriteHold(page: Page) {
-  await page.addInitScript(() => {
-    const postMessage = Worker.prototype.postMessage;
-    window.__e2eHeldDocumentWrites = [];
-    Worker.prototype.postMessage = function (
-      this: Worker,
-      ...args: Parameters<Worker["postMessage"]>
-    ) {
-      const message = args[0] as { kind?: unknown; expected?: unknown } | null;
-      if (
-        window.__e2eHoldDocumentWrites &&
-        message?.kind === "mutate" &&
-        message.expected !== undefined
-      ) {
-        window.__e2eHeldDocumentWrites!.push(() =>
-          postMessage.apply(this, args),
-        );
-        return;
-      }
-      postMessage.apply(this, args);
-    } as Worker["postMessage"];
-  });
-}
-
-async function releaseDocumentWrites(page: Page) {
-  await page.evaluate(() => {
-    window.__e2eHoldDocumentWrites = false;
-    for (const write of window.__e2eHeldDocumentWrites!.splice(0)) write();
-  });
-}
 
 // cadara-8p7o: a reload while an accepted edit is still being saved asks
 // first (the browser's own dialog); after staying, a notification explains
@@ -76,9 +40,7 @@ test("a reload while a change is saving asks first, then explains until the save
     void dialog.dismiss();
   });
 
-  await page.evaluate(() => {
-    window.__e2eHoldDocumentWrites = true;
-  });
+  await holdDocumentWrites(page);
   await labelButton.click({ button: "right" });
   await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
   const input = row.getByRole("textbox", { name: `Rename ${original}` });
@@ -87,7 +49,7 @@ test("a reload while a change is saving asks first, then explains until the save
   await input.press("Enter");
   await expect(labelButton).toHaveText("Mount plate", { timeout: 10_000 });
   await expect
-    .poll(() => page.evaluate(() => window.__e2eHeldDocumentWrites!.length), {
+    .poll(() => countHeldDocumentWrites(page), {
       message: "premise: the rename's repository write is held",
     })
     .toBeGreaterThan(0);

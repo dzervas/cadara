@@ -216,6 +216,8 @@ interface CadWorkbenchProps {
   onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
   /** Every open tab's page-leave save notice (cadara-8p7o). */
   localSaveNotification?: WorkbenchNotificationModel | null;
+  /** A local save is underway in any open tab (cadara-781c logo ring). */
+  localSaving?: boolean;
 }
 
 export function CadWorkbench({
@@ -229,6 +231,7 @@ export function CadWorkbench({
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
   localSaveNotification = null,
+  localSaving = false,
 }: CadWorkbenchProps) {
   const modelingService = useModelingService();
   const { sketchSpecialModes } = useRuntimeExtensionRegistry();
@@ -1843,6 +1846,7 @@ export function CadWorkbench({
             <WorkspaceToolbar
               historyAvailability={toolbarHistoryAvailability}
               showBrowserStorageWarning={showBrowserStorageWarning}
+              localSaving={localSaving}
               onNewDocument={handleNewDocument}
               onOpenDocument={handleOpenDocument}
               onSaveDocumentAs={handleSaveDocumentAs}

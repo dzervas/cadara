@@ -39,6 +39,7 @@ import {
 import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
 import { DurableHistoryProvider } from "@/hooks/durable-history-provider";
+import { useLocalSaveStatus } from "@/hooks/use-local-save-status";
 import { AppUpdateNotification } from "@/components/layout/app-update-notification";
 import { useWorkbenchLocalSaveGuard } from "@/workbench/adapters/use-workbench-local-save-guard";
 import {
@@ -193,6 +194,7 @@ export function WorkbenchApp({
     source: modelingServices,
     errorReporter,
   });
+  const localSaving = useLocalSaveStatus(modelingServices).saving;
 
   const durableHistory = useMemo(
     () =>
@@ -370,6 +372,7 @@ export function WorkbenchApp({
               onReorderDocumentTab={reorderDocumentTab}
               onSyncActiveDocumentTab={syncActiveDocumentTab}
               localSaveNotification={localSaveNotification}
+              localSaving={localSaving}
             />
           </EditorProvider>
         </DurableHistoryProvider>

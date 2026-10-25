@@ -127,6 +127,15 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
         toolbarMarkup.indexOf('data-tool-id="undo"'),
     "Toolbar should render the file menu trigger (the spark logo) before the CAD tool sections.",
   ).toBeTruthy();
+  const sparkLogoStart = toolbarMarkup.indexOf('aria-label="File"');
+  const sparkLogoMarkup = toolbarMarkup.slice(
+    sparkLogoStart,
+    toolbarMarkup.indexOf("</button>", sparkLogoStart),
+  );
+  expect(
+    sparkLogoMarkup,
+    "The spark logo carries the decorative save-activity ring (cadara-781c), idle and hidden from assistive tech.",
+  ).toMatch(/<span aria-hidden="true" class="workbench-save-activity-ring" data-save-activity-ring="idle">/);
   expect(
     toolbarMarkup.includes("min-w-0"),
     "Toolbar tool cluster row should be allowed to shrink so the absolute floating bar does not widen the workbench shell.",

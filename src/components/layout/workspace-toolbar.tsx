@@ -24,6 +24,7 @@ import {
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 import { ShortcutSettingsButton } from "@/components/shortcuts/shortcut-settings";
 import { DocumentFileMenu } from "@/components/layout/document-file-menu";
+import { SaveActivityRing } from "@/components/layout/save-activity-ring";
 import { ToolButton } from "@/components/layout/tool-button";
 import {
   ToolbarDropdownChevron,
@@ -90,6 +91,8 @@ interface ToolbarMeasurement {
 interface WorkspaceToolbarProps {
   historyAvailability?: EditorHistoryAvailability;
   showBrowserStorageWarning?: boolean;
+  /** A local save is underway in any open tab: the logo shows its ring. */
+  localSaving?: boolean;
   onNewDocument?: () => void;
   onOpenDocument?: () => void;
   onSaveDocumentAs?: () => void;
@@ -109,6 +112,7 @@ interface WorkspaceToolbarProps {
 export function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
+  localSaving = false,
   onNewDocument = () => undefined,
   onOpenDocument = () => undefined,
   onSaveDocumentAs = () => undefined,
@@ -507,7 +511,7 @@ export function WorkspaceToolbar({
         onNewDocument={onNewDocument}
         onOpenDocument={onOpenDocument}
         onSaveDocumentAs={onSaveDocumentAs}
-        trigger={<SparkLogo />}
+        trigger={<SparkLogo saving={localSaving} />}
       />
 
       {/*
@@ -835,8 +839,8 @@ function ToolbarPill({
  */
 const SparkLogo = forwardRef<
   HTMLButtonElement,
-  ButtonHTMLAttributes<HTMLButtonElement>
->(function SparkLogo({ className, style, ...props }, ref) {
+  ButtonHTMLAttributes<HTMLButtonElement> & { saving: boolean }
+>(function SparkLogo({ className, style, saving, ...props }, ref) {
   return (
     <ActionIcon
       ref={ref}
@@ -851,6 +855,7 @@ const SparkLogo = forwardRef<
       {...props}
     >
       C
+      <SaveActivityRing saving={saving} />
     </ActionIcon>
   );
 });

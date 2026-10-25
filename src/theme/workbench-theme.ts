@@ -106,6 +106,14 @@ export const workbenchCssVariablesResolver: CSSVariablesResolver = (theme) => {
         "inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 24px rgba(240, 161, 74, 0.20), 0 4px 12px rgba(0, 0, 0, 0.45)",
       "--workbench-spark-logo-shadow-hover":
         "inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 12px 34px rgba(240, 161, 74, 0.34), 0 0 0 1px rgba(246, 183, 119, 0.22), 0 6px 16px rgba(0, 0, 0, 0.48)",
+      // Save-activity ring around the spark logo (cadara-781c): a dim white
+      // arc fading in along its tail, and the reduced-motion static ring.
+      "--workbench-save-activity-ring-arc-tail":
+        "color-mix(in srgb, var(--workbench-shell-text) 10%, transparent)",
+      "--workbench-save-activity-ring-arc-head":
+        "color-mix(in srgb, var(--workbench-shell-text) 55%, transparent)",
+      "--workbench-save-activity-ring-static":
+        "color-mix(in srgb, var(--workbench-shell-text) 16%, transparent)",
       "--workbench-toolbar-button-transition":
         "background-color 180ms cubic-bezier(0.25, 1, 0.5, 1), border-color 180ms cubic-bezier(0.25, 1, 0.5, 1), box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1), transform 180ms cubic-bezier(0.25, 1, 0.5, 1)",
       "--workbench-toolbar-button-hover-background":

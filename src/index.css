@@ -83,6 +83,8 @@ input {
   font-family: inherit;
   font-size: 14px;
   font-weight: 700;
+  /* The save-activity ring sits outside the tile, inside this button. */
+  overflow: visible;
   pointer-events: auto;
   transition: var(--workbench-toolbar-button-transition);
   will-change: transform, box-shadow;
@@ -95,6 +97,59 @@ input {
 
 .workbench-spark-logo:where(:active) {
   transform: translateY(0) scale(1);
+}
+
+/*
+ * Save-activity ring (cadara-781c): a 2 px band 4 px clear of the logo's
+ * 10 px rounded square. The band is a fixed mask; only the oversized conic
+ * rotor inside it turns (transform, on the compositor), driven by
+ * useSaveActivityRing.
+ */
+.workbench-save-activity-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 16px;
+  padding: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(black 0 0) content-box,
+    linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(black 0 0) content-box,
+    linear-gradient(black 0 0);
+  mask-composite: exclude;
+}
+
+.workbench-save-activity-ring[data-save-activity-ring="idle"] {
+  display: none;
+}
+
+.workbench-save-activity-ring-rotor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0turn 0.6turn,
+    var(--workbench-save-activity-ring-arc-tail) 0.8turn,
+    var(--workbench-save-activity-ring-arc-head) 0.985turn,
+    transparent 1turn
+  );
+  will-change: transform;
+}
+
+.workbench-save-activity-ring[data-save-activity-ring^="static"] {
+  background: var(--workbench-save-activity-ring-static);
+}
+
+.workbench-save-activity-ring[data-save-activity-ring^="static"]
+  .workbench-save-activity-ring-rotor {
+  display: none;
 }
 
 @keyframes workbench-tab-loading-sweep {
