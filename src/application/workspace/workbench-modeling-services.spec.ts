@@ -5,7 +5,14 @@ import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/au
 import type { GetDocumentSnapshotRequest } from "@/contracts/modeling/schema";
 import { createDurableHistoryService } from "@/application/history/durable-history";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+import type { AppError } from "@/contracts/errors";
+import { LocalSaveGuard } from "@/application/workspace/local-save-guard";
+import {
+  createModelingService,
+  type LocalSaveFailure,
+  type LocalSaveStatus,
+  type ModelingService,
+} from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 import { WorkbenchModelingServices } from "./workbench-modeling-services";
@@ -211,5 +218,157 @@ test("close waits for initialization before releasing native state", async () =>
   await closed;
   expect(adapter.restoreCalls).toBe(1);
   expect(release).toHaveBeenCalledTimes(1);
+  services.dispose();
+});
+
+// cadara-8p7o. Seam: the open tabs' combined local save status and their
+// failures, which the page-leave guard follows. Each fake tab service reports
+// its own status; `settle` finishes a tab's pending persistence.
+function createFakeTabs() {
+  const tabs = new Map<
+    DocumentId,
+    { status: LocalSaveStatus; notify: () => void; settle: () => void }
+  >();
+  const services = new WorkbenchModelingServices((documentId) => {
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => (settle = resolve));
+    const tab = {
+      status: { saving: false, failure: null } as LocalSaveStatus,
+      notify: () => {},
+      settle,
+    };
+    tabs.set(documentId, tab);
+    return {
+      getLocalSaveStatus: () => tab.status,
+      subscribeToLocalSaveStatus(listener: () => void) {
+        tab.notify = listener;
+        return () => (tab.notify = () => {});
+      },
+      waitForPersistence: () => settled,
+      dispose() {},
+    } as unknown as ModelingService;
+  });
+  const set = (documentId: DocumentId, status: LocalSaveStatus) => {
+    tabs.get(documentId)!.status = status;
+    tabs.get(documentId)!.notify();
+  };
+  return { services, tabs, set };
+}
+
+function failureOf(
+  documentId: DocumentId,
+  target: LocalSaveFailure["target"] = "repository",
+): LocalSaveFailure {
+  return {
+    documentId,
+    target,
+    reasonCode: target === "repository" ? "repository-write-exception" : "local-file-failed",
+    message: `${documentId} failed`,
+  };
+}
+
+function startGuard(services: WorkbenchModelingServices) {
+  // Records every call: the production reporters' dedupe would hide repeats.
+  const reports: AppError[] = [];
+  const reporter = {
+    report(error: AppError) {
+      reports.push(error);
+      return null;
+    },
+  };
+  const guard = new LocalSaveGuard({
+    source: services,
+    reporter,
+    target: { addEventListener() {}, removeEventListener() {} },
+  });
+  guard.start();
+  const reportedDocuments = () =>
+    reports.map(
+      (error) => error.context.find(({ key }) => key === "documentId")?.value,
+    );
+  return { guard, reportedDocuments };
+}
+
+test("the local save status combines every open tab and drops a closed one", async () => {
+  const { services, tabs, set } = createFakeTabs();
+  const changes: LocalSaveStatus[] = [];
+  services.subscribeToLocalSaveStatus(() =>
+    changes.push(services.getLocalSaveStatus()),
+  );
+  services.get("doc_workspace");
+  services.get("doc_second");
+  const failure = failureOf("doc_second");
+
+  set("doc_workspace", { saving: true, failure: null });
+  set("doc_second", { saving: false, failure });
+  expect(services.getLocalSaveStatus(), "one tab saving, another failed").toEqual({
+    saving: true,
+    failure,
+  });
+  set("doc_workspace", { saving: false, failure: null });
+  expect(services.getLocalSaveStatus()).toEqual({ saving: false, failure });
+  tabs.get("doc_second")!.settle();
+  await services.retainOpenDocuments(["doc_workspace"]);
+  expect(services.getLocalSaveStatus(), "a closed tab no longer counts").toEqual({
+    saving: false,
+    failure: null,
+  });
+  expect(changes.map(({ saving, failure: entry }) => [saving, entry?.message ?? null])).toEqual([
+    [true, null],
+    [true, "doc_second failed"],
+    [false, "doc_second failed"],
+    [false, null],
+  ]);
+  services.dispose();
+});
+
+test("a browser storage failure in any tab wins over a linked file failure", () => {
+  const { services, set } = createFakeTabs();
+  services.get("doc_workspace");
+  services.get("doc_second");
+  const linkedFile = failureOf("doc_workspace", "local-file");
+  const storage = failureOf("doc_second");
+  set("doc_workspace", { saving: false, failure: linkedFile });
+  set("doc_second", { saving: false, failure: storage });
+  expect(services.getLocalSaveStatus().failure).toBe(storage);
+  expect(services.getLocalSaveFailures()).toEqual([linkedFile, storage]);
+  services.dispose();
+});
+
+test("every tab's failure is reported once; the notice keeps the first", () => {
+  const { services, set } = createFakeTabs();
+  const { guard, reportedDocuments } = startGuard(services);
+  services.get("doc_workspace");
+  services.get("doc_second");
+  const first = failureOf("doc_workspace");
+  const second = failureOf("doc_second");
+
+  set("doc_workspace", { saving: false, failure: first });
+  set("doc_second", { saving: false, failure: second });
+  set("doc_workspace", { saving: true, failure: first });
+  set("doc_workspace", { saving: false, failure: first });
+  expect(reportedDocuments()).toEqual(["doc_workspace", "doc_second"]);
+  expect(guard.getNotice()).toMatchObject({ kind: "unsaved", failure: first });
+  services.dispose();
+});
+
+test("a tab closed while saving stays saving until its write settles, and its failure is reported", async () => {
+  const { services, tabs, set } = createFakeTabs();
+  const { reportedDocuments } = startGuard(services);
+  services.get("doc_workspace");
+  services.get("doc_second");
+  set("doc_second", { saving: true, failure: null });
+
+  const closed = services.retainOpenDocuments(["doc_workspace"]);
+  expect(services.getLocalSaveStatus().saving, "the closed tab's write is pending").toBe(true);
+  // The disposed service no longer notifies; its write then fails.
+  tabs.get("doc_second")!.status = { saving: false, failure: failureOf("doc_second") };
+  tabs.get("doc_second")!.settle();
+  await closed;
+  expect(services.getLocalSaveStatus(), "the closed tab's failure is not shown").toEqual({
+    saving: false,
+    failure: null,
+  });
+  expect(reportedDocuments(), "but it is reported").toEqual(["doc_second"]);
   services.dispose();
 });

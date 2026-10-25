@@ -6,6 +6,11 @@ export interface ErrorReportMetadata {
   source: string;
   visibility?: ErrorReportVisibility;
   dedupeKey?: string;
+  /**
+   * False keeps the active document's content out of the external report
+   * (default true). Its identifiers and counts are still sent.
+   */
+  attachActiveDocumentPayload?: boolean;
   externalTracking?: {
     fingerprint?: string;
     tags?: Record<string, string>;

@@ -21,6 +21,7 @@ interface HistoryRepository {
 }
 interface HistoryModel {
   waitForPersistence(): Promise<void>;
+  trackLocalSave(work: Promise<unknown>): void;
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
   subscribeToDocumentChanges(listener: (event: { documentId: DocumentId; metadata: RepositoryMetadata }) => void): () => void;
 }
@@ -151,9 +152,13 @@ export function createDurableHistoryService(input: {
     await modelingService.waitForPersistence();
     const waiter = createRepositoryChangeWaiter(documentId);
     try {
-      const result = await (direction === "undo"
-        ? documentRepository.undoDurableHistory(documentId, actionSequence)
-        : documentRepository.redoDurableHistory(documentId, actionSequence));
+      const write =
+        direction === "undo"
+          ? documentRepository.undoDurableHistory(documentId, actionSequence)
+          : documentRepository.redoDurableHistory(documentId, actionSequence);
+      // The compensation is a user edit: leaving before it is stored loses it.
+      modelingService.trackLocalSave(write);
+      const result = await write;
       if (!result) return null;
       const applied = result.ok ? result : result.appliedLive;
       const compensation: HistoryCompensationReceipt = {

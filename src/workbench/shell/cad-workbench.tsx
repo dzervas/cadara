@@ -51,6 +51,7 @@ import {
   type WorkbenchStateDebuggerModel,
 } from "@/components/layout/workbench-state-debugger";
 import { WorkbenchNotification } from "@/components/layout/workbench-notification";
+import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import {
   hasNonEmptyCommittedGeometry,
   isInitialOccRenderPending,
@@ -213,6 +214,8 @@ interface CadWorkbenchProps {
   performanceTelemetry?: PerformanceTelemetry;
   onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
   onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
+  /** Every open tab's page-leave save notice (cadara-8p7o). */
+  localSaveNotification?: WorkbenchNotificationModel | null;
 }
 
 export function CadWorkbench({
@@ -225,6 +228,7 @@ export function CadWorkbench({
   performanceTelemetry = noopPerformanceTelemetry,
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
+  localSaveNotification = null,
 }: CadWorkbenchProps) {
   const modelingService = useModelingService();
   const { sketchSpecialModes } = useRuntimeExtensionRegistry();
@@ -1719,6 +1723,9 @@ export function CadWorkbench({
                       }}
                       onDismiss={() => setRestoreMessage(null)}
                     />
+                  ) : null}
+                  {localSaveNotification ? (
+                    <WorkbenchNotification {...localSaveNotification} />
                   ) : null}
                   {draftRecoveryNotification ? <SketchDraftRecoveryNotification {...draftRecoveryNotification} /> : null}
                   {workbenchStatusNotification ? (

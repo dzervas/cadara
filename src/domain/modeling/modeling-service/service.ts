@@ -71,6 +71,8 @@ import {
 import { serializeAuthoredDocumentJson as createLocalAuthoredDocumentPayload } from "@/contracts/modeling/authored-document-serialization";
 import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
 import type {
+  LocalSaveFailure,
+  LocalSaveStatus,
   ModelingService,
   ModelingServiceOptions,
   ModelingServiceDocumentChangeEvent,
@@ -141,6 +143,30 @@ function featureKindLabel(kind: string) {
   return kind.replace(/([A-Z])/g, " $1").replace(/^./, (value) => value.toUpperCase());
 }
 
+interface SaveFailureReason {
+  reasonCode: string;
+  message: string;
+}
+
+const STORAGE_UNAVAILABLE: SaveFailureReason = {
+  reasonCode: "document-storage-unavailable",
+  message: "Document storage is unavailable.",
+};
+
+function isSameLocalSaveFailure(
+  a: LocalSaveFailure | null,
+  b: LocalSaveFailure | null,
+) {
+  return (
+    a === b ||
+    (a !== null &&
+      b !== null &&
+      a.target === b.target &&
+      a.reasonCode === b.reasonCode &&
+      a.message === b.message)
+  );
+}
+
 export function createModelingService(
   adapter: ModelingKernelAdapter,
   options: ModelingServiceOptions,
@@ -167,7 +193,7 @@ export function createModelingService(
   let canPersistOperationHistory = true;
   let canPersistAuthoredDocument = true;
   /** Why an accepted local change exists in memory only (cadara-vk96). */
-  let unsavedLocalChangeReason: string | null = null;
+  let unsavedLocalChange: SaveFailureReason | null = null;
   let historyRestoreState: ModelingHistoryRestoreState = {
     kind: "pending",
     entriesReplayed: 0,
@@ -211,6 +237,32 @@ export function createModelingService(
   let repositoryPersistencePromise = Promise.resolve();
   // T17k3 (A-1): local mutations in flight, and the newest repository state seen.
   let localMutations: Promise<unknown> = Promise.resolve();
+  // cadara-8p7o: local mutations and repository writes still running, and
+  // whether the bound local file is being written.
+  let runningLocalSaves = 0;
+  let localFileWriting = false;
+  let localFileWriteFailure: SaveFailureReason | null = null;
+  let localSaveStatus: LocalSaveStatus = { saving: false, failure: null };
+  const localSaveStatusListeners = new Set<() => void>();
+  // The sync worker reports a bound file write as syncing before it answers
+  // the repository write that queued it, so saving has no gap between them.
+  const unsubscribeLocalFileWrites = isLocalFileSyncDocumentRepository(
+    documentRepository,
+  )
+    ? documentRepository.subscribeToLocalFileSyncStatus((status) => {
+        if (status.documentId !== currentDocumentId) return;
+        localFileWriting = status.kind === "syncing";
+        if (status.kind === "failed" || status.kind === "permission-denied") {
+          localFileWriteFailure = {
+            reasonCode: `local-file-${status.kind}`,
+            message: status.message,
+          };
+        } else if (status.kind === "synced" || status.kind === "idle") {
+          localFileWriteFailure = null;
+        }
+        publishLocalSaveStatus();
+      })
+    : undefined;
   let latestRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
   let restoredRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
   let isRestoringRepositoryDocument = documentRepository !== null;
@@ -474,7 +526,11 @@ export function createModelingService(
 
   /** T17k3 (A-1): a document mutation runs after the repository changes
    * received before it; a change received during it is restored after it. */
-  function runLocalDocumentChange<T>(action: () => Promise<T>, replaceContext = false) {
+  function runLocalDocumentChange<T>(
+    action: () => Promise<T>,
+    replaceContext = false,
+    countsAsSaving = true,
+  ) {
     const changesBefore = repositoryChangePromise;
     const mutationsBefore = localMutations;
     const run = (async () => {
@@ -488,7 +544,36 @@ export function createModelingService(
     })();
     // Ordering only: the caller still receives `run`'s rejection.
     localMutations = run.catch(() => undefined);
+    if (countsAsSaving) trackLocalSave(localMutations);
     return run;
+  }
+
+  /** Publishes a new status object only when the state changed. */
+  function publishLocalSaveStatus() {
+    const saving = runningLocalSaves > 0 || localFileWriting;
+    // An edit only in memory outweighs a stale bound file.
+    const reason = unsavedLocalChange ?? localFileWriteFailure;
+    const failure: LocalSaveFailure | null = reason && {
+      documentId: currentDocumentId,
+      target: unsavedLocalChange ? "repository" : "local-file",
+      reasonCode: reason.reasonCode,
+      message: reason.message,
+    };
+    const sameFailure = isSameLocalSaveFailure(failure, localSaveStatus.failure);
+    if (saving === localSaveStatus.saving && sameFailure) return;
+    // An unchanged failure keeps its identity: consumers report it once.
+    localSaveStatus = { saving, failure: sameFailure ? localSaveStatus.failure : failure };
+    for (const listener of localSaveStatusListeners) listener();
+  }
+
+  /** `work` must not reject: it marks saving from now until it settles. */
+  function trackLocalSave(work: Promise<unknown>) {
+    runningLocalSaves += 1;
+    publishLocalSaveStatus();
+    void work.then(() => {
+      runningLocalSaves -= 1;
+      publishLocalSaveStatus();
+    });
   }
 
   async function waitForRepositoryChanges(changes = repositoryChangePromise) {
@@ -948,7 +1033,7 @@ export function createModelingService(
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
     // The in-memory document was replaced; nothing unsaved remains.
-    unsavedLocalChangeReason = null;
+    unsavedLocalChange = null;
     historyRestoreState = {
       kind: "restored",
       entriesReplayed: 0,
@@ -1639,7 +1724,8 @@ export function createModelingService(
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
     // The in-memory document was replaced; nothing unsaved remains.
-    unsavedLocalChangeReason = null;
+    unsavedLocalChange = null;
+    publishLocalSaveStatus();
     historyRestoreState = {
       kind: "empty",
       entriesReplayed: 0,
@@ -1684,10 +1770,8 @@ export function createModelingService(
 
     if (!canPersistAuthoredDocument) {
       const status = documentRepository.getRestoreStatus(currentDocumentId);
-      unsavedLocalChangeReason =
-        status.kind === "failed"
-          ? status.diagnostic.message
-          : "Document storage is unavailable.";
+      unsavedLocalChange =
+        status.kind === "failed" ? status.diagnostic : STORAGE_UNAVAILABLE;
       return status.kind === "failed"
         ? {
             ...result,
@@ -1721,7 +1805,7 @@ export function createModelingService(
         document.revisionId);
     }
     canPersistAuthoredDocument = false;
-    unsavedLocalChangeReason = writeResult.status.diagnostic.message;
+    unsavedLocalChange = writeResult.status.diagnostic;
     return {
       ...result,
       diagnostics: [
@@ -1778,7 +1862,7 @@ export function createModelingService(
       return;
     }
     if (!canPersistAuthoredDocument) {
-      unsavedLocalChangeReason ??= "Document storage is unavailable.";
+      unsavedLocalChange ??= STORAGE_UNAVAILABLE;
       return;
     }
 
@@ -1790,7 +1874,7 @@ export function createModelingService(
     repositoryPersistencePromise = repositoryPersistencePromise
       .then(async () => {
         if (!canPersistAuthoredDocument || !documentRepository) {
-          unsavedLocalChangeReason ??= "Document storage is unavailable.";
+          unsavedLocalChange ??= STORAGE_UNAVAILABLE;
           return;
         }
         const writeResult = await documentRepository.mutate({
@@ -1815,7 +1899,7 @@ export function createModelingService(
             document.revisionId);
         }
         canPersistAuthoredDocument = false;
-        unsavedLocalChangeReason = writeResult.status.diagnostic.message;
+        unsavedLocalChange = writeResult.status.diagnostic;
         historyRestoreState = createRestoreFailure(
           writeResult.status.diagnostic.reasonCode,
           writeResult.status.diagnostic.message,
@@ -1825,17 +1909,21 @@ export function createModelingService(
       })
       .catch((error: unknown) => {
         canPersistAuthoredDocument = false;
-        unsavedLocalChangeReason =
-          error instanceof Error
-            ? error.message
-            : "Authored document could not be written.";
+        unsavedLocalChange = {
+          reasonCode: "repository-write-exception",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Authored document could not be written.",
+        };
         historyRestoreState = createRestoreFailure(
-          "repository-write-exception",
-          unsavedLocalChangeReason,
+          unsavedLocalChange.reasonCode,
+          unsavedLocalChange.message,
           null,
           historyRestoreState.entriesReplayed,
         );
       });
+    trackLocalSave(repositoryPersistencePromise);
     // A semantic caller awaits this exact candidate's write, not a fulfilled global drain.
     if (observe) await repositoryPersistencePromise;
   }
@@ -1884,6 +1972,8 @@ export function createModelingService(
       if (disposed) return;
       disposed = true;
       initialLoadingStatus.dispose();
+      unsubscribeLocalFileWrites?.();
+      localSaveStatusListeners.clear();
       unsubscribeDocumentRepository?.();
       unsubscribeDocumentRepository = undefined;
       documentChangeListeners.clear();
@@ -1937,11 +2027,27 @@ export function createModelingService(
         }
       }
       await repositoryPersistencePromise;
-      if (unsavedLocalChangeReason !== null) {
+      if (unsavedLocalChange !== null) {
         throw new Error(
-          `Local changes could not be saved, so reloading would lose them: ${unsavedLocalChangeReason}`,
+          `Local changes could not be saved, so reloading would lose them: ${unsavedLocalChange.message}`,
         );
       }
+    },
+    getLocalSaveStatus() {
+      return localSaveStatus;
+    },
+    trackLocalSave(work) {
+      trackLocalSave(work.then(
+        () => undefined,
+        () => undefined,
+      ));
+    },
+    subscribeToLocalSaveStatus(listener) {
+      if (disposed) return () => undefined;
+      localSaveStatusListeners.add(listener);
+      return () => {
+        localSaveStatusListeners.delete(listener);
+      };
     },
     async getHistoryRestoreState() {
       await ensureInitialized();
@@ -2226,7 +2332,12 @@ export function createModelingService(
       // cadara-qj6: a save follows every local mutation requested before it,
       // and an explicit native save also follows their queued repository
       // writes, so its receipt cannot precede (and conflict with) them.
-      return runLocalDocumentChange(() => exportCurrentDocumentNow(input), input !== undefined);
+      // A copy (no input) writes nothing, so it is not a local save (cadara-8p7o).
+      return runLocalDocumentChange(
+        () => exportCurrentDocumentNow(input),
+        input !== undefined,
+        input !== undefined,
+      );
     },
     commitSketch(input) {
       return runLocalMutation({

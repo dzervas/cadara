@@ -86,6 +86,18 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
+  getLocalSaveStatus() {
+    return this.inner.getLocalSaveStatus();
+  }
+
+  subscribeToLocalSaveStatus(listener: () => void) {
+    return this.inner.subscribeToLocalSaveStatus(listener);
+  }
+
+  trackLocalSave(work: Promise<unknown>) {
+    this.inner.trackLocalSave(work);
+  }
+
   getHistoryRestoreState() {
     return this.measure(
       "getHistoryRestoreState",

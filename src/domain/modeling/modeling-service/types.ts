@@ -55,6 +55,14 @@ export interface ModelingService {
   waitForPersistence(): Promise<void>;
   /** Settles after every local mutation requested so far and its repository writes. */
   waitForLocalChanges(): Promise<void>;
+  /** The current local save state; the same object until it changes. */
+  getLocalSaveStatus(): LocalSaveStatus;
+  subscribeToLocalSaveStatus(listener: () => void): () => void;
+  /**
+   * Counts a repository write made outside this service (durable undo/redo)
+   * as saving until `work` settles, either way.
+   */
+  trackLocalSave(work: Promise<unknown>): void;
   getHistoryRestoreState(): Promise<ModelingHistoryRestoreState>;
   resetOperationHistory(): void;
   /** Records the viewport's tier; true when a background refinement is due. */
@@ -166,6 +174,32 @@ export interface ModelingServiceOptions {
   documentRepository?: DocumentRepository | null;
   documentRepositoryPersistence?: "blocking" | "background";
   exportProviders?: ExportProviderRegistry;
+}
+
+/**
+ * Whether this session's accepted edits are stored yet (cadara-8p7o): the
+ * page-leave guard, its notification and the logo save animation read it.
+ */
+export interface LocalSaveStatus {
+  /**
+   * A local document change is running or its write is queued: from the
+   * mutation request through the kernel evaluation and the repository write,
+   * plus a bound local file being written. Snapshot/LOD refinement is not.
+   */
+  saving: boolean;
+  /** The newest unresolved save failure; an unchanged one keeps its identity. */
+  failure: LocalSaveFailure | null;
+}
+
+export interface LocalSaveFailure {
+  documentId: DocumentId;
+  /**
+   * `repository`: an accepted change exists in memory only and leaving loses
+   * it. `local-file`: browser storage holds it but the bound file is stale.
+   */
+  target: "repository" | "local-file";
+  reasonCode: string;
+  message: string;
 }
 
 export interface ModelingServiceDocumentChangeEvent {

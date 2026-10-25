@@ -1,5 +1,7 @@
 export type {
   ModelingService,
+  LocalSaveFailure,
+  LocalSaveStatus,
   ModelingServiceOptions,
   ModelingServiceDocumentChangeEvent,
   ModelingHistoryRestoreDiagnostic,

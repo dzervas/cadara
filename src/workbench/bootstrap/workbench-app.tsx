@@ -40,6 +40,7 @@ import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
 import { DurableHistoryProvider } from "@/hooks/durable-history-provider";
 import { AppUpdateNotification } from "@/components/layout/app-update-notification";
+import { useWorkbenchLocalSaveGuard } from "@/workbench/adapters/use-workbench-local-save-guard";
 import {
   openDocumentCopyAsTab,
   openLinkedDocumentAsTab,
@@ -188,6 +189,10 @@ export function WorkbenchApp({
     () => modelingServices.waitForLocalChanges(),
     [modelingServices],
   );
+  const localSaveNotification = useWorkbenchLocalSaveGuard({
+    source: modelingServices,
+    errorReporter,
+  });
 
   const durableHistory = useMemo(
     () =>
@@ -364,6 +369,7 @@ export function WorkbenchApp({
               performanceTelemetry={performanceTelemetry}
               onReorderDocumentTab={reorderDocumentTab}
               onSyncActiveDocumentTab={syncActiveDocumentTab}
+              localSaveNotification={localSaveNotification}
             />
           </EditorProvider>
         </DurableHistoryProvider>

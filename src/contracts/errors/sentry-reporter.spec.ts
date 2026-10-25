@@ -471,3 +471,52 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
 
   clearActiveDocumentTelemetryContext();
 });
+
+// cadara-8p7o: a background save failure must not send document content.
+test("attachActiveDocumentPayload: false keeps the active document's content out of the event", async () => {
+  const contexts: unknown[] = [];
+  const reporter = createSentryErrorReporter({
+    client: {
+      init() {},
+      captureException: () => "event_exception",
+      captureMessage(_message, context) {
+        contexts.push(context);
+        return "event_message";
+      },
+    },
+  });
+  const snapshot = (
+    await new MockKernelAdapter().getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot;
+  publishActiveDocumentTelemetryContext(
+    createActiveDocumentTelemetryContext(snapshot),
+  );
+  try {
+    const error = createAppError({
+      code: "persistence/background-write-failed",
+      message: "A local change could not be saved.",
+    });
+    reporter.report(error, { source: "unit" });
+    reporter.report(error, {
+      source: "unit",
+      attachActiveDocumentPayload: false,
+    });
+    const [attached, omitted] = contexts as Array<{
+      tags: Record<string, string>;
+      extra: Record<string, unknown>;
+    }>;
+    expect(attached!.extra.activeDocumentPayload, "default: attached").not.toBe(
+      null,
+    );
+    expect(omitted!.extra.activeDocumentPayload).toBe(null);
+    expect(
+      omitted!.tags["active_document.id"],
+      "the document's identifiers are still sent",
+    ).toBe(snapshot.document.documentId);
+  } finally {
+    clearActiveDocumentTelemetryContext();
+  }
+});

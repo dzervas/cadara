@@ -16,6 +16,7 @@ export type AppErrorCode =
   | "editor/effect-failed"
   | "editor/invocation-failed"
   | "workbench/action-failed"
+  | "persistence/background-write-failed"
   | "render/crash";
 
 export interface AppErrorContextEntry {

@@ -146,6 +146,7 @@ function createSentryCaptureContext(
     extra: {
       appErrorContext: error.context,
       activeDocumentPayload:
+        metadata.attachActiveDocumentPayload !== false &&
         activeDocument.availability === "loaded" &&
         activeDocument.payloadStatus === "attached"
           ? activeDocument.document

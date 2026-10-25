@@ -8,7 +8,11 @@ import type {
 import { createInstrumentedOccWorkerClient } from "@/domain/modeling/occ/instrumented-worker-client";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
 import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrumented-document-repository";
-import type { DocumentRepository } from "@/domain/modeling/document-repository";
+import type {
+  DocumentRepository,
+  LocalFileSyncDocumentRepository,
+} from "@/domain/modeling/document-repository";
+import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import { createInstrumentedModelingService } from "@/domain/modeling/modeling-service/instrumented-service";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { createInstrumentedSketchSolverAdapter } from "@/domain/solver/instrumented-sketch-solver-adapter";
@@ -121,6 +125,98 @@ test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records reposit
     ),
     "Repository telemetry should use cheap metadata from the repository seam.",
   ).toBeTruthy();
+});
+
+// cadara-8p7o: a failed background save is a failed repository span, for the
+// repository write and for the bound local file the sync worker writes.
+test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records failed repository writes as failed spans", async () => {
+  const telemetry = createRecordingTelemetry();
+  const status = {
+    kind: "failed",
+    documentId: "doc_1",
+    diagnostic: { reasonCode: "repository-write-failed", message: "quota exceeded" },
+  } as const;
+  let rejectWrite = false;
+  const repository = createInstrumentedDocumentRepository(
+    {
+      async mutate() {
+        if (rejectWrite) throw new Error("storage closed");
+        return { ok: false, status };
+      },
+      getMetadata: () => null,
+    } as unknown as DocumentRepository,
+    telemetry,
+  );
+  const input = { documentId: "doc_1" as const, document: {} as never, expected: {} as never };
+
+  expect(await repository.mutate(input)).toEqual({ ok: false, status });
+  rejectWrite = true;
+  await expect(repository.mutate(input)).rejects.toThrow("storage closed");
+  expect(
+    telemetry.finished.map(({ descriptor, attributes }) => ({
+      op: (descriptor as { op: string }).op,
+      operation: attributes["cadara.operation"],
+      result: attributes["cadara.result"],
+      error: attributes["cadara.error_message"],
+    })),
+  ).toEqual([
+    { op: "cad.document.repository", operation: "mutate", result: "failure", error: undefined },
+    { op: "cad.document.repository", operation: "mutate", result: "failure", error: "storage closed" },
+  ]);
+});
+
+test("src/domain/modeling/performance-telemetry-wrappers.spec.ts records one span per local file write", () => {
+  const telemetry = createRecordingTelemetry();
+  const workerListeners = new Set<(status: DocumentSyncWriteStatus) => void>();
+  const repository = createInstrumentedDocumentRepository(
+    {
+      bindLocalFile: async () => ({ ok: true }),
+      subscribeToLocalFileSyncStatus(listener: (status: DocumentSyncWriteStatus) => void) {
+        workerListeners.add(listener);
+        return () => workerListeners.delete(listener);
+      },
+    } as unknown as DocumentRepository,
+    telemetry,
+  ) as unknown as LocalFileSyncDocumentRepository;
+  const metadata = { documentId: "doc_1", fileName: "part.cadara" } as never;
+  const emit = (status: DocumentSyncWriteStatus) => {
+    for (const listener of workerListeners) listener(status);
+  };
+  const received: string[][] = [[], []];
+  const unsubscribe = received.map((statuses) =>
+    repository.subscribeToLocalFileSyncStatus((status) => statuses.push(status.kind)),
+  );
+
+  emit({ kind: "syncing", documentId: "doc_1", sequence: 1, metadata });
+  emit({ kind: "failed", documentId: "doc_1", sequence: 2, metadata, message: "disk full" });
+  emit({ kind: "syncing", documentId: "doc_1", sequence: 3, metadata });
+  emit({ kind: "synced", documentId: "doc_1", sequence: 4, metadata });
+  expect(received, "every listener still receives every status").toEqual([
+    ["syncing", "failed", "syncing", "synced"],
+    ["syncing", "failed", "syncing", "synced"],
+  ]);
+  expect(
+    telemetry.finished.map(({ descriptor, attributes }) => [
+      (descriptor as { op: string }).op,
+      attributes["cadara.operation"],
+      attributes["cadara.result"],
+    ]),
+    "one span per write although two listeners subscribe",
+  ).toEqual([
+    ["cad.document.repository", "localFileWrite", "failure"],
+    ["cad.document.repository", "localFileWrite", "success"],
+  ]);
+  emit({ kind: "syncing", documentId: "doc_1", sequence: 5, metadata });
+  for (const stop of unsubscribe) stop();
+  expect(workerListeners.size, "the shared subscription ends with the last listener").toBe(0);
+  expect(
+    telemetry.finished.map(({ attributes }) => attributes["cadara.result"]),
+    "a write still running at the last unsubscribe ends as cancelled",
+  ).toEqual(["failure", "success", "cancelled"]);
+  const stop = repository.subscribeToLocalFileSyncStatus(() => undefined);
+  emit({ kind: "synced", documentId: "doc_1", sequence: 6, metadata });
+  stop();
+  expect(telemetry.finished, "no stale span ends after a re-subscribe").toHaveLength(3);
 });
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves modeling AppResultAsync behavior", async () => {

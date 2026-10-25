@@ -4,9 +4,12 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type {
+  PerformanceSpan,
   PerformanceSpanAttributes,
+  PerformanceSpanResult,
   PerformanceTelemetry,
 } from "@/contracts/performance/telemetry";
+import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import {
   classifyOkResult,
   measurePerformanceSpan,
@@ -142,6 +145,59 @@ export function createInstrumentedDocumentRepository<
   }
 
   if (isLocalFileSyncDocumentRepository(repository)) {
+    // cadara-8p7o: the worker writes a bound file after the repository write;
+    // one span per write, from its syncing status to its outcome. One shared
+    // subscription while anyone listens, so spans are not duplicated.
+    const localFileWrites = new Map<
+      DocumentId,
+      { span: PerformanceSpan; startedAt: number }
+    >();
+    const localFileSyncListeners = new Set<
+      (status: DocumentSyncWriteStatus) => void
+    >();
+    let unsubscribeLocalFileSync: (() => void) | null = null;
+    const localFileWriteResults: Partial<
+      Record<DocumentSyncWriteStatus["kind"], PerformanceSpanResult>
+    > = {
+      synced: "success",
+      failed: "failure",
+      "permission-denied": "failure",
+      // The binding was removed, or a new write replaced an unanswered one.
+      idle: "cancelled",
+      syncing: "cancelled",
+    };
+    const endLocalFileWrite = (
+      documentId: DocumentId,
+      result: PerformanceSpanResult,
+    ) => {
+      const running = localFileWrites.get(documentId);
+      if (!running) return;
+      localFileWrites.delete(documentId);
+      running.span.end({
+        "cadara.duration_ms": Number(
+          (performance.now() - running.startedAt).toFixed(2),
+        ),
+        "cadara.result": result,
+      });
+    };
+    const traceLocalFileWrite = (status: DocumentSyncWriteStatus) => {
+      const result = localFileWriteResults[status.kind];
+      if (result) endLocalFileWrite(status.documentId, result);
+      if (status.kind !== "syncing") return;
+      localFileWrites.set(status.documentId, {
+        startedAt: performance.now(),
+        span: telemetry.startSpan({
+          name: "Document repository localFileWrite",
+          op: "cad.document.repository",
+          attributes: {
+            "cadara.seam": "document.repository",
+            "cadara.operation": "localFileWrite",
+            "cadara.storage_kind": "filesystem",
+          },
+        }),
+      });
+    };
+
     Object.assign(wrapped, {
       bindLocalFile(
         input: Parameters<LocalFileSyncDocumentRepository["bindLocalFile"]>[0],
@@ -170,7 +226,23 @@ export function createInstrumentedDocumentRepository<
           LocalFileSyncDocumentRepository["subscribeToLocalFileSyncStatus"]
         >[0],
       ) {
-        return repository.subscribeToLocalFileSyncStatus(listener);
+        localFileSyncListeners.add(listener);
+        unsubscribeLocalFileSync ??= repository.subscribeToLocalFileSyncStatus(
+          (status) => {
+            traceLocalFileWrite(status);
+            for (const next of localFileSyncListeners) next(status);
+          },
+        );
+        return () => {
+          localFileSyncListeners.delete(listener);
+          if (localFileSyncListeners.size > 0) return;
+          // Nobody hears the outcome of a running write any more.
+          for (const documentId of [...localFileWrites.keys()]) {
+            endLocalFileWrite(documentId, "cancelled");
+          }
+          unsubscribeLocalFileSync?.();
+          unsubscribeLocalFileSync = null;
+        };
       },
     } satisfies Pick<
       LocalFileSyncDocumentRepository,
