@@ -1,5 +1,6 @@
 import type { ToolIconId } from "@/core/tools/schema";
-import { getToolIconSrc } from "@/core/tools/tool-icons";
+import { getToolIconAssetFileName } from "@/core/tools/tool-icons";
+import { SvgIcon } from "@/components/ui/svg-icon";
 import { cn } from "@/lib/utils";
 
 interface ToolIconProps {
@@ -14,13 +15,10 @@ export function ToolIcon({
   draggable = false,
 }: ToolIconProps) {
   return (
-    <img
-      src={getToolIconSrc(icon)}
-      alt=""
-      aria-hidden="true"
+    <SvgIcon
+      fileName={getToolIconAssetFileName(icon)}
+      highlight
       className={cn("h-5 w-5", className)}
-      loading="lazy"
-      decoding="async"
       draggable={draggable}
     />
   );

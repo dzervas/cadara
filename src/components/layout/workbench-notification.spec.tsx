@@ -36,7 +36,7 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
     "Info notifications should expose their accent hook.",
   ).toBeTruthy();
   expect(
-    infoMarkup.includes("/icons/info.svg"),
+    infoMarkup.includes("data-icon=\"shell-info.svg\""),
     "Info notifications should use the info icon asset.",
   ).toBeTruthy();
   expect(
@@ -80,7 +80,7 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
     "Warning notifications should expose their type hook.",
   ).toBeTruthy();
   expect(
-    warningMarkup.includes("/icons/warning-overlay.svg"),
+    warningMarkup.includes("data-icon=\"shell-warning.svg\""),
     "Warning notifications should use a warning icon asset.",
   ).toBeTruthy();
   expect(
@@ -110,7 +110,7 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
     "Error notifications should expose their type hook.",
   ).toBeTruthy();
   expect(
-    errorMarkup.includes("/icons/error.svg"),
+    errorMarkup.includes("data-icon=\"shell-error.svg\""),
     "Error notifications should use the error icon asset.",
   ).toBeTruthy();
   expect(

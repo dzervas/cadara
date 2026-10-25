@@ -170,7 +170,7 @@ export const centerPointArcSketchToolDefinition: SketchToolDefinition<"centerPoi
       group: "drawing",
       name: "Center Arc",
       tooltip: "Create an arc from center, start, and end points.",
-      icon: "circle",
+      icon: "centerPointArc",
       modes: ["sketch"],
       dropdown: {
         familyId: "arc-family",

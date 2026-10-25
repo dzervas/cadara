@@ -151,17 +151,17 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     "Toolbar tool groups should be wrapped in an explicit toolbar landmark.",
   ).toBeTruthy();
   expect(
-    toolbarMarkup.includes("/icons/extrude.svg"),
+    toolbarMarkup.includes("data-icon=\"extrude.svg\""),
     "Toolbar should render standard tool buttons with local SVG assets.",
   ).toBeTruthy();
   expect(
     toolbarMarkup.includes('data-tool-id="import"') &&
       toolbarMarkup.includes('aria-label="Import"') &&
-      toolbarMarkup.includes("/icons/import-part.svg"),
+      toolbarMarkup.includes("data-icon=\"import.svg\""),
     "Toolbar should expose import as a real icon-only tool in part mode.",
   ).toBeTruthy();
   expect(
-    toolbarMarkup.includes("/icons/linear-pattern.svg"),
+    toolbarMarkup.includes("data-icon=\"pattern.svg\""),
     "Toolbar should render dropdown-backed tool triggers with local SVG assets.",
   ).toBeTruthy();
   expect(
@@ -173,7 +173,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
       toolbarMarkup.includes('target="_blank"') &&
       toolbarMarkup.includes('rel="noreferrer"') &&
       toolbarMarkup.includes('aria-label="Open repository on GitHub"') &&
-      toolbarMarkup.includes("/icons/GitHub-logo.svg"),
+      toolbarMarkup.includes("data-icon=\"GitHub-logo.svg\""),
     "Toolbar should render a safe GitHub repository link at the end.",
   ).toBeTruthy();
 
@@ -184,7 +184,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   expect(
     reportBugToolbarMarkup.includes('aria-label="Report bug"') &&
       reportBugToolbarMarkup.includes('type="button"') &&
-      reportBugToolbarMarkup.includes("/icons/bug.svg"),
+      reportBugToolbarMarkup.includes("data-icon=\"shell-reportBug.svg\""),
     "Toolbar should render the report-bug action as an icon-only button with local asset and accessible label.",
   ).toBeTruthy();
   expect(
@@ -235,12 +235,12 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
     "Toolbar should render Finish Sketch while a sketch session is active.",
   ).toBeTruthy();
   expect(
-    sketchToolbarMarkup.includes("/icons/sketch-line-segment.svg") &&
-      sketchToolbarMarkup.includes("/icons/sketch-dimension.svg") &&
-      sketchToolbarMarkup.includes("/icons/sketch-construction.svg") &&
-      sketchToolbarMarkup.includes("/icons/eye_open.svg") &&
-      sketchToolbarMarkup.includes("/icons/svg-fill.svg") &&
-      sketchToolbarMarkup.includes("/icons/svg-stroke.svg"),
+    sketchToolbarMarkup.includes("data-icon=\"line.svg\"") &&
+      sketchToolbarMarkup.includes("data-icon=\"dimension.svg\"") &&
+      sketchToolbarMarkup.includes("data-icon=\"construction.svg\"") &&
+      sketchToolbarMarkup.includes("data-icon=\"svgRendering.svg\"") &&
+      sketchToolbarMarkup.includes("data-icon=\"fill.svg\"") &&
+      sketchToolbarMarkup.includes("data-icon=\"stroke.svg\""),
     "Sketch toolbar buttons and dropdown triggers should keep local SVG icons.",
   ).toBeTruthy();
   expect(

@@ -1,13 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, and search rows", async ({
+test("toolbar uses inline SVG icons and rich tooltips across buttons, dropdowns, and search rows", async ({
   page,
 }) => {
   await page.goto("/app");
 
   const extrudeButton = page.locator('button[data-tool-id="extrude"]').first();
   await expect(
-    extrudeButton.locator('img[src="/icons/extrude.svg"]'),
+    extrudeButton.locator('[data-icon="extrude.svg"] > svg'),
   ).toBeVisible();
 
   await extrudeButton.hover();
@@ -19,7 +19,7 @@ test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, 
 
   const patternButton = page.locator('button[data-tool-id="pattern"]');
   await expect(
-    patternButton.locator('img[src="/icons/linear-pattern.svg"]'),
+    patternButton.locator('[data-icon="pattern.svg"] > svg'),
   ).toBeVisible();
 
   await patternButton.hover();
@@ -31,7 +31,7 @@ test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, 
     .getByRole("menuitem")
     .filter({ hasText: "Circular Pattern" });
   await expect(
-    circularPatternItem.locator('img[src="/icons/circular-pattern.svg"]'),
+    circularPatternItem.locator('[data-icon="circularPattern.svg"] > svg'),
   ).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -40,8 +40,56 @@ test("toolbar uses local SVG icons and rich tooltips across buttons, dropdowns, 
     'button[data-tool-source="search"][data-tool-id="mirror"]',
   );
   await expect(
-    mirrorSearchRow.locator('img[src="/icons/mirror.svg"]'),
+    mirrorSearchRow.locator('[data-icon="mirror.svg"] > svg'),
   ).toBeVisible();
+});
+
+test("inline icons inherit host ink and theme click targets, with neutral disabled tools", async ({
+  page,
+}) => {
+  await page.goto("/app");
+  const sketch = page
+    .locator('button[data-tool-id="sketch"] [data-icon="sketch.svg"]')
+    .first();
+  await expect(sketch.locator("svg")).toBeVisible();
+  const ink = await sketch.evaluate((icon) => {
+    const host = icon as HTMLElement;
+    host.style.color = "rgb(101, 111, 121)";
+    host.style.setProperty("--workbench-spark-accent", "rgb(170, 130, 70)");
+    const paths = icon.querySelectorAll("svg path");
+    return {
+      gold: getComputedStyle(paths[0]).stroke,
+      base: getComputedStyle(paths[1]).stroke,
+    };
+  });
+  expect(ink).toEqual({
+    gold: "rgb(170, 130, 70)",
+    base: "rgb(101, 111, 121)",
+  });
+  // Exercise the browser's disabled-host styling without coupling this visual
+  // contract to which modeling commands are currently available in the seed.
+  const disabled = await sketch.evaluate((icon) => {
+    icon.closest("button")!.disabled = true;
+    return {
+      ink: getComputedStyle(icon).color,
+      gold: getComputedStyle(icon.querySelector("svg path")!).stroke,
+    };
+  });
+  expect(disabled.gold).toBe(disabled.ink);
+  for (const name of ["GitHub-logo.svg", "discord-logo.svg"]) {
+    const brand = page
+      .locator(`[role="toolbar"] [data-icon="${name}"]`)
+      .first();
+    await expect(brand.locator("svg")).toBeVisible();
+    const paint = await brand.evaluate((icon) => ({
+      ink: getComputedStyle(icon).color,
+      fill: getComputedStyle(icon.querySelector("path")!).fill,
+    }));
+    expect(paint.fill).toBe(paint.ink);
+  }
+  expect(
+    await page.locator('[role="toolbar"] img[src*="/icons/"]').count(),
+  ).toBe(0);
 });
 
 test("toolbar progressively collapses tool families, then islands, then merges islands as the window narrows", async ({
@@ -80,7 +128,7 @@ test("toolbar progressively collapses tool families, then islands, then merges i
     'button[data-toolbar-group-trigger="featuresBuild"]',
   );
   await expect(
-    build.locator('img[src="/icons/revolve.svg"]'),
+    build.locator('[data-icon="revolve.svg"] > svg'),
     "The tucked dropdown shows the first tool it hides.",
   ).toBeVisible();
   await build.click();
@@ -126,21 +174,21 @@ test("a tool picked from a collapsed island becomes its face and stays first aft
     'button[data-toolbar-group-trigger="transforms"]',
   );
   await expect(
-    transforms.locator('img[src="/icons/move-face.svg"]'),
+    transforms.locator('[data-icon="moveFace.svg"] > svg'),
   ).toBeVisible();
   await transforms.click();
   await page.locator('[role="menuitem"][data-tool-id="mirror"]').click();
   await expect(page.getByRole("menu")).toBeHidden();
   await expect(transforms).toHaveAttribute("aria-pressed", "true");
   await expect(
-    transforms.locator('img[src="/icons/mirror.svg"]'),
+    transforms.locator('[data-icon="mirror.svg"] > svg'),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(transforms).toHaveAttribute("aria-pressed", "false");
 
   await page.reload();
   await expect(
-    transforms.locator('img[src="/icons/mirror.svg"]'),
+    transforms.locator('[data-icon="mirror.svg"] > svg'),
   ).toBeVisible();
   await transforms.click();
   await expect(

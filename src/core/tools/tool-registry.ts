@@ -190,7 +190,7 @@ export const toolDefinitions = [
     name: "Reference",
     tooltip:
       "Reference model or existing sketch geometry in the active sketch.",
-    icon: "construction",
+    icon: "projectReference",
     modes: ["sketch"],
   },
   {
@@ -198,7 +198,7 @@ export const toolDefinitions = [
     group: "sketchOps",
     name: "Import Image",
     tooltip: "Import one or more reference images into the active sketch.",
-    icon: "import",
+    icon: "importImage",
     modes: ["sketch"],
     commandBehavior: "sketchReferenceImageImport",
   },
@@ -274,7 +274,7 @@ export const toolDefinitions = [
     group: "patterns",
     name: "Pattern",
     tooltip: "Choose a pattern tool.",
-    icon: "linearPattern",
+    icon: "pattern",
     modes: ["part"],
     dropdown: {
       familyId: "pattern-family",

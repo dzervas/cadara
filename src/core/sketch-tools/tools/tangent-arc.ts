@@ -183,7 +183,7 @@ export const tangentArcSketchToolDefinition: SketchToolDefinition<"tangentArc"> 
       group: "drawing",
       name: "Tangent Arc",
       tooltip: "Start on a curve endpoint, then place the tangent arc end.",
-      icon: "circle",
+      icon: "tangentArc",
       modes: ["sketch"],
     },
     lifecycle: "discrete",

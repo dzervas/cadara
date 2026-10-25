@@ -570,7 +570,7 @@ test("T14d review R-1: an expression chip clamped at the right edge stays on one
   await expect(chip).toContainText("ƒ");
   const canvas = (await workbench.viewport().boundingBox())!;
   const box = (await chip.boundingBox())!;
-  const span = (await chip.locator("span").boundingBox())!;
+  const span = (await chip.locator("span.font-mono").boundingBox())!;
   expect(span.height, "one line of 11 px text").toBeLessThanOrEqual(12);
   expect(box.height).toBeLessThanOrEqual(32);
   await expectEstimateCoversChips(page);

@@ -201,11 +201,11 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
     "Sidebar parts and objects should include committed sketches.",
   ).toBeTruthy();
   expect(
-    sidebarMarkup.includes("/icons/new-sketch.svg"),
+    sidebarMarkup.includes("data-icon=\"sketch.svg\""),
     "Sidebar sketch rows should use shared sketch tool icons.",
   ).toBeTruthy();
   expect(
-    sidebarMarkup.includes("/icons/c-plane.svg"),
+    sidebarMarkup.includes("data-icon=\"plane.svg\""),
     "Sidebar construction rows should use shared plane tool icons.",
   ).toBeTruthy();
   expect(
@@ -729,11 +729,11 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
     "Timeline should expose feature selection labels.",
   ).toBeTruthy();
   expect(
-    timelineMarkup.includes("/icons/new-sketch.svg"),
+    timelineMarkup.includes("data-icon=\"sketch.svg\""),
     "Timeline sketch entries should use shared sketch tool icons.",
   ).toBeTruthy();
   expect(
-    timelineMarkup.includes("/icons/extrude.svg"),
+    timelineMarkup.includes("data-icon=\"extrude.svg\""),
     "Timeline feature entries should use shared feature tool icons.",
   ).toBeTruthy();
   expect(
@@ -1113,11 +1113,11 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
     "Sketch contents must not expose an operation replay cursor.",
   ).toBe(false);
   expect(
-    sketchHistoryMarkup.includes("/icons/sketch-line-segment.svg"),
+    sketchHistoryMarkup.includes("data-icon=\"line.svg\""),
     "Sketch history entity entries should use shared drawing tool icons.",
   ).toBeTruthy();
   expect(
-    sketchHistoryMarkup.includes("/icons/sketch-dimension.svg"),
+    sketchHistoryMarkup.includes("data-icon=\"dimension.svg\""),
     "Sketch history dimension entries should use shared dimension tool icons.",
   ).toBeTruthy();
   expect(

@@ -174,7 +174,7 @@ export const threePointArcSketchToolDefinition: SketchToolDefinition<"threePoint
       group: "drawing",
       name: "3-Point Arc",
       tooltip: "Create an arc through three points.",
-      icon: "circle",
+      icon: "threePointArc",
       modes: ["sketch"],
     },
     lifecycle: "discrete",

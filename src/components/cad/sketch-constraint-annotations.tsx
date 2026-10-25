@@ -1,3 +1,4 @@
+import { SvgIcon } from "@/components/ui/svg-icon";
 import {
   useCallback,
   useEffect,
@@ -43,7 +44,7 @@ import {
 } from "@/components/cad/sketch-viewport-feedback-model";
 import {
   getAnnotationConstraintColor,
-  getAnnotationGlyphIconSrc,
+  getAnnotationGlyphIconFileName,
 } from "@/components/cad/sketch-annotation-glyph";
 import { SketchAnnotationWheel } from "@/components/cad/sketch-annotation-wheel";
 import {
@@ -688,7 +689,7 @@ export function SketchConstraintAnnotations({
             : isLast
               ? "last"
               : undefined;
-          const iconSrc = getAnnotationGlyphIconSrc(annotation.glyphKind);
+          const iconFileName = getAnnotationGlyphIconFileName(annotation.glyphKind);
           const isDimension = annotation.status === "dimension";
           const className = `absolute flex h-8 items-center rounded border shadow-[var(--cad-panel-shadow)] ${
             isDimension
@@ -722,12 +723,10 @@ export function SketchConstraintAnnotations({
           };
           const content = (
             <>
-              <img
-                alt=""
-                aria-hidden="true"
+              <SvgIcon
                 className={isDimension ? "h-4 w-4 shrink-0" : "h-5 w-5"}
                 draggable={false}
-                src={iconSrc}
+                fileName={iconFileName}
               />
               {isDimension ? (
                 <span className="font-mono text-[11px] leading-none">

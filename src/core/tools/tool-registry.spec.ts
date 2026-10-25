@@ -26,8 +26,8 @@ test("src/core/tools/tool-registry.spec.ts", () => {
   ).toBeTruthy();
   expect(
     toolIconAssetFileNames[importTool.icon],
-    "Import should use the requested public SVG asset.",
-  ).toBe("import-part.svg");
+    "Import should use its approved generic incoming-file icon.",
+  ).toBe("import.svg");
   expect(
     partToolIds.includes("import"),
     "Import should be visible in part mode.",

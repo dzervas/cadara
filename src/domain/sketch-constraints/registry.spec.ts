@@ -209,15 +209,15 @@ test("src/domain/sketch-constraints/registry.spec.ts", async () => {
     );
 
     const newConstraintTools = {
-      constraintCollinear: "sketch-collinear.svg",
-      constraintHorizontal: "sketch-horizontal.svg",
-      constraintVertical: "sketch-vertical.svg",
-      constraintConcentric: "sketch-concentric.svg",
-      constraintMidpoint: "sketch-midpoint.svg",
-      constraintNormal: "sketch-normal.svg",
-      constraintPierce: "sketch-pierce.svg",
-      constraintSymmetric: "sketch-symmetric.svg",
-      constraintFix: "sketch-fix.svg",
+      constraintCollinear: "constraintCollinear.svg",
+      constraintHorizontal: "constraintHorizontal.svg",
+      constraintVertical: "constraintVertical.svg",
+      constraintConcentric: "constraintConcentric.svg",
+      constraintMidpoint: "constraintMidpoint.svg",
+      constraintNormal: "constraintNormal.svg",
+      constraintPierce: "constraintPierce.svg",
+      constraintSymmetric: "constraintSymmetric.svg",
+      constraintFix: "constraintFix.svg",
     } as const;
     const sketchConstraintSection = getToolbarSectionsForMode("sketch").find(
       (section) => section.id === "constraints",

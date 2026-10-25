@@ -57,7 +57,7 @@ test("src/components/layout/document-export-modal.spec.tsx", () => {
     "Export modal should list 3MF.",
   ).toBeTruthy();
   expect(
-    stlMarkup.includes("cadara"),
+    stlMarkup.replace(/<[^>]*>/g, "").includes("cadara"),
     "Solid export modal should not list cadara document export.",
   ).toBeFalsy();
   expect(

@@ -89,7 +89,7 @@ export function getSketchHistoryItemToolIcon(
   }
 }
 function getSketchOperationToolIcon(_kind: "referenceImage"): ToolIconId {
-  return "import";
+  return "importImage";
 }
 
 function getSketchEntityToolIcon(
@@ -99,8 +99,9 @@ function getSketchEntityToolIcon(
     case "lineSegment":
       return "line";
     case "circle":
-    case "arc":
       return "circle";
+    case "arc":
+      return "centerPointArc";
     case "spline":
       return "spline";
     case "ellipse":
@@ -108,11 +109,11 @@ function getSketchEntityToolIcon(
     case "conic":
     case "bezierCurve":
     case "profileText":
-      return "spline";
+      return entity.kind;
     case "derivedPiecewiseCubic":
       return "offset";
     case "point":
-      return null;
+      return "point";
   }
 }
 

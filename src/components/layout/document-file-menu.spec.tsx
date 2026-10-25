@@ -84,7 +84,7 @@ test("src/components/layout/document-file-menu.spec.tsx", () => {
     "File menu import picker should import one cadara document at a time.",
   ).toBeFalsy();
   expect(
-    markup.includes("/icons/document.svg"),
+    markup.includes("data-icon=\"shell-file.svg\""),
     "File trigger should use the local document icon.",
   ).toBeTruthy();
   expect(
@@ -95,7 +95,7 @@ test("src/components/layout/document-file-menu.spec.tsx", () => {
   );
   expect(
     markup.includes("data-workbench-browser-storage-warning") &&
-      markup.includes("/icons/warning-overlay.svg") &&
+      markup.includes("data-icon=\"shell-warning.svg\"") &&
       markup.includes("The data are currently saved within the browser"),
     "File menu should render a browser-storage warning next to the file icon when durable save is unavailable.",
   ).toBeTruthy();

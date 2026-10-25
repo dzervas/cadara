@@ -168,7 +168,7 @@ export const centerPointRectangleSketchToolDefinition: SketchToolDefinition<"cen
       group: "drawing",
       name: "Center Rectangle",
       tooltip: "Create an axis-aligned rectangle from its center.",
-      icon: "rectangle",
+      icon: "centerPointRectangle",
       modes: ["sketch"],
     },
     {

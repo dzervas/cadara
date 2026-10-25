@@ -117,7 +117,7 @@ export const midpointLineSketchToolDefinition: SketchToolDefinition<"midpointLin
       group: "drawing",
       name: "Midpoint Line",
       tooltip: "Create a line from its midpoint and one endpoint.",
-      icon: "line",
+      icon: "midpointLine",
       modes: ["sketch"],
     },
     {

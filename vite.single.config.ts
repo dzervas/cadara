@@ -13,7 +13,6 @@ import {
   createBuildMetadataDefines,
   readBuildMetadata,
 } from "./build-metadata";
-import { toolIconAssetFileNames } from "./src/core/tools/tool-icons";
 import { createTypiaPluginOptions } from "./typia-plugin-options";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
@@ -40,14 +39,9 @@ function escapeInlineStyle(source: string) {
   return source.replaceAll("</style", "<\\/style");
 }
 
-function toHtmlSafeJson(value: unknown) {
-  return JSON.stringify(value).replaceAll("<", "\\u003c");
-}
-
-function createSingleAssetsScript(singleAssets: {
-  icons: Record<string, string>;
-}) {
-  return `window.__CADARA_SINGLE_ASSETS__ = ${toHtmlSafeJson(singleAssets)};
+function createSingleAssetsScript() {
+  // Icon SVG sources are bundled inline by the shared UI renderer.
+  return `window.__CADARA_SINGLE_ASSETS__ = {};
 Object.defineProperty(window.__CADARA_SINGLE_ASSETS__, 'wasm', {
   configurable: true,
   get() {
@@ -69,21 +63,6 @@ ${source}
     startCadara();
   }
 })();`;
-}
-
-async function readToolbarIconDataUrls() {
-  const icons: Record<string, string> = {};
-  const iconFileNames = new Set(Object.values(toolIconAssetFileNames));
-
-  for (const fileName of iconFileNames) {
-    const svg = await readFile(
-      path.join(rootDir, "public/icons", fileName),
-      "utf8",
-    );
-    icons[fileName] = svgToDataUrl(svg);
-  }
-
-  return icons;
 }
 
 function cadaraSingleHtmlPlugin(): Plugin {
@@ -115,9 +94,6 @@ function cadaraSingleHtmlPlugin(): Plugin {
       const favicon = svgToDataUrl(
         await readFile(path.join(rootDir, "public/favicon.svg"), "utf8"),
       );
-      const singleAssets = {
-        icons: await readToolbarIconDataUrls(),
-      };
       const wasmDataUrlMatch = entryChunk.code.match(wasmDataUrlPattern);
       const wasmDataUrl = wasmDataUrlMatch?.[0].slice(1, -1) ?? null;
       const appCode = wasmDataUrl
@@ -129,7 +105,7 @@ function cadaraSingleHtmlPlugin(): Plugin {
       const wasmDataScript = wasmDataUrl
         ? `\n    <script id="cadara-single-wasm" type="application/octet-stream">${wasmDataUrl}</script>`
         : "";
-      const assetScript = createSingleAssetsScript(singleAssets);
+      const assetScript = createSingleAssetsScript();
       const outDir = path.resolve(rootDir, options.dir ?? "dist");
 
       let html = await readFile(path.join(outDir, "app.html"), "utf8");

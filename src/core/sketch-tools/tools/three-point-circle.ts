@@ -167,7 +167,7 @@ export const threePointCircleSketchToolDefinition: SketchToolDefinition<"threePo
       group: "drawing",
       name: "3-Point Circle",
       tooltip: "Create a circle through three points.",
-      icon: "circle",
+      icon: "threePointCircle",
       modes: ["sketch"],
     },
     lifecycle: "discrete",

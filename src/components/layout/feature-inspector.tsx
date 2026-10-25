@@ -14,6 +14,7 @@ import {
 } from "react-hook-form";
 
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
+import { SvgIcon } from "@/components/ui/svg-icon";
 import { Input } from "@/components/ui/input";
 import {
   SECTION_HEADER_CLASSES,
@@ -254,19 +255,7 @@ function findProfileSelectionDiagnostic(
 }
 
 function FunctionIcon() {
-  return (
-    <span
-      aria-hidden="true"
-      className="block h-4 w-4"
-      style={{
-        backgroundColor: "currentColor",
-        maskImage: "url(/icons/function.svg)",
-        maskRepeat: "no-repeat",
-        maskPosition: "center",
-        maskSize: "contain",
-      }}
-    />
-  );
+  return <SvgIcon fileName="expression-function.svg" className="h-4 w-4" />;
 }
 
 function ExpressionAffordance(props: {

@@ -1,3 +1,4 @@
+import { SvgIcon } from "@/components/ui/svg-icon";
 import {
   useEffect,
   useRef,
@@ -20,7 +21,7 @@ import {
 } from "@/components/cad/sketch-annotation-clusters";
 import {
   getAnnotationConstraintColor,
-  getAnnotationGlyphIconSrc,
+  getAnnotationGlyphIconFileName,
 } from "@/components/cad/sketch-annotation-glyph";
 
 type AnnotationTarget = SketchConstraintRef | SketchDimensionRef;
@@ -201,12 +202,10 @@ export function SketchAnnotationWheel({
     );
   };
   const glyph = (item: SketchAnnotationLayerItem) => (
-    <img
-      alt=""
-      aria-hidden="true"
+    <SvgIcon
       className="h-4 w-4"
       draggable={false}
-      src={getAnnotationGlyphIconSrc(item.annotation.glyphKind)}
+      fileName={getAnnotationGlyphIconFileName(item.annotation.glyphKind)}
     />
   );
   const memberSlot = (

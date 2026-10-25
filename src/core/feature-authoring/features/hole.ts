@@ -333,7 +333,7 @@ export const holeAuthoringDefinition = {
     kind: "hole",
     name: "Hole",
     tooltip: "Cut holes from sketch-point locations.",
-    icon: "circle",
+    icon: "hole",
     toolId: "hole",
     groupId: "features",
     modes: ["part"],

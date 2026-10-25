@@ -227,26 +227,26 @@ test("src/components/cad/sketch-constraint-annotations.spec.tsx", () => {
     "Committed annotation glyphs should render above committed dimension overlay geometry.",
   ).toBeTruthy();
   expect(
-    markup.includes("/icons/sketch-parallel.svg") &&
-      markup.includes("/icons/sketch-dimension.svg"),
+    markup.includes("data-icon=\"constraintParallel.svg\"") &&
+      markup.includes("data-icon=\"dimension.svg\""),
     "Committed annotation glyphs should use toolbar SVG assets.",
   ).toBeTruthy();
   expect(
-    markup.includes("/icons/drawing-angular-dim-line-to-line.svg"),
+    markup.includes("data-icon=\"annotation-angle.svg\""),
     "Committed angle dimension annotations should use the angular dimension icon asset.",
   ).toBeTruthy();
   expect(
-    markup.includes("/icons/sketch-horizontal.svg") &&
-      markup.includes("/icons/sketch-vertical.svg"),
+    markup.includes("data-icon=\"constraintHorizontal.svg\"") &&
+      markup.includes("data-icon=\"constraintVertical.svg\""),
     "Horizontal and vertical constraint annotations should use visible public icon assets.",
   ).toBeTruthy();
   expect(
-    markup.includes("/icons/sketch-concentric.svg") &&
-      markup.includes("/icons/sketch-midpoint.svg") &&
-      markup.includes("/icons/sketch-normal.svg") &&
-      markup.includes("/icons/sketch-pierce.svg") &&
-      markup.includes("/icons/sketch-symmetric.svg") &&
-      markup.includes("/icons/sketch-fix.svg"),
+    markup.includes("data-icon=\"constraintConcentric.svg\"") &&
+      markup.includes("data-icon=\"constraintMidpoint.svg\"") &&
+      markup.includes("data-icon=\"constraintNormal.svg\"") &&
+      markup.includes("data-icon=\"constraintPierce.svg\"") &&
+      markup.includes("data-icon=\"constraintSymmetric.svg\"") &&
+      markup.includes("data-icon=\"constraintFix.svg\""),
     "New committed constraint glyphs should use their dedicated toolbar SVG assets.",
   ).toBeTruthy();
   // T14d re-pin (was `left:120px`/`left:158px`, the fixed 38 px ring step):
@@ -456,7 +456,8 @@ function renderedAnnotation(markup: string, glyphKind: string) {
     markup.lastIndexOf("<button", index),
     markup.lastIndexOf("<div", index),
   );
-  return markup.slice(start, markup.indexOf("</", index));
+  const tag = markup.startsWith("<button", start) ? "button" : "div";
+  return markup.slice(start, markup.indexOf(`</${tag}>`, index));
 }
 
 function openingTag(element: string | undefined) {

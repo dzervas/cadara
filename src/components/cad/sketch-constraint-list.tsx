@@ -1,3 +1,4 @@
+import { SvgIcon } from "@/components/ui/svg-icon";
 import { ActionIcon, Paper, Switch } from "@mantine/core";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
@@ -9,7 +10,7 @@ import { primitiveRefEquals, type PrimitiveRef } from "@/core/editor/schema";
 import type { SketchAnnotationListRow } from "@/domain/editor/sketch-session";
 import {
   getAnnotationConstraintColor,
-  getAnnotationGlyphIconSrc,
+  getAnnotationGlyphIconFileName,
 } from "@/components/cad/sketch-annotation-glyph";
 import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
 import { SECTION_HEADER_CLASSES } from "@/components/ui/workbench-panel-styles";
@@ -354,12 +355,10 @@ const SketchConstraintListRow = memo(function SketchConstraintListRow({
           }`}
           onClick={() => onSelect(annotation.target, annotation.id)}
         >
-          <img
-            alt=""
-            aria-hidden="true"
+          <SvgIcon
             className="mt-0.5 h-4 w-4 shrink-0"
             draggable={false}
-            src={getAnnotationGlyphIconSrc(annotation.glyphKind)}
+            fileName={getAnnotationGlyphIconFileName(annotation.glyphKind)}
           />
           <span className="grid min-w-0 flex-1 gap-0.5">
             <span className="flex min-w-0 items-baseline gap-1.5">

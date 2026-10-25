@@ -1,5 +1,5 @@
 import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
-import { getToolIconSrc } from "@/core/tools/tool-icons";
+import { getToolIconAssetFileName } from "@/core/tools/tool-icons";
 import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
 
 /**
@@ -25,49 +25,49 @@ export function getAnnotationConstraintColor(
   return `var(${getSketchRenderingPaletteToken("underconstrained")})`;
 }
 
-export function getAnnotationGlyphIconSrc(
+export function getAnnotationGlyphIconFileName(
   glyphKind: SketchAnnotationDescriptor["glyphKind"],
 ) {
   switch (glyphKind) {
     case "constraintCoincident":
-      return getToolIconSrc("constraintCoincident");
+      return getToolIconAssetFileName("constraintCoincident");
     case "constraintCollinear":
-      return getToolIconSrc("constraintCollinear");
+      return getToolIconAssetFileName("constraintCollinear");
     case "constraintParallel":
-      return getToolIconSrc("constraintParallel");
+      return getToolIconAssetFileName("constraintParallel");
     case "constraintEqual":
-      return getToolIconSrc("constraintEqual");
+      return getToolIconAssetFileName("constraintEqual");
     case "constraintHorizontal":
-      return getToolIconSrc("constraintHorizontal");
+      return getToolIconAssetFileName("constraintHorizontal");
     case "constraintVertical":
-      return getToolIconSrc("constraintVertical");
+      return getToolIconAssetFileName("constraintVertical");
     case "constraintFixed":
-      return getToolIconSrc("constraintFix");
+      return getToolIconAssetFileName("constraintFix");
     case "constraintAngle":
-      return "/icons/drawing-angular-dim-line-to-line.svg";
+      return "annotation-angle.svg";
     case "constraintPerpendicular":
-      return "/icons/sketch-perpendicular.svg";
+      return getToolIconAssetFileName("constraintPerpendicular");
     case "constraintTangent":
-      return "/icons/sketch-tangent.svg";
+      return getToolIconAssetFileName("constraintTangent");
     case "constraintConcentric":
-      return getToolIconSrc("constraintConcentric");
+      return getToolIconAssetFileName("constraintConcentric");
     case "constraintMidpoint":
-      return getToolIconSrc("constraintMidpoint");
+      return getToolIconAssetFileName("constraintMidpoint");
     case "constraintNormal":
-      return getToolIconSrc("constraintNormal");
+      return getToolIconAssetFileName("constraintNormal");
     case "constraintPierce":
-      return getToolIconSrc("constraintPierce");
+      return getToolIconAssetFileName("constraintPierce");
     case "constraintSymmetric":
-      return getToolIconSrc("constraintSymmetric");
+      return getToolIconAssetFileName("constraintSymmetric");
     case "dimensionDistance":
-      return getToolIconSrc("dimension");
+      return getToolIconAssetFileName("dimension");
     case "dimensionHorizontal":
-      return getToolIconSrc("dimension");
+      return getToolIconAssetFileName("dimensionHorizontal");
     case "dimensionVertical":
-      return getToolIconSrc("dimension");
+      return getToolIconAssetFileName("dimensionVertical");
     case "dimensionRadius":
-      return getToolIconSrc("dimension");
+      return getToolIconAssetFileName("dimensionRadius");
     case "dimensionAngle":
-      return "/icons/drawing-angular-dim-line-to-line.svg";
+      return "annotation-angle.svg";
   }
 }

@@ -192,7 +192,7 @@ export const sketchEditToolDefinitions = [
       group: "sketchOps",
       name: "Sketch Mirror",
       tooltip: "Mirror sketch geometry with a durable sketch relationship.",
-      icon: "mirror",
+      icon: "sketchMirror",
       modes: ["sketch"],
       selection: {
         label: "Seed entities and mirror axis",
@@ -216,7 +216,7 @@ export const sketchEditToolDefinitions = [
       group: "sketchOps",
       name: "Sketch Linear Pattern",
       tooltip: "Create a durable linear pattern of sketch geometry.",
-      icon: "linearPattern",
+      icon: "sketchLinearPattern",
       modes: ["sketch"],
       selection: {
         label: "Pattern seed entities",
@@ -239,7 +239,7 @@ export const sketchEditToolDefinitions = [
       group: "sketchOps",
       name: "Sketch Circular Pattern",
       tooltip: "Create a durable circular pattern of sketch geometry.",
-      icon: "circularPattern",
+      icon: "sketchCircularPattern",
       modes: ["sketch"],
       selection: {
         label: "Pattern seed entities",
@@ -262,7 +262,7 @@ export const sketchEditToolDefinitions = [
       group: "sketchOps",
       name: "Sketch Transform",
       tooltip: "Transform sketch geometry with a durable sketch relationship.",
-      icon: "transform",
+      icon: "sketchTransform",
       modes: ["sketch"],
       selection: {
         label: "Transform seed entities",

@@ -35,6 +35,32 @@ body {
   box-sizing: border-box;
 }
 
+/* Neutral ink inherits from the host; only tool click targets earn gold. */
+.cadara-icon {
+  --cadara-icon-action: currentColor;
+  display: inline-flex;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.cadara-icon[data-icon-highlight="true"] {
+  --cadara-icon-action: var(--workbench-spark-accent);
+}
+
+.cadara-icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Retained brand paths are monochrome shell glyphs, as with the former masks. */
+.cadara-icon:is([data-icon="GitHub-logo.svg"], [data-icon="discord-logo.svg"]) path {
+  fill: currentColor;
+}
+
+:where([disabled], [aria-disabled="true"]) .cadara-icon[data-icon-highlight] {
+  --cadara-icon-action: currentColor;
+}
+
 button,
 input {
   font: inherit;

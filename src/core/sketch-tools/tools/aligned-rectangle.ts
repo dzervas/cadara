@@ -224,7 +224,7 @@ export const alignedRectangleSketchToolDefinition: SketchToolDefinition<"aligned
       group: "drawing",
       name: "Aligned Rectangle",
       tooltip: "Create a rectangle aligned to a selected first edge.",
-      icon: "rectangle",
+      icon: "alignedRectangle",
       modes: ["sketch"],
     },
     lifecycle: "discrete",

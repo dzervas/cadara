@@ -183,7 +183,7 @@ The reference for feel is **Plasticity** — bold, dark, decisive — but with t
 
 - Dark-first, dense without being cramped, browser-native but never about being browser-native.
 - **Floating chrome over a fullscreen viewport.** No structural top-bar row, no docked left sidebar — every chrome surface (toolbar, parts tree, variables, history, tabs, debugger) is a positioned overlay above the canvas. Tinted-glass surfaces let the part read through.
-- Monochromatic shell with three earned Spark Affordances. Saturated color is reserved for canvas semantics — selection, sketch references, status states — and the three deliberate spark roles in chrome.
+- Monochromatic shell with four earned Spark Affordances. Saturated color is reserved for canvas semantics — selection, sketch references, status states — and the four deliberate spark roles in chrome.
 - Typographic discipline carries the density: small text, wide-tracked uppercase labels, monospace for numbers.
 - Layered shadows + tinted-glass blur with a 1px inset top highlight. Glass earned by being _over the viewport_; opaque chrome stays opaque.
 
@@ -197,7 +197,7 @@ A 10-step graphite scale carries the entire shell — background, surfaces, text
 
 ### Tertiary: Geometry Highlights (viewport-only)
 
-- **Spark Orange** (`#f0a14a`): Selected geometry in the 3D viewport, plus the three Spark Affordances in chrome (logo mark, active-state Variables FAB, active-tab dot).
+- **Spark Orange** (`#f0a14a`): Selected geometry in the 3D viewport, plus the four Spark Affordances in chrome (logo mark, active-state Variables FAB, active-tab dot, tool-icon click targets).
 - **Ember Hover** (`#f6b777`): Hovered geometry in the 3D viewport.
 - **Spark Emissive** (`#a85a16`) / **Ember Emissive** (`#8f4c13`): Self-lit selection/hover for shaded faces; tuned darker so they read as glow under viewport lighting, not as paint.
 
@@ -223,17 +223,18 @@ A 10-step graphite scale carries the entire shell — background, surfaces, text
 
 ### Named Rules
 
-**The Quiet Chrome Rule.** The shell is monochromatic except for the three Spark Affordances below and status feedback the user must see. Hover states, dividers, tonal lifts, "primary" tints — all pull from the graphite scale. If a designer reaches for color to make something feel "more designed," they have already failed the rule.
+**The Quiet Chrome Rule.** The shell is monochromatic except for the four Spark Affordances below and status feedback the user must see. Hover states, dividers, tonal lifts, "primary" tints — all pull from the graphite scale. If a designer reaches for color to make something feel "more designed," they have already failed the rule.
 
-**The Geometry-Owns-Color Rule.** Saturated hues live where the part lives. Spark Orange is the dominant signal — selected geometry in the viewport, plus the three Spark Affordances in chrome. Pin Amber is for sketch references the user has placed, Mantine reds and yellows are for problems the user has caused.
+**The Geometry-Owns-Color Rule.** Saturated hues live where the part lives. Spark Orange is the dominant signal — selected geometry in the viewport, plus the four Spark Affordances in chrome. Pin Amber is for sketch references the user has placed, Mantine reds and yellows are for problems the user has caused.
 
-**The Spark Affordance Rule.** Spark Orange (`#f0a14a`) appears in the floating chrome in exactly three roles, each one earned:
+**The Spark Affordance Rule.** Spark Orange (`#f0a14a`) appears in the floating chrome in exactly four roles, each one earned:
 
 1. **The brand mark.** The 36px logo block in the floating toolbar's leading position. Identity, not ornament.
 2. **The Variables FAB, when open.** The FAB is a committed-state affordance: closed, it's a graphite glass pill; open, it flips to spark-orange to communicate "this panel is currently driving the workspace."
 3. **The active-document indicator.** The 6px dot on the active document tab in the bottom tab bar, signaling which document the viewport is rendering. Other tabs use steel.
+4. **Tool-icon click targets.** Small golden points, edges or regions indicate where a CAD operation expects input. They inherit the Spark theme token, not literal SVG colors; disabled tools and constraint annotations stay neutral. This is semantic guidance, not decoration. See `src/assets/icons/DESIGN.md`.
 
-These are the only three. Any new sparks require a deliberate addition to this list, not a one-off override. The Mantine `primaryColor` remains `workbench` (graphite) — Spark Orange is a _signal_ color, not a "primary."
+These are the only four. Any new sparks require a deliberate addition to this list, not a one-off override. The Mantine `primaryColor` remains `workbench` (graphite) — Spark Orange is a _signal_ color, not a "primary."
 
 ## 3. Typography
 
@@ -336,7 +337,7 @@ Components are Mantine primitives configured through the central `workbench-them
 ### Variables FAB & Panel
 
 - **FAB position:** `position: absolute; bottom: 116px; right: 24px;` — sits above the bottom tab bar and clear of the history timeline.
-- **FAB shape:** 52×52, 14px corner radius. Closed: glass treatment (`rgba(40, 40, 40, 0.65)`, `backdrop-filter: blur(18px) saturate(140%)`, 1px white-7% border, **FAB** shadow). Open: flips to **Spark Orange** `#f0a14a` with `#1a1209` icon — the second of the three Spark Affordances.
+- **FAB shape:** 52×52, 14px corner radius. Closed: glass treatment (`rgba(40, 40, 40, 0.65)`, `backdrop-filter: blur(18px) saturate(140%)`, 1px white-7% border, **FAB** shadow). Open: flips to **Spark Orange** `#f0a14a` with `#1a1209` icon — the second of the four Spark Affordances.
 - **FAB icon:** 22×22 layers icon when closed, 22×22 X when open. Hover lifts the FAB by `translateY(-1px)` over 160ms.
 - **Panel position:** `top: 76px; right: 16px; bottom: 100px; width: 320px;` — anchored to the right edge from below the toolbar to above the timeline.
 - **Panel shape:** 16px corner radius, glass treatment (`rgba(40, 40, 40, 0.65)`, `backdrop-filter: blur(20px) saturate(140%)`, 1px white-6% border, **Panel** shadow).
@@ -414,7 +415,7 @@ Components are Mantine primitives configured through the central `workbench-them
 
 ### Do:
 
-- **Do** keep saturated color confined to the viewport, sketch overlays, status states, and the three Spark Affordances. Anything else is graphite-on-graphite or it's rejected.
+- **Do** keep saturated color confined to the viewport, sketch overlays, status states, and the four Spark Affordances. Anything else is graphite-on-graphite or it's rejected.
 - **Do** use `{rounded.md}` (8px) for inline components, `{rounded.lg}` (12–16px) for floating pills/panels, `9px` for tool buttons inside pill clusters.
 - **Do** match the Inner Highlight Rule on every new elevated surface — a 1px inset top highlight at ~4–7% white. Heavier surfaces (FAB, panel) earn the higher end.
 - **Do** apply the Floating-Glass Rule on every overlay that sits over the viewport: `rgba(40, 40, 40, 0.55–0.65)` + `backdrop-filter: blur(18px) saturate(140%)`. Edge-anchored chrome (tab bar) stays opaque.
@@ -425,7 +426,7 @@ Components are Mantine primitives configured through the central `workbench-them
 
 ### Don't:
 
-- **Don't** introduce a fourth Spark Affordance without amending the rule. Three is the count.
+- **Don't** introduce a fifth Spark Affordance without amending the rule. Four is the count.
 - **Don't** ship UI that reads as **SolidWorks** — frozen-in-2005 chrome, baroque dialog stacks, every feature with a different visual language.
 - **Don't** ship UI that reads as **FreeCAD** — inconsistent enough to feel broken, default Qt look. Open-source must not look open-source in the bad way.
 - **Don't** ship UI that reads as **Rhino** — IDE-cold, panel-stacked, hostile to anyone who isn't already a Rhino expert.

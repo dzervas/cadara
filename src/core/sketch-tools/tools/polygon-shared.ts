@@ -140,7 +140,7 @@ export function createRegularPolygonSketchToolDefinition(input: {
       group: "drawing",
       name: input.name,
       tooltip: input.tooltip,
-      icon: "line",
+      icon: input.id,
       modes: ["sketch"],
       dropdown: input.dropdown,
     },

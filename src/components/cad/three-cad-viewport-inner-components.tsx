@@ -1,4 +1,5 @@
 import { ActionIcon, Menu, Tooltip } from "@mantine/core";
+import { SvgIcon } from "@/components/ui/svg-icon";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import {
@@ -322,12 +323,7 @@ export function ViewportProjectionSelector({
                 color: "var(--workbench-shell-text)",
               }}
             >
-              <img
-                src="/icons/view-cube.svg"
-                alt=""
-                aria-hidden="true"
-                className="h-4 w-4"
-              />
+              <SvgIcon fileName="view-cube.svg" className="h-4 w-4" />
             </ActionIcon>
           </Tooltip>
         </Menu.Target>
