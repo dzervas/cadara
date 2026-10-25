@@ -2185,6 +2185,72 @@ test("restore keeps persisted topology ids only for an output it reproduces exac
   ).not.toBe(storedOutput.topologyToken);
 }, 15000);
 
+// Lane: logic. Seam: authoring-state restore from persisted lineage. A restore
+// of a fresh evaluation's lineage keeps every output as evaluated, including
+// edge/vertex ids no witness preserves (thicken publishes no source keys), so
+// reopening a freshly built file rewrites none of its lineage (cadara-phi0).
+test("restore of a fresh evaluation's lineage reproduces it exactly", async () => {
+  const oc = await getDefaultOpenCascadeInstance();
+  const baseFeatureId = featureId("fresh_lineage_restore_base");
+  const thickenFeatureId = featureId("fresh_lineage_restore_thicken");
+  const sourceBodyId = bodyIdForFeature(baseFeatureId);
+  const base = createRectangleSketch(
+    "sketch_occ_fresh_lineage_restore" as SketchId,
+    createStandardPlaneDefinition("xy"),
+    { width: 10, height: 8 },
+  );
+  const baseFeature = {
+    featureId: baseFeatureId,
+    definition: createExtrudeDefinition(base.sketch, base.region, 6, {
+      operation: "newBody",
+      booleanScope: { kind: "standalone" },
+    }),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const afterBase = applyFeature(
+    createOccAuthoringState(oc, { sketches: [base.sketch] }),
+    baseFeature,
+  );
+  const thickenFeature = {
+    featureId: thickenFeatureId,
+    definition: createThickenDefinition(
+      sourceBodyId,
+      findPlanarFaceAtZ(oc, requireBody(afterBase, sourceBodyId)!, 6)!,
+    ),
+    suppressed: false,
+  } satisfies OccAuthoringFeatureRecord;
+  const serialize = (state: OccAuthoringState) =>
+    serializeOccFeatureTopologyLineage(
+      state.featureTopologyStages,
+      new Map(),
+      new Set([baseFeatureId, thickenFeatureId]),
+    );
+  const fresh = serialize(applyFeature(afterBase, thickenFeature));
+  const restored = serialize(
+    applyFeature(
+      applyFeature(
+        createOccAuthoringState(oc, {
+          sketches: [base.sketch],
+          previousFeatureTopologyLineage:
+            createOccFeatureTopologyLineageMap(fresh),
+        }),
+        baseFeature,
+      ),
+      thickenFeature,
+    ),
+  );
+
+  expect(
+    fresh.find((record) => record.featureId === thickenFeatureId)?.outputs[0]
+      ?.sourceTargets,
+    "premise: the thicken output has no witness for any subtopology",
+  ).toEqual([]);
+  expect(
+    restored,
+    "A restore of a fresh evaluation's lineage keeps every output as evaluated.",
+  ).toEqual(fresh);
+}, 15000);
+
 test("durable naming qualification invalidates an edge deleted by an upstream sketch topology edit instead of silently remapping", async () => {
   const oc = await getDefaultOpenCascadeInstance();
   const baseFeatureId = featureId("qualification_sketch_deleted_edge_base");

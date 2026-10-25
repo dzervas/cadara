@@ -933,16 +933,70 @@ function reconcileStageOutputIds(input: {
 }
 
 /**
- * A restore keeps a persisted output's token and topology ids when minting
- * with that token reproduces the persisted output exactly (ids, source
- * targets, witnesses), so reopening a document rewrites none of its lineage
- * (cadara-797). Any difference advances the token as an in-session rebuild does.
+ * A restore keeps a persisted output's token and topology ids when it
+ * reproduces the persisted output exactly (ids, source targets, witnesses), so
+ * reopening a document rewrites none of its lineage (cadara-797). Any
+ * difference advances the token as an in-session rebuild does.
+ *
+ * Two forms reproduce. A fresh evaluation (no previous stage or lineage) keeps
+ * its evaluated ids, native hash ids for subtopologies no witness preserves
+ * included, and the restore keeps an output whose raw evaluation equals it
+ * with those ids (cadara-phi0). A freshly built file then reopens unchanged:
+ * the first feature evaluates from the same authored inputs as the fresh
+ * build, so its raw output equals the stored one, and the later features'
+ * raw outputs equal theirs too. That later equality is measured on the landing
+ * fixtures, not proven (a kept body is reconciled onto itself and drops its
+ * OCAF naming); a mismatch falls back to minting below. An output a
+ * reconciliation wrote (minted ids) reproduces when minting with its stored
+ * token gives them.
+ *
+ * Rule: a restore reproduces a persisted output exactly (either form); an
+ * in-session rebuild always re-mints unwitnessed ids and advances the token;
+ * both forms are valid persisted forms. A rebuild therefore names those
+ * subtopologies differently from a cold open of the same document, by
+ * position only.
  */
 function reproducePersistedStageOutput(
   previous: AuthoredTopologyLineageOutput,
   current: OccTopologyStageOutput,
   preservedTargetsByCurrentKey: OccSemanticStageReconciliation["preservedTargetsByCurrentKey"],
 ) {
+  if (
+    isSameTopologyLineageOutput(
+      previous,
+      serializeOccTopologyStageOutput(previous.outputSlot, current),
+    )
+  ) {
+    // Every id is kept; reconciling to itself gives the body the form any
+    // reconciled output has (no seeded naming, native ids aliased).
+    return reconcileStageOutputIds({
+      previous: {
+        bodyId: previous.outputSlot,
+        topologyToken: previous.topologyToken,
+      },
+      current,
+      preservedTargetsByCurrentKey: new Map(
+        [
+          ...current.body.topology.faceIds.map((faceId) => ({
+            kind: "face" as const,
+            bodyId: current.body.bodyId,
+            faceId,
+          })),
+          ...current.body.topology.edgeIds.map((edgeId) => ({
+            kind: "edge" as const,
+            bodyId: current.body.bodyId,
+            edgeId,
+          })),
+          ...current.body.topology.vertexIds.map((vertexId) => ({
+            kind: "vertex" as const,
+            bodyId: current.body.bodyId,
+            vertexId,
+          })),
+        ].map((target) => [getOccDurableRefKey(target), target]),
+      ),
+      reusePreviousTopologyToken: true,
+    });
+  }
   // Planned ids first: minting with an already used token can collide with a
   // preserved id when the output changed, which reconciliation rejects.
   const planned = planSemanticStageTopologyIds({

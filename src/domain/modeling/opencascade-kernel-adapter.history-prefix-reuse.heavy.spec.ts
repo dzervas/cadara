@@ -26,6 +26,10 @@
 // evaluation re-mints fallback ids `…_t0019_1` -> `…_t0020_1`, see the
 // body-rename heavy spec) and stamp their revision; comparisons normalize
 // both. Invalidated references depend on session history and are excluded.
+// Nor on the id form (cadara-phi0): a cold open keeps a reproduced output's
+// native hash ids where an in-session rebuild re-mints them, so normalized
+// comparisons first rename the session's ids to the cold open's through a
+// positional correspondence (test/helpers/topology-id-correspondence.ts).
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
@@ -80,6 +84,10 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import {
+  createTopologyIdCorrespondence,
+  renameTopologyIds,
+} from "../../../test/helpers/topology-id-correspondence";
 
 let occ: Promise<OpenCascadeInstance> | null = null;
 /** A production OCC adapter holding `document`. */
@@ -235,17 +243,20 @@ const sorted = (values: readonly unknown[]) =>
 
 /** The evaluated model: bodies, objects, features, entities, live references
  * (and invalidated ones too when `tokens` is "exact"), diagnostics, and a
- * digest of every render record's geometry. */
+ * digest of every render record's geometry. `rename` maps topology ids first. */
 function evaluatedModel(
   snapshot: WorkspaceSnapshot,
   tokens: TokenComparison = "normalized",
+  rename: (text: string) => string = (text) => text,
 ) {
   const value = JSON.parse(
     normalize(
-      JSON.stringify({
-        ...snapshot,
-        document: { ...snapshot.document, render: null },
-      }),
+      rename(
+        JSON.stringify({
+          ...snapshot,
+          document: { ...snapshot.document, render: null },
+        }),
+      ),
       tokens,
     ),
   ) as WorkspaceSnapshot;
@@ -264,7 +275,9 @@ function evaluatedModel(
     geometry: snapshot.document.render.records
       .map(
         ({ geometry, ...record }) =>
-          `${normalize(JSON.stringify(record), tokens)} ${createHash("sha256")
+          `${normalize(rename(JSON.stringify(record)), tokens)} ${createHash(
+            "sha256",
+          )
             .update(JSON.stringify(geometry))
             .digest("hex")}`,
       )
@@ -290,9 +303,10 @@ const previewModel = (preview: Awaited<ReturnType<Session["preview"]>>) => ({
 const authored = (
   document: AuthoredModelDocument,
   tokens: TokenComparison = "normalized",
+  rename: (text: string) => string = (text) => text,
 ) =>
   JSON.parse(
-    normalize(JSON.stringify(document), tokens),
+    normalize(rename(JSON.stringify(document)), tokens),
   ) as AuthoredModelDocument;
 
 /**
@@ -341,30 +355,37 @@ async function expectColdEquivalent(
   );
   const cold = await open(expected);
   try {
+    const live = {
+      snapshot: await session.snapshot(),
+      document: withoutRetainedEvaluation(await session.exported(), unapplied),
+    };
+    const reference = {
+      snapshot: await cold.snapshot(),
+      document: withoutRetainedEvaluation(await cold.exported(), unapplied),
+    };
+    // Exact comparisons keep the id form; normalized ones accept either valid
+    // form at each position, paired one to one per position.
+    const correspondence =
+      tokens === "exact"
+        ? new Map<string, string>()
+        : createTopologyIdCorrespondence(live, reference);
+    const rename = (text: string) => renameTopologyIds(text, correspondence);
     expect(
       withoutRetainedEvaluation(
-        evaluatedModel(await session.snapshot(), tokens),
+        evaluatedModel(live.snapshot, tokens, rename),
         unapplied,
       ),
       `${step}: the session evaluates the same model as a cold open`,
     ).toEqual(
       withoutRetainedEvaluation(
-        evaluatedModel(await cold.snapshot(), tokens),
+        evaluatedModel(reference.snapshot, tokens),
         unapplied,
       ),
     );
     expect(
-      withoutRetainedEvaluation(
-        authored(await session.exported(), tokens),
-        unapplied,
-      ),
+      authored(live.document, tokens, rename),
       `${step}: and exports the same authored document and lineage`,
-    ).toEqual(
-      withoutRetainedEvaluation(
-        authored(await cold.exported(), tokens),
-        unapplied,
-      ),
-    );
+    ).toEqual(authored(reference.document, tokens));
   } finally {
     cold.adapter.dispose();
   }

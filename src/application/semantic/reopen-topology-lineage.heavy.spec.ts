@@ -11,9 +11,8 @@
 // wheel (866 lineage leaves, ~300 ms of Automerge transact in the browser).
 //
 // The stored basis is the wheel after one write by the current code. The
-// shipped file still holds ids from fresh feature evaluation (native hash ids
-// for edges/vertices no lineage witness preserves), which the first restore
-// re-mints once.
+// shipped file is freshly built (native hash ids for edges/vertices no lineage
+// witness preserves); a restore keeps those ids (cadara-phi0).
 import { readFile } from "node:fs/promises";
 import * as Automerge from "@automerge/automerge/slim";
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
@@ -119,13 +118,17 @@ async function openCopyAndRenameOnce(
   }
 }
 
-test("the first write after reopening a stored wheel leaves its topology lineage unchanged", async () => {
-  const file = JSON.parse(
+async function readWheelFile() {
+  return JSON.parse(
     await readFile(
       new URL("../../../landing/examples/wheel/model.cadara", import.meta.url),
       "utf8",
     ),
   ) as AuthoredModelDocument;
+}
+
+test("the first write after reopening a stored wheel leaves its topology lineage unchanged", async () => {
+  const file = await readWheelFile();
   const written = (await openCopyAndRenameOnce(file, "Wheel (written once)"))
     .after;
 
@@ -137,5 +140,30 @@ test("the first write after reopening a stored wheel leaves its topology lineage
   expect(keyedLineage(reopened.after)).toEqual(keyedLineage(written));
   // The first write's Automerge change stays a label + revision edit (a few
   // hundred bytes), not a rewrite of the witness set (hundreds of kilobytes).
+  expect(reopened.firstWriteBytes).toBeLessThan(4_096);
+}, 600_000);
+
+// cadara-phi0: a freshly built file (lineage written by a fresh evaluation,
+// with native hash ids for edges/vertices no witness preserves) reopens with
+// the same bound. Without a stored lineage the restore is a fresh evaluation,
+// so the first write persists the freshly built form.
+test("the first write after reopening a freshly built wheel leaves its topology lineage unchanged", async () => {
+  const withoutLineage = await readWheelFile();
+  delete withoutLineage.topologyLineage;
+  const built = (
+    await openCopyAndRenameOnce(withoutLineage, "Wheel (freshly built)")
+  ).after;
+  // extrude-1's first edge has no lineage witness: a restore that re-mints
+  // unwitnessed ids writes it as `…_t0002_1`.
+  expect(
+    built.topologyLineage
+      ?.find((record) => record.featureId === "feature_extrude-1")
+      ?.outputs.find((output) => output.outputSlot === wheelBodyId)?.topology
+      .edgeIds[0],
+    "premise: the fresh build keeps the native hash id of extrude-1's unwitnessed first edge",
+  ).toMatch(/^edge_body_feature_extrude-1_g[0-9a-f]+$/);
+
+  const reopened = await openCopyAndRenameOnce(built, "Wheel (reopened)");
+  expect(keyedLineage(reopened.after)).toEqual(keyedLineage(built));
   expect(reopened.firstWriteBytes).toBeLessThan(4_096);
 }, 600_000);

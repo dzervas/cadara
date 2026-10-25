@@ -11,6 +11,9 @@
 // same file already differ there). Comparisons therefore normalize revision
 // ids and topology tokens and compare the evaluated model with its live
 // references; invalidated references are checked for the body's name only.
+// A rebuild also re-mints the native hash ids a restore keeps for an output it
+// reproduces (cadara-phi0), so the rebuild comparison first renames its ids
+// to the reopened model's through a positional correspondence.
 import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
@@ -39,6 +42,10 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
+import {
+  createTopologyIdCorrespondence,
+  renameTopologyIds,
+} from "../../../test/helpers/topology-id-correspondence";
 
 let occ: Promise<OpenCascadeInstance> | null = null;
 /** A production OCC adapter (`public/cadara-occ`) holding `document`. */
@@ -107,12 +114,18 @@ async function open(document: AuthoredModelDocument) {
 const sorted = (values: readonly unknown[]) =>
   values.map((value) => JSON.stringify(value)).sort();
 
-/** The snapshot without render meshes, revision stamps or topology tokens. */
-function normalized(snapshot: WorkspaceSnapshot) {
-  const text = JSON.stringify({
-    ...snapshot,
-    document: { ...snapshot.document, render: null },
-  })
+/** The snapshot without render meshes, revision stamps or topology tokens;
+ * `rename` maps topology ids first. */
+function normalized(
+  snapshot: WorkspaceSnapshot,
+  rename: (text: string) => string = (text) => text,
+) {
+  const text = rename(
+    JSON.stringify({
+      ...snapshot,
+      document: { ...snapshot.document, render: null },
+    }),
+  )
     .replace(/rev_\d+/g, "rev")
     .replace(/_t\d+_(\d+)/g, "_t_$1")
     .replace(/"t\d+"/g, '"t"');
@@ -132,8 +145,11 @@ function normalized(snapshot: WorkspaceSnapshot) {
 }
 
 /** The evaluated model: bodies, objects, features, entities, live references. */
-function liveModel(snapshot: WorkspaceSnapshot) {
-  const value = normalized(snapshot);
+function liveModel(
+  snapshot: WorkspaceSnapshot,
+  rename?: (text: string) => string,
+) {
+  const value = normalized(snapshot, rename);
   return {
     bodies: value.document.bodies,
     objects: value.presentation.objects,
@@ -193,8 +209,12 @@ async function expectRebuildAndReopenEquivalent(
 
   await session.setCursor();
   const rebuilt = await session.snapshot();
+  const correspondence = createTopologyIdCorrespondence(
+    { snapshot: rebuilt, document: await session.exported() },
+    { snapshot: renamed, document },
+  );
   expect(
-    liveModel(rebuilt),
+    liveModel(rebuilt, (text) => renameTopologyIds(text, correspondence)),
     "a full rebuild of the renamed document evaluates the same model",
   ).toEqual(liveModel(renamed));
   expect(staleReferenceLabels(rebuilt, bodyId, label)).toEqual([]);

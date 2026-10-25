@@ -17,10 +17,12 @@ import { invokeCliRecipe } from "../../test/helpers/cli-recipe-process";
 // that keyed comparison removed, so they no longer reproduce cadara-3sq.1;
 // authored-document-equality.spec.ts and document-repository.spec.ts carry
 // the keyed-order regression. The rows still guard save/reopen identity.
+// The digest follows cadara-phi0's regeneration of the bracket (lineage and
+// UUIDs only); re-checked: these rows and the 226 pin pass unchanged.
 const root = resolve(import.meta.dirname, "../..");
 const bracketSource = resolve(root, "landing/examples/bracket/model.cadara");
 const BRACKET_SHA256 =
-  "0db9966c73601e0376a94455ca8131e77e6aaece6b3b99aae2315de73115d792";
+  "b11a65cd74de26695a139db15c913664320e36e322d8620532e84ae342854caf";
 /** Revision-sensitive fallback edge/vertex ids are renumbered by every rebuild. */
 const FALLBACK_TOPOLOGY_ID = /_t\d{4}_\d+$/;
 
