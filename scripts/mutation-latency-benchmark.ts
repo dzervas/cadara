@@ -87,6 +87,8 @@ const MUTATION_KINDS = [
   "cursorMove",
   "undo",
   "redo",
+  "depthUndo",
+  "depthRedo",
   "save",
 ] as const;
 type MutationKind = (typeof MUTATION_KINDS)[number];
@@ -777,6 +779,30 @@ async function addPlane(session: Session, timed: boolean) {
   return null;
 }
 
+/**
+ * Reopens the last literal-depth extrude and fills a new depth (10% deeper
+ * than the opened document's, or that original); resolves to its Commit
+ * button.
+ */
+function prepareDepthEdit(session: Session) {
+  const { page } = session;
+  const extrude = lastLiteralDepthExtrude(session.document);
+  if (!extrude) return "no extrude with a literal depth";
+  const label = `Select ${extrude}. Double-click to reopen.`;
+  let original: number | null = null;
+  return async (deeper: boolean) => {
+    await page
+      .getByRole("button", { name: label, exact: true })
+      .dblclick({ force: true });
+    const depth = page.locator("#extrude-depth");
+    await depth.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
+    original ??= Number(await depth.inputValue());
+    const next = deeper ? original * 1.1 : original;
+    await depth.fill(String(Number(next.toFixed(4))));
+    return page.getByRole("button", { name: "Commit", exact: true });
+  };
+}
+
 async function waitForInspectorClosed(page: Page, inputId: string) {
   return waitInPage(
     page,
@@ -840,28 +866,43 @@ async function prepareMutation(
       };
     }
     case "extrudeDepth": {
-      const extrude = lastLiteralDepthExtrude(session.document);
-      if (!extrude) return "no extrude with a literal depth";
-      const label = `Select ${extrude}. Double-click to reopen.`;
-      let original: number | null = null;
+      const editDepth = prepareDepthEdit(session);
+      if (typeof editDepth === "string") return editDepth;
       return async (_session, index) => {
-        await page
-          .getByRole("button", { name: label, exact: true })
-          .dblclick({ force: true });
-        const depth = page.locator("#extrude-depth");
-        await depth.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-        original ??= Number(await depth.inputValue());
-        const next = index % 2 === 0 ? original * 1.1 : original;
-        await depth.fill(String(Number(next.toFixed(4))));
-        const commit = page.getByRole("button", {
-          name: "Commit",
-          exact: true,
-        });
+        const commit = await editDepth(index % 2 === 0);
         return timedSample(
           session,
           () => commit.click(),
           () => waitForInspectorClosed(page, "extrude-depth"),
         );
+      };
+    }
+    // Undo/Redo of a geometric change: the history restores the document
+    // (cadara-jxe3), unlike the body rename that undo/redo time.
+    case "depthUndo":
+    case "depthRedo": {
+      const editDepth = prepareDepthEdit(session);
+      if (typeof editDepth === "string") return editDepth;
+      const undoButton = page.locator('button[data-tool-id="undo"]');
+      const redoButton = page.locator('button[data-tool-id="redo"]');
+      const untimed = async (act: () => Promise<void>) => {
+        const before = await historySignature(page);
+        const since = now();
+        await act();
+        await waitForHistoryChange(page, before, since);
+      };
+      return async (_session, index) => {
+        // Undo always returns to the original depth, so each edit deepens.
+        const commit = await editDepth(kind === "depthUndo" || index % 2 === 0);
+        await untimed(async () => {
+          await commit.click();
+          await waitForInspectorClosed(page, "extrude-depth");
+        });
+        if (kind === "depthUndo") {
+          return timedSample(session, () => undoButton.click(), null);
+        }
+        await untimed(() => undoButton.click());
+        return timedSample(session, () => redoButton.click(), null);
       };
     }
     case "variableEdit": {

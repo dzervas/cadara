@@ -84,6 +84,7 @@ import {
   withAutoBodyAppearances,
 } from "@/contracts/modeling/body-appearance";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
 import type {
   BakedGeometryAssetReference,
@@ -138,6 +139,7 @@ import {
   resumeOccAuthoringStateFromCheckpoint,
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
+  type OccFeatureStageCheckpoint,
 } from "@/domain/modeling/occ/authoring-state";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import {
@@ -205,8 +207,11 @@ import {
 } from "@/domain/modeling/occ/topology";
 import {
   createOccFeatureTopologyLineageMap,
+  isSameTopologyLineageOutput,
   mergeOccFeatureTopologyStageMaps,
   serializeOccFeatureTopologyLineage,
+  serializeOccTopologyStageOutput,
+  type OccFeatureTopologyStage,
 } from "@/domain/modeling/occ/topology-stage";
 import {
   getExtrudeFeatureExtent,
@@ -1080,6 +1085,126 @@ function createAuthoredHistoryRestoreOrder(
   }
 
   return order;
+}
+
+/**
+ * What a restore solved a sketch record from (cadara-jxe3): the document
+ * context, the authored sketch and its resolved dimensions and, when its
+ * placement or projected references read upstream geometry (a face support or
+ * external references), every history item before it. A restore whose inputs
+ * for that sketch are equal solves an equal record (but for the revision it
+ * stamps), so it reuses the record.
+ */
+interface RestoredSketchInputs {
+  sketch: string;
+  history: readonly string[] | null;
+}
+
+function isSameRestoredSketchInputs(
+  left: RestoredSketchInputs | undefined,
+  right: RestoredSketchInputs,
+) {
+  if (left === undefined || left.sketch !== right.sketch) return false;
+  if (left.history === null || right.history === null) {
+    return left.history === right.history;
+  }
+  return (
+    left.history.length === right.history.length &&
+    left.history.every((item, index) => item === right.history![index])
+  );
+}
+
+/** The RestoredSketchInputs key of `sketch` itself. Keys are stable JSON:
+ * stored documents do not keep object key order. */
+function createRestoredSketchKey(
+  document: AuthoredModelDocument,
+  sketch: AuthoredModelDocument["sketches"][number],
+) {
+  return JSON.stringify(
+    stableJsonValue([
+      document.documentId,
+      document.settings,
+      sketch,
+      resolveSketchDimensionValues({
+        definition: sketch.definition,
+        variables: document.variables,
+      }),
+    ]),
+  );
+}
+
+/**
+ * The RestoredSketchInputs history item of `feature`: what its evaluation
+ * before a later sketch depends on, its persisted topology lineage included.
+ */
+function createRestoredSketchHistoryFeatureItem(
+  document: AuthoredModelDocument,
+  feature: OccAuthoringFeatureRecord,
+  deferred: boolean,
+  lineage: ReturnType<typeof createOccFeatureTopologyLineageMap>,
+) {
+  const persisted = lineage.get(feature.featureId);
+  // Outputs and their sources are keyed records in stored documents.
+  const byKey = <T>(records: readonly T[], key: (record: T) => string) =>
+    [...records].sort((left, right) =>
+      key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0,
+    );
+  return JSON.stringify(
+    stableJsonValue([
+      feature.featureId,
+      feature.label ?? null,
+      feature.suppressed,
+      deferred,
+      feature.definition,
+      resolveFeatureDefinitionValues({
+        definition: feature.definition,
+        variables: document.variables,
+      }),
+      persisted
+        ? byKey(persisted.outputs, (output) => output.outputSlot).map(
+            (output) => ({
+              ...output,
+              sourceTargets: byKey(
+                output.sourceTargets,
+                (source) => source.sourceKey,
+              ),
+            }),
+          )
+        : null,
+    ]),
+  );
+}
+
+/**
+ * Whether `stage`, evaluated by a live runtime, holds the outputs that
+ * `lineage` persists for its feature, as a restore that keeps every persisted
+ * output it reproduces exactly (cadara-797) mints them.
+ */
+function isStagePersistedInLineage(
+  stage: OccFeatureTopologyStage | undefined,
+  lineage: ReturnType<typeof createOccFeatureTopologyLineageMap>,
+) {
+  if (!stage) return false;
+  // Outputs are keyed by slot in stored documents.
+  const persisted = new Map(
+    (lineage.get(stage.featureId)?.outputs ?? []).map((output) => [
+      output.outputSlot,
+      output,
+    ]),
+  );
+  return (
+    stage.outputs.size === persisted.size &&
+    [...stage.outputs].every(([outputSlot, output]) => {
+      const stored = persisted.get(outputSlot);
+      return (
+        stored !== undefined &&
+        isSameTopologyLineageOutput(
+          serializeOccTopologyStageOutput(outputSlot, output),
+          stored,
+        )
+      );
+    })
+  );
 }
 
 async function resolveGeometryAssetBlobs(
@@ -1968,6 +2093,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     string,
     CachedNativeTopologyBodyPayload
   >();
+  /** The inputs of each sketch record a restore solved (cadara-jxe3). */
+  private readonly restoredSketchInputs = new WeakMap<
+    SketchSnapshotRecord,
+    RestoredSketchInputs
+  >();
+  /**
+   * Checkpoints a cold evaluation of their document made: a restore or a
+   * hydrated model checkpoint. A forward rebuild evaluates against the
+   * session's previous references, so its checkpoints hold invalidations a
+   * cold open never has, and a restore must not resume from them (cadara-jxe3).
+   */
+  private readonly coldEvaluatedCheckpoints =
+    new WeakSet<OccFeatureStageCheckpoint>();
 
   constructor(options: OpenCascadeKernelAdapterOptions) {
     this.createSolverAdapter = options.createSolverAdapter;
@@ -2829,6 +2967,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ),
     });
     if (hydrated) {
+      this.recordColdEvaluatedCheckpoints(hydrated);
       // Same identity counters as the cold restore: the document's revision,
       // never lowering the kernel's high-water mark.
       this.replaceRuntimeState({
@@ -2843,6 +2982,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
     // A restore that never reports its rebuild is not known to be complete.
     let partial = true;
+    // The published checkpoint is a cold evaluation of the document.
     const restored = await this.restoreAuthoredModelDocumentOnMainThread(
       document,
       diagnostics,
@@ -2851,6 +2991,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         onRebuilt: (rebuild) => {
           partial = rebuild.partial;
         },
+        resumeRuntimePrefix: false,
       },
     );
     await publishModelCheckpoint({
@@ -2872,8 +3013,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       /** cadara-3sq.6: whether the history rebuild stopped early or deferred features. */
       onRebuilt?: (rebuild: { partial: boolean }) => void;
       onProgress?: AuthoredDocumentRestoreOptions["onProgress"];
+      /** False replays the whole document without the live runtime's prefix. */
+      resumeRuntimePrefix?: boolean;
     } = {},
   ): Promise<OccKernelRuntimeState> {
+    // cadara-jxe3: the live runtime of this document lends the restore the
+    // sketch records and feature checkpoints a replay would evaluate again.
+    const live =
+      options.resumeRuntimePrefix !== false &&
+      this.runtimeState?.authoringState.documentId === document.documentId
+        ? this.runtimeState.authoringState
+        : null;
+    const liveSketchById = new Map(
+      (live?.sketches ?? []).map((sketch) => [sketch.sketchId, sketch]),
+    );
     const oc = await this.loadOpenCascadeInstance();
     const assetBlobs = await resolveGeometryAssetBlobs(document, assetResolver);
     const restoreDiagnostics = [...diagnostics];
@@ -2930,8 +3083,36 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         projectionState,
         features.map((feature) => feature.definition),
       );
-      const pendingProjectionFeatures: OccAuthoringFeatureRecord[] = [];
+      // Projection history that only a re-solved sketch needs evaluated:
+      // features to apply and reused sketches to append, in history order.
+      const pendingProjection: (
+        | { kind: "feature"; feature: OccAuthoringFeatureRecord }
+        | { kind: "sketch"; sketch: SketchSnapshotRecord }
+      )[] = [];
       const failedProjectionFeatures: FailedFeatureRecord[] = [];
+      const appendProjectionSketch = (sketch: SketchSnapshotRecord) => {
+        projectionState = {
+          ...projectionState,
+          sketches: [...projectionState.sketches, sketch],
+          // The next sketch may project any already-restored sketch, not future history.
+          cursor: { kind: "sketch", sketchId: sketch.sketchId },
+        };
+      };
+      // RestoredSketchInputs history items, built only once a sketch that
+      // reads upstream geometry needs them.
+      const sketchHistory: string[] = [];
+      const pendingSketchHistory: (() => string)[] = [
+        () =>
+          JSON.stringify(
+            stableJsonValue([document.bodyLabels, document.assets]),
+          ),
+      ];
+      const readSketchHistory = () => {
+        for (const item of pendingSketchHistory.splice(0)) {
+          sketchHistory.push(item());
+        }
+        return [...sketchHistory];
+      };
 
       for (const item of historyOrder) {
         if (item.kind === "sketch") {
@@ -2940,7 +3121,35 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             continue;
           }
 
-          for (const feature of pendingProjectionFeatures.splice(0)) {
+          const sketchKey = createRestoredSketchKey(document, authoredSketch);
+          const inputs: RestoredSketchInputs = {
+            sketch: sketchKey,
+            history:
+              authoredSketch.plane.support.kind === "face" ||
+              authoredSketch.definition.references.length > 0
+                ? readSketchHistory()
+                : null,
+          };
+          pendingSketchHistory.push(() => sketchKey);
+          const liveSketch = liveSketchById.get(authoredSketch.sketchId);
+          if (
+            liveSketch &&
+            isSameRestoredSketchInputs(
+              this.restoredSketchInputs.get(liveSketch),
+              inputs,
+            )
+          ) {
+            sketches.push(liveSketch);
+            pendingProjection.push({ kind: "sketch", sketch: liveSketch });
+            continue;
+          }
+
+          for (const pending of pendingProjection.splice(0)) {
+            if (pending.kind === "sketch") {
+              appendProjectionSketch(pending.sketch);
+              continue;
+            }
+            const { feature } = pending;
             if (findBlockingFeature(failedProjectionFeatures, feature)) {
               failedProjectionFeatures.push(createFailedFeatureRecord(feature));
               continue;
@@ -2968,29 +3177,35 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             authoredSketch,
             projectionState,
           );
+          this.restoredSketchInputs.set(rebuiltSketch, inputs);
           sketches.push(rebuiltSketch);
-          projectionState = {
-            ...projectionState,
-            sketches: [...projectionState.sketches, rebuiltSketch],
-            // The next sketch may project any already-restored sketch, not future history.
-            cursor: { kind: "sketch", sketchId: rebuiltSketch.sketchId },
-          };
+          appendProjectionSketch(rebuiltSketch);
           continue;
         }
 
         const feature = featureRecordById.get(item.featureId);
         if (feature) {
+          const deferred =
+            options.deferredFeatureIds?.has(feature.featureId) ?? false;
+          pendingSketchHistory.push(() =>
+            createRestoredSketchHistoryFeatureItem(
+              document,
+              feature,
+              deferred,
+              previousFeatureTopologyLineage,
+            ),
+          );
           if (feature.suppressed) {
             failedProjectionFeatures.push(createFailedFeatureRecord(feature));
             continue;
           }
 
-          if (options.deferredFeatureIds?.has(feature.featureId)) {
+          if (deferred) {
             failedProjectionFeatures.push(createFailedFeatureRecord(feature));
             continue;
           }
 
-          pendingProjectionFeatures.push(feature);
+          pendingProjection.push({ kind: "feature", feature });
         }
       }
 
@@ -3035,10 +3250,32 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           cursor: document.cursor,
           deferredFeatureIds: options.deferredFeatureIds,
           onProgress: options.onProgress,
+          // A live stage stands for the replay's only where a cold
+          // evaluation made it and the document persists exactly its outputs,
+          // which a cold restore then keeps.
+          resumeFrom: live
+            ? {
+                state: live,
+                isReusable: (feature) => {
+                  const stage = live.featureTopologyStages.get(
+                    feature.featureId,
+                  );
+                  return (
+                    stage?.checkpoint !== undefined &&
+                    this.coldEvaluatedCheckpoints.has(stage.checkpoint) &&
+                    isStagePersistedInLineage(
+                      stage,
+                      previousFeatureTopologyLineage,
+                    )
+                  );
+                },
+              }
+            : undefined,
         },
       );
       options.onRebuilt?.(rebuilt);
       const rebuiltAuthoringState = rebuilt.state;
+      this.recordColdEvaluatedCheckpoints(rebuiltAuthoringState);
       authoringState = {
         ...rebuiltAuthoringState,
         diagnostics: mergeModelingDiagnostics(
@@ -3079,6 +3316,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       throw new Error("OpenCascade restore completed without a runtime state.");
     }
     return restoredRuntimeState;
+  }
+
+  private recordColdEvaluatedCheckpoints(state: OccAuthoringState) {
+    for (const { checkpoint } of state.featureTopologyStages.values()) {
+      if (checkpoint) this.coldEvaluatedCheckpoints.add(checkpoint);
+    }
   }
 
   async exportAuthoredModelDocument(
@@ -3517,6 +3760,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor?: OccAuthoringState["cursor"];
       deferredFeatureIds?: ReadonlySet<FeatureId>;
       onProgress?: AuthoredDocumentRestoreOptions["onProgress"];
+      /**
+       * Resumes from the checkpoints of `state` (a live runtime that a
+       * restore into `runtimeState` replaces) instead of `runtimeState`'s,
+       * for the features `isReusable` admits (cadara-jxe3).
+       */
+      resumeFrom?: {
+        state: OccAuthoringState;
+        isReusable: (feature: OccAuthoringFeatureRecord) => boolean;
+      };
     },
   ): RebuildAttempt {
     const features = input.features ?? runtimeState.authoringState.features;
@@ -3602,19 +3854,23 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cursor,
       baseState.historyOrder,
     );
+    const checkpointState =
+      input.resumeFrom?.state ?? runtimeState.authoringState;
     const reusable = deferredFeatureIds
       ? null
       : findReusableOccFeatureCheckpoint(
-          runtimeState.authoringState.featureTopologyStages,
+          checkpointState.featureTopologyStages,
           baseState,
           appliedFeatures,
-          (feature) => !dependencyOrderDiagnostics.has(feature.featureId),
+          (feature) =>
+            !dependencyOrderDiagnostics.has(feature.featureId) &&
+            (input.resumeFrom?.isReusable(feature) ?? true),
         );
     let current = reusable
       ? resumeOccAuthoringStateFromCheckpoint(
           baseState,
           reusable.checkpoint,
-          runtimeState.authoringState.featureTopologyStages,
+          checkpointState.featureTopologyStages,
           reusable.prefixFeatures,
           runtimeState.authoringState.referenceState,
         )
@@ -3733,6 +3989,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       this.releaseIntermediateState(previous, [
         current,
         runtimeState.authoringState,
+        ...(input.resumeFrom ? [input.resumeFrom.state] : []),
       ]);
     }
     // Nothing evaluated means nothing to count: no "0/0" update.

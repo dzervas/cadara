@@ -219,6 +219,23 @@ function expectNamingOwnersDeleted(naming: NamingOwners) {
   }
 }
 
+/**
+ * `document` with every sketch relabelled. A restore reuses the runtime's
+ * record of an unchanged sketch (cadara-jxe3), so restoring this solves each
+ * sketch again.
+ */
+function withSketchesToSolve<T extends { sketches: { label: string }[] }>(
+  document: T,
+): T {
+  return {
+    ...document,
+    sketches: document.sketches.map((sketch) => ({
+      ...sketch,
+      label: `${sketch.label} (solved again)`,
+    })),
+  };
+}
+
 function reachableErrors(error: unknown): unknown[] {
   if (!(error instanceof AggregateError)) return [error];
   return [error, ...error.errors.flatMap(reachableErrors)];
@@ -910,7 +927,7 @@ test("restore releases successful and asynchronously rejected projection ownersh
 
   releaseDiscardedSpy.mockReset();
   await expect(
-    rejected.restoreAuthoredModelDocument(bodyDocument),
+    rejected.restoreAuthoredModelDocument(withSketchesToSolve(bodyDocument)),
   ).rejects.toThrow("injected asynchronous sketch rejection");
   expect(
     releaseDiscardedSpy.mock.calls.some(([, retained]) =>
@@ -1044,7 +1061,9 @@ test("serialized restore prevents a deferred solver from racing a competing repl
   });
 
   solver.suspended = true;
-  const restoring = adapter.restoreAuthoredModelDocument(document);
+  const restoring = adapter.restoreAuthoredModelDocument(
+    withSketchesToSolve(document),
+  );
   await solver.entered.promise;
   let competingSettled = false;
   const competing = adapter

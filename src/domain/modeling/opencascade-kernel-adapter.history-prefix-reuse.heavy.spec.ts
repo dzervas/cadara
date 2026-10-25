@@ -16,6 +16,12 @@
 // document when a face sketch follows the first item it changes, since a
 // restore re-places that sketch on the moved face.
 //
+// cadara-jxe3: a restore (Undo/Redo, a peer's write) takes the runtime's
+// sketch records and feature checkpoints for the unchanged prefix, so the
+// next snapshot reuses their region meshes and native body payloads. A
+// restore must equal a cold open with exact topology tokens (cadara-797), and
+// still re-places a face sketch whose supporting face moved.
+//
 // Cold opens and rebuilds are not a fixed point on topology tokens (each
 // evaluation re-mints fallback ids `…_t0019_1` -> `…_t0020_1`, see the
 // body-rename heavy spec) and stamp their revision; comparisons normalize
@@ -36,6 +42,23 @@ vi.mock("@/domain/modeling/occ/features", async (importOriginal) => {
     ) => {
       featureRuns.count += 1;
       return actual.executeOccFeature(...args);
+    },
+  };
+});
+// Counts region profile faces built (snapshot meshing and feature profiles).
+const regionFaces = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@/domain/modeling/occ/sketch-profile", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/domain/modeling/occ/sketch-profile")
+    >();
+  return {
+    ...actual,
+    buildRegionProfileFace: (
+      ...args: Parameters<typeof actual.buildRegionProfileFace>
+    ) => {
+      regionFaces.count += 1;
+      return actual.buildRegionProfileFace(...args);
     },
   };
 });
@@ -106,6 +129,8 @@ async function open(document: AuthoredModelDocument) {
     adapter,
     snapshot,
     exported: () => adapter.exportAuthoredModelDocument(document.documentId),
+    restore: (restored: AuthoredModelDocument) =>
+      adapter.restoreAuthoredModelDocument(restored),
     async setCursor(cursor: AuthoredModelDocument["cursor"]) {
       accepted(
         await adapter.setFeatureCursor({ ...(await mutation()), cursor }),
@@ -196,23 +221,32 @@ const runtimeBodies = (session: Session) =>
     }
   ).runtimeState.authoringState.bodies;
 
-const normalize = (text: string) =>
-  text
-    .replace(/rev_\d+/g, "rev")
-    .replace(/_t\d+_(\d+)/g, "_t_$1")
-    .replace(/"t\d+"/g, '"t"');
+/** Topology tokens are normalized unless `tokens` is "exact" (restores). */
+type TokenComparison = "normalized" | "exact";
+const normalize = (text: string, tokens: TokenComparison = "normalized") =>
+  tokens === "exact"
+    ? text.replace(/rev_\d+/g, "rev")
+    : text
+        .replace(/rev_\d+/g, "rev")
+        .replace(/_t\d+_(\d+)/g, "_t_$1")
+        .replace(/"t\d+"/g, '"t"');
 const sorted = (values: readonly unknown[]) =>
   values.map((value) => JSON.stringify(value)).sort();
 
-/** The evaluated model: bodies, objects, features, entities, live references,
- * diagnostics, and a digest of every render record's geometry. */
-function evaluatedModel(snapshot: WorkspaceSnapshot) {
+/** The evaluated model: bodies, objects, features, entities, live references
+ * (and invalidated ones too when `tokens` is "exact"), diagnostics, and a
+ * digest of every render record's geometry. */
+function evaluatedModel(
+  snapshot: WorkspaceSnapshot,
+  tokens: TokenComparison = "normalized",
+) {
   const value = JSON.parse(
     normalize(
       JSON.stringify({
         ...snapshot,
         document: { ...snapshot.document, render: null },
       }),
+      tokens,
     ),
   ) as WorkspaceSnapshot;
   return {
@@ -223,14 +257,14 @@ function evaluatedModel(snapshot: WorkspaceSnapshot) {
     entities: sorted(value.document.entities),
     references: sorted(
       value.document.references.filter(
-        (reference) => reference.invalidation === null,
+        (reference) => tokens === "exact" || reference.invalidation === null,
       ),
     ),
     diagnostics: value.document.diagnostics,
     geometry: snapshot.document.render.records
       .map(
         ({ geometry, ...record }) =>
-          `${normalize(JSON.stringify(record))} ${createHash("sha256")
+          `${normalize(JSON.stringify(record), tokens)} ${createHash("sha256")
             .update(JSON.stringify(geometry))
             .digest("hex")}`,
       )
@@ -253,8 +287,13 @@ const previewModel = (preview: Awaited<ReturnType<Session["preview"]>>) => ({
     .sort(),
 });
 
-const authored = (document: AuthoredModelDocument) =>
-  JSON.parse(normalize(JSON.stringify(document))) as AuthoredModelDocument;
+const authored = (
+  document: AuthoredModelDocument,
+  tokens: TokenComparison = "normalized",
+) =>
+  JSON.parse(
+    normalize(JSON.stringify(document), tokens),
+  ) as AuthoredModelDocument;
 
 /**
  * Drops what a session deliberately keeps for features behind the cursor and a
@@ -293,6 +332,7 @@ async function expectColdEquivalent(
   session: Session,
   expected: AuthoredModelDocument,
   step: string,
+  tokens: TokenComparison = "normalized",
 ) {
   const unapplied = new Set(
     expected.featureOrder.filter(
@@ -303,21 +343,27 @@ async function expectColdEquivalent(
   try {
     expect(
       withoutRetainedEvaluation(
-        evaluatedModel(await session.snapshot()),
+        evaluatedModel(await session.snapshot(), tokens),
         unapplied,
       ),
       `${step}: the session evaluates the same model as a cold open`,
     ).toEqual(
       withoutRetainedEvaluation(
-        evaluatedModel(await cold.snapshot()),
+        evaluatedModel(await cold.snapshot(), tokens),
         unapplied,
       ),
     );
     expect(
-      withoutRetainedEvaluation(authored(await session.exported()), unapplied),
+      withoutRetainedEvaluation(
+        authored(await session.exported(), tokens),
+        unapplied,
+      ),
       `${step}: and exports the same authored document and lineage`,
     ).toEqual(
-      withoutRetainedEvaluation(authored(await cold.exported()), unapplied),
+      withoutRetainedEvaluation(
+        authored(await cold.exported(), tokens),
+        unapplied,
+      ),
     );
   } finally {
     cold.adapter.dispose();
@@ -363,18 +409,30 @@ type TailEdit = (
   featureId: FeatureId;
 }>;
 
+interface TailParameterEdit {
+  featureId: FeatureId;
+  edit: (definition: FeatureDefinition) => FeatureDefinition;
+}
+
+/** `document` with `featureId`'s definition edited by `edit`. */
+const withEditedFeature = (
+  document: AuthoredModelDocument,
+  { featureId, edit }: TailParameterEdit,
+): AuthoredModelDocument => ({
+  ...document,
+  features: document.features.map((feature) =>
+    feature.featureId === featureId
+      ? { ...feature, definition: edit(structuredClone(feature.definition)) }
+      : feature,
+  ),
+});
+
 /** Edits a literal parameter of `featureId`; only it and its suffix rerun. */
 const editFeature =
-  (
-    featureId: FeatureId,
-    edit: (definition: FeatureDefinition) => FeatureDefinition,
-  ): TailEdit =>
+  (parameterEdit: TailParameterEdit): TailEdit =>
   async (session, document) => {
-    const features = document.features.map((feature) =>
-      feature.featureId === featureId
-        ? { ...feature, definition: edit(structuredClone(feature.definition)) }
-        : feature,
-    );
+    const { featureId } = parameterEdit;
+    const { features } = withEditedFeature(document, parameterEdit);
     await session.update(
       featureId,
       features.find((feature) => feature.featureId === featureId)!.definition,
@@ -387,30 +445,45 @@ const editFeature =
     };
   };
 
-const models: Record<string, TailEdit> = {
-  bracket: editFeature("feature_chamfer-1" as FeatureId, (definition) => {
-    const parameters = definition.parameters as unknown as {
-      options: { distance: { value: number } };
-    };
-    parameters.options.distance.value = 0.5;
-    return definition;
-  }),
-  wheel: editFeature("feature_extrude-29" as FeatureId, (definition) => {
-    const parameters = definition.parameters as unknown as {
-      extent: { end: { distance: { value: number } } };
-    };
-    parameters.extent.end.distance.value = 0.3;
-    return definition;
-  }),
+const tailParameterEdits: Record<string, TailParameterEdit> = {
+  bracket: {
+    featureId: "feature_chamfer-1" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        options: { distance: { value: number } };
+      };
+      parameters.options.distance.value = 0.5;
+      return definition;
+    },
+  },
+  wheel: {
+    featureId: "feature_extrude-29" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        extent: { end: { distance: { value: number } } };
+      };
+      parameters.extent.end.distance.value = 0.3;
+      return definition;
+    },
+  },
   // A depth given by a document-variable expression.
-  enclosure: editFeature("feature_extrude-21" as FeatureId, (definition) => {
-    const parameters = definition.parameters as unknown as {
-      extent: { end: { distance: { valueText: string } } };
-    };
-    parameters.extent.end.distance.valueText = "screwHeadHeight + 0.5";
-    return definition;
-  }),
+  enclosure: {
+    featureId: "feature_extrude-21" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        extent: { end: { distance: { valueText: string } } };
+      };
+      parameters.extent.end.distance.valueText = "screwHeadHeight + 0.5";
+      return definition;
+    },
+  },
 };
+const models = Object.fromEntries(
+  Object.entries(tailParameterEdits).map(([model, edit]) => [
+    model,
+    editFeature(edit),
+  ]),
+);
 
 test.each(Object.entries(models))(
   "history edits on the landing %s rerun only the changed suffix and equal a cold open",
@@ -613,7 +686,12 @@ const loadLandingModel = async (model: string) =>
     ),
   ) as AuthoredModelDocument;
 
-test("a document variable edit restores a face sketch that follows the first item it changes, and resumes the prefix when the face sketch precedes it (cadara-afj3)", async () => {
+/**
+ * The landing enclosure with an empty sketch on the top face of its base
+ * feature right after it; nothing consumes the sketch, so only its placement
+ * depends on upstream geometry.
+ */
+async function enclosureWithTopFaceSketch() {
   const source = await loadLandingModel("enclosure");
   const baseFeatureId = "feature_extrude-1" as FeatureId;
   // feature_extrude-1 extrudes the footprint by height - lidThickness - lidGap.
@@ -639,8 +717,6 @@ test("a document variable edit restores a face sketch that follows the first ite
     probe.adapter.dispose();
   }
 
-  // An empty sketch on that face right after the base feature; nothing
-  // consumes it, so only its placement depends on upstream geometry.
   const faceSketchId = "sketch_afj3-top-face" as SketchId;
   const emptyDefinition = {
     ...source.sketches[0]!.definition,
@@ -680,6 +756,12 @@ test("a document variable edit restores a face sketch that follows the first ite
       sketchId: faceSketchId,
     }),
   };
+  return { document, faceSketchId, baseFeatureId, topZ };
+}
+
+test("a document variable edit restores a face sketch that follows the first item it changes, and resumes the prefix when the face sketch precedes it (cadara-afj3)", async () => {
+  const { document, faceSketchId, baseFeatureId, topZ } =
+    await enclosureWithTopFaceSketch();
 
   const session = await open(document);
   try {
@@ -865,3 +947,268 @@ test("snapshots after a cursor rollback it already showed or a tail plane add/de
     session.adapter.dispose();
   }
 }, 900_000);
+
+/**
+ * Restores `document` into the session, then takes a snapshot. Returns the
+ * features the restore executed, and the bodies (native topology payloads)
+ * and region profile faces the snapshot built.
+ */
+async function restoreAndSnapshot(
+  session: Session,
+  document: AuthoredModelDocument,
+) {
+  const native = (
+    (await occ!) as unknown as {
+      CadaraBuildNativeTopologyPayload: {
+        BuildJson: (...args: unknown[]) => string;
+      };
+    }
+  ).CadaraBuildNativeTopologyPayload;
+  featureRuns.count = 0;
+  await session.restore(document);
+  const runs = featureRuns.count;
+  const buildJson = native.BuildJson;
+  const bodies: string[] = [];
+  native.BuildJson = (...args: unknown[]) => {
+    bodies.push(String(args[1]));
+    return buildJson(...args);
+  };
+  regionFaces.count = 0;
+  try {
+    await session.snapshot();
+  } finally {
+    native.BuildJson = buildJson;
+  }
+  return { runs, bodies: bodies.sort(), regionFaces: regionFaces.count };
+}
+
+/** Bodies that the applied features from `featureId` on output. */
+const bodiesFrom = (document: AuthoredModelDocument, featureId: FeatureId) => {
+  const applied = appliedFeatureIds(document);
+  const suffix = new Set(applied.slice(applied.indexOf(featureId)));
+  return [
+    ...new Set(
+      (document.topologyLineage ?? [])
+        .filter((record) => suffix.has(record.featureId))
+        .flatMap((record) => record.outputs.map((output) => output.outputSlot)),
+    ),
+  ].sort();
+};
+
+test.each(Object.keys(tailParameterEdits))(
+  "restores on the landing %s resume from the runtime's unchanged prefix, rebuild only the changed tail and equal a cold open (cadara-jxe3)",
+  async (model) => {
+    const source = await loadLandingModel(model);
+    const session = await open(source);
+    try {
+      await session.snapshot();
+      const opened = await session.exported();
+      const tailEdit = tailParameterEdits[model]!;
+      const applied = appliedFeatureIds(opened);
+      const tail = {
+        runs: applied.length - applied.indexOf(tailEdit.featureId),
+        bodies: bodiesFrom(opened, tailEdit.featureId),
+        regionFaces: 0,
+      };
+      expect(
+        tail.runs,
+        "premise: the edit leaves an unchanged prefix",
+      ).toBeLessThan(applied.length);
+      expect(
+        tail.bodies.length,
+        "premise: the tail outputs bodies",
+      ).toBeGreaterThan(0);
+      const bodies = (await session.snapshot()).document.bodies.length;
+      expect(
+        tail.bodies.length < bodies || bodies === 1,
+        "premise: the prefix outputs other bodies, unless there is one",
+      ).toBe(true);
+
+      expect
+        .soft(
+          await restoreAndSnapshot(session, opened),
+          "restoring the session's own export evaluates and meshes nothing",
+        )
+        .toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+      await expectColdEquivalent(
+        session,
+        opened,
+        "restore of the export",
+        "exact",
+      );
+
+      // A peer's write: the edit never ran in this session.
+      const peer = withEditedFeature(opened, tailEdit);
+      expect
+        .soft(
+          await restoreAndSnapshot(session, peer),
+          "a peer's tail edit reruns the tail and rebuilds only its bodies",
+        )
+        .toEqual(tail);
+      await expectColdEquivalent(session, peer, "peer tail edit", "exact");
+      const edited = await session.exported();
+
+      expect
+        .soft(
+          await restoreAndSnapshot(session, opened),
+          "undo of the tail edit reruns the tail and rebuilds only its bodies",
+        )
+        .toEqual(tail);
+      await expectColdEquivalent(session, opened, "undo", "exact");
+
+      expect
+        .soft(
+          await restoreAndSnapshot(session, edited),
+          "redo of the tail edit reruns the tail and rebuilds only its bodies",
+        )
+        .toEqual(tail);
+      await expectColdEquivalent(session, edited, "redo", "exact");
+
+      // Rolling back and to the end evaluates the tail again in the session,
+      // which advances its topology token past the one `edited` persists. A
+      // cold open keeps the persisted one, so the restore must not take the
+      // session's tail stage.
+      const end = edited.cursor;
+      await session.setCursor({ kind: "feature", featureId: applied.at(-2)! });
+      await session.setCursor(end);
+      expect(
+        (await session.exported()).topologyLineage,
+        "premise: the session's tail lineage differs from the persisted one",
+      ).not.toEqual(edited.topologyLineage);
+      expect
+        .soft(
+          (await restoreAndSnapshot(session, edited)).runs,
+          "a restore reruns the features whose persisted lineage differs",
+        )
+        .toBe(1);
+      await expectColdEquivalent(
+        session,
+        edited,
+        "restore after the session re-evaluated the tail",
+        "exact",
+      );
+    } finally {
+      session.adapter.dispose();
+    }
+  },
+  900_000,
+);
+
+test("a restore reuses a face sketch whose prefix is unchanged and re-places it when its face moved (cadara-jxe3)", async () => {
+  const { document, faceSketchId, topZ } = await enclosureWithTopFaceSketch();
+  const session = await open(document);
+  try {
+    const faceSketchZ = async () =>
+      (await session.snapshot()).document.sketches.find(
+        (sketch) => sketch.sketchId === faceSketchId,
+      )!.plane.frame.origin[2];
+    expect(
+      await faceSketchZ(),
+      "premise: the sketch sits on the top",
+    ).toBeCloseTo(topZ, 6);
+    const opened = await session.exported();
+    expect(
+      await restoreAndSnapshot(session, opened),
+      "restoring the session's own export evaluates and meshes nothing",
+    ).toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+    await expectColdEquivalent(
+      session,
+      opened,
+      "restore of the export",
+      "exact",
+    );
+
+    // A peer's write of lidThickness, which the base feature reads.
+    const moved: AuthoredModelDocument = {
+      ...opened,
+      variables: opened.variables.map((variable) =>
+        variable.name === "lidThickness"
+          ? { ...variable, valueText: "4" }
+          : variable,
+      ),
+    };
+    await session.restore(moved);
+    expect(
+      await faceSketchZ(),
+      "a restore that moves the face re-places the sketch on it",
+    ).toBeCloseTo(topZ - 1, 6);
+    await expectColdEquivalent(session, moved, "moved face", "exact");
+
+    await session.restore(opened);
+    expect(await faceSketchZ(), "undo puts it back").toBeCloseTo(topZ, 6);
+    await expectColdEquivalent(session, opened, "undo", "exact");
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+/** Literal or expression extrude depths edited before each model's tail. */
+const midHistoryParameterEdits: Record<string, TailParameterEdit> = {
+  bracket: {
+    featureId: "feature_extrude-6" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        extent: { end: { distance: { value: number } } };
+      };
+      parameters.extent.end.distance.value = 3.5;
+      return definition;
+    },
+  },
+  wheel: {
+    featureId: "feature_extrude-21" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        extent: { end: { distance: { value: number } } };
+      };
+      parameters.extent.end.distance.value = 3;
+      return definition;
+    },
+  },
+  enclosure: {
+    featureId: "feature_extrude-19" as FeatureId,
+    edit: (definition) => {
+      const parameters = definition.parameters as unknown as {
+        extent: { end: { distance: { valueText: string } } };
+      };
+      parameters.extent.end.distance.valueText = "screwLength - 1";
+      return definition;
+    },
+  },
+};
+
+// A forward edit evaluates against the session's previous references, so its
+// checkpoints hold invalidations a cold open never has.
+test.each(Object.keys(midHistoryParameterEdits))(
+  "a restore after forward edits on the landing %s keeps no reference invalidation a cold open lacks (cadara-jxe3)",
+  async (model) => {
+    const session = await open(await loadLandingModel(model));
+    try {
+      await editFeature(midHistoryParameterEdits[model]!)(
+        session,
+        await session.exported(),
+      );
+      const afterMidEditExport = await session.exported();
+      await editFeature(tailParameterEdits[model]!)(
+        session,
+        afterMidEditExport,
+      );
+      expect(
+        (await session.snapshot()).document.references.some(
+          (reference) => reference.invalidation !== null,
+        ),
+        "premise: the forward edits invalidated references",
+      ).toBe(true);
+
+      await session.restore(afterMidEditExport);
+      await expectColdEquivalent(
+        session,
+        afterMidEditExport,
+        "undo of the tail edit",
+        "exact",
+      );
+    } finally {
+      session.adapter.dispose();
+    }
+  },
+  900_000,
+);
