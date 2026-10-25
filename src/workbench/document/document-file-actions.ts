@@ -6,7 +6,7 @@ import { isLocalFileSyncDocumentRepository } from "@/core/modeling/document-repo
 import { createLocalFileBindingMetadata } from "@/core/modeling/local-file-binding-metadata";
 import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import { downloadDocumentExportResult } from "@/lib/download-export";
-import { ensureLocalFileWritePermission, readCadaraDocumentFile, readLocalCadaraDocument, showOpenLocalDocumentPicker, showSaveLocalDocumentPicker, writeTextToLocalFileHandle } from "@/lib/local-file-system-access";
+import { ensureLocalFileWritePermission, queryLocalFilePermission, readCadaraDocumentFile, readLocalCadaraDocument, showOpenLocalDocumentPicker, showSaveLocalDocumentPicker, writeTextToLocalFileHandle } from "@/lib/local-file-system-access";
 import { type LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 
 export type WorkbenchDocumentActionResult =
@@ -23,6 +23,7 @@ export type WorkbenchDocumentActionResult =
 interface WorkbenchDocumentFileActionIo {
   downloadDocumentExportResult: typeof downloadDocumentExportResult;
   ensureLocalFileWritePermission: typeof ensureLocalFileWritePermission;
+  queryLocalFilePermission: typeof queryLocalFilePermission;
   readCadaraDocumentFile: typeof readCadaraDocumentFile;
   readLocalCadaraDocument: typeof readLocalCadaraDocument;
   showOpenLocalDocumentPicker: typeof showOpenLocalDocumentPicker;
@@ -33,6 +34,7 @@ interface WorkbenchDocumentFileActionIo {
 const defaultIo: WorkbenchDocumentFileActionIo = {
   downloadDocumentExportResult,
   ensureLocalFileWritePermission,
+  queryLocalFilePermission,
   readCadaraDocumentFile,
   readLocalCadaraDocument,
   showOpenLocalDocumentPicker,
@@ -167,6 +169,132 @@ export async function openLinkedDocumentAsTab(input: {
   });
 }
 
+/**
+ * A .cadara file the operating system handed to the installed app (manifest
+ * `file_handlers`, `launchQueue`). With write access already granted it
+ * opens linked, like Open… → linked; otherwise it opens as a browser copy at
+ * once (`linked: false`) and the caller offers `allowSavingToLaunchedFile`,
+ * because asking for write access needs a user click.
+ */
+export async function openLaunchedDocumentFileAsTab(input: {
+  repository: DocumentRepository | null;
+  handle: LocalFileSystemFileHandle;
+  createDocumentId: () => DocumentId;
+  openTab: (tab: WorkbenchTab) => void;
+  io?: Partial<WorkbenchDocumentFileActionIo>;
+}): Promise<{ linked: boolean; result: WorkbenchDocumentActionResult }> {
+  const io = { ...defaultIo, ...input.io };
+  if (
+    isLocalFileSyncDocumentRepository(input.repository) &&
+    (await io.queryLocalFilePermission(input.handle, "readwrite")) === "granted"
+  ) {
+    return {
+      linked: true,
+      result: await openLinkedDocumentHandleAsTab({
+        repository: input.repository,
+        handle: input.handle,
+        createDocumentId: input.createDocumentId,
+        openTab: input.openTab,
+        io,
+      }),
+    };
+  }
+
+  return {
+    linked: false,
+    result: await openDocumentCopyAsTab({
+      file: await input.handle.getFile(),
+      repository: input.repository,
+      createDocumentId: input.createDocumentId,
+      openTab: input.openTab,
+      io,
+    }),
+  };
+}
+
+/**
+ * The "Allow saving" click on a launched file opened as a browser copy: asks
+ * for write access (the click is the required user activation) and, when
+ * granted, writes the document's current state to the file and links it, so
+ * later changes save there too (the Save As → linked path). `kept` means the
+ * user declined: the document stays a browser copy.
+ */
+export async function allowSavingToLaunchedFile(input: {
+  handle: LocalFileSystemFileHandle;
+  modelingService: Pick<
+    ModelingService,
+    "bindLocalFile" | "currentDocumentId" | "exportCurrentDocument"
+  >;
+  io?: Partial<WorkbenchDocumentFileActionIo>;
+}): Promise<
+  | { status: "linked"; message: string }
+  | { status: "kept" }
+  | Exclude<
+      LinkWorkbenchLocalFileResult,
+      { ok: true } | { status: "permission-denied" }
+    >
+> {
+  const linked = await linkWorkbenchLocalFile({
+    modelingService: input.modelingService,
+    handle: input.handle,
+    io: { ...defaultIo, ...input.io },
+  });
+  if (linked.ok)
+    return {
+      status: "linked",
+      message: `Saved ${input.handle.name}. Future changes will save to that file.`,
+    };
+  return linked.status === "permission-denied" ? { status: "kept" } : linked;
+}
+
+type LinkWorkbenchLocalFileResult =
+  | { ok: true }
+  | { ok: false; status: "permission-denied" }
+  | { ok: false; status: "bind-failed"; message: string }
+  | { ok: false; status: "write-failed"; error: unknown };
+
+/** Writes the current document to `handle`, then links the document to it. */
+async function linkWorkbenchLocalFile(input: {
+  modelingService: Pick<
+    ModelingService,
+    "bindLocalFile" | "currentDocumentId" | "exportCurrentDocument"
+  >;
+  handle: LocalFileSystemFileHandle;
+  io: WorkbenchDocumentFileActionIo;
+}): Promise<LinkWorkbenchLocalFileResult> {
+  if (!(await input.io.ensureLocalFileWritePermission(input.handle))) {
+    return { ok: false, status: "permission-denied" };
+  }
+
+  const result = await input.modelingService.exportCurrentDocument();
+  const writeResult = await input.io.writeTextToLocalFileHandle(
+    input.handle,
+    result.payload,
+  );
+  if (!writeResult.ok) {
+    return writeResult.reason === "permission-denied"
+      ? { ok: false, status: "permission-denied" }
+      : { ok: false, status: "write-failed", error: writeResult.error };
+  }
+
+  const binding = await input.modelingService.bindLocalFile({
+    handle: input.handle,
+    metadata: createLocalFileBindingMetadata(
+      input.modelingService.currentDocumentId,
+      input.handle,
+    ),
+  });
+  return binding.ok
+    ? { ok: true }
+    : {
+        ok: false,
+        status: "bind-failed",
+        message:
+          binding.diagnostics[0]?.message ??
+          "Local file sync target could not be bound.",
+      };
+}
+
 async function openLinkedDocumentHandleAsTab(input: {
   repository: LocalFileSyncDocumentRepository;
   handle: LocalFileSystemFileHandle;
@@ -273,43 +401,27 @@ export async function saveWorkbenchLocalFile(
   }
 
   try {
-    if (!(await io.ensureLocalFileWritePermission(pickerResult.handle))) {
-      input.showWorkbenchError("Local file write permission was denied.");
-      return false;
-    }
-
-    const result = await input.modelingService.exportCurrentDocument();
-    const writeResult = await io.writeTextToLocalFileHandle(
-      pickerResult.handle,
-      result.payload,
-    );
-    if (!writeResult.ok) {
-      if (writeResult.reason === "permission-denied") {
-        input.showWorkbenchError("Local file write permission was denied.");
-        return false;
-      }
-
-      input.reportDocumentFileActionFailure(
-        "workbench.file.saveLinked",
-        "Save linked document failed.",
-        writeResult.error,
-      );
-      return false;
-    }
-
-    const binding = await input.modelingService.bindLocalFile({
+    const linked = await linkWorkbenchLocalFile({
+      modelingService: input.modelingService,
       handle: pickerResult.handle,
-      metadata: createLocalFileBindingMetadata(
-        input.modelingService.currentDocumentId,
-        pickerResult.handle,
-      ),
+      io,
     });
-    if (!binding.ok) {
-      input.showWorkbenchError(
-        binding.diagnostics[0]?.message ??
-          "Local file sync target could not be bound.",
-      );
-      return false;
+    if (!linked.ok) {
+      switch (linked.status) {
+        case "permission-denied":
+          input.showWorkbenchError("Local file write permission was denied.");
+          return false;
+        case "bind-failed":
+          input.showWorkbenchError(linked.message);
+          return false;
+        case "write-failed":
+          input.reportDocumentFileActionFailure(
+            "workbench.file.saveLinked",
+            "Save linked document failed.",
+            linked.error,
+          );
+          return false;
+      }
     }
 
     input.showWorkbenchInfo(

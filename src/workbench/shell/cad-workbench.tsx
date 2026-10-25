@@ -265,9 +265,18 @@ interface CadWorkbenchProps {
   projectNotification?: WorkbenchNotificationModel | null;
   /** Every open tab's page-leave save notice (cadara-8p7o). */
   localSaveNotification?: WorkbenchNotificationModel | null;
+  /**
+   * The app host's notices about browser storage and files the operating
+   * system opened in the app.
+   */
+  appNotifications?: readonly (WorkbenchNotificationModel & { id: string })[];
   /** A local save is underway in any open tab (cadara-781c logo ring). */
   localSaving?: boolean;
 }
+
+const NO_APP_NOTIFICATIONS: readonly (WorkbenchNotificationModel & {
+  id: string;
+})[] = [];
 
 export function CadWorkbench({
   tabsState,
@@ -294,6 +303,7 @@ export function CadWorkbench({
   documentTabMenuItems,
   projectNotification = null,
   localSaveNotification = null,
+  appNotifications = NO_APP_NOTIFICATIONS,
   localSaving = false,
 }: CadWorkbenchProps) {
   const modelingService = useModelingService();
@@ -2071,6 +2081,9 @@ export function CadWorkbench({
                   {localSaveNotification ? (
                     <WorkbenchNotification {...localSaveNotification} />
                   ) : null}
+                  {appNotifications.map(({ id, ...notification }) => (
+                    <WorkbenchNotification key={id} {...notification} />
+                  ))}
                   {draftRecoveryNotification ? <SketchDraftRecoveryNotification {...draftRecoveryNotification} /> : null}
                   {workbenchStatusNotification ? (
                     <WorkbenchNotification

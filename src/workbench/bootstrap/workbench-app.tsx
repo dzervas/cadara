@@ -100,6 +100,8 @@ import { useOccKernelVersionRetired } from "@/hooks/use-occ-kernel-version-retir
 import { AppUpdateNotification } from "@/components/layout/app-update-notification";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import { useWorkbenchLocalSaveGuard } from "@/workbench/adapters/use-workbench-local-save-guard";
+import { useLaunchedDocumentFiles } from "@/workbench/adapters/use-launched-document-files";
+import { useStorageDurabilityWarning } from "@/workbench/adapters/use-storage-durability-warning";
 import {
   openDocumentCopyAsTab,
   openLinkedDocumentAsTab,
@@ -356,6 +358,10 @@ function ProjectWorkbenchApp({
     errorReporter,
   });
   const localSaving = useLocalSaveStatus(modelingServices).saving;
+  const storageDurabilityNotification = useStorageDurabilityWarning({
+    source: modelingServices,
+    errorReporter,
+  });
   const kernelVersionRetired = useOccKernelVersionRetired();
   // A retired kernel fails the part readiness the project waits for; the
   // update notification's reload is the outcome. A failed discovery leaves
@@ -605,6 +611,37 @@ function ProjectWorkbenchApp({
     },
     [documentRepository, projectWriteGate],
   );
+
+  const openDocumentTab = useCallback((tab: WorkbenchTab) => {
+    tabsDispatch({ type: "open", tab, activate: true });
+  }, []);
+  const getDocumentModelingService = useCallback(
+    (documentId: DocumentId) => modelingServices.get(documentId),
+    [modelingServices],
+  );
+  const authorizeLaunchedFileOpen = useCallback(
+    () => projectWriteGate.authorize("manifest"),
+    [projectWriteGate],
+  );
+  const openDocumentIds = useMemo(
+    () => tabsState.tabs.map((tab) => tab.documentId),
+    [tabsState.tabs],
+  );
+  const launchedFileNotifications = useLaunchedDocumentFiles({
+    authorizeOpen: authorizeLaunchedFileOpen,
+    openDocumentIds,
+    repository: documentRepository,
+    createDocumentId: generateDocumentId,
+    openTab: openDocumentTab,
+    getModelingService: getDocumentModelingService,
+    errorReporter,
+  });
+  const appNotifications = [
+    ...(storageDurabilityNotification
+      ? [{ id: "storage-durability", ...storageDurabilityNotification }]
+      : []),
+    ...launchedFileNotifications,
+  ];
 
   const openLinkedDocument =
     useCallback(async (): Promise<WorkbenchDocumentActionResult> => {
@@ -914,6 +951,7 @@ function ProjectWorkbenchApp({
               }
               projectNotification={projectNotification}
               localSaveNotification={localSaveNotification}
+              appNotifications={appNotifications}
               localSaving={localSaving}
             />
           </EditorProvider>

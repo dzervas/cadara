@@ -124,6 +124,14 @@ test("root assets retain their types and missing assets stay failures", async ({
   const icon = await request.get("/icons/GitHub-logo.svg");
   expect(icon.status()).toBe(200);
   expect(icon.headers()["content-type"]).toContain("image/svg+xml");
+  // The installable PWA: its manifest and generated icons.
+  const manifest = await request.get("/manifest.webmanifest");
+  expect(manifest.status()).toBe(200);
+  expect(manifest.headers()["content-type"]).toContain("manifest+json");
+  expect(await manifest.json()).toMatchObject({ start_url: "/app" });
+  const appIcon = await request.get("/pwa-512x512.png");
+  expect(appIcon.status()).toBe(200);
+  expect(appIcon.headers()["content-type"]).toContain("image/png");
   expect((await request.get("/assets/missing-worker.js")).status()).toBe(404);
   expect((await request.get("/assets/missing-kernel.wasm")).status()).toBe(404);
 });

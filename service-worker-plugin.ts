@@ -1,10 +1,15 @@
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
+import { minimal2023Preset } from "@vite-pwa/assets-generator/config";
 import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 import { OCC_ASSET_BASE_PATH } from "./src/infrastructure/occ/asset-version.ts";
+import { workbenchColors } from "./src/theme/workbench-theme.ts";
+
+/** The dark shell surface (`--workbench-app-background`, dark-9). */
+const shellColor = workbenchColors[9];
 
 // 200 sequential requests cost 60 s at 300 ms RTT, leaving four minutes of
 // the browser's five-minute install budget for transfer and cache writes.
@@ -52,12 +57,19 @@ function versionedKernelPlugin(): Plugin {
 }
 
 /**
- * The production service worker (`src/service-worker.ts`, vite-plugin-pwa
- * `injectManifest`; builds to /service-worker.js) and the versioned kernel it
- * precaches. Production only: the dev server serves no service worker. The app
- * registers it through `virtual:pwa-register/react`
- * (src/hooks/use-app-update.ts). `srcDir` holds service-worker.ts. The whole offline application installs atomically;
+ * The installable PWA: the production service worker (`src/service-worker.ts`,
+ * vite-plugin-pwa `injectManifest`; builds to /service-worker.js), the
+ * versioned kernel it precaches and the web app manifest
+ * (/manifest.webmanifest, linked from every HTML entry). Production only: the
+ * dev server serves no service worker. The app registers it through
+ * `virtual:pwa-register/react` (src/hooks/use-app-update.ts). `srcDir` holds
+ * service-worker.ts. The whole offline application installs atomically;
  * runtime caching is not offline readiness.
+ *
+ * The manifest icons, favicon.ico and the apple-touch icon are generated at
+ * build time from public/favicon.svg by `pwaAssets`
+ * (@vite-pwa/assets-generator), which also injects their `<link>`s and the
+ * theme-color `<meta>` into the HTML; nothing generated is committed.
  */
 export function createServiceWorkerPlugin(srcDir: string) {
   return [
@@ -68,7 +80,47 @@ export function createServiceWorkerPlugin(srcDir: string) {
       filename: "service-worker.ts",
       registerType: "prompt",
       injectRegister: false,
-      manifest: false,
+      manifest: {
+        id: "/app",
+        name: "CADara",
+        short_name: "CADara",
+        description:
+          "Open-source parametric CAD in your browser. Work offline and script your modeling workflow with the CLI.",
+        // The landing page and the editor share the origin root.
+        scope: "/",
+        start_url: "/app",
+        display: "standalone",
+        theme_color: shellColor,
+        background_color: shellColor,
+        // Opening a .cadara file from the operating system hands it to the
+        // app's launch queue (src/workbench/adapters/use-launched-document-files.ts);
+        // import formats are not registered. No launch_handler: the default
+        // opens a new /app window, which always consumes the launch; focusing
+        // an existing window could hand the file to a dashboard or landing
+        // window, which has no consumer.
+        file_handlers: [
+          {
+            action: "/app",
+            accept: { "application/vnd.cadara+json": [".cadara"] },
+          },
+        ],
+      },
+      // The image is the default public/favicon.svg.
+      pwaAssets: {
+        // The upstream preset, with the opaque (maskable, apple-touch) icons
+        // on the shell colour instead of white.
+        preset: {
+          ...minimal2023Preset,
+          maskable: {
+            ...minimal2023Preset.maskable,
+            resizeOptions: { background: shellColor },
+          },
+          apple: {
+            ...minimal2023Preset.apple,
+            resizeOptions: { background: shellColor },
+          },
+        },
+      },
       injectManifest: {
         globPatterns: [
           "*.html",

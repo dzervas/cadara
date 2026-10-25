@@ -22,6 +22,8 @@ export interface WorkbenchNotificationModel {
   /** A second recovery, rendered after `action`. */
   secondaryAction?: WorkbenchNotificationAction;
   onDismiss?: () => void;
+  /** Stays until dismissed: no auto-dismiss for info and warning. */
+  persistent?: boolean;
   placement?: WorkbenchNotificationPlacement;
 }
 

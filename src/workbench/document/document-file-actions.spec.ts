@@ -6,12 +6,17 @@ import { createMemoryDocumentRepository } from "@/application/modeling/memory-do
 import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
 import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import {
+  allowSavingToLaunchedFile,
   exportWorkbenchDocument,
   openDocumentCopyAsTab,
+  openLaunchedDocumentFileAsTab,
   openLinkedDocumentAsTab,
   saveWorkbenchLocalFile,
 } from "@/workbench/document/document-file-actions";
-import type { LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
+import type {
+  LocalFileSystemFileHandle,
+  LocalFileSystemPermissionState,
+} from "@/contracts/modeling/local-file-system-access";
 
 function createHandle(name: string): LocalFileSystemFileHandle {
   return {
@@ -25,6 +30,79 @@ function createHandle(name: string): LocalFileSystemFileHandle {
         async close() {},
       };
     },
+  };
+}
+
+/**
+ * A file handle the operating system handed to the app (`launchQueue`): it
+ * answers `readwrite` queries with `queryState` and a `readwrite` request
+ * (the "Allow saving" click) with `requestState`, and records writes.
+ */
+function createLaunchedHandle(
+  name: string,
+  contents: unknown,
+  permission: {
+    queryState: LocalFileSystemPermissionState;
+    requestState: LocalFileSystemPermissionState;
+  },
+) {
+  const writes: string[] = [];
+  const requests: string[] = [];
+  const handle: LocalFileSystemFileHandle = {
+    name,
+    async getFile() {
+      return new File([JSON.stringify(contents)], name);
+    },
+    async createWritable() {
+      return {
+        async write(data) {
+          writes.push(String(data));
+        },
+        async close() {},
+      };
+    },
+    async queryPermission({ mode }) {
+      return mode === "readwrite" ? permission.queryState : "granted";
+    },
+    async requestPermission({ mode }) {
+      requests.push(mode);
+      // A granted request also answers later queries.
+      if (permission.requestState === "granted")
+        permission.queryState = "granted";
+      return permission.requestState;
+    },
+  };
+  return { handle, writes, requests };
+}
+
+function createLinkingModelingService(documentId: DocumentId) {
+  const bindings: Array<{ documentId: string; handleName: string }> = [];
+  return {
+    bindings,
+    modelingService: {
+      currentDocumentId: documentId,
+      async exportCurrentDocument() {
+        return {
+          ok: true,
+          format: "cadara",
+          extension: "cadara",
+          mimeType: "application/json",
+          diagnostics: [],
+          filename: "launched.cadara",
+          payload: '{"edited":true}',
+        };
+      },
+      async bindLocalFile(input: {
+        handle: LocalFileSystemFileHandle;
+        metadata: { documentId: string };
+      }) {
+        bindings.push({
+          documentId: input.metadata.documentId,
+          handleName: input.handle.name,
+        });
+        return { ok: true as const, revisionId: "rev_linked", diagnostics: [] };
+      },
+    } as never,
   };
 }
 
@@ -370,5 +448,122 @@ describe("document file actions", () => {
     expect(exportSucceeded).toBeTruthy();
     expect(downloaded).toEqual(["exported.cadara"]);
     expect(callbacks.infos).toEqual(["Downloaded exported.cadara."]);
+  });
+  describe("a .cadara file launched from the operating system (launchQueue)", () => {
+    it("(a) with write access already granted, opens linked: a filesystem tab bound to the file, nothing to ask", async () => {
+      const document = await createSeedAuthoredModelDocument();
+      const { bindings, repository } = createRepository();
+      const openedTabs: WorkbenchTab[] = [];
+      const { handle, requests } = createLaunchedHandle(
+        "granted.cadara",
+        { ...document, name: "Granted" },
+        { queryState: "granted", requestState: "granted" },
+      );
+
+      const opened = await openLaunchedDocumentFileAsTab({
+        repository,
+        handle,
+        createDocumentId: () => "doc_granted" as DocumentId,
+        openTab: (tab) => openedTabs.push(tab),
+      });
+
+      expect(opened).toEqual({
+        linked: true,
+        result: {
+          status: "success",
+          documentId: "doc_granted",
+          message:
+            "Opened granted.cadara. Future changes will save to that file.",
+        },
+      });
+      expect(bindings).toEqual([
+        { documentId: "doc_granted", handleName: "granted.cadara" },
+      ]);
+      expect(openedTabs).toEqual([
+        {
+          documentId: "doc_granted",
+          title: "Granted",
+          storageKind: "filesystem",
+          storageDescriptor: "granted.cadara",
+        },
+      ]);
+      expect(requests, "no permission prompt without a user click").toEqual(
+        [],
+      );
+    });
+
+    it("(b) without write access, opens a browser copy at once; Allow saving grants access, writes the current state and links the file", async () => {
+      const document = await createSeedAuthoredModelDocument();
+      const { bindings, repository } = createRepository();
+      const openedTabs: WorkbenchTab[] = [];
+      const { handle, requests, writes } = createLaunchedHandle(
+        "prompt.cadara",
+        { ...document, name: "Prompted" },
+        { queryState: "prompt", requestState: "granted" },
+      );
+
+      const opened = await openLaunchedDocumentFileAsTab({
+        repository,
+        handle,
+        createDocumentId: () => "doc_prompt" as DocumentId,
+        openTab: (tab) => openedTabs.push(tab),
+      });
+
+      expect(opened).toEqual({
+        linked: false,
+        result: {
+          status: "success",
+          documentId: "doc_prompt",
+          message: "Opened prompt.cadara.",
+        },
+      });
+      expect(openedTabs).toEqual([
+        {
+          documentId: "doc_prompt",
+          title: "Prompted",
+          storageKind: "browser",
+          storageDescriptor: null,
+        },
+      ]);
+      expect(bindings, "not linked before the user allows it").toEqual([]);
+      expect(requests).toEqual([]);
+
+      const linking = createLinkingModelingService("doc_prompt" as DocumentId);
+      const allowed = await allowSavingToLaunchedFile({
+        handle,
+        modelingService: linking.modelingService,
+      });
+
+      expect(allowed).toEqual({
+        status: "linked",
+        message: "Saved prompt.cadara. Future changes will save to that file.",
+      });
+      expect(requests).toEqual(["readwrite"]);
+      expect(writes, "the current state is written to the file").toEqual([
+        '{"edited":true}',
+      ]);
+      expect(linking.bindings).toEqual([
+        { documentId: "doc_prompt", handleName: "prompt.cadara" },
+      ]);
+    });
+
+    it("(c) when the user denies write access, the tab stays a browser copy: nothing is written or linked", async () => {
+      const { handle, requests, writes } = createLaunchedHandle(
+        "denied.cadara",
+        {},
+        { queryState: "prompt", requestState: "denied" },
+      );
+      const linking = createLinkingModelingService("doc_denied" as DocumentId);
+
+      const allowed = await allowSavingToLaunchedFile({
+        handle,
+        modelingService: linking.modelingService,
+      });
+
+      expect(allowed).toEqual({ status: "kept" });
+      expect(requests).toEqual(["readwrite"]);
+      expect(writes).toEqual([]);
+      expect(linking.bindings).toEqual([]);
+    });
   });
 });

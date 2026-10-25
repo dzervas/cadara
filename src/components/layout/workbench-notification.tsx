@@ -45,6 +45,7 @@ export function WorkbenchNotification({
   link,
   message,
   onDismiss,
+  persistent = false,
   placement,
   secondaryAction,
   style,
@@ -52,14 +53,14 @@ export function WorkbenchNotification({
   type,
 }: WorkbenchNotificationProps) {
   useEffect(() => {
-    if (!onDismiss) {
+    if (!onDismiss || persistent) {
       return undefined;
     }
 
     return (
       scheduleWorkbenchNotificationAutoDismiss(type, onDismiss) ?? undefined
     );
-  }, [onDismiss, type]);
+  }, [onDismiss, persistent, type]);
 
   const role = type === "error" ? "alert" : "status";
   const liveMode = type === "error" ? "assertive" : "polite";
