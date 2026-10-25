@@ -1,9 +1,9 @@
 // cadara-728r (Sentry CADARA-14): what restore sees when the stored Automerge
 // document behind a remembered URL is missing or incomplete, using the real
 // automerge-repo Repo over storage shared between "tabs" the way every tab's
-// document-sync worker shares one IndexedDB database. The last two rows pin
-// the current defect; cadara-rnsb replaces their expectations with distinct
-// missing/incomplete diagnostics and a working "Reset stored history".
+// document-sync worker shares one IndexedDB database. cadara-rnsb: restore
+// reports missing and incomplete storage distinctly, and "Reset stored
+// history" stores the displayed document so later edits persist.
 import { afterEach, expect, test } from "vitest";
 import {
   Automerge,
@@ -117,7 +117,7 @@ async function restoreWithRememberedUrl(
   });
 }
 
-test("a remembered URL whose storage is gone fails as 'unavailable', not as an unsupported storage format", async () => {
+test("a remembered URL whose storage is gone fails as missing storage, not as an unsupported storage format", async () => {
   const storage = new SharedMemoryStorage();
   const { seed, url } = await seedOnce(storage);
   storage.chunks.clear(); // IndexedDB evicted/cleared, localStorage URL kept
@@ -130,13 +130,13 @@ test("a remembered URL whose storage is gone fails as 'unavailable', not as an u
   expect(!restored.ok && restored.status).toMatchObject({
     kind: "failed",
     diagnostic: {
-      reasonCode: "automerge-load-failed",
-      message: `Document ${url} is unavailable`,
+      reasonCode: "automerge-document-missing",
+      message: expect.stringContaining("no longer has its stored copy"),
     },
   });
 });
 
-test("with the BroadcastChannel adapter, missing storage is still 'unavailable' unless a live peer has the document", async () => {
+test("with the BroadcastChannel adapter, missing storage is still missing unless a live peer has the document", async () => {
   const storage = new SharedMemoryStorage();
   const { seed, url } = await seedOnce(storage);
   const peerStorage = new SharedMemoryStorage();
@@ -147,8 +147,8 @@ test("with the BroadcastChannel adapter, missing storage is still 'unavailable' 
   const alone = await restoreWithRememberedUrl(storage, seed, url, {
     channelName: "cadara-728r-alone",
   });
-  expect(!alone.ok && alone.status.diagnostic.message).toBe(
-    `Document ${url} is unavailable`,
+  expect(!alone.ok && alone.status.diagnostic.reasonCode).toBe(
+    "automerge-document-missing",
   );
 
   // A peer that also lacks the document answers doc-unavailable.
@@ -159,8 +159,8 @@ test("with the BroadcastChannel adapter, missing storage is still 'unavailable' 
   const withEmptyPeer = await restoreWithRememberedUrl(storage, seed, url, {
     channelName: "cadara-728r-empty-peer",
   });
-  expect(!withEmptyPeer.ok && withEmptyPeer.status.diagnostic.message).toBe(
-    `Document ${url} is unavailable`,
+  expect(!withEmptyPeer.ok && withEmptyPeer.status.diagnostic.reasonCode).toBe(
+    "automerge-document-missing",
   );
 
   // A peer tab that still holds the document syncs it back: restore succeeds.
@@ -174,7 +174,7 @@ test("with the BroadcastChannel adapter, missing storage is still 'unavailable' 
   expect(withLivePeer.ok && withLivePeer.status.kind).toBe("restored");
 });
 
-test("a stale tab writing after another tab's reset leaves incremental-only storage that restores as an unsupported storage format", async () => {
+test("a stale tab writing after another tab's reset leaves incremental-only storage that restores as incomplete storage", async () => {
   const storage = new SharedMemoryStorage();
   const { seed, url, writer: tabA } = await seedOnce(storage);
   const tabB = await tab(storage);
@@ -209,14 +209,20 @@ test("a stale tab writing after another tab's reset leaves incremental-only stor
   expect(!restored.ok && restored.status).toMatchObject({
     kind: "failed",
     diagnostic: {
-      reasonCode: "automerge-load-failed",
-      message: "Unsupported collaborative document storage format",
+      reasonCode: "automerge-document-incomplete",
+      message: expect.stringContaining("is incomplete"),
     },
   });
+  expect(!restored.ok && restored.status.diagnostic.message).not.toContain(
+    "Unsupported collaborative document storage format",
+  );
 });
 
-test("after the unsupported-format restore, 'Reset stored history' does not make edits persist until the document is loaded again", async () => {
-  const storage = new SharedMemoryStorage();
+/** A tab whose restore fails on storage left incomplete by a stale tab. */
+async function openIncompleteDocumentInService(
+  storage: SharedMemoryStorage,
+  adapter = new MockKernelAdapter(),
+) {
   const { seed, url, writer: tabA } = await seedOnce(storage);
   const tabB = await tab(storage);
   tabB.urls.set(seed.documentId, url);
@@ -233,34 +239,141 @@ test("after the unsupported-format restore, 'Reset stored history' does not make
 
   const reopened = await tab(storage);
   reopened.urls.set(seed.documentId, url);
-  const service = createModelingService(new MockKernelAdapter(), {
+  const service = createModelingService(adapter, {
     currentDocumentId: seed.documentId,
     documentRepository: reopened.repository,
   });
   expect(await service.getHistoryRestoreState()).toMatchObject({
     kind: "failed",
     entriesReplayed: 0,
-    diagnostics: [
-      { message: "Unsupported collaborative document storage format" },
-    ],
+    diagnostics: [{ reasonCode: "automerge-document-incomplete" }],
+  });
+  return { seed, url, reopened, service };
+}
+
+test("after the incomplete-storage restore, 'Reset stored history' stores the displayed document so the next edit persists without a reload", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, url, reopened, service } =
+    await openIncompleteDocumentInService(storage);
+
+  // Record the repository calls and hold the reset until released.
+  const calls: string[] = [];
+  let releaseReset!: () => void;
+  const resetHeld = new Promise<void>((resolve) => {
+    releaseReset = resolve;
+  });
+  const { reset, initialize, mutate } = reopened.repository;
+  reopened.repository.reset = async (documentId) => {
+    await resetHeld;
+    return reset.call(reopened.repository, documentId);
+  };
+  reopened.repository.initialize = (request) => {
+    calls.push("initialize");
+    return initialize.call(reopened.repository, request);
+  };
+  reopened.repository.mutate = (request) => {
+    calls.push(`mutate ${request.document.name}`);
+    return mutate.call(reopened.repository, request);
+  };
+
+  // The notification's only action (cad-workbench.tsx "Reset stored history"),
+  // followed at once by an edit: the edit queues behind the recovery.
+  service.resetOperationHistory();
+  const renaming = service.renameDocument({ name: "After reset" });
+  let renameSettled = false;
+  void renaming.finally(() => {
+    renameSettled = true;
+  });
+  // Ample time for an unqueued rename to finish while the reset is held.
+  await Promise.race([renaming, new Promise((r) => setTimeout(r, 50))]);
+  expect(renameSettled).toBe(false);
+  releaseReset();
+  const renamed = await renaming;
+  expect(renamed).toMatchObject({ ok: true, diagnostics: [] });
+  expect(calls).toEqual(["initialize", "mutate After reset"]);
+  await service.waitForPersistence();
+  expect(service.getLocalSaveStatus()).toEqual({
+    saving: false,
+    failure: null,
+  });
+  expect(await service.getHistoryRestoreState()).toMatchObject({
+    kind: "empty",
+  });
+  const replacementUrl = reopened.urls.get(seed.documentId);
+  expect(replacementUrl).not.toBeNull();
+  expect(replacementUrl).not.toBe(url);
+
+  // A reload restores the renamed document from the replacement.
+  const reloaded = await restoreWithRememberedUrl(
+    storage,
+    seed,
+    replacementUrl!,
+  );
+  expect(reloaded.ok && reloaded.status.kind).toBe("restored");
+  expect(reloaded.ok && reloaded.document.name).toBe("After reset");
+});
+
+test("a 'Reset stored history' that cannot store the replacement reports an unsaved local change instead of silently dropping edits", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, reopened, service } =
+    await openIncompleteDocumentInService(storage);
+  reopened.repository.initialize = async () => ({
+    ok: false,
+    status: {
+      kind: "failed",
+      documentId: seed.documentId,
+      diagnostic: {
+        reasonCode: "automerge-initialize-failed",
+        message: "Quota exceeded",
+      },
+    },
   });
 
-  // The notification's only action (cad-workbench.tsx "Reset stored history").
   service.resetOperationHistory();
   await service.waitForPersistence();
-  expect(reopened.urls.get(seed.documentId)).toBeNull();
-  const renamed = await service.renameDocument({ name: "After reset" });
-  expect(renamed).toMatchObject({
-    ok: false,
-    diagnostics: [
-      { message: "Load or initialize the document before editing." },
-    ],
+  expect(service.getLocalSaveStatus().saving).toBe(false);
+  expect(service.getLocalSaveStatus().failure).toMatchObject({
+    target: "repository",
+    reasonCode: "automerge-initialize-failed",
+    message: "Quota exceeded",
   });
+  expect(await service.getHistoryRestoreState()).toMatchObject({
+    kind: "failed",
+    diagnostics: [{ reasonCode: "automerge-initialize-failed" }],
+  });
+});
 
-  // A reload finds no URL and seeds a fresh document; the authored work is gone.
-  const reloaded = await reopened.repository.load({
-    documentId: seed.documentId,
-    seedDocument: seed,
+test("a 'Reset stored history' whose export throws reports the exception and keeps the stored document", async () => {
+  const storage = new SharedMemoryStorage();
+  const adapter = new MockKernelAdapter();
+  const { seed, url, reopened, service } =
+    await openIncompleteDocumentInService(storage, adapter);
+  const chunksBefore = storage.documentChunkKinds(url);
+  let resetCalled = false;
+  const { reset } = reopened.repository;
+  reopened.repository.reset = (documentId) => {
+    resetCalled = true;
+    return reset.call(reopened.repository, documentId);
+  };
+  adapter.exportAuthoredModelDocument = async () => {
+    throw new Error("Kernel export failed");
+  };
+
+  service.resetOperationHistory();
+  await service.waitForPersistence();
+  expect(resetCalled).toBe(false);
+  expect(reopened.urls.get(seed.documentId)).toBe(url);
+  expect(storage.documentChunkKinds(url)).toEqual(chunksBefore);
+  expect(service.getLocalSaveStatus()).toMatchObject({
+    saving: false,
+    failure: {
+      target: "repository",
+      reasonCode: "repository-reset-exception",
+      message: "Kernel export failed",
+    },
   });
-  expect(reloaded.ok && reloaded.status.kind).toBe("seeded");
+  expect(await service.getHistoryRestoreState()).toMatchObject({
+    kind: "failed",
+    diagnostics: [{ reasonCode: "repository-reset-exception" }],
+  });
 });

@@ -1718,11 +1718,8 @@ export function createModelingService(
 
   function resetOperationHistory() {
     operationHistoryStore?.clear();
-    void documentRepository?.reset(currentDocumentId);
-    repositoryPersistencePromise = Promise.resolve();
     operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);
     canPersistOperationHistory = true;
-    canPersistAuthoredDocument = true;
     // The in-memory document was replaced; nothing unsaved remains.
     unsavedLocalChange = null;
     publishLocalSaveStatus();
@@ -1731,6 +1728,66 @@ export function createModelingService(
       entriesReplayed: 0,
       diagnostics: [],
     };
+    if (!documentRepository) {
+      canPersistAuthoredDocument = true;
+      return;
+    }
+    // cadara-rnsb: the reset deletes the stored document, so store the one on
+    // screen as its replacement; until then (and if that fails) edits are not
+    // persisted. Later edits and writes queue behind this recovery.
+    canPersistAuthoredDocument = false;
+    const repository = documentRepository;
+    const mutationsBefore = localMutations;
+    const writesBefore = repositoryPersistencePromise;
+    const recovery = (async () => {
+      await mutationsBefore;
+      await writesBefore;
+      // Export first: a failed export must not leave storage deleted.
+      const document = await exportAuthoredDocumentForRepository();
+      if (disposed) return null;
+      const reset = await repository.reset(currentDocumentId);
+      if (reset.kind === "failed") return reset.diagnostic;
+      const initialized = await repository.initialize({
+        documentId: currentDocumentId,
+        document,
+      });
+      if (!initialized.ok) return initialized.status.diagnostic;
+      markRepositorySnapshotFresh(initialized.metadata,
+        authoredDocumentsEqual(document, initialized.document) ? initialized.document : undefined,
+        document.revisionId);
+      operationHistoryPayload = createEmptyOperationHistoryForCurrentRepository();
+      canPersistAuthoredDocument = true;
+      // Edits refused while storage was unavailable are stored now.
+      unsavedLocalChange = null;
+      // An earlier overlapping reset may have recorded a failure.
+      historyRestoreState = {
+        kind: "empty",
+        entriesReplayed: 0,
+        diagnostics: [],
+      };
+      return null;
+    })()
+      .catch((error: unknown) => ({
+        reasonCode: "repository-reset-exception",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Stored history could not be reset.",
+      }))
+      .then((failure) => {
+        if (!failure) return;
+        // Reported like a failed background write (cadara-8p7o).
+        unsavedLocalChange = failure;
+        historyRestoreState = createRestoreFailure(
+          failure.reasonCode,
+          failure.message,
+          null,
+          0,
+        );
+      });
+    localMutations = recovery;
+    repositoryPersistencePromise = recovery;
+    trackLocalSave(recovery);
   }
 
   function appendOperationHistoryEntry(

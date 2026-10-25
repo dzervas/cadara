@@ -1,7 +1,7 @@
 import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
-import { getActorId } from "@automerge/automerge/slim";
+import { getActorId, getMissingDeps } from "@automerge/automerge/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
@@ -164,10 +164,40 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         const url = this.urlStore.get(input.documentId);
         if (!existing && !url)
           return this.seed(input.documentId, input.seedDocument);
-        const handle =
-          existing ?? (await repo.find<CollaborativeDocument>(url!));
+        let handle = existing;
+        if (!handle) {
+          try {
+            handle = await repo.find<CollaborativeDocument>(url!);
+          } catch (error) {
+            // automerge-repo 2.5 reports missing chunks (and no peer holding
+            // them) only through this message.
+            if (
+              error instanceof Error &&
+              error.message === `Document ${url} is unavailable`
+            )
+              return this.fail(input.documentId, {
+                reasonCode: "automerge-document-missing",
+                message:
+                  "This browser no longer has its stored copy of the document, for example because site data was cleared. Reset stored history to start fresh.",
+              });
+            throw error;
+          }
+        }
         await handle.whenReady();
-        const document = materializeCollaborativeDocument(handle.doc());
+        const stored = handle.doc();
+        // cadara-rnsb (CADARA-14): changes whose base snapshot was deleted
+        // (another tab reset the document, then a tab still holding it
+        // wrote again) stay queued, so the document reads as empty.
+        if (
+          (!stored.format || !stored.authored) &&
+          getMissingDeps(stored, []).length > 0
+        )
+          return this.fail(input.documentId, {
+            reasonCode: "automerge-document-incomplete",
+            message:
+              "The stored copy of this document is incomplete, typically because it was reset or cleared in another tab. Reset stored history to start fresh.",
+          });
+        const document = materializeCollaborativeDocument(stored);
         const parsed = parseAuthoredModelDocument(document);
         if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
         if (parsed.document.documentId !== input.documentId)
