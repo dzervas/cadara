@@ -95,6 +95,33 @@ interface SketchConstraintAnnotationsProps {
   onAnnotationWheelListFilter?: (filtered: boolean) => void;
 }
 
+function isSameScreenPoint(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+) {
+  return Math.hypot(a.x - b.x, a.y - b.y) < 0.5;
+}
+
+/**
+ * cadara-2wpl: where the dragged chip is drawn: its anchor plus the drag
+ * offset, or plus its layout displacement while the anchor is still where
+ * the drag grabbed it.
+ */
+function getDraggedLabelCentre(
+  anchor: { x: number; y: number },
+  drag: {
+    dx: number;
+    dy: number;
+    untilAnchorMoves: { x: number; y: number; dx: number; dy: number } | null;
+  },
+) {
+  const offset =
+    drag.untilAnchorMoves && isSameScreenPoint(anchor, drag.untilAnchorMoves)
+      ? drag.untilAnchorMoves
+      : drag;
+  return { x: anchor.x + offset.dx, y: anchor.y + offset.dy };
+}
+
 export function SketchConstraintAnnotations({
   annotations,
   projections,
@@ -190,11 +217,15 @@ export function SketchConstraintAnnotations({
   // anchor, so the first placement brings the anchor under the chip and the
   // release leaves the label where it was dropped. An angle label's
   // placement cannot follow the pointer off its bisector, so it keeps the
-  // displacement as its offset instead.
+  // displacement as its offset instead. cadara-2wpl: the shifted anchor
+  // arrives through the editor a render after the drag starts, so until the
+  // anchor has moved the chip keeps its displacement (`untilAnchorMoves`);
+  // dropping it at once drew the chip back on its old anchor for a frame.
   const [labelDragOffset, setLabelDragOffset] = useState<{
     handleId: string;
     dx: number;
     dy: number;
+    untilAnchorMoves: { x: number; y: number; dx: number; dy: number } | null;
   } | null>(null);
   const labelDragPressShiftRef = useRef({ dx: 0, dy: 0 });
   const onTrackedDimensionDrag: DimensionAnnotationDragListener = (
@@ -222,6 +253,10 @@ export function SketchConstraintAnnotations({
       setLabelDragOffset({
         handleId: handle.id,
         ...(followsAlongLine ? { dx: 0, dy: 0 } : displacement),
+        untilAnchorMoves:
+          followsAlongLine && anchor
+            ? { x: anchor.x, y: anchor.y, ...displacement }
+            : null,
       });
     } else if (phase === "end" || phase === "cancel") {
       setLabelDragOffset(null);
@@ -252,6 +287,24 @@ export function SketchConstraintAnnotations({
   const anchorById = new Map(
     projections.map((projection) => [projection.id, projection]),
   );
+  // cadara-2wpl: once the dragged chip's anchor has left the grab anchor the
+  // chip sits on it for the rest of the drag, so a drag back over the grab
+  // anchor does not bring the displacement back. Cleared here, in render,
+  // because the drag listener is the closure of the render the drag began in.
+  if (labelDragOffset?.untilAnchorMoves) {
+    const dragged = annotations.find(
+      (entry) => entry.dragHandle?.id === labelDragOffset.handleId,
+    );
+    const anchor = dragged
+      ? anchorById.get(getAnnotationProjectionId(dragged.id))
+      : undefined;
+    if (
+      anchor &&
+      !isSameScreenPoint(anchor, labelDragOffset.untilAnchorMoves)
+    ) {
+      setLabelDragOffset({ ...labelDragOffset, untilAnchorMoves: null });
+    }
+  }
   const layoutItems = visibleAnnotations.flatMap(
     ({
       annotation,
@@ -281,10 +334,7 @@ export function SketchConstraintAnnotations({
           fixed:
             labelDragOffset &&
             annotation.dragHandle?.id === labelDragOffset.handleId
-              ? {
-                  x: anchor.x + labelDragOffset.dx,
-                  y: anchor.y + labelDragOffset.dy,
-                }
+              ? getDraggedLabelCentre(anchor, labelDragOffset)
               : null,
           // T14f (T-9): dimensions and problems are never clustered.
           cluster:

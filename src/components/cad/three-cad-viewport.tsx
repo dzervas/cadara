@@ -4194,6 +4194,30 @@ function ThreeCadViewportScene({
             });
           }
         }}
+        onHandlePointerMove={(event) => {
+          // cadara-2wpl: the canvas listens for the moves a pointer-following
+          // preview follows (and hovers by); its handle under the pointer
+          // passes them on, as a chip passes on the wheel.
+          canvasElementRef.current?.dispatchEvent(
+            new PointerEvent("pointermove", {
+              bubbles: true,
+              cancelable: true,
+              pointerId: event.pointerId,
+              pointerType: event.pointerType,
+              isPrimary: event.isPrimary,
+              clientX: event.clientX,
+              clientY: event.clientY,
+              screenX: event.screenX,
+              screenY: event.screenY,
+              button: event.button,
+              buttons: event.buttons,
+              ctrlKey: event.ctrlKey,
+              shiftKey: event.shiftKey,
+              altKey: event.altKey,
+              metaKey: event.metaKey,
+            }),
+          );
+        }}
       />
       <SketchDragFeedbackCue cue={dragFeedbackCue} />
       <SketchSpecialModeViewportFeedback

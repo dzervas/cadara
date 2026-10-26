@@ -44,6 +44,13 @@ interface SketchViewportFeedbackLayerProps {
     clientY: number,
     phase: "start" | "move" | "end" | "cancel",
   ) => void;
+  /**
+   * cadara-2wpl: a pointer move over a drag handle that is not being
+   * dragged. A pointer-following preview draws its line, and so its handle,
+   * under the pointer; the viewport hands these moves on to the canvas,
+   * which the handle would otherwise starve of the moves the preview follows.
+   */
+  onHandlePointerMove?: (event: PointerEvent) => void;
 }
 
 interface SketchViewportDragCallbacks {
@@ -67,6 +74,7 @@ export function SketchViewportFeedbackLayer({
   projections,
   onPatch,
   onDragHandle,
+  onHandlePointerMove,
   documentVariableNames = [],
 }: SketchViewportFeedbackLayerProps) {
   const dragCallbacks: SketchViewportDragCallbacks = {
@@ -79,6 +87,7 @@ export function SketchViewportFeedbackLayer({
     },
     onDragMove(handle, event) {
       if (event.currentTarget.dataset.sketchViewportDragging !== "true") {
+        onHandlePointerMove?.(event.nativeEvent);
         return;
       }
 
