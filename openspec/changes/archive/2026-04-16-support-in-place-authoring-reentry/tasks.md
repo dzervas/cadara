@@ -1,5 +1,0 @@
-- [x] 1. Add explicit double-click reopen intents for committed feature and sketch rows in the workbench navigation surfaces.
-- [x] 2. Route feature reopen through existing edit-session hydration so forms open prefilled from current committed values.
-- [x] 3. Route sketch reopen through the stored sketch plane and geometry context so editing resumes in place.
-- [x] 4. Update scoped `Escape` handling so active tools deactivate first and sketch mode exits only when no tool remains active, without regressing picker-specific cancellation.
-- [x] 5. Add or update tests covering double-click feature reopen, double-click sketch reopen, and layered `Escape` behavior.

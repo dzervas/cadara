@@ -1,4 +1,0 @@
-- [x] 1. Add bounded left-sidebar resize state and pointer-drag handling in the workbench shell.
-- [x] 2. Convert the right inspector container into a viewport overlay with internal scrolling and correct stacking behavior.
-- [x] 3. Replace timeline step controls with a draggable snapped cursor handle using the requested Unicode glyph.
-- [x] 4. Add or update tests covering sidebar resize behavior, inspector overlay containment, and snapped timeline cursor dragging.

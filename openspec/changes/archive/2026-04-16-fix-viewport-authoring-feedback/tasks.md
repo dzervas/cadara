@@ -1,4 +1,0 @@
-- [x] 1. Update viewport style mapping so solids render off-white, regions render faint cyan, and vertices reuse the wire color at a smaller visible size.
-- [x] 2. Fix raycast and target-binding behavior for edges, lines, and vertices so hover and selection resolve against their actual authoring targets.
-- [x] 3. Add mild orange hover styling for lines, edges, and vertices without regressing existing persistent selection readability.
-- [x] 4. Add or update focused tests covering solid or region styling plus hover and selection for line, edge, and vertex targets.

@@ -1,5 +1,0 @@
-- [x] 1. Update sketch-open orchestration to request camera alignment from the active `SketchPlaneDefinition` for both new and existing sketches.
-- [x] 2. Implement sketch edit bounds calculation (committed entities only) and connect it to viewport fit logic with consistent padding.
-- [x] 3. Add fallback framing for empty sketches using a default plane-centered extent.
-- [x] 4. Ensure camera-entry behavior is consistent for `XY`, `YZ`, and `XZ` plane definitions and planar-face derived sketch planes.
-- [x] 5. Add integration coverage for (a) new sketch entry orientation, (b) existing sketch edit fit-to-visible framing, and (c) empty-sketch fallback framing.
