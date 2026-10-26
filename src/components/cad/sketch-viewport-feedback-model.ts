@@ -110,6 +110,72 @@ export interface SketchAnnotationLayoutItem {
   keepWhenUnplaceable: boolean;
   /** A-7: placed here (centre) as is, before everything else, and avoided by every other item. */
   fixed?: { x: number; y: number } | null;
+  /**
+   * cadara-0atd: a dimension whose label the user placed (a committed
+   * `annotationPlacement`: the Dimension tool's placing click or a label
+   * drag; persisted). It is placed before the auto-placed labels of its
+   * priority, so a dropped chip keeps its place across a reload too.
+   */
+  placedByUser?: boolean;
+  /**
+   * cadara-0atd: a chip a drag dropped on its anchor in this sketch session,
+   * by recency (0: the last drop). Among the user-placed labels of its
+   * priority it is placed first, so after the release it stays where it was
+   * dropped and the labels it was dropped on stay displaced.
+   */
+  dropRank?: number | null;
+}
+
+/**
+ * cadara-0atd: one label drag's drop, kept (most recent first) for the open
+ * sketch session only. `placedByUserBeforeDrag` is null for a chip dropped on
+ * its anchor. An angle label dropped at its layout displacement (its
+ * placement cannot follow the pointer off the bisector) records whether it
+ * was user-placed before the drag instead: the drag commits a placement,
+ * which would otherwise let it outrank the label displacing it and jump
+ * onto its anchor at the release.
+ */
+export interface SketchDimensionLabelDrop {
+  handleId: string;
+  placedByUserBeforeDrag: boolean | null;
+}
+
+/** cadara-0atd: `drop` first, then the earlier drops whose chips still exist. */
+export function recordSketchDimensionLabelDrop(
+  drops: readonly SketchDimensionLabelDrop[],
+  drop: SketchDimensionLabelDrop,
+  liveHandleIds: ReadonlySet<string>,
+): readonly SketchDimensionLabelDrop[] {
+  return [
+    drop,
+    ...drops.filter(
+      (entry) =>
+        entry.handleId !== drop.handleId && liveHandleIds.has(entry.handleId),
+    ),
+  ];
+}
+
+/**
+ * cadara-0atd: a label's layout rank inputs from the session's drops and
+ * whether its dimension has a committed placement now.
+ */
+export function getSketchDimensionLabelDropRank(
+  drops: readonly SketchDimensionLabelDrop[],
+  handleId: string,
+  placedByUser: boolean,
+): Pick<SketchAnnotationLayoutItem, "placedByUser" | "dropRank"> {
+  const onAnchor = drops.filter(
+    (entry) => entry.placedByUserBeforeDrag === null,
+  );
+  const rank = onAnchor.findIndex((entry) => entry.handleId === handleId);
+  if (rank >= 0) {
+    return { placedByUser, dropRank: rank };
+  }
+  const displaced = drops.find((entry) => entry.handleId === handleId);
+  return {
+    placedByUser: displaced?.placedByUserBeforeDrag ?? placedByUser,
+    dropRank: null,
+  };
 }
 
 export interface SketchAnnotationLayoutViewport {
@@ -165,10 +231,11 @@ export function estimateSketchAnnotationExtent(annotation: {
 
 /**
  * T14d (T-8): places annotation labels in a stable order (fixed items, then
- * priority, then id). The usable area is the canvas between the top and
- * bottom chrome bands minus the `chrome` obstacles: a label whose anchor is
- * outside it is not rendered (problems included; off-screen anchors are not
- * pulled in). Each other label takes the first candidate from its anchor
+ * priority, then user-placed labels, the most recently dropped first, then
+ * id). The usable area is the canvas between the top and bottom chrome
+ * bands minus the `chrome` obstacles: a label whose anchor is outside it
+ * is not rendered (problems included; off-screen anchors are not pulled
+ * in). Each other label takes the first candidate from its anchor
  * outward (8 directions on up to 6 rings, ring step = its own size + 6 px
  * gap), clamped 8 px inside the usable band, whose rect keeps the gap to
  * every placed label and obstacle. With no free candidate, a problem or
@@ -189,6 +256,8 @@ export function layoutSketchAnnotations(
       Number(!left.fixed) - Number(!right.fixed) ||
       SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[left.priority] -
         SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[right.priority] ||
+      Number(!left.placedByUser) - Number(!right.placedByUser) ||
+      (left.dropRank ?? Infinity) - (right.dropRank ?? Infinity) ||
       (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );
   const clear = (
