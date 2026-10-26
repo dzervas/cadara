@@ -27,11 +27,13 @@ import {
   resolveRegionBoundaryCurve,
   tessellateBoundaryLoop,
   type BoundaryCurveFailure,
+  type RegionBoundaryBasis,
 } from "@/contracts/sketch/region-boundary-curves";
 import type { RegionRecord, SketchPoint2D } from "@/contracts/sketch/schema";
 import type {
   MeasureTopologyResponse,
   TopologyMeasure,
+  TopologyMeasureTarget,
   TopologyMeasureVec3,
 } from "@/contracts/modeling/topology-measure";
 import {
@@ -50,6 +52,7 @@ import {
   primitiveRefEquals,
   type PrimitiveRef,
 } from "@/core/editor/schema";
+import type { EditorState } from "@/core/editor/state-machine/types";
 import {
   mapSketchPointToWorkspaceWorld,
   mapWorldPointToWorkspaceSketch,
@@ -81,14 +84,51 @@ export type MeasurementWitness =
   | MeasurementWitnessMarker;
 
 export interface MeasurementViewModel {
-  /** The measured targets' readout names, one per target (one or two). */
+  /**
+   * The measured targets' readout names in pick order, one per target (one
+   * or two); none for a summary of more than two targets.
+   */
   targetLabels: readonly string[];
   rows: readonly MeasurementRow[];
   note: string | null;
   witnesses: readonly MeasurementWitness[];
+  /**
+   * The distance a two-target readout shows; set exactly when it measures
+   * one, so the readout offers the min / max / centre switch.
+   */
+  distanceMode?: MeasurementDistanceMode;
+}
+
+/**
+ * Which distance a two-target readout measures (cadara-h026.3): the
+ * closest points, the farthest points, or centre to centre (a point itself,
+ * a circle's or arc's centre, a curve's length centroid, a face's area
+ * centroid).
+ */
+export type MeasurementDistanceMode = "minimum" | "maximum" | "center";
+
+/**
+ * What a readout measures (cadara-h026.3): the armed Measure tool's picks,
+ * or the plain selection while no tool, dialog or sketch tool owns it.
+ */
+export type MeasurementReadoutSource = "measureTool" | "selection";
+
+/**
+ * The open sketch's live geometry for the readout: measured in place of the
+ * sketch's last committed record, with the region basis its live regions
+ * were derived from (they are not bound to the live pair while pending).
+ */
+export interface OpenSketchMeasurementRecord {
+  record: SketchSnapshotRecord;
+  regionBasis: RegionBoundaryBasis | null;
 }
 
 type MeasuredTargetCategory = "body" | "surface" | "curve" | "point";
+
+interface MeasuredQuantity {
+  value: number;
+  approximate: boolean;
+}
 /**
  * A distance primitive. `exact` marks a polyline that tessellates a curved
  * sketch curve: point distances use the exact curve, every other pairing
@@ -150,6 +190,10 @@ interface MeasuredTarget {
   validityNote?: string;
   /** The centre of a circle or arc: two of them measure centre to centre. */
   center?: WorkspaceVec3;
+  /** A planar face's or region's normal, for the pair's angle. */
+  planeNormal?: WorkspaceVec3;
+  /** A curve's length or a surface's area, summed by a many-target summary. */
+  total?: MeasuredQuantity & { kind: "length" | "area" };
   witnesses: readonly MeasurementWitness[];
 }
 
@@ -166,6 +210,10 @@ const ARC_SEGMENTS = 32;
 const SPLINE_SEGMENTS = 48;
 const WITNESS_MARKER_RADIUS = 0.16;
 const DISTANCE_EPSILON = 1e-9;
+/** A face mesh is planar when its triangle normals agree to 1 − cos below this. */
+const PLANAR_NORMAL_TOLERANCE = 1e-6;
+/** …and its triangles lie within this distance (mm) of one plane. */
+const PLANAR_OFFSET_TOLERANCE = 1e-6;
 
 export function isMeasureSelectableTarget(
   snapshot: WorkspaceSnapshot | null,
@@ -233,8 +281,45 @@ export function resolveMeasureSelectionCandidate(
   };
 }
 
+/**
+ * Whether the editor shows a measurement readout, and of what
+ * (cadara-h026.3): the armed Measure tool's picks; or, with no tool armed,
+ * the plain selection in part mode and in an open sketch with no sketch
+ * tool, constraint, edit tool or special mode collecting picks. A feature
+ * dialog, import, section view or any other armed tool owns the selection:
+ * no readout (measuring there is the Measure tool's job).
+ */
+export function getMeasurementReadoutSource(
+  state: EditorState,
+): MeasurementReadoutSource | null {
+  if (state.kind === "idle") return "selection";
+  if (state.kind === "selectionCommand")
+    return state.command.toolId === "measure" ? "measureTool" : null;
+  if (state.kind !== "editingSketch") return null;
+  const { session } = state;
+  return session.activeTool === null &&
+    session.activeEditTool === null &&
+    session.constraintAuthoring === null &&
+    session.activeSpecialMode === null &&
+    session.activeAnnotationEdit === null
+    ? "selection"
+    : null;
+}
+
+/**
+ * The readout of `selection` (cadara-h026.3 records which picks it means;
+ * the selection is ordered oldest pick first): one measurable target shows
+ * its intrinsic properties; two show the distance between them (oldest pick
+ * to newest, by `distanceMode`), its X/Y/Z components and their angle
+ * where both have a direction; more than two (a plain selection only: the
+ * Measure tool keeps at most two) are summarised as a count, the total
+ * length of the curves and the total area of the surfaces. Unmeasurable
+ * targets (features, sketches, planes) are skipped. The plain selection's
+ * readout draws only the distance witness: the selection highlight already
+ * shows the targets themselves.
+ */
 export function deriveMeasurementViewModel(input: {
-  activeToolId: string | null;
+  source: MeasurementReadoutSource | null;
   selection: readonly PrimitiveRef[];
   snapshot: WorkspaceSnapshot | null;
   /**
@@ -243,18 +328,22 @@ export function deriveMeasurementViewModel(input: {
    * values come from the render meshes and are marked approximate.
    */
   topologyMeasures?: MeasureTopologyResponse | null;
+  /** The two-target distance; closest points by default. */
+  distanceMode?: MeasurementDistanceMode;
+  /** The open sketch's live geometry, measured instead of its last commit. */
+  openSketch?: OpenSketchMeasurementRecord | null;
 }): MeasurementViewModel | null {
-  if (
-    input.activeToolId !== "measure" ||
-    !input.snapshot ||
-    input.selection.length === 0
-  ) {
+  if (!input.source || !input.snapshot || input.selection.length === 0) {
     return null;
   }
 
+  const openSketch = input.openSketch ?? null;
+  const snapshot = openSketch
+    ? withSketchRecord(input.snapshot, openSketch.record)
+    : input.snapshot;
   const exactMeasures =
     input.topologyMeasures &&
-    input.topologyMeasures.revisionId === input.snapshot.document.revisionId
+    input.topologyMeasures.revisionId === snapshot.document.revisionId
       ? new Map(
           input.topologyMeasures.measures.map((measure) => [
             getPrimitiveRefKey(measure.target),
@@ -262,11 +351,16 @@ export function deriveMeasurementViewModel(input: {
           ]),
         )
       : null;
-  const resolvedSelection = input.selection.slice(0, 2).flatMap((target) => {
+  const measured =
+    input.source === "measureTool"
+      ? input.selection.slice(0, 2)
+      : input.selection;
+  const resolvedSelection = measured.flatMap((target) => {
     const resolved = resolveMeasuredTarget(
-      input.snapshot,
+      snapshot,
       target,
       exactMeasures?.get(getPrimitiveRefKey(target)),
+      openSketch,
     );
     return resolved ? [resolved] : [];
   });
@@ -275,19 +369,33 @@ export function deriveMeasurementViewModel(input: {
     return null;
   }
 
+  const targetWitnesses = input.source === "measureTool";
+
   if (resolvedSelection.length === 1) {
     const target = resolvedSelection[0]!;
     return {
       targetLabels: [target.label],
       rows: target.rows,
       note: joinNotes(target.validityNote, target.note),
-      witnesses: target.witnesses,
+      witnesses: targetWitnesses ? target.witnesses : [],
     };
   }
 
-  const [first, second] = resolvedSelection;
-  const pairwise = supportsPairwiseMeasurement(first!, second!)
-    ? measurePairwiseDistance(first!, second!)
+  if (resolvedSelection.length > 2) {
+    return summarizeMeasuredTargets(resolvedSelection);
+  }
+
+  const [first, second] = resolvedSelection as [MeasuredTarget, MeasuredTarget];
+  const supported = supportsPairwiseMeasurement(first, second);
+  // A plain selection of a pair with no distance (two bodies, a body and a
+  // face) is summarised like a larger one, never told to pick another pair.
+  if (!supported && input.source === "selection") {
+    return summarizeMeasuredTargets(resolvedSelection);
+  }
+
+  const distanceMode = input.distanceMode ?? "minimum";
+  const pairwise = supported
+    ? measurePairwiseDistanceByMode(first, second, distanceMode)
     : null;
 
   const rows = pairwise
@@ -297,24 +405,127 @@ export function deriveMeasurementViewModel(input: {
           label: "Distance",
           value: formatLength(pairwise.distance, pairwise.approximate),
         },
-        ...resolvePairwiseAngleRow(first!, second!),
-        ...resolveCenterDistanceRow(first!, second!),
+        ...distanceComponentRows(pairwise),
+        ...resolvePairwiseAngleRow(first, second),
+        ...(distanceMode === "center"
+          ? []
+          : resolveCenterDistanceRow(first, second)),
       ]
     : [];
 
   const note = joinNotes(
-    first!.validityNote,
-    second!.validityNote,
+    first.validityNote,
+    second.validityNote,
     pairwise
       ? null
-      : "Select a supported point, edge, face, or profile target pair to inspect distance.",
+      : supported
+        ? `The ${DISTANCE_MODE_NOUNS[distanceMode]} distance is unavailable for this pair.`
+        : "Select a supported point, edge, face, or profile target pair to inspect distance.",
   );
 
+  // Two picks of one kind on one owner (two faces of a body) would read
+  // alike: number them in pick order.
+  const sameLabel = first.label === second.label;
   return {
-    targetLabels: [first!.label, second!.label],
+    targetLabels: sameLabel
+      ? [`${first.label} (1)`, `${second.label} (2)`]
+      : [first.label, second.label],
     rows,
     note,
-    witnesses: derivePairwiseWitnesses(first!, second!, pairwise),
+    witnesses: derivePairwiseWitnesses(first, second, pairwise, {
+      targetWitnesses,
+      endMarkers: distanceMode !== "minimum",
+    }),
+    // The switch stays while the pair has a distance in any mode, so a mode
+    // without a result can be switched back from.
+    ...(supported ? { distanceMode } : {}),
+  };
+}
+
+const DISTANCE_MODE_NOUNS = {
+  minimum: "minimum",
+  maximum: "maximum",
+  center: "centre",
+} as const satisfies Record<MeasurementDistanceMode, string>;
+
+/**
+ * The body, face and edge targets whose exact kernel measures the readout
+ * uses (cadara-h026.3): a body's volume and area only for a lone body (a
+ * pair with a body measures no distance, a summary sums no volumes), and at
+ * most `MAX_TOPOLOGY_MEASURE_TARGETS` (the rest stay mesh values, marked
+ * approximate), so a marquee asks the worker one bounded request.
+ */
+export function getTopologyMeasureTargets(
+  selection: readonly PrimitiveRef[],
+): TopologyMeasureTarget[] {
+  return selection
+    .filter(
+      (target): target is TopologyMeasureTarget =>
+        (target.kind === "body" && selection.length === 1) ||
+        target.kind === "face" ||
+        target.kind === "edge",
+    )
+    .slice(0, MAX_TOPOLOGY_MEASURE_TARGETS);
+}
+
+export const MAX_TOPOLOGY_MEASURE_TARGETS = 64;
+
+/** `snapshot` with `record` in place of its sketch (added for a new sketch). */
+function withSketchRecord(
+  snapshot: WorkspaceSnapshot,
+  record: SketchSnapshotRecord,
+): WorkspaceSnapshot {
+  const others = snapshot.document.sketches.filter(
+    (entry) => entry.sketchId !== record.sketchId,
+  );
+  return {
+    ...snapshot,
+    document: { ...snapshot.document, sketches: [...others, record] },
+  };
+}
+
+/** More than two targets: their count and summed lengths and areas. */
+function summarizeMeasuredTargets(
+  targets: readonly MeasuredTarget[],
+): MeasurementViewModel {
+  const sum = (kind: "length" | "area") => {
+    const parts = targets.flatMap((target) =>
+      target.total?.kind === kind ? [target.total] : [],
+    );
+    return parts.length === 0
+      ? null
+      : {
+          value: parts.reduce((total, part) => total + part.value, 0),
+          approximate: parts.some((part) => part.approximate),
+        };
+  };
+  const length = sum("length");
+  const area = sum("area");
+  return {
+    targetLabels: [],
+    rows: [
+      { id: "targets", label: "Targets", value: String(targets.length) },
+      ...(length
+        ? [
+            {
+              id: "total-length",
+              label: "Total Length",
+              value: formatLength(length.value, length.approximate),
+            },
+          ]
+        : []),
+      ...(area
+        ? [
+            {
+              id: "total-area",
+              label: "Total Area",
+              value: formatArea(area.value, area.approximate),
+            },
+          ]
+        : []),
+    ],
+    note: null,
+    witnesses: [],
   };
 }
 
@@ -322,6 +533,7 @@ function resolveMeasuredTarget(
   snapshot: WorkspaceSnapshot | null,
   target: PrimitiveRef | null,
   exact?: TopologyMeasure,
+  openSketch?: OpenSketchMeasurementRecord | null,
 ): MeasuredTarget | null {
   if (!snapshot || !target) {
     return null;
@@ -356,7 +568,13 @@ function resolveMeasuredTarget(
   }
 
   if (target.kind === "region") {
-    return resolveRegionTarget(snapshot, target);
+    return resolveRegionTarget(
+      snapshot,
+      target,
+      openSketch?.record.sketchId === target.sketchId
+        ? openSketch.regionBasis
+        : null,
+    );
   }
 
   if (target.kind === "sketchPoint" || target.kind === "sketchEntity") {
@@ -478,15 +696,29 @@ function resolveFaceTarget(
   const rows: readonly MeasurementRow[] = exact
     ? exactFaceRows(exact)
     : meshFaceRows(renderable.geometry, boundaryEdges);
+  const triangles = trianglesFromMesh(renderable.geometry);
+  const planeNormal = exact
+    ? exact.surface.kind === "plane"
+      ? exact.surface.normal
+      : null
+    : planarMeshNormal(triangles);
 
   return {
     target,
     key: getPrimitiveRefKey(target),
     label: getTargetLabel(snapshot, target, exact),
     category: "surface",
+    ...(planeNormal ? { planeNormal } : {}),
+    total: exact
+      ? { kind: "area", value: exact.area, approximate: false }
+      : {
+          kind: "area",
+          value: getMeshArea(renderable.geometry),
+          approximate: true,
+        },
     distancePrimitive: {
       kind: "mesh",
-      triangles: trianglesFromMesh(renderable.geometry),
+      triangles,
       // Only a planar face bounded by straight edges is meshed exactly: a
       // curved face's triangles, or a curved boundary's chords, approximate.
       approximate: !(
@@ -516,18 +748,21 @@ function resolveEdgeTarget(
   }
 
   const circle = exact?.curve.kind === "circle" ? exact.curve : null;
+  const length: MeasuredQuantity = exact
+    ? { value: exact.length, approximate: false }
+    : {
+        value: polylineLength(
+          renderable.geometry.points,
+          renderable.geometry.isClosed,
+        ),
+        approximate: true,
+      };
   const rows: readonly MeasurementRow[] = !exact
     ? [
         {
           id: "length",
           label: "Length",
-          value: formatLength(
-            polylineLength(
-              renderable.geometry.points,
-              renderable.geometry.isClosed,
-            ),
-            true,
-          ),
+          value: formatLength(length.value, true),
         },
       ]
     : circle
@@ -564,6 +799,7 @@ function resolveEdgeTarget(
       approximate: exact?.curve.kind !== "line",
     },
     ...(circle ? { center: circle.center } : {}),
+    total: { kind: "length", ...length },
     rows,
     note: null,
     witnesses: [
@@ -612,6 +848,7 @@ function resolveVertexTarget(
 function resolveRegionTarget(
   snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: "region" }>,
+  regionBasis: RegionBoundaryBasis | null,
 ): MeasuredTarget | null {
   const sketch = snapshot.document.sketches.find(
     (entry) => entry.sketchId === target.sketchId,
@@ -624,7 +861,11 @@ function resolveRegionTarget(
     return null;
   }
 
-  const measured = measureSketchRegion(sketch, region);
+  const measured = measureSketchRegion(
+    sketch,
+    region,
+    regionBasis ?? undefined,
+  );
   if (measured.kind === "failed") {
     return {
       target,
@@ -651,6 +892,8 @@ function resolveRegionTarget(
     key: getPrimitiveRefKey(target),
     label: getTargetLabel(snapshot, target),
     category: "surface",
+    planeNormal: sketch.plane.frame.normal,
+    total: { kind: "area", value: measured.area, approximate: false },
     distancePrimitive:
       measured.area > DISTANCE_EPSILON
         ? {
@@ -784,6 +1027,7 @@ function resolveSketchEntityTarget(
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline: [start, end],
+      length: { value: distanceBetween(start, end), approximate: false },
       rows: [
         {
           id: "length",
@@ -809,6 +1053,7 @@ function resolveSketchEntityTarget(
       polyline,
       exact: exactCircle(sketch, center, entity.radius),
       isClosed: true,
+      length: { value: Math.PI * entity.radius * 2, approximate: false },
       rows: [
         { id: "radius", label: "Radius", value: formatLength(entity.radius) },
         {
@@ -864,6 +1109,7 @@ function resolveSketchEntityTarget(
         end,
         entity.sweepDirection,
       ),
+      length: { value: radius * sweepRadians, approximate: false },
       rows: [
         { id: "radius", label: "Radius", value: formatLength(radius) },
         { id: "diameter", label: "Diameter", value: formatLength(radius * 2) },
@@ -944,6 +1190,7 @@ function resolveSketchEntityTarget(
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
       exact: { plane: sketch.plane, curve: { kind: "cubics", spans } },
+      length,
       rows: [
         {
           id: "length",
@@ -990,6 +1237,7 @@ function resolveSketchEntityTarget(
       key: getPrimitiveRefKey(target),
       polyline: sampledPoints,
       exact: { plane: sketch.plane, curve: { kind: "cubics", spans, domains } },
+      length,
       rows: [
         {
           id: "length",
@@ -1062,6 +1310,10 @@ function resolveProjectedGeometryTarget(
       label: getTargetLabel(snapshot, target),
       key: getPrimitiveRefKey(target),
       polyline,
+      length: {
+        value: distanceBetween(polyline[0], polyline[1]),
+        approximate: false,
+      },
       rows: [
         {
           id: "length",
@@ -1081,6 +1333,7 @@ function resolveProjectedGeometryTarget(
       polyline,
       exact: exactCircle(sketch, geometry.centerPosition, geometry.radius),
       isClosed: true,
+      length: { value: Math.PI * geometry.radius * 2, approximate: false },
       rows: [
         { id: "radius", label: "Radius", value: formatLength(geometry.radius) },
         {
@@ -1122,6 +1375,7 @@ function resolveProjectedGeometryTarget(
         geometry.endPosition,
         geometry.sweepDirection,
       ),
+      length: { value: radius * sweepRadians, approximate: false },
       rows: [
         { id: "radius", label: "Radius", value: formatLength(radius) },
         { id: "diameter", label: "Diameter", value: formatLength(radius * 2) },
@@ -1169,6 +1423,7 @@ function resolveProjectedGeometryTarget(
         ? { exact: { plane: sketch.plane, curve: { kind: "cubics", spans } } }
         : {}),
       isClosed,
+      length,
       rows: [
         {
           id: "length",
@@ -1205,6 +1460,7 @@ function createCurveTarget(input: {
   key: string;
   polyline: readonly WorkspaceVec3[];
   exact?: ExactSketchCurve;
+  length: MeasuredQuantity;
   rows: readonly MeasurementRow[];
   isClosed?: boolean;
 }): MeasuredTarget {
@@ -1213,6 +1469,7 @@ function createCurveTarget(input: {
     key: input.key,
     label: input.label,
     category: "curve",
+    total: { kind: "length", ...input.length },
     distancePrimitive: {
       kind: "polyline",
       points: input.polyline,
@@ -1264,21 +1521,183 @@ function measurePairwiseDistance(
   );
 }
 
+/**
+ * The pair's distance by `mode` (cadara-h026.3), from the first pick to the
+ * second. Maximum: the farthest pair of the primitives' vertices (where the
+ * distance between two segment/triangle sets peaks), approximate on a
+ * tessellated curve. Centre: see `measuredTargetCenter`.
+ */
+function measurePairwiseDistanceByMode(
+  first: MeasuredTarget,
+  second: MeasuredTarget,
+  mode: MeasurementDistanceMode,
+): PairwiseDistanceResult | null {
+  if (mode === "minimum") return measurePairwiseDistance(first, second);
+  if (!first.distancePrimitive || !second.distancePrimitive) return null;
+  if (mode === "center") {
+    const start = measuredTargetCenter(first);
+    const end = measuredTargetCenter(second);
+    return start && end
+      ? {
+          distance: distanceBetween(start.point, end.point),
+          start: start.point,
+          end: end.point,
+          approximate: start.approximate || end.approximate,
+        }
+      : null;
+  }
+  const farthest = farthestPointPair(
+    primitiveVertices(first.distancePrimitive),
+    primitiveVertices(second.distancePrimitive),
+  );
+  return farthest
+    ? {
+        ...farthest,
+        approximate:
+          isTessellatedCurve(first.distancePrimitive) ||
+          isTessellatedCurve(second.distancePrimitive),
+      }
+    : null;
+}
+
+/**
+ * The farthest pair of `first` × `second`, as the brute-force scan in list
+ * order finds it (ties to the earliest pair); chunk pairs are visited
+ * farthest first and skipped once their boxes cannot beat the best.
+ */
+function farthestPointPair(
+  first: readonly WorkspaceVec3[],
+  second: readonly WorkspaceVec3[],
+): PairwiseDistanceResult | null {
+  const firstChunks = chunkElements(first, pointBound);
+  const secondChunks = chunkElements(second, pointBound);
+  const chunkPairs = firstChunks
+    .flatMap((firstChunk) =>
+      secondChunks.map((secondChunk) => ({
+        firstChunk,
+        secondChunk,
+        reach: boxReach(firstChunk.box, secondChunk.box),
+      })),
+    )
+    .sort((left, right) => right.reach - left.reach);
+  let best: {
+    result: PairwiseDistanceResult;
+    first: number;
+    second: number;
+  } | null = null;
+  for (const { firstChunk, secondChunk, reach: chunkReach } of chunkPairs) {
+    if (best && chunkReach + PRUNE_SLACK < best.result.distance) break;
+    for (
+      let firstOffset = 0;
+      firstOffset < firstChunk.bounds.length;
+      firstOffset += 1
+    ) {
+      for (
+        let secondOffset = 0;
+        secondOffset < secondChunk.bounds.length;
+        secondOffset += 1
+      ) {
+        const firstIndex = firstChunk.offset + firstOffset;
+        const secondIndex = secondChunk.offset + secondOffset;
+        const start = first[firstIndex]!;
+        const end = second[secondIndex]!;
+        const distance = distanceBetween(start, end);
+        if (
+          !best ||
+          distance > best.result.distance ||
+          (distance === best.result.distance &&
+            (firstIndex < best.first ||
+              (firstIndex === best.first && secondIndex < best.second)))
+        )
+          best = {
+            result: { distance, start, end },
+            first: firstIndex,
+            second: secondIndex,
+          };
+      }
+    }
+  }
+  return best?.result ?? null;
+}
+
+/** A primitive's distinct vertices (a mesh repeats shared corners). */
+function primitiveVertices(primitive: DistancePrimitive) {
+  if (primitive.kind === "point") return [primitive.point];
+  if (primitive.kind === "polyline") return primitive.points;
+  const vertices = new Map<string, WorkspaceVec3>();
+  for (const triangle of primitive.triangles)
+    for (const vertex of [triangle.first, triangle.second, triangle.third])
+      vertices.set(getPointKey(vertex), vertex);
+  return [...vertices.values()];
+}
+
+/**
+ * The point a centre distance measures from: a point itself, a circle's or
+ * arc's centre, any other curve's length centroid (its segments' midpoints
+ * weighted by length: a straight curve's midpoint; off a curved open
+ * curve, like a spline's), a surface's area centroid. Approximate when
+ * taken from a tessellated curve or surface.
+ */
+function measuredTargetCenter(
+  target: MeasuredTarget,
+): { point: WorkspaceVec3; approximate: boolean } | null {
+  if (target.center) return { point: target.center, approximate: false };
+  const primitive = target.distancePrimitive;
+  if (!primitive) return null;
+  if (primitive.kind === "point")
+    return { point: primitive.point, approximate: false };
+  const approximate = isTessellatedCurve(primitive);
+  let weight = 0;
+  let weighted: WorkspaceVec3 = [0, 0, 0];
+  const accumulate = (center: WorkspaceVec3, amount: number) => {
+    weight += amount;
+    weighted = add(weighted, scale(center, amount));
+  };
+  if (primitive.kind === "polyline") {
+    forEachSegment(primitive.points, false, (start, end) =>
+      accumulate(scale(add(start, end), 0.5), distanceBetween(start, end)),
+    );
+  } else {
+    for (const triangle of primitive.triangles)
+      accumulate(
+        scale(add(add(triangle.first, triangle.second), triangle.third), 1 / 3),
+        triangleArea(triangle),
+      );
+  }
+  return weight > DISTANCE_EPSILON
+    ? { point: scale(weighted, 1 / weight), approximate }
+    : null;
+}
+
+/** The X/Y/Z components of the pair's distance, as magnitudes. */
+function distanceComponentRows(
+  pairwise: PairwiseDistanceResult,
+): readonly MeasurementRow[] {
+  const delta = subtract(pairwise.end, pairwise.start);
+  return (["X", "Y", "Z"] as const).map((axis, index) => ({
+    id: `delta-${axis.toLowerCase()}`,
+    label: `Δ${axis}`,
+    value: formatLength(Math.abs(delta[index]!), pairwise.approximate),
+  }));
+}
+
+/**
+ * The angle of two directions, 0 to 90 deg: two straight curves, two planar
+ * faces or regions (their normals), or a straight curve and a plane.
+ */
 function resolvePairwiseAngleRow(
   first: MeasuredTarget,
   second: MeasuredTarget,
 ): readonly MeasurementRow[] {
-  const firstSegment = getLinearSegmentFromPrimitive(first.distancePrimitive);
-  const secondSegment = getLinearSegmentFromPrimitive(second.distancePrimitive);
+  const firstDirection = getTargetDirection(first);
+  const secondDirection = getTargetDirection(second);
 
-  if (!firstSegment || !secondSegment) {
+  if (!firstDirection || !secondDirection) {
     return [];
   }
 
-  const firstDirection = subtract(firstSegment.end, firstSegment.start);
-  const secondDirection = subtract(secondSegment.end, secondSegment.start);
-  const firstMagnitude = magnitude(firstDirection);
-  const secondMagnitude = magnitude(secondDirection);
+  const firstMagnitude = magnitude(firstDirection.vector);
+  const secondMagnitude = magnitude(secondDirection.vector);
 
   if (
     firstMagnitude <= DISTANCE_EPSILON ||
@@ -1289,20 +1708,64 @@ function resolvePairwiseAngleRow(
 
   const cosine = clamp(
     Math.abs(
-      dotProduct(firstDirection, secondDirection) /
+      dotProduct(firstDirection.vector, secondDirection.vector) /
         (firstMagnitude * secondMagnitude),
     ),
     -1,
     1,
   );
+  // A line against a plane: the complement of its angle to the normal.
+  const angle =
+    firstDirection.kind === secondDirection.kind
+      ? Math.acos(cosine)
+      : Math.asin(cosine);
 
   return [
     {
       id: "angle",
       label: "Angle",
-      value: formatAngle(Math.acos(cosine)),
+      value: formatAngle(angle),
     },
   ];
+}
+
+function getTargetDirection(
+  target: MeasuredTarget,
+): { kind: "line" | "plane"; vector: WorkspaceVec3 } | null {
+  if (target.planeNormal) return { kind: "plane", vector: target.planeNormal };
+  const segment = getLinearSegmentFromPrimitive(target.distancePrimitive);
+  return segment
+    ? { kind: "line", vector: subtract(segment.end, segment.start) }
+    : null;
+}
+
+/** The unit normal of a mesh whose triangles all lie in one plane, or null. */
+function planarMeshNormal(
+  triangles: readonly Triangle[],
+): WorkspaceVec3 | null {
+  let normal: WorkspaceVec3 | null = null;
+  for (const triangle of triangles) {
+    const cross = crossProduct(
+      subtract(triangle.second, triangle.first),
+      subtract(triangle.third, triangle.first),
+    );
+    const length = magnitude(cross);
+    if (length <= DISTANCE_EPSILON) continue;
+    const unit = scale(cross, 1 / length);
+    if (!normal) {
+      normal = unit;
+      continue;
+    }
+    if (Math.abs(dotProduct(normal, unit)) < 1 - PLANAR_NORMAL_TOLERANCE)
+      return null;
+    if (
+      Math.abs(
+        dotProduct(normal, subtract(triangle.first, triangles[0]!.first)),
+      ) > PLANAR_OFFSET_TOLERANCE
+    )
+      return null;
+  }
+  return normal;
 }
 
 /** Two circles or arcs (sketch, projected or body edges): centre to centre. */
@@ -1436,11 +1899,19 @@ function derivePairwiseWitnesses(
   first: MeasuredTarget,
   second: MeasuredTarget,
   pairwise: PairwiseDistanceResult | null,
+  options: {
+    /** The curves' own witnesses (the Measure tool; a plain selection is highlighted already). */
+    targetWitnesses: boolean;
+    /** Mark both ends (a maximum or centre distance ends off the outlines). */
+    endMarkers: boolean;
+  },
 ): readonly MeasurementWitness[] {
-  const curveWitnesses = [
-    ...(first.category === "curve" ? first.witnesses : []),
-    ...(second.category === "curve" ? second.witnesses : []),
-  ];
+  const curveWitnesses = options.targetWitnesses
+    ? [
+        ...(first.category === "curve" ? first.witnesses : []),
+        ...(second.category === "curve" ? second.witnesses : []),
+      ]
+    : [];
 
   if (!pairwise || pairwise.distance <= DISTANCE_EPSILON) {
     return curveWitnesses;
@@ -1455,7 +1926,11 @@ function derivePairwiseWitnesses(
     },
   ];
 
-  if (first.category === "point" || second.category === "point") {
+  if (
+    options.endMarkers ||
+    first.category === "point" ||
+    second.category === "point"
+  ) {
     connectorWitnesses.push(
       {
         id: `${first.key}:${second.key}:start`,
@@ -1730,67 +2205,258 @@ function measurePolylineToPolyline(
   first: readonly WorkspaceVec3[],
   second: readonly WorkspaceVec3[],
 ): PairwiseDistanceResult | null {
-  let best: PairwiseDistanceResult | null = null;
-
-  forEachSegment(first, false, (firstStart, firstEnd) => {
-    forEachSegment(second, false, (secondStart, secondEnd) => {
-      const segmentResult = closestPointsBetweenSegments(
-        firstStart,
-        firstEnd,
-        secondStart,
-        secondEnd,
+  return closestElementPair(
+    polylineSegments(first),
+    polylineSegments(second),
+    segmentBound,
+    segmentBound,
+    (firstSegment, secondSegment) => {
+      const result = closestPointsBetweenSegments(
+        firstSegment[0],
+        firstSegment[1],
+        secondSegment[0],
+        secondSegment[1],
       );
-      const distance = distanceBetween(segmentResult.start, segmentResult.end);
-      if (!best || distance < best.distance) {
-        best = { distance, start: segmentResult.start, end: segmentResult.end };
-      }
-    });
-  });
-
-  return best;
+      return {
+        distance: distanceBetween(result.start, result.end),
+        start: result.start,
+        end: result.end,
+      };
+    },
+  );
 }
 
 function measurePolylineToMesh(
   polyline: readonly WorkspaceVec3[],
   triangles: readonly Triangle[],
 ): PairwiseDistanceResult | null {
-  let best: PairwiseDistanceResult | null = null;
-
-  forEachSegment(polyline, false, (segmentStart, segmentEnd) => {
-    for (const triangle of triangles) {
-      const segmentTriangle = closestPointsBetweenSegmentAndTriangle(
-        segmentStart,
-        segmentEnd,
-        triangle,
-      );
-      if (!best || segmentTriangle.distance < best.distance) {
-        best = segmentTriangle;
-      }
-    }
-  });
-
-  return best;
+  return closestElementPair(
+    polylineSegments(polyline),
+    triangles,
+    segmentBound,
+    triangleBound,
+    (segment, triangle) =>
+      closestPointsBetweenSegmentAndTriangle(segment[0], segment[1], triangle),
+  );
 }
 
 function measureMeshToMesh(
   first: readonly Triangle[],
   second: readonly Triangle[],
 ): PairwiseDistanceResult | null {
-  let best: PairwiseDistanceResult | null = null;
+  return closestElementPair(
+    first,
+    second,
+    triangleBound,
+    triangleBound,
+    closestPointsBetweenTriangles,
+  );
+}
 
-  for (const firstTriangle of first) {
-    for (const secondTriangle of second) {
-      const triangleResult = closestPointsBetweenTriangles(
-        firstTriangle,
-        secondTriangle,
-      );
-      if (!best || triangleResult.distance < best.distance) {
-        best = triangleResult;
+type Segment = readonly [WorkspaceVec3, WorkspaceVec3];
+
+/** An axis-aligned box: per axis, its least and greatest coordinate. */
+interface BoundingBox {
+  min: WorkspaceVec3;
+  max: WorkspaceVec3;
+}
+
+/** An element's box, its vertices and, for a triangle, its plane. */
+interface ElementBound extends BoundingBox {
+  points: readonly WorkspaceVec3[];
+  plane: { normal: WorkspaceVec3; offset: number } | null;
+}
+
+interface ElementChunk {
+  /** Index of the chunk's first element in its list. */
+  offset: number;
+  bounds: readonly ElementBound[];
+  box: BoundingBox;
+}
+
+/** Consecutive elements per chunk: tessellations are spatially coherent. */
+const ELEMENT_CHUNK_SIZE = 32;
+/** Box bounds are compared with this margin (mm) for rounding. */
+const PRUNE_SLACK = 1e-9;
+
+function polylineSegments(points: readonly WorkspaceVec3[]): Segment[] {
+  const segments: Segment[] = [];
+  forEachSegment(points, false, (start, end) => segments.push([start, end]));
+  return segments;
+}
+
+function boxOfPoints(points: readonly WorkspaceVec3[]): BoundingBox {
+  const axis = (index: 0 | 1 | 2, pick: (...values: number[]) => number) =>
+    pick(...points.map((point) => point[index]));
+  return {
+    min: [axis(0, Math.min), axis(1, Math.min), axis(2, Math.min)],
+    max: [axis(0, Math.max), axis(1, Math.max), axis(2, Math.max)],
+  };
+}
+
+const segmentBound = (segment: Segment): ElementBound => ({
+  ...boxOfPoints(segment),
+  points: segment,
+  plane: null,
+});
+
+function triangleBound(triangle: Triangle): ElementBound {
+  const points = [triangle.first, triangle.second, triangle.third];
+  const cross = crossProduct(
+    subtract(triangle.second, triangle.first),
+    subtract(triangle.third, triangle.first),
+  );
+  const length = magnitude(cross);
+  const normal = length > DISTANCE_EPSILON ? scale(cross, 1 / length) : null;
+  return {
+    ...boxOfPoints(points),
+    points,
+    plane: normal
+      ? { normal, offset: dotProduct(normal, triangle.first) }
+      : null,
+  };
+}
+
+const pointBound = (point: WorkspaceVec3): ElementBound => ({
+  min: point,
+  max: point,
+  points: [point],
+  plane: null,
+});
+
+function chunkElements<T>(
+  elements: readonly T[],
+  boundOf: (element: T) => ElementBound,
+): ElementChunk[] {
+  const chunks: ElementChunk[] = [];
+  for (let offset = 0; offset < elements.length; offset += ELEMENT_CHUNK_SIZE) {
+    const bounds = elements
+      .slice(offset, offset + ELEMENT_CHUNK_SIZE)
+      .map(boundOf);
+    chunks.push({
+      offset,
+      bounds,
+      box: boxOfPoints(bounds.flatMap((bound) => [bound.min, bound.max])),
+    });
+  }
+  return chunks;
+}
+
+/** No two points of the boxes are closer than this. */
+function boxGap(first: BoundingBox, second: BoundingBox) {
+  let sum = 0;
+  for (const index of [0, 1, 2] as const) {
+    const gap = Math.max(
+      0,
+      second.min[index] - first.max[index],
+      first.min[index] - second.max[index],
+    );
+    sum += gap * gap;
+  }
+  return Math.sqrt(sum);
+}
+
+/** No point of `points` is closer than this to the plane. */
+function planeGap(
+  plane: ElementBound["plane"],
+  points: readonly WorkspaceVec3[],
+) {
+  if (!plane) return 0;
+  let above = Infinity;
+  let below = Infinity;
+  for (const point of points) {
+    const offset = dotProduct(plane.normal, point) - plane.offset;
+    if (offset >= 0) above = Math.min(above, offset);
+    else below = Math.min(below, -offset);
+  }
+  return above === Infinity ? below : below === Infinity ? above : 0;
+}
+
+/**
+ * No two points of the elements are closer than this: their boxes' gap, or
+ * how far one lies off the other's plane (tight for parallel surfaces,
+ * where boxes of slanted triangles are loose).
+ */
+function elementGap(first: ElementBound, second: ElementBound) {
+  return Math.max(
+    boxGap(first, second),
+    planeGap(first.plane, second.points),
+    planeGap(second.plane, first.points),
+  );
+}
+
+/** No two points of the boxes are farther apart than this. */
+function boxReach(first: BoundingBox, second: BoundingBox) {
+  let sum = 0;
+  for (const index of [0, 1, 2] as const) {
+    const reach = Math.max(
+      second.max[index] - first.min[index],
+      first.max[index] - second.min[index],
+    );
+    sum += reach * reach;
+  }
+  return Math.sqrt(sum);
+}
+
+/**
+ * The closest pair over `first` × `second`, exactly as the brute-force scan
+ * in list order finds it: the least distance, ties going to the earliest
+ * pair (first index, then second). Chunk pairs are visited nearest first
+ * and any pair whose bounds (`elementGap`) are farther apart than the best
+ * so far is skipped (cadara-h026.3: two dense curved faces took seconds to a
+ * minute on the main thread; the plain selection measures every pick).
+ */
+function closestElementPair<A, B>(
+  first: readonly A[],
+  second: readonly B[],
+  firstBound: (element: A) => ElementBound,
+  secondBound: (element: B) => ElementBound,
+  measure: (first: A, second: B) => PairwiseDistanceResult,
+): PairwiseDistanceResult | null {
+  const firstChunks = chunkElements(first, firstBound);
+  const secondChunks = chunkElements(second, secondBound);
+  const chunkPairs = firstChunks
+    .flatMap((firstChunk) =>
+      secondChunks.map((secondChunk) => ({
+        firstChunk,
+        secondChunk,
+        gap: boxGap(firstChunk.box, secondChunk.box),
+      })),
+    )
+    .sort((left, right) => left.gap - right.gap);
+  let best: {
+    result: PairwiseDistanceResult;
+    first: number;
+    second: number;
+  } | null = null;
+  for (const { firstChunk, secondChunk, gap } of chunkPairs) {
+    if (best && gap - PRUNE_SLACK > best.result.distance) break;
+    for (const [firstOffset, firstElement] of firstChunk.bounds.entries()) {
+      for (const [
+        secondOffset,
+        secondElement,
+      ] of secondChunk.bounds.entries()) {
+        if (
+          best &&
+          elementGap(firstElement, secondElement) - PRUNE_SLACK >
+            best.result.distance
+        )
+          continue;
+        const firstIndex = firstChunk.offset + firstOffset;
+        const secondIndex = secondChunk.offset + secondOffset;
+        const result = measure(first[firstIndex]!, second[secondIndex]!);
+        if (
+          !best ||
+          result.distance < best.result.distance ||
+          (result.distance === best.result.distance &&
+            (firstIndex < best.first ||
+              (firstIndex === best.first && secondIndex < best.second)))
+        )
+          best = { result, first: firstIndex, second: secondIndex };
       }
     }
   }
-
-  return best;
+  return best?.result ?? null;
 }
 
 function closestPointsBetweenTriangles(
@@ -1812,23 +2478,8 @@ function closestPointsBetweenTriangles(
     });
   }
 
-  for (const point of [first.first, first.second, first.third]) {
-    const closest = closestPointOnTriangle(point, second);
-    candidates.push({
-      distance: distanceBetween(point, closest),
-      start: point,
-      end: closest,
-    });
-  }
-
-  for (const point of [second.first, second.second, second.third]) {
-    const closest = closestPointOnTriangle(point, first);
-    candidates.push({
-      distance: distanceBetween(point, closest),
-      start: closest,
-      end: point,
-    });
-  }
+  // Each vertex's distance to the other triangle is already a candidate,
+  // earlier and equal, as an endpoint of its edges' segment results.
 
   return candidates.reduce((best, entry) =>
     entry.distance < best.distance ? entry : best,
@@ -1850,16 +2501,18 @@ function closestPointsBetweenSegmentAndTriangle(
     };
   }
 
+  const startClosest = closestPointOnTriangle(start, triangle);
+  const endClosest = closestPointOnTriangle(end, triangle);
   const candidates: PairwiseDistanceResult[] = [
     {
-      distance: distanceBetween(start, closestPointOnTriangle(start, triangle)),
+      distance: distanceBetween(start, startClosest),
       start,
-      end: closestPointOnTriangle(start, triangle),
+      end: startClosest,
     },
     {
-      distance: distanceBetween(end, closestPointOnTriangle(end, triangle)),
+      distance: distanceBetween(end, endClosest),
       start: end,
-      end: closestPointOnTriangle(end, triangle),
+      end: endClosest,
     },
   ];
 
@@ -2132,13 +2785,15 @@ export interface SketchRegionMeasure {
  * (T10 plan §2.3, [TECH] T-6): each loop's area is the midpoint of
  * `boundaryLoopSignedArea`, its length the sum of `curveLength` over its
  * segments' kernel intervals, both on the curves the arrangement certified
- * at the record's own solved positions. The polygon is display output only.
+ * at the record's own solved positions, or on `basis`, the pair an open
+ * sketch's live regions were derived from. The polygon is display output
+ * only.
  */
 export function measureSketchRegion(
   sketch: SketchSnapshotRecord,
   region: RegionRecord,
+  basis: RegionBoundaryBasis = regionBoundaryBasisOfRecord(sketch.sketch),
 ): SketchRegionMeasure | BoundaryCurveFailure {
-  const basis = regionBoundaryBasisOfRecord(sketch.sketch);
   const loops: SketchRegionMeasure["loops"][number][] = [];
   for (const loop of region.loops) {
     const area = boundaryLoopSignedArea(basis, loop);

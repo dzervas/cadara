@@ -69,7 +69,7 @@ function measuredVolume(oc: Oc, shape: Shape) {
     ).snapshot,
   );
   const value = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [{ kind: "body", bodyId: "body_measured" }],
     snapshot,
   })?.rows.find((row) => row.label === "Volume")?.value;

@@ -398,7 +398,7 @@ test("measurement measures a rejected sketch's held (authored) lines and spline 
   const measure = (label: string, ...entities: string[]) => {
     const record = recordOf(label);
     return deriveMeasurementViewModel({
-      activeToolId: "measure",
+      source: "measureTool",
       selection: entities.map((entity) => ({
         kind: "sketchEntity",
         sketchId: record.sketchId,
@@ -475,7 +475,7 @@ test("T17d2 (T17d review A-3): a held spline whose authored fit points define no
   const record = recordOf("Degenerate spline");
   expect(record.sketch.derivedValidity.state, "premise").toBe("invalid");
   const measured = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -762,7 +762,7 @@ test("T17d2: part mode draws a rejected sketch (T13e2 95° rectangle with a spli
     // points, accepted) measures, marked.
     const measure = (label: string) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [
           {
             kind: "sketchEntity",

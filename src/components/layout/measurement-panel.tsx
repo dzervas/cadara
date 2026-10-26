@@ -1,14 +1,28 @@
-import { Paper, Text } from "@mantine/core";
+import { Button, Paper, Text } from "@mantine/core";
 import type { Ref } from "react";
 
-import type { MeasurementViewModel } from "@/domain/measure/measurement";
+import type {
+  MeasurementDistanceMode,
+  MeasurementViewModel,
+} from "@/domain/measure/measurement";
 
 interface MeasurementPanelProps {
   measurement: MeasurementViewModel | null;
+  onDistanceModeChange: (mode: MeasurementDistanceMode) => void;
   ref?: Ref<HTMLDivElement>;
 }
 
-export function MeasurementPanel({ measurement, ref }: MeasurementPanelProps) {
+const DISTANCE_MODES = [
+  { value: "minimum", label: "Min" },
+  { value: "maximum", label: "Max" },
+  { value: "center", label: "Center" },
+] satisfies { value: MeasurementDistanceMode; label: string }[];
+
+export function MeasurementPanel({
+  measurement,
+  onDistanceModeChange,
+  ref,
+}: MeasurementPanelProps) {
   if (!measurement || (measurement.rows.length === 0 && !measurement.note)) {
     return null;
   }
@@ -41,6 +55,33 @@ export function MeasurementPanel({ measurement, ref }: MeasurementPanelProps) {
           {label}
         </Text>
       ))}
+
+      {measurement.distanceMode ? (
+        // The readout passes pointer events through to the viewport; only
+        // its distance switch takes them (cadara-h026.3). Buttons, not a
+        // radio group: a clicked radio input would hold the keyboard
+        // shortcuts (Escape clearing the selection) as a text field does.
+        <Button.Group
+          aria-label="Distance"
+          className="pointer-events-auto mt-2"
+        >
+          {DISTANCE_MODES.map((mode) => {
+            const active = mode.value === measurement.distanceMode;
+            return (
+              <Button
+                key={mode.value}
+                size="compact-xs"
+                fullWidth
+                variant={active ? "filled" : "default"}
+                aria-pressed={active}
+                onClick={() => onDistanceModeChange(mode.value)}
+              >
+                {mode.label}
+              </Button>
+            );
+          })}
+        </Button.Group>
+      ) : null}
 
       {measurement.rows.length > 0 ? (
         <div className="mt-2 grid gap-1 border-t border-[var(--cad-border)] pt-2">

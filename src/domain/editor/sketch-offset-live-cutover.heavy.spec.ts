@@ -3254,7 +3254,7 @@ describe("T08b-g5b consumers and region wiring", () => {
 
     // Measure (a committed sketch record).
     const measured = deriveMeasurementViewModel({
-      activeToolId: "measure",
+      source: "measureTool",
       selection: [
         {
           kind: "sketchEntity",
@@ -4022,7 +4022,7 @@ describe("T08b-g5c non-accepted offset outputs ([TECH] G19/G19a, U-G5)", () => {
     // Measurement.
     const measure = (state: SketchSessionState, entityId: SketchEntityId) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [
           { kind: "sketchEntity", sketchId: "sketch_g5b", entityId } as never,
         ],
@@ -4952,7 +4952,7 @@ describe("T08b-g5c review fixes", () => {
       );
     const measured = (state: SketchSessionState, pointId: SketchPointId) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [
           { kind: "sketchPoint", sketchId: "sketch_g5b", pointId } as never,
         ],
@@ -9103,7 +9103,7 @@ describe("T15b: failed mirrors in the session and the G19 consumers", () => {
     // Measurement.
     const measured = (ref: unknown) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [ref as never],
         snapshot: { document: { sketches: [sketchRecordOf(broken)] } } as never,
       })?.witnesses ?? [];

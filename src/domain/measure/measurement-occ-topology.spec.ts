@@ -284,7 +284,7 @@ describe("cadara-h026.5: exact topology measures of production-kernel bodies", (
       topologyMeasures: MeasureTopologyResponse | null,
     ) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [target],
         snapshot,
         topologyMeasures,
@@ -322,7 +322,7 @@ describe("cadara-h026.5: exact topology measures of production-kernel bodies", (
     );
     const distance = (first: TopologyMeasure, second: TopologyMeasure) =>
       deriveMeasurementViewModel({
-        activeToolId: "measure",
+        source: "measureTool",
         selection: [first.target, second.target],
         snapshot,
         topologyMeasures: response,

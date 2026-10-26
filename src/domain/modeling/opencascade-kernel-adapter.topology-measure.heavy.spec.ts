@@ -133,7 +133,7 @@ test("cadara-h026.5: the wheel's every face and edge measures exactly; circles a
   // The readout: kind names, exact rows; the bore (Ø12) among the circles.
   const readout = (measure: TopologyMeasure) =>
     deriveMeasurementViewModel({
-      activeToolId: "measure",
+      source: "measureTool",
       selection: [measure.target],
       snapshot,
       topologyMeasures: response,
@@ -162,7 +162,7 @@ test("cadara-h026.5: the wheel's every face and edge measures exactly; circles a
   });
   // Inscribed facets fall short of the exact area, by under 1%.
   const mesh = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [cylinder.target],
     snapshot,
   })!;

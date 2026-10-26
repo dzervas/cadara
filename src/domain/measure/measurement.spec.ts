@@ -33,7 +33,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   const snapshot = createMeasurementSnapshotForTest();
 
   const lineMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -51,7 +51,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const circleMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -80,7 +80,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
 
   // cadara-h026.5: two sketch circles/arcs measure centre to centre.
   const circleArcMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -105,7 +105,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
 
   const arcMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -129,7 +129,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const splineMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -153,7 +153,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const regionMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "region",
@@ -177,7 +177,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const faceMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [{ kind: "face", bodyId: "body_measure", faceId: "face_top" }],
     snapshot,
   });
@@ -195,7 +195,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const bodyMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [{ kind: "body", bodyId: "body_measure" }],
     snapshot,
   });
@@ -213,7 +213,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const pairMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "vertex",
@@ -225,17 +225,21 @@ test("src/domain/measure/measurement.spec.ts", () => {
     snapshot,
   });
   expect(
-    pairMeasurement?.rows.length === 1 &&
-      pairMeasurement.rows[0]?.value === "≈ 5 mm",
-    "Supported pairwise measurements should expose minimum distance only.",
-  ).toBeTruthy();
+    pairMeasurement?.rows.map((row) => [row.label, row.value]),
+    "Supported pairwise measurements should expose the minimum distance and its X/Y/Z components (cadara-h026.3), no angle for a point.",
+  ).toEqual([
+    ["Distance", "≈ 5 mm"],
+    ["ΔX", "≈ 0 mm"],
+    ["ΔY", "≈ 0 mm"],
+    ["ΔZ", "≈ 5 mm"],
+  ]);
   expect(
     pairMeasurement?.witnesses.length,
     "Pairwise measurements should retain a witness segment with endpoint markers.",
   ).toBe(3);
 
   const parallelEdgeMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       { kind: "edge", bodyId: "body_measure", edgeId: "edge_top_front" },
       { kind: "edge", bodyId: "body_measure", edgeId: "edge_top_back" },
@@ -278,7 +282,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const touchingEdgeMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       { kind: "edge", bodyId: "body_measure", edgeId: "edge_top_front" },
       { kind: "edge", bodyId: "body_measure", edgeId: "edge_top_left" },
@@ -310,7 +314,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   ).toBeTruthy();
 
   const projectedMeasurement = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "projectedReferenceGeometry",
@@ -376,7 +380,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
     ).spans.map((span) => span.poles),
   );
   const pointToSpline = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchPoint",
@@ -422,7 +426,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   );
 
   const splineToLine = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchEntity",
@@ -445,7 +449,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   // Review A-3: a probe outside a clockwise arc's sweep measures to the
   // nearer arc end, not to the unclamped circle (1.11 mm here).
   const pointToArc = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       {
         kind: "sketchPoint",
@@ -543,7 +547,7 @@ test("cadara-h026.4: readout target labels name the geometry kind and its owner,
 
   for (const [selection, expected] of rows) {
     const labels = deriveMeasurementViewModel({
-      activeToolId: "measure",
+      source: "measureTool",
       selection,
       snapshot,
     })?.targetLabels;
@@ -626,7 +630,7 @@ test("entity splines measure the record's solved spans; no valid solved spline m
     selection: readonly PrimitiveRef[],
   ) =>
     deriveMeasurementViewModel({
-      activeToolId: "measure",
+      source: "measureTool",
       selection,
       snapshot: { document: { sketches: [record] } } as never,
     });
@@ -834,7 +838,7 @@ function holedPrismSnapshot(input: {
 
 const holedVolume = (snapshot: WorkspaceSnapshot) =>
   deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [{ kind: "body", bodyId: "body_holed" }],
     snapshot,
   })?.rows.find((row) => row.label === "Volume")?.value ?? null;

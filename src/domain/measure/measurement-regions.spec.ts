@@ -204,7 +204,7 @@ function pointToRegion(
     sketchId: "sketch_probe",
   };
   const result = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [
       { kind: "sketchPoint", sketchId: "sketch_probe", pointId },
       { kind: "region", sketchId: record.sketchId, regionId: region.regionId },

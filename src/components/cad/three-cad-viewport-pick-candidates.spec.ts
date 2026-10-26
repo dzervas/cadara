@@ -1530,7 +1530,7 @@ test("display, pick, snap, measure and vector export (model and SVG) of one spli
   );
 
   const measured = deriveMeasurementViewModel({
-    activeToolId: "measure",
+    source: "measureTool",
     selection: [{ kind: "sketchEntity", sketchId: record.sketchId, entityId }],
     snapshot: { document: { sketches: [record] } } as never,
   });

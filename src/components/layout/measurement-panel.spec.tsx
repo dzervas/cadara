@@ -10,6 +10,7 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
   const populatedMarkup = renderToStaticMarkup(
     <MantineProvider>
       <MeasurementPanel
+        onDistanceModeChange={() => {}}
         measurement={{
           targetLabels: ["Arc 1 · Sketch 1"],
           rows: [
@@ -42,6 +43,7 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
   const notedMarkup = renderToStaticMarkup(
     <MantineProvider>
       <MeasurementPanel
+        onDistanceModeChange={() => {}}
         measurement={{
           targetLabels: ["Vertex · Body 1"],
           rows: [],
@@ -59,6 +61,7 @@ test("src/components/layout/measurement-panel.spec.tsx", () => {
   const emptyMarkup = renderToStaticMarkup(
     <MantineProvider>
       <MeasurementPanel
+        onDistanceModeChange={() => {}}
         measurement={{
           targetLabels: ["Unused"],
           rows: [],
@@ -80,8 +83,9 @@ test("cadara-h026.4: the measure readout's markup shows target labels, never a d
   const markup = renderToStaticMarkup(
     <MantineProvider>
       <MeasurementPanel
+        onDistanceModeChange={() => {}}
         measurement={deriveMeasurementViewModel({
-          activeToolId: "measure",
+          source: "measureTool",
           selection: [
             {
               kind: "vertex",
@@ -109,4 +113,35 @@ test("cadara-h026.4: the measure readout's markup shows target labels, never a d
       subtitle,
     );
   }
+});
+
+test("cadara-h026.3: a two-target distance readout offers the min / max / centre switch, the only part of the readout that takes pointer events; other readouts have none", () => {
+  const render = (distanceMode?: "minimum" | "center") =>
+    renderToStaticMarkup(
+      <MantineProvider>
+        <MeasurementPanel
+          onDistanceModeChange={() => {}}
+          measurement={{
+            targetLabels: ["Line 1 · Sketch 1", "Line 2 · Sketch 1"],
+            rows: [{ id: "distance", label: "Distance", value: "3 mm" }],
+            note: null,
+            witnesses: [],
+            ...(distanceMode ? { distanceMode } : {}),
+          }}
+        />
+      </MantineProvider>,
+    );
+  const markup = render("center");
+  expect(markup).toMatch(/role="group"[^>]*aria-label="Distance"/);
+  for (const label of ["Min", "Max", "Center"])
+    expect(markup, `the switch offers ${label}`).toContain(`>${label}<`);
+  expect(
+    markup.match(/pointer-events-auto/g),
+    "only the switch takes pointer events",
+  ).toHaveLength(1);
+  expect(markup, "the selected mode is pressed, the others not").toMatch(
+    /aria-pressed="true"[^>]*>(<[^>]*>)*Center</,
+  );
+  expect(markup.match(/aria-pressed="false"/g)).toHaveLength(2);
+  expect(render()).not.toContain('aria-label="Distance"');
 });

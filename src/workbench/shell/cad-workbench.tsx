@@ -139,7 +139,12 @@ import {
   getSelectionDetail,
   getTargetContributingFeatureIds,
 } from "@/domain/modeling/document-snapshot-view";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import {
+  deriveMeasurementViewModel,
+  getMeasurementReadoutSource,
+  type MeasurementDistanceMode,
+} from "@/domain/measure/measurement";
+import { openSketchMeasurementRecord } from "@/domain/measure/open-sketch-measurement";
 import { createTopologyDebugSummary } from "@/domain/modeling/topology-debug";
 import { useCadaraDebugPlatform } from "@/workbench/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
@@ -882,23 +887,59 @@ export function CadWorkbench({
     sectionRetainedSide: activeSectionView?.retainedSide ?? null,
   };
 
+  // cadara-h026.3: the readout follows the plain selection with no tool
+  // armed, and the Measure tool's picks while it is.
+  const measurementReadoutSource = getMeasurementReadoutSource(machineState);
+  const measuredSelection = useMemo(
+    () =>
+      measurementReadoutSource === "measureTool"
+        ? visibleSelection.slice(0, 2)
+        : visibleSelection,
+    [measurementReadoutSource, visibleSelection],
+  );
+  const [measurementDistanceMode, setMeasurementDistanceMode] =
+    useState<MeasurementDistanceMode>("minimum");
   const topologyMeasures = useTopologyMeasures({
-    enabled: activeCommand?.toolId === "measure",
+    enabled: measurementReadoutSource !== null,
     modelingService,
     snapshot,
-    selection: visibleSelection,
+    selection: measuredSelection,
     errorReporter,
     showError: showWorkbenchError,
   });
+  const openSketchMeasurement = useMemo(
+    () =>
+      snapshot &&
+      sketchSession &&
+      measurementReadoutSource &&
+      measuredSelection.length > 0
+        ? openSketchMeasurementRecord(snapshot, sketchSession)
+        : null,
+    [
+      measuredSelection.length,
+      measurementReadoutSource,
+      sketchSession,
+      snapshot,
+    ],
+  );
   const measurementViewModel = useMemo(
     () =>
       deriveMeasurementViewModel({
-        activeToolId: activeCommand?.toolId ?? null,
-        selection: visibleSelection,
+        source: measurementReadoutSource,
+        selection: measuredSelection,
         snapshot,
         topologyMeasures,
+        distanceMode: measurementDistanceMode,
+        openSketch: openSketchMeasurement,
       }),
-    [activeCommand?.toolId, snapshot, topologyMeasures, visibleSelection],
+    [
+      measuredSelection,
+      measurementDistanceMode,
+      measurementReadoutSource,
+      openSketchMeasurement,
+      snapshot,
+      topologyMeasures,
+    ],
   );
   // The readout sits under the parts tree's column (cadara-h026.4): publish
   // its height so the tree's max height stops above it; 0px when hidden.
@@ -1939,6 +1980,7 @@ export function CadWorkbench({
                     <MeasurementPanel
                       ref={publishMeasurementPanelHeight}
                       measurement={measurementViewModel}
+                      onDistanceModeChange={setMeasurementDistanceMode}
                     />
                     <WorkbenchStateDebugger state={debuggerState} />
                   </div>
