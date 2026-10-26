@@ -73,8 +73,10 @@
     "three": "^0.183.2",
     "typia": "^12.1.1"
   },
+  "//": "@playwright/test is pinned exactly: keep it equal to pkgs.playwright-driver.version from devenv.lock (devenv supplies the matching browsers via PLAYWRIGHT_BROWSERS_PATH and warns on mismatch). Without devenv, run `bunx playwright install chromium`.",
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "1.63.0",
     "@sentry/vite-plugin": "^5.2.1",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^24.12.2",

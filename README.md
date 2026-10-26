@@ -8,6 +8,11 @@ It uses OpenCascade for the time being which is delivered as a WASM binary (shou
 
 ## Development and deployment
 
+The toolchain is Bun (version in `package.json` `packageManager`). With
+[devenv](https://devenv.sh), `devenv shell` (or direnv) provides it plus
+Playwright's chromium and fonts; without devenv, install Bun and run
+`bunx playwright install chromium` once for the E2E lane.
+
 ```sh
 bun install --frozen-lockfile
 bun run dev

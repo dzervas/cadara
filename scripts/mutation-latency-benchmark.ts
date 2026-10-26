@@ -26,9 +26,8 @@
 // plus .cpuprofile files; the console prints the latency table, each row's
 // phase medians and the profiled samples' per-thread phase busy time.
 //
-// Run from the workspace root with the devenv environment (only it exports
-// PLAYWRIGHT_BROWSERS_PATH for the nix chromium):
-//   eval "$(cd <main checkout> && devenv print-dev-env)"
+// Run from the workspace root (Playwright's chromium must be installed, see
+// README.md):
 //   bun run bench:mutation -- --port 3121 --out-dir .scratch/bench-mutation/<run>
 // Options: --runs N (steady samples, default 5), --fixtures a,b,
 // --mutations a,b, --settle MS (idle wait after opening, default 1500),
@@ -121,11 +120,6 @@ const workspace = process.cwd();
 if (!existsSync(resolve(workspace, "package.json"))) {
   throw new Error(
     `Run from the workspace root (${workspace} has no package.json).`,
-  );
-}
-if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
-  throw new Error(
-    'PLAYWRIGHT_BROWSERS_PATH is unset: load the devenv environment first, e.g. eval "$(cd /path/to/cadara && devenv print-dev-env)".',
   );
 }
 
