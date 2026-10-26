@@ -1,4 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expectGlideFollowed,
+  glidePath,
+  glideSamplingElement,
+} from "./helpers/pointer-glide";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 // Lane: e2e (docs/testing.md). Seam: the T14d annotation layout in the real
@@ -180,8 +185,9 @@ test("T14d: two dimension chips on one anchor keep clear with real DOM widths; a
   await expectChipsInsideCanvas(page);
 
   // A-7: drag the displaced chip 60 px down (away from the shared anchor).
-  // It stays where it was grabbed and follows the drag; the layout never
-  // re-places it onto its now free anchor under the pointer's side.
+  // It stays where it was grabbed and follows the drag at every step
+  // (cadara-3wp6); the layout never re-places it onto its now free anchor
+  // under the pointer's side.
   const centres = chips.map((box) => ({
     x: box.x + box.width / 2,
     y: box.y + box.height / 2,
@@ -192,24 +198,22 @@ test("T14d: two dimension chips on one anchor keep clear with real DOM widths; a
   await page.mouse.move(grabbed.x + 30, grabbed.y + 30);
   await page.mouse.move(grabbed.x, grabbed.y, { steps: 8 });
   await workbench.waitForAnimationFrames(2);
-  await page.mouse.down();
-  await page.mouse.move(grabbed.x, grabbed.y + 30, { steps: 6 });
-  await workbench.waitForAnimationFrames(4);
-  const midDrag = (await dragged.boundingBox())!;
-  await page.mouse.move(grabbed.x, grabbed.y + 60, { steps: 6 });
-  await workbench.waitForAnimationFrames(4);
-  const duringDrag = (await dragged.boundingBox())!;
-  for (const box of [midDrag, duringDrag]) {
-    expect(
-      Math.abs(box.x + box.width / 2 - grabbed.x),
-      "the dragged chip does not jump sideways onto its free anchor",
-    ).toBeLessThan(3);
-  }
-  expect(
-    Math.abs(duringDrag.y - midDrag.y - 30),
-    "the dragged chip follows the drag",
-  ).toBeLessThan(3);
+  const draggedId = await dragged.getAttribute("data-sketch-annotation-id");
+  const drag = await glideSamplingElement(
+    page,
+    `[data-sketch-annotation-id="${draggedId}"]`,
+    glidePath([grabbed, { x: grabbed.x, y: grabbed.y + 60 }]),
+    () => workbench.waitForAnimationFrames(2),
+    { press: true },
+  );
   await page.mouse.up();
+  // Grabbed at its centre: the chip's centre stays on the pointer (x stays
+  // at the grab, so it never jumps sideways onto its free anchor).
+  expectGlideFollowed(drag, {
+    what: "the dragged chip (no jump sideways onto its free anchor)",
+    followsPointer: true,
+    expectedOffset: { x: 0, y: 0 },
+  });
   await workbench.waitForAnimationFrames(4);
   const afterDrag = await boxes(page.locator(chipSelector));
   expectLayoutGap(

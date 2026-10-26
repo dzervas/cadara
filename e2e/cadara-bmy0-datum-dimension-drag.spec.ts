@@ -4,6 +4,11 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { openDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import {
+  expectGlideFollowed,
+  glidePath,
+  glideSamplingElement,
+} from "./helpers/pointer-glide";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 // cadara-bmy0 (E2E: pointer drag of a DOM chip over the canvas, which only
@@ -23,9 +28,14 @@ async function centreOf(locator: Locator) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-/** Glides onto `from`, presses, glides by `delta` and releases. */
+/**
+ * Glides onto the chip's centre `from`, presses, glides by `delta` and
+ * releases. cadara-3wp6: the chip (`chipId`) is sampled after every step and
+ * at every drawn frame, and its centre must stay on the pointer.
+ */
 async function glideDrag(
   page: Page,
+  chipId: string,
   from: { x: number; y: number },
   delta: { x: number; y: number },
   frames: () => Promise<void>,
@@ -33,10 +43,19 @@ async function glideDrag(
   await page.mouse.move(from.x + 40, from.y + 30);
   await page.mouse.move(from.x, from.y, { steps: 8 });
   await frames();
-  await page.mouse.down();
-  await page.mouse.move(from.x + delta.x, from.y + delta.y, { steps: 12 });
-  await frames();
+  const recording = await glideSamplingElement(
+    page,
+    `[data-sketch-annotation-id="${chipId}"]`,
+    glidePath([from, { x: from.x + delta.x, y: from.y + delta.y }]),
+    frames,
+    { press: true },
+  );
   await page.mouse.up();
+  expectGlideFollowed(recording, {
+    what: "the dragged chip",
+    followsPointer: true,
+    expectedOffset: { x: 0, y: 0 },
+  });
 }
 
 test("cadara-bmy0: a point-to-origin dimension label drags in 2D, persists its place along the line, and a displaced chip keeps a leader", async ({
@@ -77,7 +96,7 @@ test("cadara-bmy0: a point-to-origin dimension label drags in 2D, persists its p
   // jump by its old displacement on release) and needs no leader any more.
   const verticalBefore = await centreOf(vertical);
   const verticalDelta = { x: 100, y: 130 };
-  await glideDrag(page, verticalBefore, verticalDelta, frames);
+  await glideDrag(page, VERTICAL_19, verticalBefore, verticalDelta, frames);
   await frames();
   await expect
     .poll(
@@ -96,7 +115,7 @@ test("cadara-bmy0: a point-to-origin dimension label drags in 2D, persists its p
   const before = await centreOf(chip);
   // Drag along the (horizontal) dimension line and across it in one gesture.
   const delta = { x: -50, y: 100 };
-  await glideDrag(page, before, delta, frames);
+  await glideDrag(page, HORIZONTAL_19, before, delta, frames);
 
   await expect
     .poll(
