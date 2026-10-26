@@ -2,7 +2,7 @@
 
 Status: approved through revision 07 (cadara-4ti). Canonical sources live in
 `src/assets/icons/`; identical icons use the relative symlinks listed below.
-`public/icons/DESIGN.md` links to this document.
+`public/icons/` holds only symlinks for files pages outside the app need by URL.
 
 ## Intent
 

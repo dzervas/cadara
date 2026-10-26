@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This document designs item 1.3 of `docs/onshape-importer-parity-plan.md`. It is a
+This document designs item 1.3 of `docs/archive/onshape-importer-parity-plan.md`. It is a
 foundation for the fillet/chamfer, shell, boolean/delete, mirror/transform,
 split, hole, and face-backed construction-plane translators. It does not design
 the parameter mapping for each of those features beyond identifying the

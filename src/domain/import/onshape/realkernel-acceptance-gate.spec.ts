@@ -27,7 +27,7 @@ import type { OnshapeTopologyQueryRef } from "@/domain/import/onshape/topology-q
 // ONLY — not that the real OCC probe prefix exposes matching faces/edges.
 //
 // The diagnosis (see the W-realkernel note in
-// docs/onshape-importer-completion-plan.md) captured the *real* OCC
+// docs/archive/onshape-importer-completion-plan.md) captured the *real* OCC
 // signatures for the two consumers the mock over-promotes. These specs feed
 // those real-shaped signatures through the matcher/resolver so the logic lane
 // fails honestly where the real kernel fails — the mock can no longer

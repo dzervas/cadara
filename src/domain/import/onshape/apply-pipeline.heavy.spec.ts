@@ -1173,7 +1173,7 @@ test("Onshape closed hollow shell fixture applies and rebuilds through real OCC"
 // the target stays ONE body. When the rebuilt boss misses the wall the join
 // severs the target into fresh `_split_` bodies, every public face id on it is
 // reminted, and that is exactly what bakes 9841's Cutter/Extrude 4/Split 1 chain.
-// See docs/onshape-importer-completion-plan.md, "9841 Extrude 3 bosses do not
+// See docs/archive/onshape-importer-completion-plan.md, "9841 Extrude 3 bosses do not
 // contact the shelled wall".
 test("an ENTITY start-offset boss joins its shelled target as one body", async () => {
   const oc = await loadRealOccForImportTest();

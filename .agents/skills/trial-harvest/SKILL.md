@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Trial harvest
 
-Read [docs/community/discord.md](../../../docs/community/discord.md) first. Ask with the questionnaire tool whenever a step below asks for a choice.
+Read [docs/discord.md](../../../docs/discord.md) first. Ask with the questionnaire tool whenever a step below asks for a choice.
 
 A reply is **harvested** once the bot has added ✅ to it (`reactions` contains `{ "emoji": "✅", "mine": true }`). The ✅ is the only record of what has been filed, so add it exactly when the reply's content lands on an issue.
 

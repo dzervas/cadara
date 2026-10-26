@@ -504,7 +504,7 @@ test("Second Part Studio commits its honest real-kernel tier split", async ({
   // sets, so a legitimate shape edit remints the split body ids and Extrude 5's
   // persisted boolean target reports occ-missing-reference — the known-open
   // edit-stable naming gap shared with 5151's `walls` region-identity defect
-  // (see docs/onshape-importer-completion-plan.md).
+  // (see docs/archive/onshape-importer-completion-plan.md).
   const rebuilt = await editD3ColumnDepth(page);
   expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
   expect(rebuilt.featureIds).toEqual(imported.featureIds);

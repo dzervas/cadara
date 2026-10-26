@@ -1,1 +1,0 @@
-../../src/assets/icons/DESIGN.md

@@ -3,7 +3,7 @@
 This is an operation inventory, not a promise that every registered tool or
 arbitrary combination of parameters is executable. The closed semantic contract
 is authoritative for inputs; discovery at the current basis is authoritative for
-references and capabilities. See README for the bounded variants of each row.
+references and capabilities. See SKETCH-OPERATIONS.md and PART-OPERATIONS.md for the bounded variants of each row.
 Every operation below has existing public application and/or actual Bun recipe
 coverage. Family qualification is retained from tickets 11–36; ticket 38 reruns
 the foundation and representative cross-family/failure/isolation seams, not the
@@ -58,7 +58,7 @@ reopens it and inspects the fresh context. `scoped-profiles.json` extrudes the
 `Outer region` of an xy and a yz sketch selected by owning sketch
 (`src/cli/sketch-owner-recipes.spec.ts`). Output paths are relative to the
 caller's working directory. These examples execute during the extracted-package
-workflow test. The README gives the remaining bounded-family input recipes;
+workflow test. SKETCH-OPERATIONS.md and PART-OPERATIONS.md give the remaining bounded-family input recipes;
 family-specific executable examples/assertions live at the exact test paths in
 the table, not in a second release-only modeling harness.
 

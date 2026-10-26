@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This document designs item B.1 of `docs/onshape-importer-completion-plan.md`.
+This document designs item B.1 of `docs/archive/onshape-importer-completion-plan.md`.
 It replaces first-bake poisoning for snapshot-enabled Onshape captures with
 interleaved baked-body checkpoints. It is a design for B.2 (planning) and B.3
 (provider/orchestrator emission); it does not implement either item.

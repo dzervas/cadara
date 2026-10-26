@@ -70,3 +70,15 @@ test("identical whole icons are relative symlinks, never synchronized copies", (
   );
   expect(new Set(contents).size).toBe(originals.length);
 });
+
+// public/icons/ serves icons by URL to pages outside the app bundle (landing,
+// 404). The app imports from src/assets/icons; public/ only links to them.
+test("public/icons holds only relative symlinks into src/assets/icons", () => {
+  for (const file of readdirSync("public/icons")) {
+    const filename = path.join("public/icons", file);
+    expect(lstatSync(filename).isSymbolicLink(), filename).toBe(true);
+    expect(readlinkSync(filename), filename).toBe(
+      path.join("../../src/assets/icons", file),
+    );
+  }
+});

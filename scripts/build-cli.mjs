@@ -47,6 +47,8 @@ await writeFile(
         "SDK.md",
         "occ",
         "README.md",
+        "SKETCH-OPERATIONS.md",
+        "PART-OPERATIONS.md",
         "COVERAGE.md",
         "examples",
         "LICENSE.md",
@@ -58,6 +60,8 @@ await writeFile(
 );
 for (const [from, to] of [
   ["src/cli/README.md", "README.md"],
+  ["src/cli/SKETCH-OPERATIONS.md", "SKETCH-OPERATIONS.md"],
+  ["src/cli/PART-OPERATIONS.md", "PART-OPERATIONS.md"],
   ["src/cli/COVERAGE.md", "COVERAGE.md"],
   ["src/cli/SDK.md", "SDK.md"],
   ["LICENSE.md", "LICENSE.md"],

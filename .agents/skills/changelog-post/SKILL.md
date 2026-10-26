@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Changelog post
 
-Read [docs/community/discord.md](../../../docs/community/discord.md) first. It defines the channels, the voice and the issue lookups. The user is present for the whole run, so ask with the questionnaire tool whenever a step below asks for a choice.
+Read [docs/discord.md](../../../docs/discord.md) first. It defines the channels, the voice and the issue lookups. The user is present for the whole run, so ask with the questionnaire tool whenever a step below asks for a choice.
 
 1. **Find the range.** Run `bun run discord last-changelog`. Take `<old>` from the `<new>` side of its compare link. If there is no previous post, ask the user where to start (offer "last 7 days", "last 14 days", or a revision they type). The range is `<old>..main@origin`. If it is empty, tell the user and stop.
 2. **Collect.** List the commits with `jj log --no-graph -r '<old>..main@origin' -T 'commit_id ++ "\t" ++ description ++ "\n"'`. Group them by issue reference. Merge sibling issues under one parent or epic when they serve one user-visible change. The step is done when every commit belongs to exactly one group.
@@ -21,7 +21,7 @@ Read [docs/community/discord.md](../../../docs/community/discord.md) first. It d
 
 5. **Draft** in the post format below and save it to `.scratch/community/changelog-<date>.md`.
 6. **Demo.** Offer the user up to three headline candidates that would look good animated, each with a one-line shot description, plus a "no demo" option. Record the chosen one following [demo-recording.md](demo-recording.md). When recording fails, show the user what went wrong and ask: retry, pick another candidate, or post without a demo.
-7. **Review.** Show the full draft and the demo path. Ask: post, change (apply their edits and show it again), or cancel. When their edits show a new pattern, add a pair to the voice examples in `docs/community/discord.md`.
+7. **Review.** Show the full draft and the demo path. Ask: post, change (apply their edits and show it again), or cancel. When their edits show a new pattern, add a pair to the voice examples in `docs/discord.md`.
 8. **Post** with `bun run discord post-changelog <draft> [--attach <demo>]`, and report the returned message ID.
 
 ## Post format

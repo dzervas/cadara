@@ -3,7 +3,7 @@
 Snapshot 2026-07-18 (commit 06270237). What Onshape Part Studio features cadara
 cannot represent, and where the blocker sits. Excludes sheet metal, surface
 modelling, and FeatureScript custom features (permanently honest-bake).
-Companion to `docs/onshape-importer-completion-plan.md` — that plan's scope is
+Companion to `docs/archive/onshape-importer-completion-plan.md` — that plan's scope is
 table 3 only ("existing cadara capabilities"); tables 1–2 are out of scope
 until cadara grows the substrate/executors.
 

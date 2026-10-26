@@ -6,7 +6,7 @@
 // (solver starts and candidate judging), never one more per iteration. Before
 // the fix every Wolfe line search re-evaluated the loss at its start point,
 // which the caller already held: 39% of all evaluations in the T18 drag
-// profile (.scratch/sketch-product-readiness/b3k-evidence/cadara-b3k.26).
+// profile (evidence in bead cadara-b3k.26).
 import { expect, test } from "vitest";
 
 import type { SketchPointId } from "@/contracts/shared/ids";

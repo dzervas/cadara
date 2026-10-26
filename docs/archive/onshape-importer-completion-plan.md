@@ -1,6 +1,6 @@
 # Onshape Importer Completion Plan
 
-Successor to `docs/onshape-importer-parity-plan.md` (all items there are done).
+Successor to `docs/archive/onshape-importer-parity-plan.md` (all items there are done).
 Goal: every Onshape feature that maps onto a feature kind **cadara already has**
 imports parametrically; a single unsupported feature no longer bakes the whole
 downstream history; everything genuinely out of scope bakes honestly with a
@@ -46,7 +46,7 @@ apply-pipeline coverage against the tracked curated captures in
 - Known gap analysis (translator-by-translator) lives in the section
   "Reference: current translator behavior" below; the full Onshape-vs-cadara
   feature gap inventory (incl. out-of-scope items) is
-  `docs/onshape-feature-gaps.md`.
+  `docs/archive/onshape-feature-gaps.md`.
 
 ## Phase 0 — Captures & harness (parallel-safe, do first)
 
@@ -83,13 +83,13 @@ apply-pipeline coverage against the tracked curated captures in
       the `test.fails` release gate in
       `src/domain/modeling/occ/topological-naming.spec.ts` (topology-changing
       sketch edit) passes with honest zero/one/many successor classification.
-      Deliverable: decision doc `docs/architecture/durable-naming-pre8-spike.md`
+      Deliverable: decision doc `docs/archive/durable-naming-pre8-spike.md`
       with (a) feasible → concrete task list appended to this plan as Phase K2,
       or (b) infeasible → explicit deferral to the BRepGraph migration
       (`openspec/changes/modernize-occ-kernel-topology`) and Wave S stays
       gated. Nearest-geometry matching is not an acceptable outcome.
 - [x] K.2 **Implement semantic per-feature stage naming (feasible; medium-high risk).**
-      Decision and evidence: `docs/architecture/durable-naming-pre8-spike.md`.
+      Decision and evidence: `docs/archive/durable-naming-pre8-spike.md`.
       No geometry/traversal matching is permitted; Wave S remains gated until
       K.2.7 flips the capability.
   - [x] K.2.1 **Retain feature-stage state.** Add internal
@@ -692,7 +692,7 @@ Audit baseline at Phase-X start (parametric / baked / geometryOnly):
       ID-less query, and opaque-profile evidence share one batched request per required
       rollback index; readable `qSketchRegion` queries remain exact local semantics.
       The API budget and endpoint-purpose audit are recorded in
-      `docs/onshape-capture-api-budget.md`.
+      `docs/archive/onshape-capture-api-budget.md`.
 
       All five roots now carry complete profile-evidence schema v3 records with no
       unresolved opaque profile and server-certified three-component witnesses for

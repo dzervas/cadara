@@ -72,7 +72,7 @@ try {
 - `doc.canRun(id)` polls the current discovery capability matrix and, for exports, the advertised `exportProviders` formats. False also means unknown capability/discovery or a closing document. True is not a guarantee that the current editing context, targets or options are valid.
 - `doc.current` is the last terminal handle. Its discovery is null after an uncertified handoff; queries never silently reuse an earlier snapshot as current. `.results()` returns every terminal result, including failures; `.commands()` returns copies of the successful or live-applied commands eligible for the recipe trace.
 
-For the exact modelling fields and units, run `cadara document recipe --schema <operation>` and read README. Lengths use document units (the shipped headless composition uses millimetres); angles vary by field. SDK types extend the same contract with shared selectors, not a second set of parameters.
+For the exact modelling fields and units, run `cadara document recipe --schema <operation>` and read SKETCH-OPERATIONS.md or PART-OPERATIONS.md. Lengths use document units (the shipped headless composition uses millimetres); angles vary by field. SDK types extend the same contract with shared selectors, not a second set of parameters.
 
 ### Outcomes and errors
 

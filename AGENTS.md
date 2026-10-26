@@ -1,63 +1,53 @@
 # AGENTS
 
-## Design Context
+CADara is a browser-native parametric CAD app: Bun, React 19, TypeScript strict, Vite, Mantine, Tailwind v4, Three.js through `@react-three/*`, OpenCascade (WASM), Automerge.
 
-Strategic design context lives in `PRODUCT.md` at the project root — register, target users, brand personality, anti-references, and design principles. Read it before any UI/UX-shaping work. Key load-bearing principles: interop is identity, visible tools beat hidden tools, treat hobbyists as professionals, browser-native is invisible, density-but-readable. Reference for feel: Plasticity (with tools kept visible). Anti-references: SolidWorks, FreeCAD, Rhino, TinkerCAD, generic SaaS dashboards.
+## Environment
 
-## Stack
+Tooling comes from PATH. `devenv shell` (or direnv) provides Bun, Playwright's chromium and fonts. Without devenv: install the Bun version in `package.json` `packageManager` and run `bunx playwright install chromium` once. Every checkout or jj workspace needs its own `bun install --frozen-lockfile`.
 
-- Runtime/package manager: Bun
-- App framework: React 19 + TypeScript
-- Bundler/dev server: Vite on port `3000`
-- UI primitives: Mantine as the primary shell component library
-- Styling: Mantine theme tokens first, Tailwind CSS v4 for layout glue, minimal custom CSS
-- 3D viewport: Three.js
+`@playwright/test` is pinned exactly to devenv's Playwright version. Change both together (see the `"//"` note in `package.json`).
 
-## Interface Overview
+## Where things live
 
-- Top toolbar: icon-only CAD tools with tooltips, search, undo/redo on the left, mode-aware tool switching between `part` and `sketch`, and dropdown support for tool families like pattern variants.
-- Left sidebar: feature tree at the top and parts/objects at the bottom, both kept visually compact for dense CAD-style navigation.
-- Main viewport: Three.js canvas with an XY grid, three perpendicular reference planes (`XY`, `YZ`, `XZ`), right-click rotate, middle-mouse pan, and a clickable view cube overlay for fast camera orientation changes.
+| What | Where |
+| --- | --- |
+| Domain terms | `GLOSSARY.md` |
+| Product intent, users, design principles | `PRODUCT.md` (read before UI/UX work) |
+| Visual design system | `DESIGN.md` (+ generated `DESIGN.json`); icons: `src/assets/icons/DESIGN.md` |
+| Architecture decisions | `docs/adr/NNNN-*.md` |
+| How a subsystem works | `docs/architecture/` |
+| Living how-to guides (testing, debug platform, Discord) | `docs/*.md` |
+| Dated research notes | `docs/research/` |
+| Finished plans and spikes (historical, not authoritative) | `docs/archive/` |
+| Task playbooks | `.agents/skills/` |
+| CLI and SDK docs (shipped in the CLI package) | `src/cli/*.md` |
+| Work tracking | beads (`bd`) |
 
-## Important Architecture
+New docs go in the matching row. Files live in the repo, so links point only at tracked paths. `.scratch/` is private scratch space and is never linked.
 
-- Tool definitions live in `src/domain/tools/` and are the source of truth for ids, groups, icons, modes, and dropdown families.
-- Tool/group hooks are strongly typed through `ToolActionBus`; clicking a tool dispatches the group event first and the tool event second.
-- UI components live under `src/components/`; tool logic, schemas, and scene helpers stay in `src/domain/` and `src/hooks/`.
-- `ToolActionProvider` supplies the current mode and the shared action bus to the UI.
-- Mantine theme configuration should live in a central theme module with an easily editable dark-first colors tuple as the source of truth for shell chrome.
-- Prefer Mantine components and theme overrides over bespoke UI wrappers, long Tailwind class stacks, or custom shell CSS.
-- NEVER silence unhandled exceptions. They must either bubble up and handled by the error handling component or handled gracefully
+### Source layers
 
-## Current Behavior Rules
+`docs/adr/0001-layered-runtime-boundaries.md` defines the layers; `test/static/` enforces them.
 
-- All toolbar actions currently `console.log` through subscribers installed in the workbench.
-- Entering sketch mode is triggered by the `Sketch` tool.
-- Returning to part mode is triggered by `Finish Sketch`.
-- Keep UI, domain definitions, and future CAD behavior split cleanly; do not mix scene logic or event contracts into presentational components.
-- Preserve the dense dark CAD-style feel, but prefer fewer lines of code over decorative eye candy when the behavioral contract stays the same.
+- `src/contracts`: schemas, contract types, Typia runtime validation.
+- `src/core`: pure logic (tools in `src/core/tools`, sketch constraints, feature authoring).
+- `src/application`: orchestration; the TEA-style editor event loop is `src/application/editor/editor-event-loop.ts`.
+- `src/infrastructure`: browser, worker, storage, OCC and rendering adapters.
+- `src/components`, `src/hooks`, `src/workbench`, `src/theme`: UI. Mantine theme lives in `src/theme/workbench-theme.ts`.
+- `src/domain`: legacy mix still being migrated out; put new code in the layers above.
 
-## Active Technologies
+## Rules
 
-- TypeScript strict mode on React 19 + React 19, Vite 8, Bun, Three.js, Mantine, Tailwind CSS v4, OpenCascade.js
-- Always prefer @react-three packages to interact with three.js (@react-three/drai, @react-three/fiber, etc.)
-- Runtime contract validation uses Typia-generated validators derived from TypeScript contract types; prefer shared validation helpers for transport and persistence boundaries, and keep domain invariants in plain TypeScript when generated structural validation does not make the code smaller or clearer.
-- Stateful editor/runtime orchestration uses the TEA-style `EditorEventLoop`; keep orchestration logic in domain/contracts and application seams, and avoid leaking event-loop concerns into presentational components.
-- Non-E2E tests use Vitest (run through `bun run test`, never `bun test`); add or update `.spec.ts` / `.spec.tsx` coverage with the smallest possible structural change instead of introducing another unit test runner.
+- Exceptions bubble to the error handling path (`reported-error-boundary`) or are handled with a visible outcome; every catch does one of the two.
+- UI: Mantine components and theme tokens first, Tailwind for layout glue, minimal custom CSS. Keep the dense dark CAD feel.
+- Presentational components stay free of scene logic, event contracts and event-loop concerns.
+- Keep files under 2000 lines and 50 KB so they fit one read; `test/static/file-size-budget.spec.ts` enforces it.
 
-## Testing Policy
+## Testing
 
-1. Read `docs/testing.md` before making any test-related edit.
-2. In a `commentary` update before editing tests, state:
-   - the chosen lane: `logic`, `ui`, `e2e`, or `static`
-   - the seam being tested
-   - why that lane is correct under `docs/testing.md`
-3. Only then edit or add tests.
-4. In the final response, explicitly confirm:
-   - `docs/testing.md` was reviewed
-   - which lane was used
-   - what seam the test covers
+1. Read `docs/testing.md` before any test-related edit.
+2. Before editing tests, state the lane (`logic`, `ui`, `e2e`, `static`), the seam under test and why that lane fits.
+3. In the final response, confirm `docs/testing.md` was reviewed, the lane used and the seam covered.
 
-## Validation
-
-While working, run `bun run test` (about a minute). Before handing off a set of changes, run `bun run test:all`; it is the only pass that spawns the heavy and E2E tiers.
+Vitest runs through `bun run test`, never `bun test`. While working, run `bun run test` (about a minute). Before handing off, run `bun run test:all`: it is the only pass that runs the heavy and E2E tiers.

@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Trial post
 
-Read [docs/community/discord.md](../../../docs/community/discord.md) first. Ask with the questionnaire tool whenever a step below asks for a choice.
+Read [docs/discord.md](../../../docs/discord.md) first. Ask with the questionnaire tool whenever a step below asks for a choice.
 
 1. **Pick trials.** If the user named issues, use those. Otherwise, list the open `human-trial` issues, drop the ones whose ID already appears in a `bun run discord list-trials` title, and ask which of the rest to post.
 2. **Distil each trial.** A trial script is written for the developer, so it can have twenty steps and need local files. A tester gets at most **five** steps on https://cadara.app, each one an action followed by what they should see. Keep the steps that check what changed. Drop or move to one "Optional" line any steps that need special setup (screen readers, OS settings, two deploys). If the trial cannot work for an outside tester at all, tell the user instead of posting it.

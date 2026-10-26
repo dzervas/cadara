@@ -113,8 +113,10 @@ describe.each(["source", "extracted package"])(
       expect((await readdir(extracted)).filter((name) => !/^chunk-.*\.js$/.test(name)).sort()).toEqual([
         "COVERAGE.md",
         "LICENSE.md",
+        "PART-OPERATIONS.md",
         "README.md",
         "SDK.md",
+        "SKETCH-OPERATIONS.md",
         "examples",
         "main.js",
         "occ",

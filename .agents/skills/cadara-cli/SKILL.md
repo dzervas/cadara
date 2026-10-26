@@ -7,7 +7,7 @@ description: Execute CADara recipe files or replay SDK traces in batch/CI. Use t
 
 Use this skill for existing JSON recipes and SDK trace replay. To author or edit a part through a script, start with [SDK modelling](../cadara-sdk-modelling/SKILL.md); its [Design intent](../cadara-sdk-modelling/SKILL.md#design-intent) also governs models represented by recipes.
 
-`<cli>` is a complete built package directory; source docs/examples live in `src/cli/`. Read `<cli>/README.md` for operation fields, selector rules and units, `document recipe --help` for invocation, or `document recipe --schema [operation]` for generated contracts and capabilities. These queries leave the modelling kernel idle. For package acquisition/building, see the SDK workflow's first step.
+`<cli>` is a complete built package directory; source docs/examples live in `src/cli/`. Read `<cli>/README.md` for shared rules and selectors and `<cli>/SKETCH-OPERATIONS.md` / `<cli>/PART-OPERATIONS.md` for operation fields and units, `document recipe --help` for invocation, or `document recipe --schema [operation]` for generated contracts and capabilities. These queries leave the modelling kernel idle. For package acquisition/building, see the SDK workflow's first step.
 
 ## Workflow
 
