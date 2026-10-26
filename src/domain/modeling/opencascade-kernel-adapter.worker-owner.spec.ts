@@ -155,6 +155,9 @@ test("src/domain/modeling/opencascade-kernel-adapter.worker-owner.spec.ts", asyn
       async resolveReference() {
         throw new Error("unused");
       },
+      async measureTopology() {
+        throw new Error("unused");
+      },
       async getExportCapabilities() {
         throw new Error("unused");
       },

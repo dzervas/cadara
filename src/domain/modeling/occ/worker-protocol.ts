@@ -44,6 +44,10 @@ import type {
   UpdateFeatureResponse,
 } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type {
+  MeasureTopologyRequest,
+  MeasureTopologyResponse,
+} from "@/contracts/modeling/topology-measure";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { OccWorkerRestoreProgressMessage } from "@/domain/modeling/occ/worker-restore-progress.runtime-schema";
 import type { OccWorkerEngineDownloadProgressMessage } from "@/domain/modeling/occ/worker-engine-download-progress.runtime-schema";
@@ -278,6 +282,10 @@ export type OccWorkerOperation =
       request: ResolveReferenceRequest;
     }
   | {
+      kind: "measureTopology";
+      request: MeasureTopologyRequest;
+    }
+  | {
       kind: "tessellateExportMesh";
       documentId: AuthoredModelDocument["documentId"];
       baseRevisionId: RevisionId;
@@ -342,6 +350,7 @@ export type OccWorkerOperationResult =
   | RemoveDocumentVariableResponse
   | EvaluatePreviewResponse
   | ResolveReferenceResponse
+  | MeasureTopologyResponse
   | OccNativeTopologyCapabilityProbeResult
   | OccNativeTopologyWorkerResult<OccNativeTopologyPayload>
   | OccNativeTopologyWorkerResult<OccNativeExactBrepPayload>

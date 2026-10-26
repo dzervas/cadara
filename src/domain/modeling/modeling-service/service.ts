@@ -1,5 +1,7 @@
 import { enrichExtrudeRegionProfiles } from "@/domain/modeling/region-profile-selection";
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
+import { requireMeasureTopologyResponse } from "@/contracts/modeling/topology-measure.runtime-schema";
+import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -2996,6 +2998,18 @@ export function createModelingService(
           label: getResolutionLabel(normalized.resolution),
         },
       };
+    },
+    async measureTopology(targets) {
+      await ensureInitialized();
+      await waitForRepositoryChanges();
+      if (!adapter.measureTopology) return null;
+      return requireMeasureTopologyResponse(
+        await adapter.measureTopology({
+          contractVersion: CONTRACT_VERSION,
+          documentId: currentDocumentId,
+          targets: [...targets],
+        }),
+      );
     },
   };
 }

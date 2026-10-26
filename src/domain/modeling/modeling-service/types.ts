@@ -15,6 +15,10 @@ import type {
   SketchId,
 } from "@/core/editor/schema";
 import type * as schema from "@/contracts/modeling/schema";
+import type {
+  MeasureTopologyResponse,
+  TopologyMeasureTarget,
+} from "@/contracts/modeling/topology-measure";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { RenderExport } from "@/contracts/render/schema";
 import type {
@@ -170,6 +174,13 @@ export interface ModelingService {
   resolveReference(
     target: PrimitiveRef,
   ): Promise<ModelingResolvedReferenceResult>;
+  /**
+   * Exact measures of live body topology, for the measured targets only
+   * (cadara-h026.5); null when the kernel cannot measure topology.
+   */
+  measureTopology(
+    targets: readonly TopologyMeasureTarget[],
+  ): Promise<MeasureTopologyResponse | null>;
 }
 
 export interface ModelingServiceOptions {

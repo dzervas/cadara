@@ -1,3 +1,7 @@
+import type {
+  MeasureTopologyRequest,
+  MeasureTopologyResponse,
+} from "@/contracts/modeling/topology-measure";
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
@@ -227,4 +231,8 @@ export interface ModelingKernelAdapter extends NeutralCurveQueryCapability {
   resolveReference(
     request: ResolveReferenceRequest,
   ): Promise<ResolveReferenceResponse>;
+  /** Measures live body topology exactly, for the requested targets only, when the kernel supports it. */
+  measureTopology?(
+    request: MeasureTopologyRequest,
+  ): Promise<MeasureTopologyResponse>;
 }

@@ -10,6 +10,11 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type {
+  MeasureTopologyRequest,
+  MeasureTopologyResponse,
+} from "@/contracts/modeling/topology-measure";
+import { measureOccTopology } from "@/domain/modeling/occ/topology-measure";
+import type {
   NeutralCurveJoinRequest,
   NeutralCurveQueryCapability,
   NeutralCurveQueryRequest,
@@ -7200,6 +7205,28 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       contractVersion: CONTRACT_VERSION,
       resolution: resolved.resolution,
       diagnostics: resolved.diagnostics,
+    };
+  }
+
+  async measureTopology(
+    request: MeasureTopologyRequest,
+  ): Promise<MeasureTopologyResponse> {
+    assertSupportedModelingRequest(request, this.documentId);
+
+    this.assertNotDisposed();
+    if (this.workerSnapshotClient) {
+      return this.workerSnapshotClient.measureTopology(request);
+    }
+
+    const { authoringState } = await this.getRuntimeState();
+    return {
+      contractVersion: CONTRACT_VERSION,
+      revisionId: authoringState.revisionId,
+      measures: measureOccTopology(
+        authoringState.oc,
+        authoringState.bodies,
+        request.targets,
+      ),
     };
   }
 }

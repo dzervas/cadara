@@ -373,6 +373,12 @@ class InstrumentedModelingService implements ModelingService {
     );
   }
 
+  measureTopology(targets: Parameters<ModelingService["measureTopology"]>[0]) {
+    return this.measure("measureTopology", () =>
+      this.inner.measureTopology(targets),
+    );
+  }
+
   private measure<T>(
     operation: string,
     action: () => Promise<T>,

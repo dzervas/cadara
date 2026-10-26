@@ -90,7 +90,8 @@ for (const viewport of [
     expect(await placement("debugger expanded")).toEqual(collapsed);
 
     const text = await readout(page).innerText();
-    expect(text).toContain("Face · Extrude 1");
+    // "Face" until the kernel's exact measure names it "Planar face".
+    expect(text).toMatch(/(Face|Planar face) · Extrude 1/);
     for (const id of face.split(".")) {
       expect(
         text,

@@ -78,6 +78,32 @@ test("src/domain/measure/measurement.spec.ts", () => {
     "Circle measurement should expose circumference.",
   ).toBeTruthy();
 
+  // cadara-h026.5: two sketch circles/arcs measure centre to centre.
+  const circleArcMeasurement = deriveMeasurementViewModel({
+    activeToolId: "measure",
+    selection: [
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "sketch_entity_circle_primary",
+      },
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_measure",
+        entityId: "sketch_entity_arc_primary",
+      },
+    ],
+    snapshot,
+  });
+  expect(
+    circleArcMeasurement?.rows,
+    "A circle and an arc (centres 4 apart) should expose their centre distance.",
+  ).toContainEqual({
+    id: "center-distance",
+    label: "Center Distance",
+    value: "4 mm",
+  });
+
   const arcMeasurement = deriveMeasurementViewModel({
     activeToolId: "measure",
     selection: [
@@ -157,13 +183,13 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     faceMeasurement?.rows.some(
-      (row) => row.label === "Area" && row.value === "12 mm²",
+      (row) => row.label === "Area" && row.value === "≈ 12 mm²",
     ),
     "Face measurement should expose surface area.",
   ).toBeTruthy();
   expect(
     faceMeasurement?.rows.some(
-      (row) => row.label === "Perimeter" && row.value === "14 mm",
+      (row) => row.label === "Perimeter" && row.value === "≈ 14 mm",
     ),
     "Face measurement should expose perimeter.",
   ).toBeTruthy();
@@ -175,13 +201,13 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     bodyMeasurement?.rows.some(
-      (row) => row.label === "Surface Area" && row.value === "94 mm²",
+      (row) => row.label === "Surface Area" && row.value === "≈ 94 mm²",
     ),
     "Body measurement should expose surface area when every face mesh is available.",
   ).toBeTruthy();
   expect(
     bodyMeasurement?.rows.some(
-      (row) => row.label === "Volume" && row.value === "60 mm³",
+      (row) => row.label === "Volume" && row.value === "≈ 60 mm³",
     ),
     "Body measurement should expose solid volume when the body shell closes.",
   ).toBeTruthy();
@@ -200,7 +226,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     pairMeasurement?.rows.length === 1 &&
-      pairMeasurement.rows[0]?.value === "5 mm",
+      pairMeasurement.rows[0]?.value === "≈ 5 mm",
     "Supported pairwise measurements should expose minimum distance only.",
   ).toBeTruthy();
   expect(
@@ -218,7 +244,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     parallelEdgeMeasurement?.rows.some(
-      (row) => row.label === "Distance" && row.value === "3 mm",
+      (row) => row.label === "Distance" && row.value === "≈ 3 mm",
     ),
     "Parallel edge measurements should expose perpendicular spacing between the two selected edges.",
   ).toBeTruthy();
@@ -261,7 +287,7 @@ test("src/domain/measure/measurement.spec.ts", () => {
   });
   expect(
     touchingEdgeMeasurement?.rows.some(
-      (row) => row.label === "Distance" && row.value === "0 mm",
+      (row) => row.label === "Distance" && row.value === "≈ 0 mm",
     ),
     "Intersecting edge measurements should still report zero minimum distance.",
   ).toBeTruthy();
@@ -821,7 +847,7 @@ test("a body with a through hole measures its solid volume, whatever each face's
   expect(
     holedVolume(holedPrismSnapshot({ inwardFaces: [] })),
     "all faces wound outward",
-  ).toBe("64 mm³");
+  ).toBe("≈ 64 mm³");
   expect(
     holedVolume(
       holedPrismSnapshot({
@@ -834,7 +860,7 @@ test("a body with a through hole measures its solid volume, whatever each face's
       }),
     ),
     "mixed windings (unoriented face meshes)",
-  ).toBe("64 mm³");
+  ).toBe("≈ 64 mm³");
   expect(
     holedVolume(
       holedPrismSnapshot({
@@ -842,7 +868,7 @@ test("a body with a through hole measures its solid volume, whatever each face's
       }),
     ),
     "every face wound inward",
-  ).toBe("64 mm³");
+  ).toBe("≈ 64 mm³");
   expect(
     holedVolume(
       holedPrismSnapshot({ inwardFaces: [], dropTriangleOf: "face_inner_2" }),

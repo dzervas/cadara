@@ -421,6 +421,10 @@ async function handleWorkerOperation(
       return getWorkerAdapter(operation.request.documentId).resolveReference(
         operation.request,
       );
+    case "measureTopology":
+      return getWorkerAdapter(operation.request.documentId).measureTopology(
+        operation.request,
+      );
     case "tessellateExportMesh": {
       const capabilitiesOrDiagnostic =
         await getWorkerExportCapabilities(operation);

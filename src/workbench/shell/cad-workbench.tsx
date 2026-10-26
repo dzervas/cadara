@@ -36,6 +36,7 @@ import {
 import { BrowserTabCloseWarningModal } from "@/components/layout/browser-tab-close-warning-modal";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
+import { useTopologyMeasures } from "@/workbench/shell/use-topology-measures";
 import { DocumentExportModal } from "@/components/layout/document-export-modal";
 import {
   OpenDocumentModal,
@@ -881,14 +882,23 @@ export function CadWorkbench({
     sectionRetainedSide: activeSectionView?.retainedSide ?? null,
   };
 
+  const topologyMeasures = useTopologyMeasures({
+    enabled: activeCommand?.toolId === "measure",
+    modelingService,
+    snapshot,
+    selection: visibleSelection,
+    errorReporter,
+    showError: showWorkbenchError,
+  });
   const measurementViewModel = useMemo(
     () =>
       deriveMeasurementViewModel({
         activeToolId: activeCommand?.toolId ?? null,
         selection: visibleSelection,
         snapshot,
+        topologyMeasures,
       }),
-    [activeCommand?.toolId, snapshot, visibleSelection],
+    [activeCommand?.toolId, snapshot, topologyMeasures, visibleSelection],
   );
   // The readout sits under the parts tree's column (cadara-h026.4): publish
   // its height so the tree's max height stops above it; 0px when hidden.

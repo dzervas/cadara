@@ -29,6 +29,11 @@ import {
   type BoundaryCurveFailure,
 } from "@/contracts/sketch/region-boundary-curves";
 import type { RegionRecord, SketchPoint2D } from "@/contracts/sketch/schema";
+import type {
+  MeasureTopologyResponse,
+  TopologyMeasure,
+  TopologyMeasureVec3,
+} from "@/contracts/modeling/topology-measure";
 import {
   closestSplineSpanLocation,
   reconstructSplineAggregate,
@@ -88,7 +93,9 @@ type MeasuredTargetCategory = "body" | "surface" | "curve" | "point";
  * A distance primitive. `exact` marks a polyline that tessellates a curved
  * sketch curve: point distances use the exact curve, every other pairing
  * measures the tessellation and is labelled approximate (T-6, review R7).
- * `approximate` marks a mesh built from such a tessellation (a region fill).
+ * `approximate` marks a mesh built from such a tessellation (a region fill)
+ * and a body face mesh or edge polyline not known to be planar or straight
+ * (cadara-h026.5).
  */
 type DistancePrimitive =
   | { kind: "point"; point: WorkspaceVec3 }
@@ -96,6 +103,8 @@ type DistancePrimitive =
       kind: "polyline";
       points: readonly WorkspaceVec3[];
       exact?: ExactSketchCurve;
+      /** A body edge's render polyline, not known to be straight. */
+      approximate?: boolean;
     }
   | { kind: "mesh"; triangles: readonly Triangle[]; approximate?: boolean };
 
@@ -139,6 +148,8 @@ interface MeasuredTarget {
    * refused where only an accepted solve defines it.
    */
   validityNote?: string;
+  /** The centre of a circle or arc: two of them measure centre to centre. */
+  center?: WorkspaceVec3;
   witnesses: readonly MeasurementWitness[];
 }
 
@@ -226,6 +237,12 @@ export function deriveMeasurementViewModel(input: {
   activeToolId: string | null;
   selection: readonly PrimitiveRef[];
   snapshot: WorkspaceSnapshot | null;
+  /**
+   * Exact kernel measures of the selected body topology (cadara-h026.5);
+   * ignored unless they measure the snapshot's revision. Without them body
+   * values come from the render meshes and are marked approximate.
+   */
+  topologyMeasures?: MeasureTopologyResponse | null;
 }): MeasurementViewModel | null {
   if (
     input.activeToolId !== "measure" ||
@@ -235,8 +252,22 @@ export function deriveMeasurementViewModel(input: {
     return null;
   }
 
+  const exactMeasures =
+    input.topologyMeasures &&
+    input.topologyMeasures.revisionId === input.snapshot.document.revisionId
+      ? new Map(
+          input.topologyMeasures.measures.map((measure) => [
+            getPrimitiveRefKey(measure.target),
+            measure,
+          ]),
+        )
+      : null;
   const resolvedSelection = input.selection.slice(0, 2).flatMap((target) => {
-    const resolved = resolveMeasuredTarget(input.snapshot, target);
+    const resolved = resolveMeasuredTarget(
+      input.snapshot,
+      target,
+      exactMeasures?.get(getPrimitiveRefKey(target)),
+    );
     return resolved ? [resolved] : [];
   });
 
@@ -267,6 +298,7 @@ export function deriveMeasurementViewModel(input: {
           value: formatLength(pairwise.distance, pairwise.approximate),
         },
         ...resolvePairwiseAngleRow(first!, second!),
+        ...resolveCenterDistanceRow(first!, second!),
       ]
     : [];
 
@@ -289,21 +321,34 @@ export function deriveMeasurementViewModel(input: {
 function resolveMeasuredTarget(
   snapshot: WorkspaceSnapshot | null,
   target: PrimitiveRef | null,
+  exact?: TopologyMeasure,
 ): MeasuredTarget | null {
   if (!snapshot || !target) {
     return null;
   }
 
   if (target.kind === "body") {
-    return resolveBodyTarget(snapshot, target);
+    return resolveBodyTarget(
+      snapshot,
+      target,
+      exact && "volume" in exact ? exact : undefined,
+    );
   }
 
   if (target.kind === "face") {
-    return resolveFaceTarget(snapshot, target);
+    return resolveFaceTarget(
+      snapshot,
+      target,
+      exact && "surface" in exact ? exact : undefined,
+    );
   }
 
   if (target.kind === "edge") {
-    return resolveEdgeTarget(snapshot, target);
+    return resolveEdgeTarget(
+      snapshot,
+      target,
+      exact && "curve" in exact ? exact : undefined,
+    );
   }
 
   if (target.kind === "vertex") {
@@ -344,6 +389,7 @@ function resolveMeasuredTarget(
 function resolveBodyTarget(
   snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: "body" }>,
+  exact?: Extract<TopologyMeasure, { volume: number | null }>,
 ): MeasuredTarget | null {
   const body = snapshot.document.bodies.find(
     (entry) => entry.bodyId === target.bodyId,
@@ -355,19 +401,23 @@ function resolveBodyTarget(
 
   const faceRenderables = getBodyFaceRenderables(snapshot, body.bodyId);
   const edgeRenderables = getBodyEdgeRenderables(snapshot, body.bodyId);
-  const surfaceArea =
-    faceRenderables.length === body.topology.faceIds.length
+  const meshComplete = faceRenderables.length === body.topology.faceIds.length;
+  const surfaceArea = exact
+    ? exact.surfaceArea
+    : meshComplete
       ? faceRenderables.reduce(
           (sum, renderable) => sum + getMeshArea(renderable.geometry),
           0,
         )
       : null;
-  const volume =
-    faceRenderables.length === body.topology.faceIds.length
+  const volume = exact
+    ? exact.volume
+    : meshComplete
       ? getClosedMeshVolume(
           faceRenderables.map((renderable) => renderable.geometry),
         )
       : null;
+  const approximate = exact === undefined;
 
   const rows = [
     ...(surfaceArea === null
@@ -376,12 +426,18 @@ function resolveBodyTarget(
           {
             id: "surface-area",
             label: "Surface Area",
-            value: formatArea(surfaceArea),
+            value: formatArea(surfaceArea, approximate),
           },
         ]),
     ...(volume === null
       ? []
-      : [{ id: "volume", label: "Volume", value: formatVolume(volume) }]),
+      : [
+          {
+            id: "volume",
+            label: "Volume",
+            value: formatVolume(volume, approximate),
+          },
+        ]),
   ];
 
   const witnesses = edgeRenderables.flatMap((renderable, index) =>
@@ -410,6 +466,7 @@ function resolveBodyTarget(
 function resolveFaceTarget(
   snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: "face" }>,
+  exact?: Extract<TopologyMeasure, { surface: unknown }>,
 ): MeasuredTarget | null {
   const renderable = getRenderableForTarget(snapshot, target);
 
@@ -418,30 +475,23 @@ function resolveFaceTarget(
   }
 
   const boundaryEdges = collectMeshBoundaryEdges(renderable.geometry);
-  const boundaryLoops = groupBoundaryLoops(boundaryEdges);
-  const area = getMeshArea(renderable.geometry);
-  const perimeter = boundaryEdges.reduce(
-    (sum, [start, end]) => sum + distanceBetween(start, end),
-    0,
-  );
-  const rows: MeasurementRow[] = [
-    { id: "area", label: "Area", value: formatArea(area) },
-    { id: "perimeter", label: "Perimeter", value: formatLength(perimeter) },
-    ...boundaryLoops.map((loopLength, index) => ({
-      id: `boundary-${index + 1}`,
-      label: `Boundary ${index + 1}`,
-      value: formatLength(loopLength),
-    })),
-  ];
+  const rows: readonly MeasurementRow[] = exact
+    ? exactFaceRows(exact)
+    : meshFaceRows(renderable.geometry, boundaryEdges);
 
   return {
     target,
     key: getPrimitiveRefKey(target),
-    label: getTargetLabel(snapshot, target),
+    label: getTargetLabel(snapshot, target, exact),
     category: "surface",
     distancePrimitive: {
       kind: "mesh",
       triangles: trianglesFromMesh(renderable.geometry),
+      // Only a planar face bounded by straight edges is meshed exactly: a
+      // curved face's triangles, or a curved boundary's chords, approximate.
+      approximate: !(
+        exact?.surface.kind === "plane" && exact.surface.polygonal
+      ),
     },
     rows,
     note: null,
@@ -457,6 +507,7 @@ function resolveFaceTarget(
 function resolveEdgeTarget(
   snapshot: WorkspaceSnapshot,
   target: Extract<PrimitiveRef, { kind: "edge" }>,
+  exact?: Extract<TopologyMeasure, { curve: unknown }>,
 ): MeasuredTarget | null {
   const renderable = getRenderableForTarget(snapshot, target);
 
@@ -464,21 +515,56 @@ function resolveEdgeTarget(
     return null;
   }
 
-  const length = polylineLength(
-    renderable.geometry.points,
-    renderable.geometry.isClosed,
-  );
+  const circle = exact?.curve.kind === "circle" ? exact.curve : null;
+  const rows: readonly MeasurementRow[] = !exact
+    ? [
+        {
+          id: "length",
+          label: "Length",
+          value: formatLength(
+            polylineLength(
+              renderable.geometry.points,
+              renderable.geometry.isClosed,
+            ),
+            true,
+          ),
+        },
+      ]
+    : circle
+      ? [
+          { id: "radius", label: "Radius", value: formatLength(circle.radius) },
+          {
+            id: "diameter",
+            label: "Diameter",
+            value: formatLength(circle.radius * 2),
+          },
+          circle.isFull
+            ? {
+                id: "circumference",
+                label: "Circumference",
+                value: formatLength(exact.length),
+              }
+            : {
+                id: "arc-length",
+                label: "Arc Length",
+                value: formatLength(exact.length),
+              },
+          { id: "center", label: "Center", value: formatPoint(circle.center) },
+        ]
+      : [{ id: "length", label: "Length", value: formatLength(exact.length) }];
 
   return {
     target,
     key: getPrimitiveRefKey(target),
-    label: getTargetLabel(snapshot, target),
+    label: getTargetLabel(snapshot, target, exact),
     category: "curve",
     distancePrimitive: {
       kind: "polyline",
       points: renderable.geometry.points,
+      approximate: exact?.curve.kind !== "line",
     },
-    rows: [{ id: "length", label: "Length", value: formatLength(length) }],
+    ...(circle ? { center: circle.center } : {}),
+    rows,
     note: null,
     witnesses: [
       {
@@ -1132,6 +1218,14 @@ function createCurveTarget(input: {
       points: input.polyline,
       ...(input.exact ? { exact: input.exact } : {}),
     },
+    ...(input.exact?.curve.kind === "arc"
+      ? {
+          center: mapSketchPointToWorkspaceWorld(
+            input.exact.plane,
+            input.exact.curve.center,
+          ),
+        }
+      : {}),
     rows: input.rows,
     note: null,
     witnesses: [
@@ -1211,6 +1305,133 @@ function resolvePairwiseAngleRow(
   ];
 }
 
+/** Two circles or arcs (sketch, projected or body edges): centre to centre. */
+function resolveCenterDistanceRow(
+  first: MeasuredTarget,
+  second: MeasuredTarget,
+): readonly MeasurementRow[] {
+  return first.center && second.center
+    ? [
+        {
+          id: "center-distance",
+          label: "Center Distance",
+          value: formatLength(distanceBetween(first.center, second.center)),
+        },
+      ]
+    : [];
+}
+
+function meshFaceRows(
+  geometry: RenderMeshGeometry,
+  boundaryEdges: ReturnType<typeof collectMeshBoundaryEdges>,
+): MeasurementRow[] {
+  const perimeter = boundaryEdges.reduce(
+    (sum, [start, end]) => sum + distanceBetween(start, end),
+    0,
+  );
+  return [
+    {
+      id: "area",
+      label: "Area",
+      value: formatArea(getMeshArea(geometry), true),
+    },
+    {
+      id: "perimeter",
+      label: "Perimeter",
+      value: formatLength(perimeter, true),
+    },
+    ...groupBoundaryLoops(boundaryEdges).map((loopLength, index) => ({
+      id: `boundary-${index + 1}`,
+      label: `Boundary ${index + 1}`,
+      value: formatLength(loopLength, true),
+    })),
+  ];
+}
+
+function exactFaceRows(
+  exact: Extract<TopologyMeasure, { surface: unknown }>,
+): MeasurementRow[] {
+  const area = { id: "area", label: "Area", value: formatArea(exact.area) };
+  const surface = exact.surface;
+  switch (surface.kind) {
+    case "plane":
+      return [
+        area,
+        {
+          id: "perimeter",
+          label: "Perimeter",
+          value: formatLength(surface.perimeter),
+        },
+        {
+          id: "normal",
+          label: "Normal",
+          value: formatDirection(surface.normal),
+        },
+      ];
+    case "cylinder":
+      return [
+        { id: "radius", label: "Radius", value: formatLength(surface.radius) },
+        {
+          id: "diameter",
+          label: "Diameter",
+          value: formatLength(surface.radius * 2),
+        },
+        {
+          id: "axis",
+          label: "Axis",
+          value: formatDirection(surface.axis.direction),
+        },
+        area,
+      ];
+    case "cone":
+      return [
+        {
+          id: "half-angle",
+          label: "Half Angle",
+          value: formatAngle(surface.semiAngleRadians),
+        },
+        {
+          id: "axis",
+          label: "Axis",
+          value: formatDirection(surface.axis.direction),
+        },
+        area,
+      ];
+    case "sphere":
+      return [
+        { id: "radius", label: "Radius", value: formatLength(surface.radius) },
+        {
+          id: "diameter",
+          label: "Diameter",
+          value: formatLength(surface.radius * 2),
+        },
+        { id: "center", label: "Center", value: formatPoint(surface.center) },
+        area,
+      ];
+    case "torus":
+      return [
+        {
+          id: "major-radius",
+          label: "Major Radius",
+          value: formatLength(surface.majorRadius),
+        },
+        {
+          id: "minor-radius",
+          label: "Minor Radius",
+          value: formatLength(surface.minorRadius),
+        },
+        {
+          id: "axis",
+          label: "Axis",
+          value: formatDirection(surface.axis.direction),
+        },
+        area,
+      ];
+    default:
+      return [area];
+  }
+}
+
 function derivePairwiseWitnesses(
   first: MeasuredTarget,
   second: MeasuredTarget,
@@ -1284,9 +1505,12 @@ function measureDistanceBetweenPrimitives(
   }
 
   if (first.kind === "point" && second.kind === "polyline") {
-    return second.exact
+    const result = second.exact
       ? measurePointToExactCurve(first.point, second.exact)
       : measurePointToPolyline(first.point, second.points);
+    return result && second.approximate
+      ? { ...result, approximate: true }
+      : result;
   }
 
   if (first.kind === "polyline" && second.kind === "point") {
@@ -1294,12 +1518,17 @@ function measureDistanceBetweenPrimitives(
       ? measurePointToExactCurve(second.point, first.exact)
       : measurePointToPolyline(second.point, first.points);
     return result
-      ? { distance: result.distance, start: result.end, end: result.start }
+      ? {
+          distance: result.distance,
+          start: result.end,
+          end: result.start,
+          ...(first.approximate ? { approximate: true } : {}),
+        }
       : null;
   }
 
   // Every other pairing measures tessellations; it is exact only when no
-  // side tessellates a curved sketch shape (T-6, review R7).
+  // side tessellates a curved shape (T-6, review R7; cadara-h026.5).
   const result = measureTessellatedPrimitives(first, second);
   return result
     ? {
@@ -1311,7 +1540,7 @@ function measureDistanceBetweenPrimitives(
 
 function isTessellatedCurve(primitive: DistancePrimitive) {
   return primitive.kind === "polyline"
-    ? primitive.exact !== undefined
+    ? primitive.exact !== undefined || primitive.approximate === true
     : primitive.kind === "mesh" && primitive.approximate === true;
 }
 
@@ -1707,22 +1936,47 @@ const PROJECTED_GEOMETRY_NOUNS = {
   spline: "spline",
 } as const;
 
+const FACE_SURFACE_NOUNS = {
+  plane: "Planar face",
+  cylinder: "Cylindrical face",
+  cone: "Conical face",
+  sphere: "Spherical face",
+  torus: "Toroidal face",
+  bspline: "Spline face",
+  other: "Face",
+} as const;
+
+const EDGE_CURVE_NOUNS = {
+  line: "Linear edge",
+  circle: "Circular edge",
+  ellipse: "Elliptical edge",
+  bspline: "Spline edge",
+  other: "Edge",
+} as const;
+
 /**
  * The readout name of a measured target: its geometry kind and its owner's
  * display label ("Face · Extrude 1", "Circle 2 · Sketch 3"), never a
  * durable id (cadara-h026.4). Presentation labels are not used: OCC ones
- * embed the topology id.
+ * embed the topology id. A body face or edge measured exactly names its
+ * surface or curve type ("Planar face", "Circular edge"; cadara-h026.5).
  */
 function getTargetLabel(
   snapshot: WorkspaceSnapshot,
   target: MeasurableTarget,
+  exact?: TopologyMeasure,
 ): string {
   if (
     target.kind === "face" ||
     target.kind === "edge" ||
     target.kind === "vertex"
   ) {
-    const kind = { face: "Face", edge: "Edge", vertex: "Vertex" }[target.kind];
+    const kind =
+      exact && "surface" in exact
+        ? FACE_SURFACE_NOUNS[exact.surface.kind]
+        : exact && "curve" in exact
+          ? EDGE_CURVE_NOUNS[exact.curve.kind]
+          : { face: "Face", edge: "Edge", vertex: "Vertex" }[target.kind];
     const body = snapshot.document.bodies.find(
       (entry) => entry.bodyId === target.bodyId,
     );
@@ -2495,12 +2749,29 @@ function formatLength(value: number, approximate = false) {
   return `${approximate ? "≈ " : ""}${formatNumber(value)} mm`;
 }
 
-function formatArea(value: number) {
-  return `${formatNumber(value)} mm²`;
+function formatArea(value: number, approximate = false) {
+  return `${approximate ? "≈ " : ""}${formatNumber(value)} mm²`;
 }
 
-function formatVolume(value: number) {
-  return `${formatNumber(value)} mm³`;
+function formatVolume(value: number, approximate = false) {
+  return `${approximate ? "≈ " : ""}${formatNumber(value)} mm³`;
+}
+
+function formatPoint(point: TopologyMeasureVec3) {
+  return `${formatComponents(point)} mm`;
+}
+
+function formatDirection(direction: TopologyMeasureVec3) {
+  return formatComponents(direction);
+}
+
+/** Components shown to 0.01; one that rounds to zero shows as 0, not -0. */
+function formatComponents(vector: TopologyMeasureVec3) {
+  return vector
+    .map((component) =>
+      formatNumber(Math.abs(component) < 0.005 ? 0 : component),
+    )
+    .join(", ");
 }
 
 function formatAngle(valueRadians: number) {

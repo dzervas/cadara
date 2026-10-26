@@ -1,3 +1,4 @@
+import type { MeasureTopologyRequest } from "@/contracts/modeling/topology-measure";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
@@ -313,6 +314,12 @@ class InstrumentedOccWorkerClient implements OccWorkerSnapshotClient {
       "resolveReference",
       () => this.inner.resolveReference(request),
       diagnosticResultAttributes,
+    );
+  }
+
+  measureTopology(request: MeasureTopologyRequest) {
+    return this.measure("measureTopology", () =>
+      this.inner.measureTopology(request),
     );
   }
 

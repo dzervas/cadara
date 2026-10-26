@@ -73,7 +73,11 @@ function measuredVolume(oc: Oc, shape: Shape) {
     selection: [{ kind: "body", bodyId: "body_measured" }],
     snapshot,
   })?.rows.find((row) => row.label === "Volume")?.value;
-  return value === undefined ? null : Number(value.replace(" mm³", ""));
+  // Mesh-derived without the kernel's topology measures (cadara-h026.5).
+  expect(value?.startsWith("≈ ")).toBe(true);
+  return value === undefined
+    ? null
+    : Number(value.replace("≈ ", "").replace(" mm³", ""));
 }
 
 const box = (oc: Oc, at: number, size: number) =>

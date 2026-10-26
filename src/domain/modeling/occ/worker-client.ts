@@ -1,4 +1,8 @@
 import type {
+  MeasureTopologyRequest,
+  MeasureTopologyResponse,
+} from "@/contracts/modeling/topology-measure";
+import type {
   AddDocumentVariableRequest,
   AddDocumentVariableResponse,
   CommitSketchRequest,
@@ -220,6 +224,9 @@ export interface OccWorkerSnapshotClient {
   resolveReference(
     request: ResolveReferenceRequest,
   ): Promise<ResolveReferenceResponse>;
+  measureTopology(
+    request: MeasureTopologyRequest,
+  ): Promise<MeasureTopologyResponse>;
   probeNativeTopologyKernelCapabilities(
     assets?: OccWorkerAssetConfig,
   ): Promise<OccNativeTopologyCapabilityProbeResult>;
@@ -545,6 +552,13 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   resolveReference(request: ResolveReferenceRequest) {
     return this.invoke<ResolveReferenceResponse>({
       kind: "resolveReference",
+      request,
+    });
+  }
+
+  measureTopology(request: MeasureTopologyRequest) {
+    return this.invoke<MeasureTopologyResponse>({
+      kind: "measureTopology",
       request,
     });
   }
