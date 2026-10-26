@@ -6,9 +6,9 @@ const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("browser and semantic corner/slot construction share canonical builders, gates and solve-basis handoff", () => {
   const source = read("src/domain/editor/sketch-session/editing.ts");
+  // cadara-h026.2: Fillet and Chamfer build through the per-corner builder.
   for (const builder of [
-    "createSketchFilletMutation",
-    "createSketchChamferMutation",
+    "createSketchCornersMutation",
     "createSketchSlotContribution",
   ])
     expect(source.match(new RegExp(`${builder}\\(`, "g"))).toHaveLength(1);

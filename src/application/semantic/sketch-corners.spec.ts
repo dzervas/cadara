@@ -231,3 +231,42 @@ it("chamfers an adjacent rectangle corner while preserving requirements and publ
     await f.close();
   }
 }, 60000);
+
+it("cadara-h026.2: a three-line chain rounds both of its corners in one reversible action", async () => {
+  const f = await createSketchWorkflow();
+  try {
+    const rectangle = await f.execute({
+      operation: "sketch.author",
+      draft: f.current().discovery!.state.draft,
+      primitive: { kind: "rectangle", start: [0, 0], end: [10, 10] },
+      construction: false,
+      intent: "fulfill",
+    });
+    const targets = rectangle
+      .discovery!.references.filter((r) => r.target.kind === "sketchEntity")
+      .slice(0, 3)
+      .map((r) => r.target);
+    const rounded = await f.execute({
+      operation: "sketch.geometry.build",
+      draft: rectangle.discovery!.state.draft,
+      kind: "fillet",
+      targets,
+      radius: 2,
+      intent: "fulfill",
+    });
+    const sketch = rounded.discovery!.sketch!;
+    expect(sketch.entities.filter((e) => e.kind === "arc")).toHaveLength(2);
+    expect(rounded.discovery!.history!.undoEntries).toHaveLength(
+      rectangle.discovery!.history!.undoEntries!.length + 1,
+    );
+    const undone = await f.execute({
+      operation: "history.undo",
+      draft: rounded.discovery!.state.draft,
+    });
+    expect(undone.discovery!.sketch!.entities).toEqual(
+      rectangle.discovery!.sketch!.entities,
+    );
+  } finally {
+    await f.close();
+  }
+}, 60000);

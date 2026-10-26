@@ -250,7 +250,7 @@ describe("no-tool sketch selection", () => {
     expect(send(boxed, { type: "selection.cleared" }).selection).toEqual([]);
   });
 
-  test("a tool keeps its own rules: Offset ignores the mode and refuses a remove", async () => {
+  test("a tool keeps its own rules: Offset ignores the mode; a remove drops only its last-added pick (cadara-h026.2)", async () => {
     const {
       state,
       lines: [a, b],
@@ -265,9 +265,13 @@ describe("no-tool sketch selection", () => {
       "The viewport selection is the last pick.",
     ).toEqual([b]);
     expect(
-      pick(picked, b, "remove"),
-      "No remove outside a multi-selection.",
+      pick(picked, a, "remove"),
+      "A tool's remove (its cycle's deselect entry) never drops an earlier pick.",
     ).toBe(picked);
+    expect(
+      pick(picked, b, "remove").session.activeEditTool?.selectedTargets,
+      "It drops the last-added pick.",
+    ).toEqual([a]);
   });
 });
 

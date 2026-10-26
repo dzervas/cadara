@@ -115,8 +115,11 @@ test("Offset targets: a cycle click replaces the last-added target instead of ad
     "The construction line replaced the line: one Offset target, not two.",
   ).toHaveText("Targets: 1/1");
 
-  // Offset takes no datum axis, so its cycle wraps past it to the line,
-  // again replacing rather than toggling or appending.
+  // Offset takes no datum axis, so its cycle skips it to its deselect entry
+  // (cadara-h026.2), which removes only the cycle's own pick, then wraps to
+  // the line, again replacing rather than toggling or appending.
+  await workbench.clickViewportAt(at);
+  await expect(targets).toHaveText("Targets: 0/1");
   await workbench.clickViewportAt(at);
   await expectOnlySelected(workbench, line);
   await expect(targets).toHaveText("Targets: 1/1");

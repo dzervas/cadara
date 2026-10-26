@@ -2906,6 +2906,55 @@ describe("h026.1: multi-selection clicks", () => {
     ).toEqual([[lineTarget], [constructionTarget]]);
   });
 
+  test("cadara-h026.2: a tool that accumulates picks (Offset) cycles line → construction → deselect → line, keeping its earlier pick", () => {
+    const { session, lineTarget, constructionTarget, xAxisTarget } =
+      makeAxisLineSession({ withConstruction: true });
+    const stack = pickSketchStackAt(session, 120, 102).map(
+      (entry) => entry.target,
+    );
+    expect(stack).toEqual([lineTarget, constructionTarget, xAxisTarget]);
+    const other: PrimitiveRef = {
+      kind: "sketchEntity",
+      sketchId:
+        lineTarget.kind === "sketchEntity"
+          ? lineTarget.sketchId
+          : ("" as SketchId),
+      entityId: "sketch_entity_other" as SketchEntityId,
+    };
+    const offset = beginSketchTool(session, "offset");
+    // The tool's picks stand for the selection the sequence tracks.
+    const wiringFor = (picks: readonly PrimitiveRef[]) =>
+      createSketchPickCycleWiring({
+        session: {
+          ...offset,
+          activeEditTool: {
+            ...offset.activeEditTool!,
+            selectedTargets: [...picks],
+          },
+        },
+        selection: picks.slice(-1),
+        selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+        stack,
+      });
+    expect(
+      clickSequence([other], wiringFor, 4),
+      "Offset takes no axis: its cycle is line → construction → deselect.",
+    ).toEqual([
+      [other, lineTarget],
+      [other, constructionTarget],
+      [other],
+      [other, lineTarget],
+    ]);
+    expect(
+      resolveSketchPickClick(
+        null,
+        { x: 120, y: 102, detail: 2, selectionMode: "toggle" },
+        wiringFor([other, lineTarget]),
+      ).target,
+      "A tool's quick second click (detail 2) still acts on stack[0].",
+    ).toEqual(lineTarget);
+  });
+
   test("a one-entry stack toggles: select → deselect → select", () => {
     const { lineTarget } = makeAxisLineSession();
     const wiringFor = (selection: readonly PrimitiveRef[]) =>

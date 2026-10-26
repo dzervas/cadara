@@ -180,7 +180,9 @@ export {
 export {
   acceptSketchDraw,
   adoptCompatibleSketchEditToolTargets,
+  beginSketchConstraintToolFromSelection,
   beginSketchTool,
+  removeSketchToolCyclePick,
   canUndoSketchDraftPoint,
   undoSketchDraftPoint,
   clearActiveSketchTool,

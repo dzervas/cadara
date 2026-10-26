@@ -125,6 +125,16 @@ export interface SketchConstraintDefinition<
 > {
   metadata: SketchConstraintMetadata<TToolId>;
   steps: readonly SketchConstraintSelectionStep[];
+  /**
+   * cadara-h026.2 (Onshape behaviour): how a commit of more targets than
+   * `steps` (a constraint adopting a multi-selection) authors them: one
+   * constraint per target (`eachTarget`, Horizontal on N lines), one per
+   * consecutive pair in selection order (`chain`, Equal on N lines), or as
+   * the tool's own contribution of all of them (`allTargets`, Collinear
+   * aligns every target to the first line). Without it a tool takes only
+   * its steps' worth of targets.
+   */
+  selectionExpansion?: "eachTarget" | "chain" | "allTargets";
   valueSpec?: SketchConstraintValueSpec;
   resolveTarget(
     definition: SketchDefinition,

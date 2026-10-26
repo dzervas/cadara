@@ -2021,6 +2021,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "chain",
     steps: [
       {
         id: "point-a",
@@ -2220,6 +2221,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "allTargets",
     steps: [
       {
         id: "collinear-a",
@@ -2256,6 +2258,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "chain",
     steps: [
       { id: "line-a", label: "Select first line", acceptedKinds: ["line"] },
       { id: "line-b", label: "Select second line", acceptedKinds: ["line"] },
@@ -2454,6 +2457,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "chain",
     steps: [
       {
         id: "equal-a",
@@ -2522,6 +2526,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "eachTarget",
     steps: [
       { id: "horizontal-line", label: "Select line", acceptedKinds: ["line"] },
     ],
@@ -2562,6 +2567,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "eachTarget",
     steps: [
       { id: "vertical-line", label: "Select line", acceptedKinds: ["line"] },
     ],
@@ -2602,6 +2608,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "chain",
     steps: [
       {
         id: "concentric-a",
@@ -2991,6 +2998,7 @@ const sketchConstraintDefinitions = [
       group: "constraints",
       modes: ["sketch"],
     },
+    selectionExpansion: "eachTarget",
     steps: [
       {
         id: "fix-target",
@@ -3591,11 +3599,64 @@ const sketchConstraintDefinitions = [
   },
 ] as const satisfies readonly SketchConstraintDefinition[];
 
+/**
+ * cadara-h026.2: a commit of more targets than a tool's steps authors its
+ * `selectionExpansion` groups (each target, or each consecutive pair), each
+ * through the tool's own contribution with group-indexed ids, as one commit.
+ * Groups that author nothing are skipped; when none authors anything, the
+ * first refusal explains why.
+ */
+function withSelectionExpansion(
+  definition: SketchConstraintDefinition,
+): SketchConstraintDefinition {
+  const { selectionExpansion, steps } = definition;
+  if (!selectionExpansion || selectionExpansion === "allTargets")
+    return definition;
+  return {
+    ...definition,
+    createCommitContribution(input) {
+      const targets = input.selectedTargets;
+      if (targets.length <= steps.length)
+        return definition.createCommitContribution(input);
+      const groups =
+        selectionExpansion === "eachTarget"
+          ? targets.map((target) => [target])
+          : targets.slice(1).map((target, index) => [targets[index]!, target]);
+      const contributions = groups.map((selectedTargets, index) => {
+        const indexed = (suffix: string) =>
+          index === 0 ? suffix : `${suffix}-${index + 1}`;
+        return definition.createCommitContribution({
+          ...input,
+          selectedTargets,
+          createConstraintId: (suffix) =>
+            input.createConstraintId(indexed(suffix)),
+          createDimensionId: (suffix) =>
+            input.createDimensionId(indexed(suffix)),
+        });
+      });
+      const constraints = contributions.flatMap(
+        (contribution) => contribution.constraints ?? [],
+      );
+      const dimensions = contributions.flatMap(
+        (contribution) => contribution.dimensions ?? [],
+      );
+      const refusal = contributions.find(
+        (contribution) => contribution.refusal,
+      )?.refusal;
+      return constraints.length > 0 || dimensions.length > 0
+        ? { constraints, dimensions }
+        : refusal
+          ? { refusal }
+          : {};
+    },
+  };
+}
+
 const constraintRegistry = createRegistry<
   SketchConstraintToolId,
   SketchConstraintDefinition
 >(
-  sketchConstraintDefinitions,
+  sketchConstraintDefinitions.map(withSelectionExpansion),
   (definition) => definition.metadata.id,
   "Sketch constraint tool",
 );

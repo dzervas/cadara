@@ -488,8 +488,11 @@ not from the query alone. Explicit point merges keep the existing shared
 
 - `kind: "fillet", radius: <positive number>`: two adjacent, non-collinear
   local line segments; trims the corner and adds a tangent, endpoint-bound arc.
-- `kind: "chamfer", distance: <positive number>`: the same two-line corner;
-  trims each side by that distance and adds a connecting line.
+  More than two lines (a chain, or several line pairs) round every corner they
+  form, in one action: each end point two targets share where they are not
+  collinear and no third target ends; at least one such corner is required.
+- `kind: "chamfer", distance: <positive number>`: the same corners; trims each
+  side by that distance and adds a connecting line.
 - `kind: "slot", width: <positive number>`: one line (parallel sides and
   bound semicircular ends), one arc (concentric arcs and **straight radial
   caps**), or one closed line chain (two joined offset loops). Spline, circle,

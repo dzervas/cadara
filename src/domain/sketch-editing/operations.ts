@@ -2213,6 +2213,150 @@ export function createSketchChamferMutation(input: {
 }
 
 /**
+ * cadara-h026.2: the corners Sketch Fillet/Chamfer rounds for a set of
+ * selected lines (a chain, or several line pairs): every end point two of
+ * them share, by point or position, where they are not collinear and no
+ * third selected line ends. Each corner is its pair of lines in selection
+ * order.
+ */
+export function getSketchSelectedLineCorners(
+  definition: SketchDefinition,
+  entityIds: readonly SketchEntityId[],
+): [SketchEntityId, SketchEntityId][] {
+  const lines = getSelectedLineDescriptors(definition, [
+    ...new Set(entityIds),
+  ]).filter((line) => line !== null);
+  const endsAt = (
+    line: (typeof lines)[number],
+    point: SketchPointDefinition,
+  ) =>
+    [line.startPoint, line.endPoint].some(
+      (end) =>
+        end.pointId === point.pointId ||
+        pointsAlmostEqual(end.position, point.position),
+    );
+  const corners: [SketchEntityId, SketchEntityId][] = [];
+  lines.forEach((first, firstIndex) => {
+    lines.slice(firstIndex + 1).forEach((second) => {
+      const corner = findSharedLineCorner(first, second);
+      const firstDirection =
+        corner && normalize(subtract(corner.firstOther, corner.point));
+      const secondDirection =
+        corner && normalize(subtract(corner.secondOther, corner.point));
+      // A straight joint (e.g. a side cut in two by Split) is no corner.
+      const point =
+        corner &&
+        firstDirection &&
+        secondDirection &&
+        Math.abs(cross(firstDirection, secondDirection)) > EPSILON
+          ? first.startPoint.pointId === corner.pointId
+            ? first.startPoint
+            : first.endPoint
+          : null;
+      if (
+        point &&
+        lines.every(
+          (line) => line === first || line === second || !endsAt(line, point),
+        )
+      )
+        corners.push([first.entity.entityId, second.entity.entityId]);
+    });
+  });
+  return corners;
+}
+
+/**
+ * cadara-h026.2 (user decision, as Onshape): Sketch Fillet/Chamfer on more
+ * than two selected lines rounds every corner of
+ * `getSketchSelectedLineCorners`, one after another, as one edit. Each later
+ * corner's new ids carry its index. The preview draws the selected lines as
+ * all corners leave them, plus each corner's arc or chamfer line. Two lines
+ * or fewer are the single-corner mutation unchanged.
+ */
+export function createSketchCornersMutation(input: {
+  kind: "fillet" | "chamfer";
+  definition: SketchDefinition;
+  entityIds: readonly SketchEntityId[];
+  value: number | null;
+  sequence: number;
+  factories: SketchEditOperationFactories;
+}): SketchEditOperationResult {
+  const mutate = (
+    definition: SketchDefinition,
+    entityIds: readonly SketchEntityId[],
+    factories: SketchEditOperationFactories,
+  ) =>
+    input.kind === "fillet"
+      ? createSketchFilletMutation({
+          definition,
+          entityIds,
+          radius: input.value,
+          sequence: input.sequence,
+          factories,
+        })
+      : createSketchChamferMutation({
+          definition,
+          entityIds,
+          distance: input.value,
+          sequence: input.sequence,
+          factories,
+        });
+  if (input.entityIds.length <= 2)
+    return mutate(input.definition, input.entityIds, input.factories);
+
+  const corners = getSketchSelectedLineCorners(
+    input.definition,
+    input.entityIds,
+  );
+  if (corners.length === 0)
+    return createInvalidOperationResult(
+      `Sketch ${input.kind} needs two lines that share a corner.`,
+    );
+  let definition = input.definition;
+  const cornerPreviews: SketchDraftEntity[] = [];
+  for (const [index, corner] of corners.entries()) {
+    const indexed = (suffix: string) =>
+      index === 0 ? suffix : `corner-${index + 1}-${suffix}`;
+    const result = mutate(definition, corner, {
+      ...input.factories,
+      createPointId: (suffix) => input.factories.createPointId(indexed(suffix)),
+      createEntityId: (suffix) =>
+        input.factories.createEntityId(indexed(suffix)),
+      createConstraintId: (suffix) =>
+        input.factories.createConstraintId(indexed(suffix)),
+      createDimensionId: (suffix) =>
+        input.factories.createDimensionId(indexed(suffix)),
+    });
+    if (!result.valid || !result.definition) return result;
+    definition = result.definition;
+    cornerPreviews.push(
+      ...result.previewEntities
+        .filter((entity) => !entity.id.includes("-trim-"))
+        .map((entity) => ({ ...entity, id: indexed(entity.id) })),
+    );
+  }
+  const label = input.kind === "fillet" ? "Fillet preview" : "Chamfer preview";
+  const trimmedLines = [...new Set(corners.flat())].flatMap((entityId) => {
+    const line = getLineDescriptorById(definition, entityId);
+    return line
+      ? [
+          makePreviewLine(
+            `preview-${input.kind}-trim-${entityId}`,
+            label,
+            line.start,
+            line.end,
+            line.entity.isConstruction,
+          ),
+        ]
+      : [];
+  });
+  return createMutationOperationResult(definition, [
+    ...trimmedLines,
+    ...cornerPreviews,
+  ]);
+}
+
+/**
  * The exact Extend (T10g-2; design §3.1, Q-g3: a line extended to a line):
  * the extended end (`intersections.extendedEnd`) becomes a new
  * `extend-endpoint` point Q at the one cut's `position` (the evaluator on

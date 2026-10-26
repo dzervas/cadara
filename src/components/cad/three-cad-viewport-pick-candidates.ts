@@ -8,7 +8,9 @@ import {
 } from "@/core/editor/schema";
 import {
   getSketchSelectionCycleContext,
+  hasSketchSelectionCycleDeselectEntry,
   isSketchSelectionContextSingleShot,
+  isSketchSelectionCycleTargetHeld,
   isSketchSelectionCycleTargetEligible,
   isSketchSelectionCyclePickRetained,
   type SketchSelectionCycleContext,
@@ -916,9 +918,9 @@ export interface SketchPickCycleWiring {
   /** Whether the hint teaches a cycle (not in single-shot pickers). */
   readonly hintCycles?: boolean;
   /**
-   * Multi-selection contexts only (cadara-h026.1): whether the selection
-   * holds a target; the cycle then has a deselect entry and skips entries
-   * selected by other clicks.
+   * Multi-selection contexts (cadara-h026.1) and tools that accumulate
+   * picks (cadara-h026.2): whether the context holds a target; the cycle
+   * then has a deselect entry and skips entries selected by other clicks.
    */
   readonly selected?: (target: PrimitiveRef) => boolean;
   /**
@@ -958,8 +960,11 @@ export function createSketchPickCycleWiring({
     hintStack: eligible,
     hintCycles:
       context.mode !== "none" && !isSketchSelectionContextSingleShot(session),
-    ...(context.mode === "multiSelect"
-      ? { selected: (target: PrimitiveRef) => isSelectedIn(selection, target) }
+    ...(hasSketchSelectionCycleDeselectEntry(session, selectionFilter)
+      ? {
+          selected: (target: PrimitiveRef) =>
+            isSketchSelectionCycleTargetHeld(state, target),
+        }
       : {}),
   };
 }
@@ -1188,7 +1193,12 @@ export function resolveSketchPickClick(
   const own =
     armed !== null && cycle ? (wiring.stack[cycle.index] ?? null) : null;
   const { isSelected } = pointer;
-  if (!isSelected) {
+  // A tool's quick second click (`detail >= 2`) still acts on stack[0], as
+  // before its cycle had a deselect entry (cadara-h026.2).
+  if (
+    !isSelected ||
+    (click.detail !== 1 && wiring.context.mode !== "multiSelect")
+  ) {
     return {
       cycle: next,
       target: wiring.stack[next?.index ?? 0] ?? null,

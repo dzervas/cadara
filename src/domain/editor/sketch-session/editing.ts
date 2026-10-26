@@ -49,11 +49,10 @@ import {
   type OffsetCurveDescriptor,
   type SketchEditOperationResult,
   createOffsetContribution,
-  createSketchChamferMutation,
+  createSketchCornersMutation,
   createSketchDerivedTransformContribution,
   createSketchExtendMutation,
   type SketchMutationResult,
-  createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
   createSketchSplitMutation,
@@ -980,11 +979,10 @@ export function getSketchCornerSlotResult(
     sequence: session.sequence + 1,
     factories: createSessionCommitFactories(session.sequence + 1, session.sketchId ?? ("sketch_draft" as SketchId)),
   };
-  return input.kind === "fillet"
-    ? createSketchFilletMutation({ ...common, radius: input.value })
-    : input.kind === "chamfer"
-      ? createSketchChamferMutation({ ...common, distance: input.value })
-      : createSketchSlotContribution({ ...common, width: input.value });
+  // cadara-h026.2: Fillet and Chamfer round every corner of their lines.
+  return input.kind === "slot"
+    ? createSketchSlotContribution({ ...common, width: input.value })
+    : createSketchCornersMutation({ ...common, kind: input.kind, value: input.value });
 }
 
 export function buildSketchGeometry(
@@ -3002,7 +3000,15 @@ export function selectSketchEditToolTarget(
     : metadata.selection.allowsMultiple ||
         activeEditTool.selectedTargets.length < metadata.selection.requiredCount
       ? [...activeEditTool.selectedTargets, target]
-      : [...activeEditTool.selectedTargets.slice(1), target];
+      : // cadara-h026.2: past an adopted superset, too.
+        [
+          ...activeEditTool.selectedTargets.slice(
+            activeEditTool.selectedTargets.length -
+              metadata.selection.requiredCount +
+              1,
+          ),
+          target,
+        ];
   const nextEditTool = {
     ...activeEditTool,
     selectedTarget: nextSelectedTargets[0] ?? null,

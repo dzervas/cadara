@@ -15,7 +15,13 @@ import {
   getSketchConstraintDefinition,
   inferDimensionAnnotationPlacement,
   isRegisteredSketchConstraintToolId,
+  resolveSketchConstraintTarget,
 } from "@/core/sketch-constraints/registry";
+import type {
+  SketchConstraintTargetRecord,
+  SketchConstraintToolId,
+} from "@/core/sketch-constraints/definition";
+import { getSketchSelectedLineCorners } from "@/domain/sketch-editing/operations";
 import type {
   SketchEditToolId,
   SketchEditToolSelectionRequirement,
@@ -78,10 +84,14 @@ import { getSketchSessionDisplaySolvedSnapshot } from "./solved-snapshot";
 import { buildCommittedDimensionOverlays } from "./annotations";
 import {
   activateSketchConstraintTool,
+  authorSketchConstraintTarget,
   buildConstraintToolPresentation,
+  canSketchConstraintSelectMoreTargets,
   isSketchConstraintReadyForValue,
+  prepareSketchConstraintCommit,
 } from "./constraints";
 import {
+  getSketchEditOperatorResult,
   selectSketchEditToolTarget,
   updateSketchOffsetPointer,
   updateSketchSplitPointer,
@@ -599,11 +609,40 @@ export function canAppendSketchEditToolActivationTarget(
   );
 }
 
+/**
+ * The preselection an edit tool adopts at activation, in selection order
+ * (cadara-dd3.121: all or nothing). cadara-h026.2 (user decision): Sketch
+ * Fillet and Chamfer instead adopt the selected lines when they have a
+ * corner (`getSketchSelectedLineCorners`) and drop everything else, e.g. a
+ * marquee's points; with no corner they adopt nothing. Lines without a
+ * corner stay adopted: they still mark three-line junctions as no corner.
+ */
 export function adoptCompatibleSketchEditToolTargets(
   session: SketchSessionState,
   toolId: SketchEditToolId,
   targets: readonly PrimitiveRef[],
 ): PrimitiveRef[] {
+  if (isSketchCornerEditTool(toolId)) {
+    const lines = targets.filter(
+      (target): target is Extract<PrimitiveRef, { kind: "sketchEntity" }> =>
+        target.kind === "sketchEntity" &&
+        getSketchEditSelectionKindForEntity(
+          session.definition,
+          target.entityId,
+        ) === "line",
+    );
+    const uniqueLines = lines.filter(
+      (line, index) =>
+        lines.findIndex((other) => other.entityId === line.entityId) === index,
+    );
+    return getSketchSelectedLineCorners(
+      session.definition,
+      uniqueLines.map((line) => line.entityId),
+    ).length > 0
+      ? uniqueLines
+      : [];
+  }
+
   const adoptedTargets: PrimitiveRef[] = [];
 
   for (const target of targets) {
@@ -669,11 +708,160 @@ export function beginSketchEditTool(
     initialSelectedTargets,
   );
 
+  // cadara-h026.2: a corner tool takes all its adopted lines at once (a
+  // later pick keeps only the last adopted line with it).
+  if (isSketchCornerEditTool(toolId) && adoptedTargets.length > 0) {
+    const tool: SketchEditToolState = {
+      ...activeEditTool,
+      selectedTarget: adoptedTargets[0]!,
+      selectedTargets: adoptedTargets,
+    };
+    const preview = getSketchEditOperatorResult(nextSession, tool);
+    return {
+      ...nextSession,
+      activeEditTool: tool,
+      toolStagedEntities: preview.previewEntities,
+      toolPresentation: buildSketchEditToolPresentation(
+        tool,
+        preview.message,
+        preview.previewEntities,
+      ),
+    };
+  }
+
   for (const target of adoptedTargets) {
     nextSession = selectSketchEditToolTarget(nextSession, target);
   }
 
   return nextSession;
+}
+
+function isSketchCornerEditTool(toolId: SketchEditToolId) {
+  return toolId === "sketchFillet" || toolId === "sketchChamfer";
+}
+
+/**
+ * cadara-h026.2: a tool's pick-cycle deselect entry (`selectionMode:
+ * "remove"`) drops `target`, the cycle's own pick, which the tool holds as
+ * its last-added pick; its other picks and values stay and the tool
+ * re-stages. Unchanged when `target` is not the last-added pick.
+ */
+export function removeSketchToolCyclePick(
+  session: SketchSessionState,
+  target: PrimitiveRef,
+): SketchSessionState {
+  const tool = session.activeEditTool;
+  if (tool) {
+    const last = tool.selectedTargets.at(-1);
+    if (!last || !primitiveRefEquals(last, target)) return session;
+    // Edit tools toggle a held pick off, except Merge Points' source,
+    // which only the tool's restart drops.
+    return tool.toolId === "sketchMergePoints" &&
+      tool.selectedTargets.length === 1
+      ? beginSketchEditTool(session, tool.toolId)
+      : selectSketchEditToolTarget(session, target);
+  }
+  const authoring = session.constraintAuthoring;
+  if (!authoring) return session;
+  const last = authoring.selectedTargets.at(-1)?.target;
+  const resolved = resolveSketchConstraintTarget(
+    authoring.toolId,
+    session.definition,
+    target,
+    session.projectedReferences,
+  )?.target;
+  if (!last || !resolved || !primitiveRefEquals(last, resolved)) return session;
+  const armed = activateSketchConstraintTool(session, authoring.toolId);
+  return authoring.selectedTargets
+    .slice(0, -1)
+    .reduce<SketchSessionState>(
+      (next, entry) => authorSketchConstraintTarget(next, entry.target).session,
+      {
+        ...armed,
+        constraintAuthoring: {
+          ...armed.constraintAuthoring!,
+          pointer: authoring.pointer,
+        },
+      },
+    );
+}
+
+/**
+ * cadara-h026.2: a constraint or Dimension tool activated on the
+ * preselection adopts the targets it resolves, in selection order, and
+ * reports which (the editor selection keeps them while the tool holds them).
+ * A tool with a `selectionExpansion` commits more targets than its steps at
+ * once (Horizontal on N lines constrains each, Equal chains them); any other
+ * tool takes them as picks, so a complete pick set commits (or, for a value
+ * tool, previews its value) and a partial one arms the tool with them. With
+ * nothing resolved the tool is armed as usual and adopts nothing.
+ */
+export function beginSketchConstraintToolFromSelection(
+  current: SketchSessionState,
+  toolId: SketchConstraintToolId,
+  selection: readonly PrimitiveRef[],
+): { session: SketchSessionState; adopted: PrimitiveRef[] } {
+  let session = beginSketchTool(current, toolId);
+  const definition = getSketchConstraintDefinition(toolId);
+  const candidates: { target: PrimitiveRef; resolvedKey: string }[] = [];
+  const resolved: SketchConstraintTargetRecord[] = [];
+  for (const target of selection) {
+    const record = resolveSketchConstraintTarget(
+      toolId,
+      session.definition,
+      target,
+      session.projectedReferences,
+    );
+    const resolvedKey = record ? getTargetKey(record.target) : null;
+    if (
+      !record ||
+      !resolvedKey ||
+      candidates.some((candidate) => candidate.resolvedKey === resolvedKey)
+    )
+      continue;
+    candidates.push({ target, resolvedKey });
+    resolved.push(record);
+  }
+
+  if (
+    definition.selectionExpansion &&
+    resolved.length > definition.steps.length
+  ) {
+    session = prepareSketchConstraintCommit(session, {
+      ...session.constraintAuthoring!,
+      selectedTargets: resolved,
+    }).session;
+  } else {
+    for (const record of resolved.slice(0, definition.steps.length)) {
+      // A commit ends the authoring; a complete value pick set waits.
+      const authoring = session.constraintAuthoring;
+      if (
+        !authoring ||
+        (isSketchConstraintReadyForValue(
+          definition,
+          authoring.selectedTargets,
+        ) &&
+          !canSketchConstraintSelectMoreTargets(
+            definition,
+            authoring.selectedTargets,
+          ))
+      )
+        break;
+      session = authorSketchConstraintTarget(session, record.target).session;
+    }
+  }
+
+  const heldKeys = new Set(
+    session.constraintAuthoring?.selectedTargets.map((entry) =>
+      getTargetKey(entry.target),
+    ) ?? [],
+  );
+  return {
+    session,
+    adopted: candidates
+      .filter((candidate) => heldKeys.has(candidate.resolvedKey))
+      .map((candidate) => candidate.target),
+  };
 }
 
 export function beginSketchTool(

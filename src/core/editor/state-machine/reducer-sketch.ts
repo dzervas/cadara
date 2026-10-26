@@ -13,6 +13,7 @@ import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/re
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
 import {
   adoptCompatibleSketchEditToolTargets,
+  beginSketchConstraintToolFromSelection,
   beginSketchTool,
   cancelSketchGeometryDrag,
   finalizeSketchDraw,
@@ -45,6 +46,7 @@ import {
   emitEditSessionCursorRestore,
 } from "./effect-emitters";
 import { toIdleState, withActivationSelection } from "./state-creators";
+import { isMultiSelectionContext } from "./selection-helpers";
 
 import { isPassiveSketchTool, nextRequestId } from "./utility-helpers";
 import {
@@ -162,17 +164,47 @@ function handleEditingSketchToolActivation(
     };
   }
 
+  // cadara-h026.2: constraint and Dimension tools act on the preselection,
+  // the no-tool multi-selection (`beginSketchConstraintToolFromSelection`);
+  // the selection keeps what the armed tool holds. A commit disarms the
+  // tool, so the toolbar shows Select (not while a routed shared-driver edit,
+  // which re-arms it, is open). Another tool's picks are no preselection:
+  // the selection is cleared.
+  if (
+    isRegisteredSketchConstraintToolId(event.toolId) ||
+    event.toolId === "dimension"
+  ) {
+    const fromSelection = isMultiSelectionContext(state);
+    const { session, adopted } = beginSketchConstraintToolFromSelection(
+      state.session,
+      event.toolId === "dimension" ? "dimensionDistance" : event.toolId,
+      fromSelection ? state.selection : [],
+    );
+    const activationState = withActivationSelection(state, adopted);
+
+    return {
+      state: {
+        ...createSketchPreviewState(activationState, session),
+        selectionFilter: getDefaultSelectionFilterForMode("sketch"),
+        command: {
+          ...state.command,
+          toolId:
+            session.activeTool === null && !session.activeAnnotationEdit?.shared
+              ? "sketch"
+              : event.toolId,
+          phase: "editing",
+        },
+      },
+      effects: [],
+    };
+  }
+
   if (
     isRegisteredSketchToolId(event.toolId) ||
-    isRegisteredSketchConstraintToolId(event.toolId) ||
-    event.toolId === "dimension" ||
     event.toolId === "construction" ||
     event.toolId === "projectReference"
   ) {
-    const session = beginSketchTool(
-      state.session,
-      event.toolId === "dimension" ? "dimensionDistance" : event.toolId,
-    );
+    const session = beginSketchTool(state.session, event.toolId);
 
     return {
       state: {

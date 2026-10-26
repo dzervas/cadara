@@ -24,6 +24,7 @@ import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/inte
 import { getToolById } from "@/core/tools/tool-registry";
 import { describeBlockedSketchAction } from "@/domain/modeling/document-action-blocked";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
+import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import {
   parseSketchStylePatch,
   SKETCH_STYLE_PATCH_INTENT,
@@ -275,8 +276,13 @@ function actionLabel(event: EditorEvent, before: EditorState) {
       break;
     }
     // T17c3 review F-4: the SVG Rendering toggle is one action.
+    // cadara-h026.2: so is a constraint applied to the preselection at its
+    // activation, labelled by the tool's name (e.g. "Horizontal").
     case "tool.activated":
-      if (event.toolId === "svgRendering")
+      if (
+        event.toolId === "svgRendering" ||
+        isRegisteredSketchConstraintToolId(event.toolId)
+      )
         return getToolById(event.toolId).name;
       break;
     // T17c3 (T17c review F-B): a Create that waited for the preview's

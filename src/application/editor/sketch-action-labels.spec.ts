@@ -150,6 +150,22 @@ describe("T17c3: a completed pick is labelled by its tool", () => {
     },
   );
 
+  test("cadara-h026.2: a constraint applied to the preselection at its activation is one action labelled with the tool's name", async () => {
+    const f = await createSketchActionOwnerFixture(seeded());
+    const before = f.session.definition.constraints.length;
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: entityRef(f.session, eid("ab")),
+      selectionMode: "toggle",
+    });
+    f.dispatch({ type: "tool.activated", toolId: "constraintHorizontal" });
+    expect(
+      f.session.definition.constraints.length,
+      "premise: the constraint is authored at activation",
+    ).toBe(before + 1);
+    expect(f.undoLabels()).toEqual(["Horizontal"]);
+  });
+
   test("a Construction pick (the toggle) is one 'Construction' action", async () => {
     const f = await createSketchActionOwnerFixture(seeded());
     f.dispatch({ type: "tool.activated", toolId: "construction" });

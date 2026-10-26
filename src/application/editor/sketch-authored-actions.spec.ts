@@ -4785,6 +4785,26 @@ describe("T17h review R-1: a routed edit keeps the tool's command; the toolbar m
     expectCommand(f, "constraintFix", "after Save");
   });
 
+  test("cadara-h026.2: Fix activated on the preselected copy circle opens the routed popup and keeps the Fix command", async () => {
+    const { f, copy } = await routed();
+    f.dispatch({
+      type: "viewport.selectionRequested",
+      target: copy,
+      selectionMode: "toggle",
+    });
+    f.dispatch({ type: "tool.activated", toolId: "constraintFix" });
+    expect(
+      f.session.activeAnnotationEdit?.shared,
+      "premise: the routed edit is open at activation",
+    ).toBeTruthy();
+    expectCommand(f, "constraintFix", "routed popup");
+    f.dispatch({
+      type: "sketch.toolPatched",
+      patch: { intent: "cancelAnnotationValue" },
+    });
+    expectCommand(f, "constraintFix", "after Cancel");
+  });
+
   test("Radius on the copy routed by the label placement patch, then Save keeps the Radius command", async () => {
     const { f, copy } = await routed();
     f.dispatch({ type: "tool.activated", toolId: "dimensionRadius" });

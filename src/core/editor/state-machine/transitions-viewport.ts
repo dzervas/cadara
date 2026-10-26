@@ -11,6 +11,7 @@ import {
   selectSketchReferenceTarget,
   shouldPinSketchConstraintPreviewBeforeSelection,
   pinSketchConstraintPreview,
+  removeSketchToolCyclePick,
   toggleSketchConstructionTarget,
   updateSketchConstraintHover,
   updateSketchEditToolHover,
@@ -25,6 +26,7 @@ import {
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import {
   getSketchSelectionCycleContext,
+  hasSketchSelectionCycleDeselectEntry,
   isSketchSelectionCyclePickRetained,
   withoutSketchSelectionCyclePick,
 } from "@/domain/editor/sketch-session/selection";
@@ -722,6 +724,23 @@ function handleEditingSketchViewportSelection(
   state: SketchEditorState,
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
 ): EditorTransitionResult {
+  // cadara-h026.2: a tool cycle's deselect entry drops the tool's own pick.
+  if (event.selectionMode === "remove" && !isMultiSelectionContext(state)) {
+    const session = removeSketchToolCyclePick(state.session, event.target);
+    return session === state.session
+      ? { state, effects: [] }
+      : {
+          state: {
+            ...createSketchPreviewState(state, session),
+            selection: state.selection.filter(
+              (target) => !primitiveRefEquals(target, event.target),
+            ),
+            hoverTarget: null,
+          },
+          effects: [],
+        };
+  }
+
   if (!event.cycleReplaces) {
     return selectEditingSketchViewportTarget(state, event);
   }
@@ -1027,8 +1046,16 @@ export function handleViewportSelectionRequested(
   event: Extract<EditorEvent, { type: "viewport.selectionRequested" }>,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
-  // Only a multi-selection removes a pick (its cycle's deselect entry).
-  if (event.selectionMode === "remove" && !isMultiSelectionContext(state)) {
+  // Only a multi-selection or a sketch tool that accumulates picks removes
+  // a pick (its cycle's deselect entry; cadara-h026.2).
+  if (
+    event.selectionMode === "remove" &&
+    !isMultiSelectionContext(state) &&
+    !(
+      state.kind === "editingSketch" &&
+      hasSketchSelectionCycleDeselectEntry(state.session, state.selectionFilter)
+    )
+  ) {
     return { state, effects: [] };
   }
 

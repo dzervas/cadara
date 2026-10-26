@@ -229,6 +229,59 @@ interface SketchSelectionCycleState {
 }
 
 /**
+ * Whether the context's cycle ends in a deselect entry that removes its own
+ * pick (cadara-h026.1 user decision): the no-tool multi-selection, and
+ * (cadara-h026.2) the `replaceLastAdded` contexts of tools that accumulate
+ * picks (edit tools, constraint and Dimension authoring).
+ */
+export function hasSketchSelectionCycleDeselectEntry(
+  session: SketchSessionState,
+  selectionFilter: SelectionFilter | null,
+): boolean {
+  const { mode } = getSketchSelectionCycleContext(session, selectionFilter);
+  return (
+    mode === "multiSelect" ||
+    (mode === "replaceLastAdded" &&
+      !isSketchSelectionContextSingleShot(session) &&
+      (session.activeEditTool !== null || session.constraintAuthoring !== null))
+  );
+}
+
+/**
+ * Whether the context holds `target` as a pick (any click's): the active
+ * edit tool's picks, the constraint's resolved picks, else the selection.
+ * A deselect-entry cycle skips held entries other clicks picked.
+ */
+export function isSketchSelectionCycleTargetHeld(
+  state: SketchSelectionCycleState,
+  target: PrimitiveRef,
+): boolean {
+  const { session } = state;
+  if (session.activeEditTool)
+    return session.activeEditTool.selectedTargets.some((selected) =>
+      primitiveRefEquals(selected, target),
+    );
+  const authoring = session.constraintAuthoring;
+  if (authoring) {
+    const resolved = resolveSketchConstraintTarget(
+      authoring.toolId,
+      session.definition,
+      target,
+      session.projectedReferences,
+    )?.target;
+    return (
+      resolved !== undefined &&
+      authoring.selectedTargets.some((entry) =>
+        primitiveRefEquals(entry.target, resolved),
+      )
+    );
+  }
+  return state.selection.some((selected) =>
+    primitiveRefEquals(selected, target),
+  );
+}
+
+/**
  * Whether the selection still holds `target`, a previous cycle pick, the
  * way the context's mode needs it: in the selection (`replace`,
  * `multiSelect`), or as the
