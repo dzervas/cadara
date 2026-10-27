@@ -31,7 +31,7 @@ import {
 } from "@/contracts/sketch/mirror-requirements";
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
+import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import type { SketchMirrorRepairState, SketchSessionState } from "./types";
 import {
   getSketchMirrorRepairCandidate,

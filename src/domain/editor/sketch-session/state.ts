@@ -25,7 +25,7 @@ import {
 import { buildReferenceImageAnchorProjectedReferences } from "@/domain/reference-image-calibration/export/references";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
-import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import type { SketchConstraintDisplayState, SketchSessionState } from "./types";
 import {
   cloneDefinition,

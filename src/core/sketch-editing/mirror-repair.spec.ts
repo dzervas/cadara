@@ -42,7 +42,7 @@ import {
   replaceMirrorLine,
   replaceMirrorOriginal,
   type MirrorReplacement,
-} from "./mirror-repair";
+} from "@/core/sketch-editing/mirror-repair";
 
 type Mirror = ReturnType<typeof mirroredSession>["relationship"];
 

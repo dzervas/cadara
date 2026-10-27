@@ -46,7 +46,7 @@ import type {
   SketchToolPresentationSchema,
 } from "@/core/sketch-tools/editor-schema";
 import type { PlacementInference } from "@/domain/sketch-inference/placement-inference";
-import type { SketchStyleFocus } from "@/domain/sketch-styles/definition";
+import type { SketchStyleFocus } from "@/core/sketch-styles/definition";
 import type { OffsetSide } from "@/domain/sketch-editing/operations";
 import type { SketchEditToolId } from "@/core/sketch-edit-tools/definition";
 import type { ActiveSketchSpecialModeSession } from "@/core/sketch-special-modes/schema";

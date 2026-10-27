@@ -35,7 +35,7 @@ import { isUnevaluatedMetadataOnlySketch, sketchProfileGateFailures } from "@/co
 import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";
 import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
-import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
 import { getSketchMirrorActionEntries } from "@/domain/editor/sketch-session/mirror-actions";
 import { getSketchOffsetHealth } from "@/domain/editor/sketch-session/offset-actions";

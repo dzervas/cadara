@@ -5,7 +5,7 @@ import type {
   SketchToolPresentationSchema,
   SketchToolControlValue,
 } from "@/core/sketch-tools/editor-schema";
-import { buildSketchStylePresentation } from "@/domain/sketch-styles/definition";
+import { buildSketchStylePresentation } from "@/core/sketch-styles/definition";
 import { getSketchStyleTargetDefinition } from "./styles";
 import { isDrawingSketchTool, withConstructionFlag } from "./tool-authoring";
 import { buildCommittedDimensionOverlays } from "./dimension-overlays";

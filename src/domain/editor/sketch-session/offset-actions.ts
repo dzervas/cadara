@@ -22,8 +22,8 @@ import {
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { AuthoredValue } from "@/contracts/modeling/authored-values";
 import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
-import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
-import { removeDerivedRelationship } from "@/domain/sketch-editing/derived-removal";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
+import { removeDerivedRelationship } from "@/core/sketch-editing/derived-removal";
 import type { SketchSessionState } from "./types";
 import { getSessionSketchId } from "./tool-authoring";
 import { getSketchSessionDerivationSettings } from "./session-definition";

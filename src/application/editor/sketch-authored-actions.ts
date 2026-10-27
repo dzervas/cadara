@@ -28,7 +28,7 @@ import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/re
 import {
   parseSketchStylePatch,
   SKETCH_STYLE_PATCH_INTENT,
-} from "@/domain/sketch-styles/definition";
+} from "@/core/sketch-styles/definition";
 import { getSketchStylePatchToolId } from "@/domain/editor/sketch-session/styles";
 import {
   AuthoredActionHistory,

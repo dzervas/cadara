@@ -8,7 +8,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
   SketchStylePatch,
   SketchStyleToolId,
-} from "@/domain/sketch-styles/definition";
+} from "@/core/sketch-styles/definition";
 import type { SketchStyleId } from "@/contracts/shared/ids";
 
 export function applyStylePatchToDefinition(

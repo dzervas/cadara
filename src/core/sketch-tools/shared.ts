@@ -2,7 +2,7 @@ import type { SketchPoint } from "@/contracts/modeling/schema";
 import {
   distanceBetween as distanceBetweenPoints,
   midpoint as pointMidpoint,
-} from "@/domain/sketch/point-math";
+} from "@/core/sketch/point-math";
 import type {
   SketchDraftEntity,
   SketchToolCommitInput,

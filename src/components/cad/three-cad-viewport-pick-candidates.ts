@@ -79,7 +79,7 @@ import {
 } from "@/infrastructure/viewport/render-picking";
 import type { SelectionRequestMode } from "@/core/editor/state-machine/types";
 import type { ViewportCamera } from "@/infrastructure/viewport/viewport-projection";
-import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+import { SKETCH_CURVE_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 export const DEFAULT_PROJECTED_SKETCH_CURVE_PICK_ENTER_RADIUS_PX =

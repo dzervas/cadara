@@ -39,7 +39,7 @@ import {
   findSketchNearGapAt,
   getSketchNearGapBasis,
 } from "@/domain/sketch-interaction/near-gap";
-import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+import { SKETCH_POINT_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 
 const pid = (name: string) => `sketch_point_${name}` as SketchPointId;
 const eid = (name: string) => `sketch_entity_${name}` as SketchEntityId;

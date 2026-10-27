@@ -13,7 +13,7 @@ import type {
 import type { ViewportRenderableOrigin } from "@/core/workspace/viewport-renderables";
 import type { ViewportCamera } from "@/infrastructure/viewport/viewport-projection";
 import type { SketchPickStackCandidate } from "@/domain/sketch-interaction/pick-stack";
-import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+import { SKETCH_POINT_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 import { workbenchGeometryHighlightColors } from "@/theme/workbench-theme";
 
 export type WorkspaceSemanticClass =

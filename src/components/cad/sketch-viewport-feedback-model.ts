@@ -1,4 +1,4 @@
-import { SKETCH_POINT_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+import { SKETCH_POINT_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 
 import type {
   SketchToolAnchorDescriptor,

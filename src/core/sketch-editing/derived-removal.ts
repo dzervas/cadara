@@ -17,7 +17,7 @@ import {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
   getEntityPointIds,
-} from "./definition-references";
+} from "@/core/sketch-editing/definition-references";
 
 export interface DerivedRelationshipRemoval {
   /** The definition without the relationship and its write set. */

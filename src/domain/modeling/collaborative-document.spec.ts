@@ -26,7 +26,7 @@ import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
-import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
+import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import {
   makeReferenceDimensionCases,
   makeReferenceDimensionSketch,

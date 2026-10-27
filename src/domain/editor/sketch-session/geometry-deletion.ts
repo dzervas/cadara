@@ -10,7 +10,7 @@ import {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
   getEntityPointIds,
-} from "@/domain/sketch-editing/definition-references";
+} from "@/core/sketch-editing/definition-references";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import { cloneDefinition } from "./session-definition";
 import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";

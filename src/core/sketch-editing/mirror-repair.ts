@@ -23,7 +23,7 @@ import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
 import {
   removeDerivedRelationship,
   type DerivedRelationshipRemoval,
-} from "./derived-removal";
+} from "@/core/sketch-editing/derived-removal";
 
 /** The mirror removal write set (`removeDerivedRelationship`). */
 export type MirrorRemoval = DerivedRelationshipRemoval;

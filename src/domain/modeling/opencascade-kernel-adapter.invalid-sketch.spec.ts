@@ -22,7 +22,7 @@ import {
   entityRef,
   mirroredSession,
 } from "@/domain/editor/sketch-mirror.fixtures";
-import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
+import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 
 async function loadOcc() {

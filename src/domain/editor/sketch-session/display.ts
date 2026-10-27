@@ -57,7 +57,7 @@ import type {
   SketchSessionDisplayRenderable,
   SketchSessionState,
 } from "./types";
-import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import { getSketchEditOperatorResult } from "./edit-geometry-operations";
 import {
   REFERENCE_IMAGE_ANCHOR_MARKER_COLOR,

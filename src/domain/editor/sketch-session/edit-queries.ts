@@ -42,7 +42,7 @@ import {
 } from "./tool-authoring";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { withSketchToolValidation } from "./session-definition";
-import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import { getSelectedSketchEntityIds } from "./edit-geometry-operations";
 import { applySketchContribution } from "./definition-authoring";
 

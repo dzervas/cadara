@@ -19,7 +19,7 @@ import {
   querySketchSnapIntersections,
 } from "@/contracts/sketch/edit-intersections";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import { SKETCH_CURVE_RADII_PX } from "@/domain/sketch-interaction/screen-radii";
+import { SKETCH_CURVE_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 import {
   literalResolvedDefinition,
   makeSketchFixture,

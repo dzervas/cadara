@@ -14,8 +14,8 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   replaceMirrorOriginal,
   replaceMirrorLine,
-} from "@/domain/sketch-editing/mirror-repair";
-import type { MirrorReplacement } from "@/domain/sketch-editing/mirror-repair";
+} from "@/core/sketch-editing/mirror-repair";
+import type { MirrorReplacement } from "@/core/sketch-editing/mirror-repair";
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import { offsetEditInputGate } from "./offset-editing";
 import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";

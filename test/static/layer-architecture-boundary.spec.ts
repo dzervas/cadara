@@ -214,12 +214,10 @@ test("src/layer-architecture-boundary.spec.ts core domain dependency debt stays 
     "src/core/editor/state-machine/types.ts",
     "src/core/editor/state-machine/utility-helpers.ts",
     "src/core/feature-authoring/form-adapter.ts",
-    "src/core/sketch-constraints/registry.ts",
     "src/core/sketch-special-modes/presentation.ts",
     "src/core/sketch-special-modes/schema.ts",
     "src/core/sketch-tools/definition.ts",
     "src/core/sketch-tools/editor-schema.ts",
-    "src/core/sketch-tools/shared.ts",
     "src/core/sketch-tools/tools/tangent-arc.ts",
     "src/core/workspace/viewport-renderables.ts",
   ]);

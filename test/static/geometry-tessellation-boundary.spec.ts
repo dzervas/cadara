@@ -47,7 +47,7 @@ const TESSELLATOR_ALLOWLIST: Record<string, string> = {
     "session display of every spline entity (authored reconstruction)",
   "src/domain/modeling/occ/snapshot.ts": "OCC snapshot display edges",
   "src/core/sketch-tools/tools/spline.ts": "spline tool preview",
-  "src/domain/sketch-editing/offset-preview.ts":
+  "src/core/sketch-editing/offset-preview.ts":
     "offset tool preview of derived shells",
   "src/domain/export/providers/dxf-sketch-export-provider.ts":
     "DXF output polylines",

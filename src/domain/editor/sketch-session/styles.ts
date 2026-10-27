@@ -9,7 +9,7 @@ import {
   type SketchStylePatch,
   isSketchStyleTarget,
   parseSketchStylePatch,
-} from "@/domain/sketch-styles/definition";
+} from "@/core/sketch-styles/definition";
 import type { SketchSessionState } from "./types";
 import {
   getSessionSketchId,

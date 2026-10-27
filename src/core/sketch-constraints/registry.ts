@@ -14,7 +14,7 @@ import type {
   SketchCurveConstraintOperand,
   SketchPointConstraintOperand,
 } from "@/contracts/sketch/schema";
-import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
+import { distanceBetween, midpoint } from "@/core/sketch/point-math";
 import { createRegistry } from "@/core/tools/registry-factory";
 import type {
   SketchToolDimensionReferenceKind,

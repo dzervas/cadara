@@ -61,7 +61,7 @@ import {
   isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
 } from "@/domain/editor/sketch-session";
-import { isSketchStyleToolId } from "@/domain/sketch-styles/definition";
+import { isSketchStyleToolId } from "@/core/sketch-styles/definition";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
 import type { EditorHistoryAvailability } from "@/domain/editor/state-machine";

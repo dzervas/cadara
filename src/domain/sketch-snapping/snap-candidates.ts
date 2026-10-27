@@ -19,7 +19,7 @@ import type {
   SketchEntityId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import { distanceBetween, midpoint } from "@/domain/sketch/point-math";
+import { distanceBetween, midpoint } from "@/core/sketch/point-math";
 import {
   closestPointOnSolvedCubicSpans,
   cubicSpansPoleBounds,
@@ -35,7 +35,7 @@ import {
   SKETCH_ALIGNMENT_SNAP_RADII_PX,
   SKETCH_CURVE_RADII_PX,
   SKETCH_POINT_RADII_PX,
-} from "@/domain/sketch-interaction/screen-radii";
+} from "@/core/sketch-interaction/screen-radii";
 
 const DEFAULT_SKETCH_DATUM_AXIS_EXTENT = 10;
 const EPSILON = 1e-9;

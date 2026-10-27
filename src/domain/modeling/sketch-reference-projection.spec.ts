@@ -11,7 +11,7 @@ import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { projectSketchExternalReferencesFromSnapshot } from "./sketch-reference-projection";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
 import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
-import { removeMirrorRelationship } from "@/domain/sketch-editing/mirror-repair";
+import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 
 function createSnapshotWithEdge(
   points: readonly (readonly [number, number, number])[],

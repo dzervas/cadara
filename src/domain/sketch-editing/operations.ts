@@ -45,7 +45,7 @@ import {
   splineSourceSpanPairs,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
-import { createOffsetShellPreviewEntities } from "@/domain/sketch-editing/offset-preview";
+import { createOffsetShellPreviewEntities } from "@/core/sketch-editing/offset-preview";
 import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
 import {
   projectedSplineIsClosed,
@@ -74,12 +74,12 @@ import {
   type SketchEditIncidence,
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
-import { distanceBetween as distanceBetweenPoints } from "@/domain/sketch/point-math";
+import { distanceBetween as distanceBetweenPoints } from "@/core/sketch/point-math";
 import {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
   getEntityPointIds,
-} from "@/domain/sketch-editing/definition-references";
+} from "@/core/sketch-editing/definition-references";
 
 export type OffsetSide = "left" | "right";
 

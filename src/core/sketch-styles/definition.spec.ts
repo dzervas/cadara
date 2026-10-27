@@ -5,7 +5,7 @@ import {
   buildSketchStyleControls,
   buildSketchStylePresentation,
   parseSketchStylePatch,
-} from "@/domain/sketch-styles/definition";
+} from "@/core/sketch-styles/definition";
 
 test("src/domain/sketch-styles/definition.spec.ts", () => {
   const controls = buildSketchStyleControls(undefined);

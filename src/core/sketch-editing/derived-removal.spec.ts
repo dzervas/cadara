@@ -35,8 +35,8 @@ import {
   withOffset,
   type OffsetVariant,
 } from "@/domain/editor/sketch-offset.fixtures";
-import { getEntityPointIds } from "./definition-references";
-import { removeDerivedRelationship } from "./derived-removal";
+import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
+import { removeDerivedRelationship } from "@/core/sketch-editing/derived-removal";
 
 type Offset = Extract<SketchDerivationDefinition, { kind: "offset" }>;
 

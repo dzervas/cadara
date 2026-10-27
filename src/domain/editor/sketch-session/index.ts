@@ -176,7 +176,7 @@ export {
 export {
   constraintReferencesSketchGeometry,
   dimensionReferencesSketchGeometry,
-} from "@/domain/sketch-editing/definition-references";
+} from "@/core/sketch-editing/definition-references";
 
 export { computeSketchMirrorActionState } from "./mirror-actions";
 export type {
