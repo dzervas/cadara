@@ -63,7 +63,7 @@ import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";

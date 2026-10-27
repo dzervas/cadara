@@ -8,7 +8,7 @@ import {
   deriveCommittedSketchValidity,
   type CommittedSketchDerivation,
 } from "@/contracts/sketch/derived-validity";
-import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publication-round";
+import { solveAndDeriveSketchWithOffsets } from "@/application/solver/offset-publication-round";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import {
@@ -176,7 +176,7 @@ import type { ModelingCommitSketchCorrelation } from "@/domain/modeling/modeling
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import {

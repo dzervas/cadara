@@ -50,7 +50,7 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
 import { describe, expect, test } from "vitest";
 
 describe("T15c axis preference (issue 15; [TECH] T-6 + R-7): drag frames keep a mirror axis bitwise unless the frame cannot be accepted with it", () => {

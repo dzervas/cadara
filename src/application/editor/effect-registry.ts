@@ -60,7 +60,7 @@ import {
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
 } from "@/core/editor/state-machine/error-mapping";
-import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchRegionDerivationSupersededError } from "@/application/solver/sketch-constraint-solver-adapter";
 
 /**
  * `runSignal` is the owning event loop's run: aborted once the loop stops

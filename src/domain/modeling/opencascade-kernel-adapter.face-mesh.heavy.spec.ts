@@ -13,7 +13,7 @@ import {
 } from "@/domain/modeling/occ/native-topology-payload";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 async function loadFixture() {
   const module = (await import("../../../public/cadara-occ.js")) as unknown as {

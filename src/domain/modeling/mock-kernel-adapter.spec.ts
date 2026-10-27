@@ -12,7 +12,7 @@ import {
   normalizeRenderables,
   normalizeWorkspaceSnapshot,
 } from "../../core/modeling/modeling-service/normalization";
-import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
+import { MockSketchSolverAdapter } from "@/application/solver/mock-sketch-solver-adapter";
 import {
   bindRenderableObject,
   collectRaycastPickCandidates,

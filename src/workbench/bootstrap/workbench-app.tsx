@@ -14,9 +14,9 @@ import { isLocalFileSyncDocumentRepository } from "@/domain/modeling/document-re
 import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrumented-document-repository";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { getBrowserSketchRegionDerivation } from "@/domain/modeling/occ/sketch-derivation-worker-runtime";
-import { createInstrumentedSketchSolverAdapter } from "@/domain/solver/instrumented-sketch-solver-adapter";
+import { createInstrumentedSketchSolverAdapter } from "@/application/solver/instrumented-sketch-solver-adapter";
 import {
   createInitialWorkbenchTabsState,
   reduceWorkbenchTabs,

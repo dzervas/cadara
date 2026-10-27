@@ -12,7 +12,7 @@ import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   literalResolvedDefinition,
   makeSketchFixture,

@@ -32,7 +32,7 @@ import {
   validateSolveSketchRequest,
 } from "@/contracts/solver/runtime-schema";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { DEFAULT_MOCK_SKETCH_PLANE_FRAME } from "@/domain/solver/mock-sketch-solver-adapter";
+import { DEFAULT_MOCK_SKETCH_PLANE_FRAME } from "@/application/solver/mock-sketch-solver-adapter";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {

@@ -9,7 +9,7 @@ import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import {
   createSketchSessionFromSnapshot,

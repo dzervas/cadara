@@ -38,7 +38,7 @@ import {
 } from "@/contracts/sketch/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { getAutoHiddenSketchTargetKeys } from "@/core/editor/visibility";
 import {

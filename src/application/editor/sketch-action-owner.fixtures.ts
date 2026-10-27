@@ -34,7 +34,7 @@ import {
 } from "@/core/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { runEditorEffect } from "./effect-registry";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 

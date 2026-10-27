@@ -1,7 +1,7 @@
-import { compileSketchSolveProgram } from "./compile-program";
-import { solveSketchDefinitionCore } from "./solve-sketch";
-import { createCompiledSketchSolveSession } from "./start-session";
-import { updateCompiledSketchSolveSession } from "./update-session";
+import { compileSketchSolveProgram } from "../../core/sketch-solver/compile-program";
+import { solveSketchDefinitionCore } from "../../core/sketch-solver/solve-sketch";
+import { createCompiledSketchSolveSession } from "../../core/sketch-solver/start-session";
+import { updateCompiledSketchSolveSession } from "../../core/sketch-solver/update-session";
 import type { AuthoredSketchRecord } from "@/contracts/modeling/authored-document";
 import type {
   ConstraintId,

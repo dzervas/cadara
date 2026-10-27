@@ -13,11 +13,3 @@ export { undefinedReferenceDimensionDiagnostics } from "./solver-geometry";
 export { unsatisfiedRequirementDiagnostics } from "./solver-geometry";
 export { updateCompiledSketchSolveSession } from "./update-session";
 export { validateSketchDefinitionCore } from "./solve-sketch";
-export {
-  evaluateSketchSolverBenchmarkFixture,
-  SKETCH_SOLVER_BENCHMARK_DOCUMENT,
-  SKETCH_SOLVER_BENCHMARK_TOLERANCES,
-  SKETCH_SOLVER_BENCHMARK_FIXTURES,
-  type SketchSolverBenchmarkFixture,
-  type SketchSolverBenchmarkEvaluation,
-} from "./solver-benchmark";

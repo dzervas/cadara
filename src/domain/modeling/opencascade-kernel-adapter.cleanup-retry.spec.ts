@@ -14,7 +14,7 @@ import { resetRegionRenderRecordCacheForTest } from "@/domain/modeling/occ/snaps
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from "@/domain/modeling/occ/sketch-profile";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";

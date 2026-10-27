@@ -18,7 +18,7 @@ import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimens
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import type { PrimitiveRef } from "@/core/editor/schema";

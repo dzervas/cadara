@@ -14,7 +14,7 @@ import { evaluateSketchDerivations } from "@/contracts/sketch/derived-geometry";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { expect } from "vitest";
 

@@ -185,7 +185,7 @@ test("test/static/for-test-export-boundary.spec.ts production modules never reac
     "landing/ModelScene.tsx",
     "src/contracts/sketch/offset-derivation-frame.ts",
     "src/contracts/sketch/offset-chain-topology.ts",
-    "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.ts",
+    "src/core/modeling/neutral-curve-certification/cubic-tube-chain.ts",
     "src/domain/modeling/occ/sketch-derivation.worker.ts",
     "src/domain/modeling/occ/worker.ts",
     "src/infrastructure/workers/document-sync.worker.ts",

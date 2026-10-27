@@ -17,7 +17,7 @@ import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { AppResultAsync } from "@/contracts/errors";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 test("repository compensation synchronizes background document edits", async () => {
   type ExtrudeFeatureDefinition = Extract<

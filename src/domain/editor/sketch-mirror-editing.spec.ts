@@ -48,7 +48,7 @@ import {
 } from "@/domain/editor/workbench-interactions";
 import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   nonAcceptedOffsetFeatureInputMessage,

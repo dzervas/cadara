@@ -23,7 +23,7 @@ import type { ImportPreparedActions } from "@/contracts/import/actions";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import { translateSketch } from "@/application/import/onshape/sketch-translator";
 import { captureSplitInterfaceOwnerWitness } from "@/domain/import/onshape/split-interface-owner-witness";

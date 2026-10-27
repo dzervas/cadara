@@ -14,7 +14,7 @@ import {
 import {
   SketchRegionDerivationSupersededError,
   type SketchRegionDerivationDelegate,
-} from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/sketch-constraint-solver-adapter";
 
 /** A region derivation, (T10g-1) an edit-intersection or (T13i) a snap-intersection query. */
 type DerivationRequest =

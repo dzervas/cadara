@@ -11,7 +11,7 @@ import {
   resolveOnshapeOpenSketchCurveProfiles,
   resolveOnshapeSketchProfiles,
 } from "@/application/import/onshape/profile-resolver";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const profileVerifier = {
   sketchSolver: new SketchConstraintSolverAdapter({

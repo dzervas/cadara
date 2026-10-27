@@ -31,7 +31,7 @@ import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
 } from "@/application/import/onshape/profile-resolver";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const profileVerifier = {
   sketchSolver: new SketchConstraintSolverAdapter({

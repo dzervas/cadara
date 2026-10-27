@@ -19,7 +19,7 @@ import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 
 // Lane: logic (docs/testing.md — importer review/prepare/apply through the real

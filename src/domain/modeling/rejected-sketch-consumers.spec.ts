@@ -64,7 +64,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
 import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const request = {
   contractVersion: CONTRACT_VERSION,

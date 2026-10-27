@@ -25,7 +25,7 @@ import {
 } from "@/domain/modeling/occ/sketch-derivation-worker-client";
 import { FakeDerivationWorker } from "./sketch-derivation-worker.fixtures";
 import { validateOccWorkerRequestEnvelope } from "@/domain/modeling/occ/worker-protocol";
-import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchRegionDerivationSupersededError } from "@/application/solver/sketch-constraint-solver-adapter";
 
 function makePool(firstWorkerPostMessageError: Error | null = null) {
   const workers: FakeDerivationWorker[] = [];

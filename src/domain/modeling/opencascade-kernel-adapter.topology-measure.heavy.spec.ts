@@ -16,7 +16,7 @@ import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 async function loadWheel() {
   const module = (await import("../../../public/cadara-occ.js")) as unknown as {

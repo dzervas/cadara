@@ -22,7 +22,7 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   createTopologyIdCorrespondence,
   renameTopologyIds,

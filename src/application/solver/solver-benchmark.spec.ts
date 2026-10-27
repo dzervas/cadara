@@ -7,7 +7,7 @@ import {
   SKETCH_SOLVER_BENCHMARK_FIXTURES,
   type SketchSolverBenchmarkSketch,
 } from "./solver-benchmark";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const sketchSolver = new SketchConstraintSolverAdapter({ ...SKETCH_SOLVER_BENCHMARK_DOCUMENT, neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest() });
 

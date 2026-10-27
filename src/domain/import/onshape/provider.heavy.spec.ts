@@ -54,7 +54,7 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";

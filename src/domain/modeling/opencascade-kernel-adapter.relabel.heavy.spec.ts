@@ -37,7 +37,7 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 let occ: Promise<OpenCascadeInstance> | null = null;
 /** A production OCC adapter (`public/cadara-occ`) for `document`. */

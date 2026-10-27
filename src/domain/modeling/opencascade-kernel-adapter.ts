@@ -130,7 +130,7 @@ import {
   deriveCommittedSketchValidity,
   type CommittedSketchDerivation,
 } from "@/contracts/sketch/derived-validity";
-import { solveAndDeriveSketchWithOffsets } from "@/domain/solver/offset-publication-round";
+import { solveAndDeriveSketchWithOffsets } from "@/application/solver/offset-publication-round";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   applyOccFeatureToAuthoringState,

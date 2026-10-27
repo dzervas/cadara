@@ -23,8 +23,8 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 

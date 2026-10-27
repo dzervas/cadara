@@ -10,7 +10,7 @@ import {
 } from "@/contracts/shared/versioning";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const releaseFailures = vi.hoisted(() => ({
   /** Thrown, before releasing, by the next releaseOccObjects call containing a matching object. */

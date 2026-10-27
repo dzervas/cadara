@@ -5,7 +5,7 @@ import { expect, test, vi } from "vitest";
 import { PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const applyFeatureSpy = vi.hoisted(() => vi.fn());
 const referenceStateFailure = vi.hoisted(() => ({ callsUntilFailure: -1 }));

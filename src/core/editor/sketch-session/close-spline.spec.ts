@@ -27,7 +27,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {

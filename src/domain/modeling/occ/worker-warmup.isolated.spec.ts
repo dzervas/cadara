@@ -13,7 +13,7 @@ vi.mock("@/domain/modeling/opencascade-kernel-adapter", () => ({
     preloadRuntime = native.preloadAdapter;
   },
 }));
-vi.mock("@/domain/solver/sketch-constraint-solver-adapter", () => ({
+vi.mock("@/application/solver/sketch-constraint-solver-adapter", () => ({
   SketchConstraintSolverAdapter: class {},
 }));
 vi.mock("@/domain/modeling/occ/neutral-curve-query", () => ({

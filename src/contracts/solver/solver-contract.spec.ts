@@ -19,8 +19,8 @@ import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   DEFAULT_MOCK_SOLVER_TOLERANCES,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 // T17p2 (F-2): the solver works on resolved definitions (numbers).

@@ -104,7 +104,7 @@ import type {
   OnshapeGeometricSignature,
   OnshapeResolvedReference,
 } from "@/contracts/import/onshape-capture-bundle";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { encodeOnshapeTessellationAsBakedMeshBytes } from "@/domain/import/onshape/rollback-bake";
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
 import { createMemoizedHistoryProbe } from "@/domain/import/kernel-history-probe";

@@ -24,9 +24,9 @@ import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
 import type { DimensionId } from "@/contracts/shared/ids";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   makeReferenceDimensionCases,
   makeReferenceDimensionSketch,

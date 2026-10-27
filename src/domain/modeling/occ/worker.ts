@@ -34,7 +34,7 @@ import {
 import {
   OCC_KERNEL_DOCUMENT_ID,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;

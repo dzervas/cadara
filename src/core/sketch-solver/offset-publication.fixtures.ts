@@ -10,7 +10,7 @@ import { literalAuthoredDefinition } from "@/contracts/sketch/region-extraction.
 import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
 import { createNewSketchSessionFromSupport } from "@/core/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 

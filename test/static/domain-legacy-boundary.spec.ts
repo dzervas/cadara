@@ -139,8 +139,6 @@ const legacyDomainFiles = [
   "src/domain/modeling/modeling-service/snapshot.ts",
   "src/domain/modeling/modeling-service/types.ts",
   "src/domain/modeling/modeling-test-fixtures.ts",
-  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.spec.ts",
-  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.ts",
   "src/domain/modeling/occ/asset-version.ts",
   "src/domain/modeling/occ/assets.ts",
   "src/domain/modeling/occ/authoring-checkpoint.ts",
@@ -269,11 +267,6 @@ const legacyDomainFiles = [
   "src/domain/reference-image-calibration/mode/definition.ts",
   "src/domain/sketch-special-modes/builtin-registry-composition.ts",
   "src/domain/sketch-special-modes/registry.ts",
-  "src/domain/solver/instrumented-sketch-solver-adapter.ts",
-  "src/domain/solver/mock-sketch-solver-adapter.ts",
-  "src/domain/solver/offset-publication-round.ts",
-  "src/domain/solver/sketch-constraint-solver-adapter.spec.ts",
-  "src/domain/solver/sketch-constraint-solver-adapter.ts",
 ];
 
 function listFiles(directory: string): string[] {

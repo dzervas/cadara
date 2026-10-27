@@ -27,7 +27,7 @@ import { createRecordingNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import {
   SketchConstraintSolverAdapter,
   SketchRegionDerivationSupersededError,
-} from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/sketch-constraint-solver-adapter";
 import { defaultSelectionFilter } from "@/core/editor/schema";
 import { transitionEditorState } from "@/core/editor/state-machine/reducer-root";
 import { initialEditorState } from "@/core/editor/state-machine/state-creators";

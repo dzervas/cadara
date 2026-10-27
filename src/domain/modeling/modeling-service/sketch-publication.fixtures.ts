@@ -2,7 +2,7 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 import { createModelingService } from "./service";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 
 /** Fault only after the real repository accepted a publication, never during entry. */

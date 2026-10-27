@@ -26,7 +26,7 @@ import {
   type OccWorkerRequest,
   type OccWorkerResponse,
 } from "@/domain/modeling/occ/worker-protocol";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 interface SketchDerivationWorkerScope {
   postMessage(message: OccWorkerResponse): void;

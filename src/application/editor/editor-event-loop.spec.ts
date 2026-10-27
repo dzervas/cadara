@@ -29,7 +29,7 @@ import {
 } from "@/core/modeling/opencascade-kernel-seed";
 import { runEditorEffect } from "./effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";

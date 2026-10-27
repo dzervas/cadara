@@ -24,7 +24,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
 import { createReferenceImageOperation } from "@/core/reference-image/operations";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 /** A new Top-plane draft holding one imported image, finished through `service`. */
 async function finishImageDraft(service: ModelingService) {

@@ -16,7 +16,7 @@ import {
   getBrowserGeometryAssetComposition,
 } from "@/infrastructure/modeling/browser-geometry-asset-store";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { DocumentId } from "@/contracts/shared/ids";
 
 const browserGeometryAssetResolver =

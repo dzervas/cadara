@@ -8,7 +8,7 @@ import {
   translateSketch,
   verifySketchTranslationSolveConsistency,
 } from "@/application/import/onshape/sketch-translator";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { OnshapeSketchConstraint } from "@/core/import/onshape/bundle-reader";
 
 function relationship(

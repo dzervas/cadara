@@ -35,7 +35,7 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const request = {
   contractVersion: CONTRACT_VERSION,

@@ -15,7 +15,7 @@ import {
 } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { parseOperationHistoryPayload as validateOperationHistoryPayload } from "@/contracts/modeling/operation-history.runtime-schema";
 import {
   CONTRACT_VERSION,

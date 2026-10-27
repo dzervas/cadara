@@ -86,10 +86,186 @@ test("production source does not import test-support modules", () => {
   );
 });
 
+function browserGlobalReferences(filePath: string, text: string): string[] {
+  const source = ts.createSourceFile(
+    filePath,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  // Resolve local bindings without loading imported modules or ambient DOM declarations.
+  const program = ts.createProgram(
+    [filePath],
+    { noLib: true, noResolve: true },
+    {
+      ...ts.createCompilerHost({}),
+      getSourceFile: (name) => (name === filePath ? source : undefined),
+    },
+  );
+  const checker = program.getTypeChecker();
+  const browserGlobals = new Set([
+    "window",
+    "document",
+    "self",
+    "localStorage",
+    "indexedDB",
+    "BroadcastChannel",
+    "Worker",
+  ]);
+  const references: string[] = [];
+  function isGlobal(node: ts.Identifier) {
+    const symbol = ts.isShorthandPropertyAssignment(node.parent)
+      ? checker.getShorthandAssignmentValueSymbol(node.parent)
+      : checker.getSymbolAtLocation(node);
+    return !symbol?.declarations?.some(
+      (declaration) => declaration.getSourceFile() === source,
+    );
+  }
+  function globalObjectName(expression: ts.Expression): string | undefined {
+    while (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isTypeAssertionExpression(expression) ||
+      ts.isNonNullExpression(expression) ||
+      ts.isSatisfiesExpression(expression)
+    ) {
+      expression = expression.expression;
+    }
+    return ts.isIdentifier(expression) &&
+      (expression.text === "globalThis" || expression.text === "self") &&
+      isGlobal(expression)
+      ? expression.text
+      : undefined;
+  }
+  function propertyName(name: ts.PropertyName): string | undefined {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+    if (
+      ts.isComputedPropertyName(name) &&
+      ts.isStringLiteral(name.expression)
+    ) {
+      return name.expression.text;
+    }
+    return undefined;
+  }
+  function visit(node: ts.Node) {
+    if (ts.isTypeNode(node)) return;
+    if (
+      ts.isIdentifier(node) &&
+      browserGlobals.has(node.text) &&
+      !(
+        (ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.name === node) ||
+        (ts.isBindingElement(node.parent) && node.parent.propertyName === node)
+      ) &&
+      isGlobal(node)
+    ) {
+      references.push(node.text);
+    }
+    if (
+      ts.isPropertyAccessExpression(node) ||
+      ts.isElementAccessExpression(node)
+    ) {
+      const receiver = globalObjectName(node.expression);
+      const name = ts.isPropertyAccessExpression(node)
+        ? node.name.text
+        : node.argumentExpression && ts.isStringLiteral(node.argumentExpression)
+          ? node.argumentExpression.text
+          : undefined;
+      if (receiver && name && browserGlobals.has(name)) {
+        references.push(`${receiver}.${name}`);
+      }
+    }
+    if (
+      (ts.isVariableDeclaration(node) ||
+        ts.isParameter(node) ||
+        ts.isBindingElement(node)) &&
+      ts.isObjectBindingPattern(node.name) &&
+      node.initializer
+    ) {
+      const receiver = globalObjectName(node.initializer);
+      if (receiver) {
+        for (const element of node.name.elements) {
+          const name = element.propertyName
+            ? propertyName(element.propertyName)
+            : ts.isIdentifier(element.name)
+              ? element.name.text
+              : undefined;
+          if (!element.dotDotDotToken && name && browserGlobals.has(name)) {
+            references.push(`${receiver}.${name}`);
+          }
+        }
+      }
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isObjectLiteralExpression(node.left)
+    ) {
+      const receiver = globalObjectName(node.right);
+      if (receiver) {
+        for (const property of node.left.properties) {
+          const name = property.name && propertyName(property.name);
+          if (name && browserGlobals.has(name))
+            references.push(`${receiver}.${name}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return references;
+}
+
+test("browser-global guard resolves runtime references rather than local names", () => {
+  for (const text of [
+    "window.foo",
+    "const x = { [window.name]: 1 };",
+    "document.body",
+    "globalThis.window",
+    "const { document } = globalThis; document.body;",
+    "let document; ({ document } = globalThis); document.body;",
+    "let storage; ({ localStorage: storage } = globalThis);",
+    "function f({ document } = globalThis) { return document.body; }",
+
+    "const { localStorage: storage } = globalThis; storage.getItem('key');",
+    "const { ['window']: browser } = (globalThis); browser.location;",
+    "(globalThis).window.location;",
+    "(globalThis as typeof globalThis).window.location;",
+    "globalThis!.window.location;",
+    "(globalThis satisfies unknown).window.location;",
+    "(<typeof globalThis>globalThis).window.location;",
+    "self.window",
+    "globalThis['document'].body",
+    "new Worker('worker.js')",
+    "const value = { window };",
+    "function f() { return window.foo; }",
+    "function f() { const window = { foo: 1 }; } window.foo;",
+  ]) {
+    expect(browserGlobalReferences("control.ts", text), text).not.toEqual([]);
+  }
+  for (const text of [
+    "const window = { coneHigh: 1 }; window.coneHigh;",
+    "function f(window: { coneHigh: number }) { return window.coneHigh; }",
+    "const x = { window: 1 }; x.window;",
+    "const { window: value } = input;",
+    "type WindowValue = typeof window; interface Shape { window: string }",
+    "const window = 1; const value = { window };",
+    "function f() { const globalThis = { window: 1 }; return globalThis.window; }",
+    "function f(globalThis: { document: unknown }) { const { document } = globalThis; return document; }",
+    "function f(globalThis: { localStorage: unknown }) { const { localStorage: storage } = globalThis; return storage; }",
+    "function f(globalThis: { window: unknown }) { return (globalThis).window; }",
+    "const local = { window: 1 }; (local).window;",
+    "function f(globalThis: { document: unknown }) { let document; ({ document } = globalThis); return document; }",
+
+    "function f() { const window = { foo: 1 }; return { window }; }",
+    "function f() { const window = { foo: 1 }; return window.foo; }",
+  ]) {
+    expect(browserGlobalReferences("control.ts", text), text).toEqual([]);
+  }
+});
+
 test("src/layer-architecture-boundary.spec.ts core stays framework and browser free", () => {
   const offenders: string[] = [];
-  const browserDocumentPattern =
-    /\bdocument\.(createElement|documentElement|querySelector|getElementById|body|head)\b/;
 
   for (const filePath of getLayerFiles("src/core")) {
     const source = readFileSync(filePath, "utf8");
@@ -100,12 +276,7 @@ test("src/layer-architecture-boundary.spec.ts core stays framework and browser f
       source.includes("from 'three'") ||
       source.includes('from "three"') ||
       source.includes("@react-three/") ||
-      /\bwindow\./.test(source) ||
-      browserDocumentPattern.test(source) ||
-      source.includes("localStorage") ||
-      source.includes("indexedDB") ||
-      source.includes("BroadcastChannel") ||
-      /\bnew Worker\(/.test(source) ||
+      browserGlobalReferences(filePath, source).length > 0 ||
       source.includes("from '@/app/") ||
       source.includes('from "@/app/') ||
       source.includes("from '@/hooks/") ||

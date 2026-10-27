@@ -82,7 +82,7 @@ import {
 import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   ARCH_POINTS,
   CORNER_MATRIX_SOLVE_TOLERANCES,

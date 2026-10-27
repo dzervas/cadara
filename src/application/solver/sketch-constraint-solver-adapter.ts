@@ -44,7 +44,7 @@ import {
   querySketchSnapIntersections,
 } from "@/contracts/sketch/edit-intersections";
 import type { OffsetPublicationCapabilities } from "@/contracts/sketch/offset-publication";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 

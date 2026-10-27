@@ -15,7 +15,7 @@ import {
 } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 // Lane: logic (docs/testing.md, src/domain adapter conformance). Seams: the
 // production OCC kernel adapter's feature replay diagnostics for the T10 plan

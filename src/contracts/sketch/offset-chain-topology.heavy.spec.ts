@@ -146,7 +146,7 @@ import {
   createCertifiedCubicTubeChain,
   createCertifiedCubicTubeChainWithBudgetObserverForTest,
   createCertifiedCubicTubeChainWithLowerBudgetForTest,
-} from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+} from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   createCertifiedNeutralCurveRequestQuery,
   createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest,

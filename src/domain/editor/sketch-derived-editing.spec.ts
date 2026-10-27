@@ -27,8 +27,8 @@ import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 // Logic lane: the exported drag write must update copies before any later
 // live solve; the mock adapter must evaluate the same mirror-free relationships.

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import type { OccWorkerRequest, OccWorkerResponse } from "./worker-protocol";
 
 vi.mock("@/domain/modeling/opencascade-kernel-adapter", () => ({ OpenCascadeKernelAdapter: class {} }));
-vi.mock("@/domain/solver/sketch-constraint-solver-adapter", () => ({ SketchConstraintSolverAdapter: class {} }));
+vi.mock("@/application/solver/sketch-constraint-solver-adapter", () => ({ SketchConstraintSolverAdapter: class {} }));
 vi.mock("@/domain/modeling/occ/neutral-curve-query", () => ({ createOpenCascadeNeutralCurveQueryCapability: () => ({}) }));
 
 const initialize = vi.hoisted(() => ({ calls: 0, hasAbortHook: false }));

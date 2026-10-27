@@ -489,7 +489,7 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
   const { createCertifiedNeutralCurveRequestQuery } =
     await import("@/core/modeling/neutral-curve-certification/query");
   const { createCertifiedCubicTubeChain } =
-    await import("@/domain/modeling/neutral-curve-certification/cubic-tube-chain");
+    await import("@/core/modeling/neutral-curve-certification/cubic-tube-chain");
   let session = acceptSketchDraw(
     startSketchDraw(
       beginSketchTool(

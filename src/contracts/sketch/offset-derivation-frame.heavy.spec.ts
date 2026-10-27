@@ -115,7 +115,7 @@ import {
   offsetFrameShellSpans,
   ownerSpanKey,
 } from "@/contracts/sketch/offset-derivation-outputs";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 
 /*

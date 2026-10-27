@@ -21,7 +21,7 @@ import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
 } from "../src/application/import/onshape/profile-resolver.ts";
-import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
+import { SketchConstraintSolverAdapter } from "../src/application/solver/sketch-constraint-solver-adapter.ts";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/core/modeling/neutral-curve-certification/query.ts";
 import { OCC_KERNEL_SETTINGS } from "../src/core/modeling/opencascade-kernel-seed.ts";
 import { normalizeOnshapeTopologySignature } from "../src/core/import/onshape/topology-signature-normalizer.ts";

@@ -63,7 +63,7 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import { toolDefinitions } from "@/core/tools/tool-registry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

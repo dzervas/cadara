@@ -15,7 +15,7 @@ import type {
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import { createInstrumentedModelingService } from "@/domain/modeling/modeling-service/instrumented-service";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { createInstrumentedSketchSolverAdapter } from "@/domain/solver/instrumented-sketch-solver-adapter";
+import { createInstrumentedSketchSolverAdapter } from "@/application/solver/instrumented-sketch-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 
 test("src/domain/modeling/performance-telemetry-wrappers.spec.ts preserves OCC worker results and rejections", async () => {

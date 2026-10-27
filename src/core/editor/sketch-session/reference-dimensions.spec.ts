@@ -37,7 +37,7 @@ import {
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
   requireSketchDefinition,

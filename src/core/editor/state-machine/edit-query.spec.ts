@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
 import { prepareSketchIntersectionEdit } from "@/core/editor/sketch-session/edit-queries";
 import { runEditorEffect } from "@/application/editor/effect-registry";
-import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchRegionDerivationSupersededError } from "@/application/solver/sketch-constraint-solver-adapter";
 import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
 import { FakeDerivationWorker } from "@/domain/modeling/occ/sketch-derivation-worker.fixtures";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";

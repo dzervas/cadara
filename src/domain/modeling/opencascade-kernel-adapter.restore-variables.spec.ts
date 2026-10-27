@@ -19,7 +19,7 @@ import type {
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,

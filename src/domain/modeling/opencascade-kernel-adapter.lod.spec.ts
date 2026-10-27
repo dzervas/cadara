@@ -18,7 +18,7 @@ import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const request = {
   contractVersion: CONTRACT_VERSION,

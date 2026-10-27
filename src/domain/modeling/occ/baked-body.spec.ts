@@ -18,7 +18,7 @@ import {
 } from "@/domain/modeling/occ/authoring-state";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_SETTINGS,

@@ -17,7 +17,7 @@ import {
   sketchProfileGateFailures,
 } from "@/contracts/sketch/derived-validity";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,

@@ -123,7 +123,7 @@ import {
 import { refreshSketchEditToolAfterOffsetRound } from "@/core/editor/sketch-session/edit-tool-interaction";
 import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   OCC_KERNEL_SETTINGS,
@@ -161,8 +161,8 @@ import {
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
-} from "@/domain/solver/mock-sketch-solver-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+} from "@/application/solver/mock-sketch-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createSketchArrangementDeriver,

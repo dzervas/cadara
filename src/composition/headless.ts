@@ -21,7 +21,7 @@ import type { GeometryAssetDocumentRepository } from "@/domain/modeling/document
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 import { createOpenCascadeInstanceLoader } from "@/infrastructure/occ/runtime";
 import { assertOpenCascadeNativeTopologyKernelCapabilities } from "@/domain/modeling/occ/runtime";

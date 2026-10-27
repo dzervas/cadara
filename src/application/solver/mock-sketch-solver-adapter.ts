@@ -37,7 +37,7 @@ import {
   offsetArrangementInput,
   type SketchArrangementDeriver,
 } from "@/contracts/sketch/region-extraction";
-import { assertDocumentModelingTolerance } from "@/domain/solver/sketch-constraint-solver-adapter";
+import { assertDocumentModelingTolerance } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   querySketchEditIntersections,
   querySketchSnapIntersections,
@@ -82,7 +82,7 @@ import {
   publishSketchOffsets,
   type OffsetPublicationCapabilities,
 } from "@/contracts/sketch/offset-publication";
-import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
+import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import type {
   ConstraintId,
