@@ -59,7 +59,7 @@ test("a tab whose stored document another tab replaced keeps its edit unsaved, s
   const replacementFeatures = await featureIds(pageA);
   expect(replacementFeatures).not.toEqual(extrudeFeatures);
   await pageA.locator("[data-workbench-variables-fab]").click();
-  await pageA.getByRole("button", { name: "Add variable" }).click();
+  await pageA.getByRole("button", { name: "Add variable", exact: true }).click();
   await expect(pageA.getByLabel("Variable name variable_1")).toHaveValue(
     "var1",
     {

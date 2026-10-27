@@ -12,7 +12,7 @@ test("hovering a variable reveals a dim delete control that removes it undoably"
   await workbench.openWithRepository();
   await page.locator("[data-workbench-variables-fab]").click();
   for (const ordinal of [1, 2]) {
-    await page.getByRole("button", { name: "Add variable" }).click();
+    await page.getByRole("button", { name: "Add variable", exact: true }).click();
     await expect(
       page.getByLabel(`Variable name variable_${ordinal}`),
       "Add variable opens the new row for editing",

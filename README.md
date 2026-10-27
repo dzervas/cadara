@@ -25,6 +25,7 @@ runs the same build. HTML paths canonicalize without trailing slashes, and
 unknown pages display the landing with a real 404 status. Shared assets stay
 at root URLs, so editor workers, icons, and offline caching also work at `/app`.
 
+- `PLAYWRIGHT_GPU=1 bun run test:e2e` — opt into GPU-accelerated Chromium locally (default/CI stay on headless-shell SwiftShader).
 - `bun run preview` — preview the Vite output.
 - `bun run preview:cf` — build and serve it through the local Cloudflare runtime.
 - `bun run test:e2e:cloudflare` — verify the built Cloudflare routes and editor handoff.

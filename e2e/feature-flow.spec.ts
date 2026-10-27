@@ -303,9 +303,9 @@ test("shell previews, commits, and keeps consecutive canvas frames stable", asyn
   await workbench.expectFeaturePreviewReady("shell");
   await workbench.commitFeature();
 
-  const firstFrame = await workbench.canvasBytes();
+  const firstFrame = await workbench.canvasPixels();
   await workbench.waitForAnimationFrames(2);
-  const secondFrame = await workbench.canvasBytes();
+  const secondFrame = await workbench.canvasPixels();
   expect(meanPixelDelta(firstFrame, secondFrame)).toBeLessThan(2);
 });
 

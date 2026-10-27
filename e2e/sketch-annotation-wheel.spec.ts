@@ -383,7 +383,6 @@ test("T14g review R-1: `+N` clicked during the damped tail of a pan keeps its wh
     await page.mouse.down({ button: "middle" });
     await page.mouse.move(BLANK.x, BLANK.y + dy, { steps: 12 });
     await page.mouse.up({ button: "middle" });
-    return Date.now();
   };
   /** Click the `+N` where it is now (few round trips: it may be drifting). */
   const clickChip = async () => {
@@ -392,29 +391,31 @@ test("T14g review R-1: `+N` clicked during the damped tail of a pan keeps its wh
     await page.mouse.move(at.x, at.y, { steps: 2 });
     await page.mouse.down();
     await page.mouse.up();
-    return { at, time: Date.now() };
+    return { at };
   };
 
-  // A pan, then `+N` a few hundred ms after the release: the damped camera
-  // is still moving the cluster (premise), the wheel opens and stays open.
+  // Advance the damped tail by frames, not mouse-protocol wall time: a
+  // real GPU can finish the entire pan during the round trips of a click.
   // 120 px keeps the cluster clear of the top inset, where the layout
   // re-places chips sideways and the press would miss the moving `+N`.
-  const released = await pan(-120);
+  await page.clock.install();
+  await page.clock.pauseAt(new Date(Date.now() + 1_000));
+  await pan(-120);
+  await page.clock.runFor(16);
   const early = await centreOf(chip);
+  await page.clock.runFor(32);
   const clicked = await clickChip();
-  // The delay depends on the load (about 0.5–0.8 s here); the premise that
-  // matters is that the cluster was still moving when `+N` was pressed.
-  console.log(`R-1: +N pressed ${clicked.time - released} ms after release`);
   expect(
     Math.hypot(clicked.at.x - early.x, clicked.at.y - early.y),
     "premise: the cluster was still drifting",
   ).toBeGreaterThanOrEqual(1);
   await expect(wheelOf(page), "the wheel opened").toHaveCount(1);
-  await page.waitForTimeout(2_000);
+  await page.clock.runFor(2_000);
   await expect(
     wheelOf(page),
     "the drift of a pan that ended before opening keeps it open",
   ).toHaveCount(1);
+  await page.clock.resume();
 
   // A pan started after opening closes it.
   await pan(40);

@@ -14,7 +14,7 @@ test("invalid variable edit reports a UI error notification without telemetry", 
 
   await workbench.open();
   await page.locator("[data-workbench-variables-fab]").click();
-  await page.getByRole("button", { name: "Add variable" }).click();
+  await page.getByRole("button", { name: "Add variable", exact: true }).click();
   const valueInput = page.getByLabel(/^Variable value /);
   await expect(valueInput).toBeVisible({ timeout: 30_000 });
   await valueInput.fill("missing + 1");

@@ -24,7 +24,7 @@ test("opt-in local peer sync exposes peer-authored document changes after refres
   const secondTabRevisionBefore = await revisionLabel(secondTab);
 
   await firstTab.locator("[data-workbench-variables-fab]").click();
-  await firstTab.getByRole("button", { name: "Add variable" }).click();
+  await firstTab.getByRole("button", { name: "Add variable", exact: true }).click();
   await expect(firstTab.getByLabel("Variable name variable_1")).toHaveValue(
     "var1",
     { timeout: 30_000 },

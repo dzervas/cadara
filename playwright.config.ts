@@ -4,6 +4,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const shouldStartWebServer = (process.env.PLAYWRIGHT_WEB_SERVER ?? "1") !== "0";
 const runRealCaptures = process.env.PLAYWRIGHT_REAL_CAPTURES === "1";
 const recordDiagnostics = process.env.PLAYWRIGHT_DIAGNOSTICS === "1";
+const useGPU = process.env.PLAYWRIGHT_GPU === "1";
 
 const realCaptureTests = [
   "**/onshape-import-parametric.spec.ts",
@@ -31,6 +32,18 @@ export default defineConfig({
   use: {
     baseURL,
     headless: true,
+    ...(useGPU
+      ? {
+          channel: "chromium",
+          launchOptions: {
+            args: [
+              "--use-angle=vulkan",
+              "--enable-features=Vulkan",
+              "--ignore-gpu-blocklist",
+            ],
+          },
+        }
+      : {}),
     viewport: { width: 1440, height: 900 },
     trace: recordDiagnostics ? "retain-on-failure" : "off",
     screenshot: "only-on-failure",

@@ -234,7 +234,13 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async setOperation(operation: "newBody" | "join" | "cut" | "intersect") {
+    // Profile previews infer an operation. Choosing the still-selected New
+    // body before that result arrives emits no change and can become Join.
+    await expect
+      .poll(() => this.featureSessionLabel(), { timeout: 30_000 })
+      .toContain(":previewReady");
     await this.selectOperation(operation);
+    await this.expectOperationSelected(operation);
   }
 
   async setResultBodyType(resultBodyType: "solid" | "surface") {
@@ -328,8 +334,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
     }
   }
 
-  async canvasBytes() {
-    return this.viewport().screenshot();
+  async canvasPixels() {
+    const screenshot = await this.viewport().screenshot();
+    // Compare pixels, not compressed PNG bytes: even a tiny raster change can
+    // change the entire compressed stream. Screenshot the composited canvas,
+    // rather than reading a WebGL buffer that may already have been cleared.
+    const pixels = await this.page.evaluate(async (base64) => {
+      const image = await createImageBitmap(
+        await (await fetch(`data:image/png;base64,${base64}`)).blob(),
+      );
+      try {
+        const canvas = new OffscreenCanvas(image.width, image.height);
+        const context = canvas.getContext("2d")!;
+        context.drawImage(image, 0, 0);
+        return Array.from(
+          context.getImageData(0, 0, image.width, image.height).data,
+        );
+      } finally {
+        image.close();
+      }
+    }, screenshot.toString("base64"));
+    return Buffer.from(pixels);
   }
 
   async waitForRenderIdle(timeout = 15_000) {

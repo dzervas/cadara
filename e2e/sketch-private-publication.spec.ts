@@ -372,7 +372,7 @@ async function openVariables(page: Page) {
   await expect(panel).toBeVisible();
   // The panel slides in: wait until its controls are stable before a press.
   await panel
-    .getByRole("button", { name: "Add variable" })
+    .getByRole("button", { name: "Add variable", exact: true })
     .click({ trial: true });
 }
 
@@ -380,7 +380,10 @@ async function openVariables(page: Page) {
 async function addVariable(page: Page) {
   await openVariables(page);
   await waitForCommittedAction(page, "Add Variable", () =>
-    glidePress(page, page.getByRole("button", { name: "Add variable" })),
+    glidePress(
+      page,
+      page.getByRole("button", { name: "Add variable", exact: true }),
+    ),
   );
   await page.keyboard.press("Escape");
 }

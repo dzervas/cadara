@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 import { expect, type Page } from "@playwright/test";
 
+import { foregroundPeerPage } from "./peer-page";
+
 /**
  * The user-facing file workflow (File menu): Save As → "Download a copy"
  * and Open… → "Open a copy" through the browser's file chooser. The saved
@@ -18,6 +20,7 @@ const fileMenu = (page: Page) =>
 export async function saveDocumentCopy<Document = unknown>(
   page: Page,
 ): Promise<Document> {
+  await foregroundPeerPage(page);
   await fileMenu(page).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("menuitem", { name: "Save As" }).click();
@@ -33,6 +36,7 @@ export async function openDocumentCopy(
   document: unknown,
   name: string,
 ) {
+  await foregroundPeerPage(page);
   await fileMenu(page).click();
   await page.getByRole("menuitem", { name: "Open..." }).click();
   const chooserPromise = page.waitForEvent("filechooser");
@@ -54,6 +58,7 @@ export async function openDocumentCopy(
  * browser's picker with `emulateSaveFilePicker`.
  */
 export async function saveDocumentLinked(page: Page) {
+  await foregroundPeerPage(page);
   await fileMenu(page).click();
   await page.getByRole("menuitem", { name: "Save As" }).click();
   await page.getByRole("button", { name: "Save and keep linked" }).click();

@@ -154,6 +154,11 @@ for (const viewport of [
     await workbench.clickViewportAt(at(0.65));
     await expect(readout(page)).toBeVisible({ timeout: 15_000 });
     await expect(readout(page)).toContainText("Length");
+    // A pending solve temporarily adds a stale-geometry warning, changing
+    // the panel height independently of the debugger's expansion.
+    await expect(readout(page)).not.toContainText("is stale", {
+      timeout: 15_000,
+    });
     await expectBottomLeftPlacement(page, "Sketch contents");
   });
 }

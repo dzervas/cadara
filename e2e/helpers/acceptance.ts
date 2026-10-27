@@ -7,6 +7,7 @@ import {
 
 import { SketchWorkbenchHarness } from "./sketch-workbench";
 import { glidePress } from "./mirror-workbench";
+import { foregroundPeerPage } from "./peer-page";
 
 /**
  * Shared acceptance harness (T17b). Every pointer path glides (several
@@ -319,6 +320,7 @@ export async function glideDrag(
 
 /** Glides onto `target` (e.g. a timeline entry) and double-clicks it. */
 export async function glideDoubleClick(page: Page, target: Locator) {
+  await foregroundPeerPage(page);
   await expect(target).toBeVisible({ timeout: 30_000 });
   // "active" is set before the timeline's 200 ms translation finishes.
   // Trial hover waits for native stability (two frames) without moving the pointer.

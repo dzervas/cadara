@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 import type { SketchWorkbenchHarness } from "./sketch-workbench";
+import { foregroundPeerPage } from "./peer-page";
 
 /**
  * Gliding-pointer helpers for the mirror E2E rows (T16g). Every press is a
@@ -72,6 +73,7 @@ export async function glideClick(
   to: CanvasPoint,
 ) {
   const page = workbench.page;
+  await foregroundPeerPage(page);
   const canvas = (await workbench.viewport().boundingBox())!;
   await page.mouse.move(canvas.x + to.x, canvas.y + to.y, { steps: 8 });
   await workbench.waitForAnimationFrames(2);
@@ -81,6 +83,7 @@ export async function glideClick(
 
 /** A gliding press on a DOM control's centre. */
 export async function glidePress(page: Page, control: Locator) {
+  await foregroundPeerPage(page);
   await expect(control).toBeVisible({ timeout: 15_000 });
   // Wait for animated DOM controls to be stable before starting the glide.
   await control.hover({ trial: true });
