@@ -1,0 +1,5 @@
+# Generate strict boundary validators from TypeScript contracts
+
+TypeScript contracts, not a parallel runtime-schema DSL, own payload shapes; Typia generates their runtime validators as part of the toolchain. This replaced Zod's second data model and its associated schema/type synchronization cost. External and persisted boundaries default to strict equality validation so extra properties remain errors; cross-field and graph invariants stay in explicit TypeScript helpers rather than being hidden in string-based custom tags.
+
+The [authored-document validator](../../src/contracts/modeling/authored-document.runtime-schema.ts) shows structural validation followed by named invariant checks, and the [Typia preload](../../typia-preload.ts) and [Vite configuration](../../vite.config.ts) supply the transform. The trade-off is that validator execution depends on a working build-time transform, not just importing a runtime library; [ADR 0006](0006-uncached-typia-transforms.md) records its cache constraint. Historical rationale: `cadara-dd3.158`, original design decisions 1, 2, 4 and 6 (TypeScript ownership, strictness, explicit invariants and build-time generation).

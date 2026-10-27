@@ -1,0 +1,5 @@
+# Use a TEA event loop instead of a second statechart
+
+The editor uses a framework-independent TEA (The Elm Architecture) event loop over a pure `(state, event) -> { state, effects }` reducer. XState was removed because the actual business logic already lived in that reducer: its workflow states duplicated `state.kind`, leaving XState as an effect runner with an extra layer of indirection. Keep command state in the reducer and effect execution/result dispatch in the event loop rather than reintroducing a parallel statechart or React-driven orchestration queue.
+
+The decision lives in [`EditorEventLoop`](../../src/application/editor/editor-event-loop.ts), the [root reducer](../../src/core/editor/state-machine/reducer-root.ts) and the [React adapter](../../src/hooks/use-editor-event-loop.ts). This does not move DOM/resource lifecycle work into the loop; [ADR 0001](0001-layered-runtime-boundaries.md) defines the surrounding boundaries. Historical rationale: `cadara-dd3.142`, original proposal “Why” and “What Changes”, records why XState was removed rather than retained as an effect runner.

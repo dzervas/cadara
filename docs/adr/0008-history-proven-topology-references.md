@@ -1,0 +1,5 @@
+# Preserve topology references only with lineage proof
+
+Durable face, edge and vertex references survive rebuilds only when authored source identity and exact kernel history prove an unambiguous successor. Matching geometry or traversal positions is not authoritative: a deleted edge can be replaced by a geometrically coincident but semantically unrelated edge, silently redirecting a downstream feature. Prefer explicit missing, deleted, ambiguous or unsupported-history outcomes to that apparently successful remap, accepting conservative invalidation when a producer cannot supply sufficient history.
+
+The [feature-stage provenance](../../src/domain/modeling/occ/topology-stage.ts) and [naming reconciliation](../../src/domain/modeling/occ/topology-naming.ts) implement this policy. The [pre-8 feasibility spike](../archive/durable-naming-pre8-spike.md) records the original failure and alternatives in “Decision” and “Problem restatement”; its historical implementation status is not a current capability claim. Historical rationale also appears in `cadara-dd3.177`, original design decision “Operation history is mandatory for mutating solids”.

@@ -1,0 +1,5 @@
+# Give browser OCC one worker runtime owner
+
+When dedicated workers are available, browser OCC initialization, rebuilds, mutations and snapshots share a worker-owned runtime with retained committed authoring state; the main thread is an RPC client. The former split between worker snapshots and main-thread mutations could initialize WASM twice and let authoritative state drift, while replaying unchanged documents for every snapshot wasted rebuild work. Accept a wider worker protocol rather than duplicate owners or move expensive kernel work back onto the UI thread.
+
+See the [browser runtime composition](../../src/infrastructure/occ/browser-kernel-runtime.ts), [worker runtime owner](../../src/domain/modeling/occ/worker.ts) and [kernel adapter's worker delegation](../../src/domain/modeling/opencascade-kernel-adapter.ts). Historical rationale: `cadara-dd3.141`, original design decisions “Make the OCC worker the sole browser runtime owner” and “Retain committed worker authoring state between calls”, plus “Risks / Trade-offs” (RPC surface).
