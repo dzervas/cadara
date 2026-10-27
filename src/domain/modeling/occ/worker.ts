@@ -8,19 +8,19 @@ import type {
 } from "@/contracts/modeling/geometry-assets";
 import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/ids";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { packWorkspaceSnapshotRenderMeshes } from "@/domain/modeling/occ/mesh-transport";
+import { packWorkspaceSnapshotRenderMeshes } from "@/infrastructure/occ/mesh-transport";
 import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
 import { createEngineDownloadInstantiateWasm } from "@/infrastructure/occ/engine-download";
-import { OCC_WASM_BYTE_LENGTH } from "@/domain/modeling/occ/asset-version";
+import { OCC_WASM_BYTE_LENGTH } from "@/infrastructure/occ/asset-version";
 import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
-import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
+} from "@/infrastructure/occ/kernel-capabilities";
+import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/infrastructure/occ/assets";
 import {
   getOccNativeTopologyTransferList,
   type OccNativeTopologyWorkerResultWithBuffers,
-} from "@/domain/modeling/occ/native-topology-payload";
+} from "@/infrastructure/occ/native-topology-payload";
 import {
   isOccRuntimeAbort,
   normalizeOccWorkerFailure,
@@ -30,12 +30,12 @@ import {
   type OccWorkerOperation,
   type OccWorkerRequest,
   type OccWorkerResponse,
-} from "@/domain/modeling/occ/worker-protocol";
+} from "@/infrastructure/occ/worker-protocol";
 import {
   OCC_KERNEL_DOCUMENT_ID,
 } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
-import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/infrastructure/occ/neutral-curve-query";
 
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;

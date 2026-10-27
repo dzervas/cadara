@@ -16,7 +16,7 @@ import type {
   SketchSessionState,
 } from "@/core/editor/sketch-session";
 import type { MeasurementWitness } from "@/core/measure/measurement";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 export interface ViewportSpecialModeTargetInput {

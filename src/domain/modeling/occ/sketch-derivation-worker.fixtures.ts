@@ -3,12 +3,12 @@ import type {
   QuerySketchEditIntersectionsResponse,
   QuerySketchSnapIntersectionsResponse,
 } from "@/contracts/solver/schema";
-import type { OccWorkerLike } from "./worker-client";
+import type { OccWorkerLike } from "@/infrastructure/occ/worker-client";
 import {
   normalizeOccWorkerFailure,
   type OccWorkerRequest,
   type OccWorkerResponse,
-} from "./worker-protocol";
+} from "@/infrastructure/occ/worker-protocol";
 
 export class FakeDerivationWorker implements OccWorkerLike {
   readonly posted: OccWorkerRequest[] = [];

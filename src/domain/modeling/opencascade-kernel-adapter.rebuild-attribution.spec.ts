@@ -16,9 +16,9 @@ import type {
 } from "@/contracts/shared/ids";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import type { OccAuthoringFeatureRecord } from "@/domain/modeling/occ/authoring-state";
+import type { OccAuthoringFeatureRecord } from "@/infrastructure/occ/authoring-state";
 import { createFeatureRebuildFailureDiagnostic } from "@/domain/modeling/opencascade-kernel-adapter";
-import { tagRebuildSlot } from "@/domain/modeling/occ/features/shared";
+import { tagRebuildSlot } from "@/infrastructure/occ/features/shared";
 
 // Lane: logic (docs/testing.md — src/domain/ non-UI behavioral coverage).
 // Seam: the kernel-adapter rebuild-failure attribution function

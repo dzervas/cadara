@@ -52,16 +52,16 @@ import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
-import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import boxFixture from "@/infrastructure/occ/fixtures/topology-signatures/box.payload.json";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
-} from "@/domain/modeling/occ/native-topology-payload";
+} from "@/infrastructure/occ/native-topology-payload";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
 import { normalizeOnshapeTopologySignature } from "@/core/import/onshape/topology-signature-normalizer";
 import { readPartStudio } from "@/core/import/onshape/bundle-reader";

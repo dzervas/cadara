@@ -10,13 +10,13 @@ import type {
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
 import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
-import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import type { OccTrackedBody } from "@/infrastructure/occ/topology";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   parseNativeShimPayloadJson,
   type OpenCascadeNativeTopologyKernelHost,
-} from "@/domain/modeling/occ/native-topology-payload";
+} from "@/infrastructure/occ/native-topology-payload";
 
 type MeshPoint = readonly [number, number, number];
 

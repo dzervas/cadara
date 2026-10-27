@@ -16,7 +16,7 @@ import type {
   SketchSessionDisplayRenderable,
 } from "@/core/editor/sketch-session";
 import type { MeasurementWitness } from "@/core/measure/measurement";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import { getSketchMergeOfferEvents } from "@/domain/editor/workbench-interactions";
 import type {

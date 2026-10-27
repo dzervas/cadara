@@ -21,10 +21,10 @@ import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
-import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
-import type { OccSnapshotLodRefinementOutcome } from "@/domain/modeling/occ/worker-protocol";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
+import type { OccSnapshotLodRefinementOutcome } from "@/infrastructure/occ/worker-protocol";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import {
   createProductionOpenCascadeInitializerFromMainJS,
 } from "@/infrastructure/occ/initialization";
-import type { OpenCascadeInitializer } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInitializer } from "@/infrastructure/occ/kernel-capabilities";
 
 /** Loads the same generated artifacts as the browser, without a web server. */
 export async function loadFilesystemOpenCascadeFactory(

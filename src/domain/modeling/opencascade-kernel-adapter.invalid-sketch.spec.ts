@@ -7,7 +7,7 @@ import type { RevisionId } from "@/contracts/shared/ids";
 import type { CommitSketchRequest } from "@/contracts/modeling/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";

@@ -9,13 +9,13 @@ import { deriveImportRegionBoundaryIdentity } from "@/contracts/import/region-bo
 import type { BodyId, RevisionId, SketchId } from "@/contracts/shared/ids";
 import type { RegionRecord } from "@/contracts/sketch/schema";
 import { ImportDeferredMaterializer } from "@/domain/import/orchestrator";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
-} from "@/domain/modeling/occ/native-topology-payload";
-import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
-import cylinderFixture from "@/domain/modeling/occ/fixtures/topology-signatures/cylinder-boss.payload.json";
+} from "@/infrastructure/occ/native-topology-payload";
+import boxFixture from "@/infrastructure/occ/fixtures/topology-signatures/box.payload.json";
+import cylinderFixture from "@/infrastructure/occ/fixtures/topology-signatures/cylinder-boss.payload.json";
 
 function region(regionId: string, entityId = "boundary"): RegionRecord {
   return {

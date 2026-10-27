@@ -2,8 +2,8 @@ import type {
   OpenCascadeInstance,
   OpenCascadeInitializer,
   OpenCascadeMainJS,
-} from "@/domain/modeling/occ/runtime";
-import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
+} from "@/infrastructure/occ/kernel-capabilities";
+import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/infrastructure/occ/assets";
 import {
   createProductionOpenCascadeInitializerFromMainJS,
 } from "@/infrastructure/occ/initialization";

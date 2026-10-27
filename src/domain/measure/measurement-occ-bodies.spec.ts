@@ -2,15 +2,15 @@ import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { describe, expect, test } from "vitest";
 
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
-import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
+import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
 import {
   packWorkspaceSnapshotRenderMeshes,
   unpackWorkspaceSnapshotRenderMeshes,
-} from "@/domain/modeling/occ/mesh-transport";
-import { type OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
-import { OCC_TESSELLATION_TIERS } from "@/domain/modeling/occ/tessellation";
-import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
+} from "@/infrastructure/occ/mesh-transport";
+import { type OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
+import { OCC_TESSELLATION_TIERS } from "@/infrastructure/occ/tessellation";
+import { trackNewSolidBody } from "@/infrastructure/occ/topology";
 
 // Logic lane (seam: `deriveMeasurementViewModel` on the product's own body
 // meshes: an OCC solid tracked as a body, the snapshot's face meshes at the

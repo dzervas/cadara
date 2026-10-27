@@ -70,7 +70,7 @@ import { describeUnknownError } from "@/contracts/errors";
 import { matchSignature } from "@/core/import/onshape/signature-matcher";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import { selectSplitInterfaceOwner } from "@/domain/import/onshape/split-interface-owner-witness";
-import { createOccTopologyProvenanceIndex, createOccFeatureTopologyLineageMap } from "@/domain/modeling/occ/topology-stage";
+import { createOccTopologyProvenanceIndex, createOccFeatureTopologyLineageMap } from "@/infrastructure/occ/topology-stage";
 import type { CadaraBrepFaceRecord } from "@/contracts/modeling/geometry-assets";
 import type { DurableRef } from "@/contracts/shared/references";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
 import { PLANE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
@@ -14,9 +14,9 @@ const releaseAllSpy = vi.hoisted(() => vi.fn());
 const releaseAllFailure = vi.hoisted(() => ({ current: null as unknown }));
 const releaseBehavior = vi.hoisted(() => ({ enabled: true }));
 
-vi.mock("@/domain/modeling/occ/memory", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/memory", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/memory")>();
+    await importOriginal<typeof import("@/infrastructure/occ/memory")>();
   return {
     ...actual,
     releaseDiscardedOccAuthoringStateObjects: (
@@ -43,9 +43,9 @@ vi.mock("@/domain/modeling/occ/memory", async (importOriginal) => {
   };
 });
 
-vi.mock("@/domain/modeling/occ/topology", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/topology", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/topology")>();
+    await importOriginal<typeof import("@/infrastructure/occ/topology")>();
   return {
     ...actual,
     createOccReferenceState: (
@@ -65,10 +65,10 @@ vi.mock("@/domain/modeling/occ/topology", async (importOriginal) => {
   };
 });
 
-vi.mock("@/domain/modeling/occ/authoring-state", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/authoring-state", async (importOriginal) => {
   const actual =
     await importOriginal<
-      typeof import("@/domain/modeling/occ/authoring-state")
+      typeof import("@/infrastructure/occ/authoring-state")
     >();
   return {
     ...actual,
@@ -377,7 +377,7 @@ test("appending a tail feature executes that feature exactly once", async () => 
 
 test("cleanup-bearing aggregates bypass adapter diagnostics and retain every retry", async () => {
   const { combineOccCleanupError, releaseDiscardedOccAuthoringStateObjects } =
-    await import("@/domain/modeling/occ/memory");
+    await import("@/infrastructure/occ/memory");
   const primary = new Error("injected primary modeling failure");
   const deletedFirst = { delete: vi.fn() };
   const deletedSecond = { delete: vi.fn() };
@@ -470,7 +470,7 @@ test("cleanup-bearing aggregates bypass adapter diagnostics and retain every ret
 });
 
 test("cleanup-bearing aggregates bypass restore, rebuild, and preview fallback catches", async () => {
-  const { OccCleanupError } = await import("@/domain/modeling/occ/memory");
+  const { OccCleanupError } = await import("@/infrastructure/occ/memory");
   const document = await new MockKernelAdapter().exportAuthoredModelDocument(
     "doc_workspace",
   );
@@ -1170,7 +1170,7 @@ test("dispose is final while initialization and restore are suspended", async ()
   releaseAllSpy.mockClear();
   const preload = initializing.preloadRuntime();
   initializing.dispose();
-  const { OccCleanupError } = await import("@/domain/modeling/occ/memory");
+  const { OccCleanupError } = await import("@/infrastructure/occ/memory");
   const lateCandidateRetry = vi.fn();
   releaseAllFailure.current = new OccCleanupError(
     [new Error("late candidate cleanup failed")],
@@ -1369,7 +1369,7 @@ test("real OCC restore lifecycle distinguishes old retention from bounded cleanu
           .slice(index + 1)
           .map(([laterDiscarded]) => laterDiscarded);
         const { releaseDiscardedOccAuthoringStateObjects } =
-          await import("@/domain/modeling/occ/memory");
+          await import("@/infrastructure/occ/memory");
         releaseDiscardedOccAuthoringStateObjects(discarded, [
           ...laterStates,
           currentState,

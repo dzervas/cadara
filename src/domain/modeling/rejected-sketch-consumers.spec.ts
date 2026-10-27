@@ -55,8 +55,8 @@ import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-v
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { normalizeWorkspaceSnapshot } from "@/core/modeling/modeling-service/normalization";
-import { mapSketchPointToWorld } from "@/domain/modeling/occ/geometry";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import { mapSketchPointToWorld } from "@/infrastructure/occ/geometry";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {

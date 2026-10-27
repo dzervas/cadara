@@ -19,7 +19,7 @@ import {
   type QuerySketchEditIntersectionsRequest,
 } from "@/contracts/solver/schema";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/infrastructure/occ/neutral-curve-query";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,

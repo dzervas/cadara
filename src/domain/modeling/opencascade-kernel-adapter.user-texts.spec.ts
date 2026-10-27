@@ -20,7 +20,7 @@ import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const request = {

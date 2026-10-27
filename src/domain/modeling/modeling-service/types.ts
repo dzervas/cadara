@@ -32,7 +32,7 @@ import type {
 } from "@/contracts/solver/schema";
 import type { SketchSolverAdapter as SketchSolverBoundary } from "@/contracts/solver/adapter";
 import type { RequestId } from "@/contracts/shared/ids";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
 import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
 import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
@@ -43,8 +43,8 @@ import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { ExportProviderRegistry } from "@/core/export/provider-registry";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
-import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
+import type { OccNativeExactBrepPayload } from "@/infrastructure/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/infrastructure/occ/worker-protocol";
 
 export interface ModelingService {
   readonly initialLoadingStatus: LoadingStatusSource;

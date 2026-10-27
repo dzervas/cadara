@@ -38,7 +38,7 @@ import {
 import {
   selectViewportLodTierForRenderables,
   type OccTessellationTierId,
-} from "@/domain/modeling/occ/tessellation";
+} from "@/infrastructure/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import {
   createRenderIdleTracker,

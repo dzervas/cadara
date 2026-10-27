@@ -2,7 +2,7 @@ import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeli
 import { err, ok } from "neverthrow";
 import { expect, test } from "vitest";
 
-import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import boxFixture from "@/infrastructure/occ/fixtures/topology-signatures/box.payload.json";
 import {
   createKernelHistoryProbeSession,
   createMemoizedHistoryProbe,
@@ -11,8 +11,8 @@ import {
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
-} from "@/domain/modeling/occ/native-topology-payload";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+} from "@/infrastructure/occ/native-topology-payload";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 import {
   createImportCapabilities,
   TopologyApplyRematchError,

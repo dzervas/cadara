@@ -1,13 +1,13 @@
 import { test, expect } from "vitest";
 
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
-import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { toGpPnt } from "@/domain/modeling/occ/planes";
+import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { toGpPnt } from "@/infrastructure/occ/planes";
 import {
   trackNewSheetBody,
   trackNewSolidBody,
-} from "@/domain/modeling/occ/topology";
+} from "@/infrastructure/occ/topology";
 import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";

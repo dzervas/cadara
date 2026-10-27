@@ -7,18 +7,18 @@ import { makeOccWrapperTracker } from "../../../test/helpers/occ-wrapper-tracker
 import { readFile } from "node:fs/promises";
 
 import type { FaceId, RevisionId } from "@/contracts/shared/ids";
-import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { collectOccCleanupErrors } from "@/domain/modeling/occ/memory";
-import { resetRegionRenderRecordCacheForTest } from "@/domain/modeling/occ/snapshot";
+import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { collectOccCleanupErrors } from "@/infrastructure/occ/memory";
+import { resetRegionRenderRecordCacheForTest } from "@/infrastructure/occ/snapshot";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from "@/domain/modeling/occ/sketch-profile";
-import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
-import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
+import { buildConstructionPlaneFromPlanarFace, getExtrusionNormalForPlanarFace } from "@/infrastructure/occ/sketch-profile";
+import { extractPlanarFaceData } from "@/infrastructure/occ/planes";
+import { trackNewSolidBody } from "@/infrastructure/occ/topology";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 
 type OC = OpenCascadeInstance;

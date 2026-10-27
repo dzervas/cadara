@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { DocumentId } from "@/contracts/shared/ids";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
-import type { OccWorkerRequest, OccWorkerResponse } from "./worker-protocol";
+import type { OccWorkerRequest, OccWorkerResponse } from "../../../infrastructure/occ/worker-protocol";
 
 const mainThreadFactory = vi.hoisted(() =>
   vi.fn(() => {

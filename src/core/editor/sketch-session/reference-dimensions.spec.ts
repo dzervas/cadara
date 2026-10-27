@@ -11,7 +11,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   acceptSketchDraw,
   beginSketchAnnotationEdit,

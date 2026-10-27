@@ -1,6 +1,6 @@
 import { VitePWA } from "vite-plugin-pwa";
 
-import { OCC_ASSET_VERSION } from "./src/domain/modeling/occ/asset-version";
+import { OCC_ASSET_VERSION } from "./src/infrastructure/occ/asset-version";
 
 const occKernelFilePattern = /(?:^|\/)cadara-occ\.(?:js|wasm)$/;
 

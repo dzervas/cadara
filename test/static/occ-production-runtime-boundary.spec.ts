@@ -4,8 +4,8 @@ import { expect, test } from "vitest";
 const readSource = (path: string) => readFileSync(path, "utf8");
 
 test("production kernel has no stock runtime or enumeration identity escape hatch", () => {
-  const runtime = readSource("src/domain/modeling/occ/runtime.ts");
-  const topology = readSource("src/domain/modeling/occ/topology.ts");
+  const runtime = readSource("src/infrastructure/occ/kernel-capabilities.ts");
+  const topology = readSource("src/infrastructure/occ/topology.ts");
   const bootstrap = readSource("src/infrastructure/occ/runtime.ts");
   const initialization = readSource("src/infrastructure/occ/initialization.ts");
   for (const source of [runtime, bootstrap, initialization, topology]) {
@@ -26,8 +26,10 @@ test("production kernel has no stock runtime or enumeration identity escape hatc
 });
 
 test("OCC bootstrap selection and shared initialization have no adapter cycle", () => {
-  const neutral = readSource("src/domain/modeling/occ/runtime.ts");
-  expect(neutral).not.toMatch(/(?:import|export)[\s\S]*?["']@\/infrastructure\//);
+  const neutral = readSource("src/infrastructure/occ/kernel-capabilities.ts");
+  expect(neutral).not.toMatch(
+    /(?:import|export)[\s\S]*?["'](?:@\/infrastructure\/occ\/|\.\/)(?:runtime|initialization|filesystem-kernel-runtime|browser-kernel-runtime)(?:\.ts)?["']/,
+  );
   const initialization = readSource("src/infrastructure/occ/initialization.ts");
   expect(initialization).not.toMatch(
     /(?:filesystem-kernel-runtime|@\/infrastructure\/occ\/runtime)/,
@@ -52,7 +54,7 @@ test("kernel execution adapters remain independent of CLI and browser compositio
   const filesystem = readSource(
     "src/infrastructure/occ/filesystem-kernel-runtime.ts",
   );
-  const runtime = readSource("src/domain/modeling/occ/runtime.ts");
+  const runtime = readSource("src/infrastructure/occ/kernel-capabilities.ts");
   const adapter = readSource(
     "src/domain/modeling/opencascade-kernel-adapter.ts",
   );

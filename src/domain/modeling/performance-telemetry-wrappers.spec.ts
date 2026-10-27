@@ -5,8 +5,8 @@ import type {
   PerformanceSpanAttributes,
   PerformanceTelemetry,
 } from "@/contracts/performance/telemetry";
-import { createInstrumentedOccWorkerClient } from "@/domain/modeling/occ/instrumented-worker-client";
-import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
+import { createInstrumentedOccWorkerClient } from "@/infrastructure/occ/instrumented-worker-client";
+import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrumented-document-repository";
 import type {
   DocumentRepository,

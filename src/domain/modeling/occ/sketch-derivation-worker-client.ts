@@ -10,7 +10,7 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import {
   OccWorkerClient,
   type OccWorkerLike,
-} from "@/domain/modeling/occ/worker-client";
+} from "@/infrastructure/occ/worker-client";
 import {
   SketchRegionDerivationSupersededError,
   type SketchRegionDerivationDelegate,

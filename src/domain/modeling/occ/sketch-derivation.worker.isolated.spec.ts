@@ -26,11 +26,11 @@ import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-d
 import {
   OccWorkerClient,
   type OccWorkerLike,
-} from "@/domain/modeling/occ/worker-client";
+} from "@/infrastructure/occ/worker-client";
 import type {
   OccWorkerRequest,
   OccWorkerResponse,
-} from "@/domain/modeling/occ/worker-protocol";
+} from "@/infrastructure/occ/worker-protocol";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 const occLoads = vi.hoisted(() => ({ count: 0 }));

@@ -24,7 +24,7 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 import { createOpenCascadeInstanceLoader } from "@/infrastructure/occ/runtime";
-import { assertOpenCascadeNativeTopologyKernelCapabilities } from "@/domain/modeling/occ/runtime";
+import { assertOpenCascadeNativeTopologyKernelCapabilities } from "@/infrastructure/occ/kernel-capabilities";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";

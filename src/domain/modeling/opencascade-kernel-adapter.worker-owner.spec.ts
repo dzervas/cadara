@@ -7,7 +7,7 @@ import type {
   GetDocumentSnapshotResponse,
 } from "@/contracts/modeling/schema";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
+import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,

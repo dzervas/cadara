@@ -6,14 +6,14 @@ import type {
 } from "@/contracts/modeling/topology-measure";
 import type { BodyId } from "@/contracts/shared/ids";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
-import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import { type OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
+import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import { type OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
 import {
   trackNewSolidBody,
   type OccTrackedBody,
-} from "@/domain/modeling/occ/topology";
-import { measureOccTopology } from "@/domain/modeling/occ/topology-measure";
+} from "@/infrastructure/occ/topology";
+import { measureOccTopology } from "@/infrastructure/occ/topology-measure";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 
 // Logic lane (cadara-h026.5). Seam: `measureOccTopology` on bodies built by

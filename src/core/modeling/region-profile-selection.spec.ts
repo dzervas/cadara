@@ -9,7 +9,7 @@ import { deriveImportRegionBoundaryIdentity } from "@/contracts/import/region-bo
 import {
   requireRegion,
   ProfileRegionSelectionError,
-} from "../../domain/modeling/occ/features/shared";
+} from "../../infrastructure/occ/features/shared";
 import type {
   ExtrudeProfileRef,
   FeatureDefinition,

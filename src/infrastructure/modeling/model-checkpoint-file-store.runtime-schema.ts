@@ -3,7 +3,7 @@ import {
   validateContract,
   type ContractValidationResult,
 } from "@/contracts/shared/validation";
-import type { OccCheckpointShapeRecord } from "@/domain/modeling/occ/authoring-checkpoint";
+import type { OccCheckpointShapeRecord } from "@/infrastructure/occ/authoring-checkpoint";
 
 type Sha256Hex = string & tags.Pattern<"^[0-9a-f]{64}$">;
 type ByteLength = number & tags.Type<"uint32">;

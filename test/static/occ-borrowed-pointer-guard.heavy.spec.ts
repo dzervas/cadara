@@ -49,11 +49,11 @@ const AUDITED_BORROWED_BINDINGS = [
 ];
 // Every audited production borrowed root. A new root needs an ownership review.
 const AUDITED_PRODUCTION_ROOTS = [
-  "src/domain/modeling/occ/features/shell.ts Handle_Poly_Triangulation.get",
-  "src/domain/modeling/occ/snapshot.ts Handle_Poly_Polygon3D.get",
-  "src/domain/modeling/occ/snapshot.ts Handle_Poly_PolygonOnTriangulation.get",
-  "src/domain/modeling/occ/snapshot.ts Handle_Poly_Triangulation.get",
-  "src/domain/modeling/occ/snapshot.ts Handle_Poly_Triangulation.get",
+  "src/infrastructure/occ/features/shell.ts Handle_Poly_Triangulation.get",
+  "src/infrastructure/occ/snapshot.ts Handle_Poly_Polygon3D.get",
+  "src/infrastructure/occ/snapshot.ts Handle_Poly_PolygonOnTriangulation.get",
+  "src/infrastructure/occ/snapshot.ts Handle_Poly_Triangulation.get",
+  "src/infrastructure/occ/snapshot.ts Handle_Poly_Triangulation.get",
 ];
 
 const isOccTypings = (fileName: string) =>
@@ -467,7 +467,7 @@ const FIXTURE_DIRECTORY = join(
   "test/static/__occ_borrowed_guard_fixtures__",
 );
 const FIXTURE_PRELUDE = `import type { OpenCascadeInstance } from "opencascade.js/dist/opencascade.full";
-import { deleteOccObject, releaseOccObjects } from "@/domain/modeling/occ/memory";
+import { deleteOccObject, releaseOccObjects } from "@/infrastructure/occ/memory";
 type Oc = OpenCascadeInstance;
 type Tri = InstanceType<Oc["Handle_Poly_Triangulation"]>;
 type Curve = InstanceType<Oc["Handle_Geom_TrimmedCurve"]>;

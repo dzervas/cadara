@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "./service";
 

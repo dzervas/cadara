@@ -1,0 +1,2854 @@
+import type {
+  BodySnapshotRecord,
+  FeatureBooleanScope,
+  DocumentPresentationSnapshot,
+  FeatureSnapshotRecord,
+  FeatureTreeNodeRecord,
+  KernelDocumentSnapshot,
+  ModelingDiagnostic,
+  ObjectTreeNodeRecord,
+  ReferenceRecord,
+  SketchSnapshotRecord,
+  SnapshotEntityRecord,
+  WorkspaceSnapshot,
+} from "@/contracts/modeling/schema";
+import type {
+  RenderMeshGeometry,
+  RenderPoint3D,
+  RenderableEntityRecord,
+} from "@/contracts/render/schema";
+import type {
+  SketchPoint2D,
+  SolvedSketchEntityGeometryRecord,
+} from "@/contracts/sketch/schema";
+import {
+  orderedSplineOccurrences,
+  reconstructSplineAggregate,
+  tessellateCubicSpans,
+  solvedCubicSpans,
+} from "@/contracts/sketch/spline-geometry";
+import { describeFeatureTreeNode } from "@/core/modeling/feature-description";
+import type {
+  BodyId,
+  EdgeId,
+  FaceId,
+  FeatureId,
+  FeatureTreeNodeId,
+  ObjectTreeNodeId,
+  PickId,
+  ReferenceId,
+  RenderableId,
+  SketchId,
+  SketchPointId,
+  SnapshotEntityId,
+  VertexId,
+} from "@/contracts/shared/ids";
+import type {
+  ConstructionRef,
+  DurableRef,
+  EdgeRef,
+  FaceRef,
+  RegionRef,
+  SketchEntityRef,
+  SketchPointRef,
+  VertexRef,
+} from "@/contracts/shared/references";
+import {
+  CONTRACT_VERSION,
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
+  FILLET_FEATURE_SCHEMA_VERSION,
+  PLANE_FEATURE_SCHEMA_VERSION,
+  RENDER_EXPORT_SCHEMA_VERSION,
+  REVOLVE_FEATURE_SCHEMA_VERSION,
+  SHELL_FEATURE_SCHEMA_VERSION,
+  SNAPSHOT_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
+import { OCC_CONTRACT_GAP_CODES } from "@/infrastructure/occ/implementation-policy";
+import { mapSketchPointToWorld } from "@/infrastructure/occ/geometry";
+import type { OccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import {
+  OCC_KERNEL_CAPABILITIES,
+  OCC_KERNEL_SETTINGS,
+} from "@/core/modeling/opencascade-kernel-seed";
+import {
+  createDocumentHistoryItems,
+  getAppliedDocumentHistoryItemsForDocumentCursor,
+  getAppliedSketchIdsForDocumentCursor,
+} from "@/core/modeling/document-history";
+import { extractPlanarFaceData } from "@/infrastructure/occ/planes";
+import {
+  buildRegionProfileFace,
+  releaseBuiltSketchProfileFace,
+} from "@/infrastructure/occ/sketch-profile";
+import {
+  collectOccCleanupErrors,
+  combineOccCleanupError,
+  deleteOccObject,
+  releaseOccObjects,
+  type OccDisposable,
+} from "@/infrastructure/occ/memory";
+import {
+  getOccDurableRefKey,
+  type OccTrackedBody,
+} from "@/infrastructure/occ/topology";
+import {
+  getOccTessellationTier,
+  type OccTessellationTierId,
+} from "@/infrastructure/occ/tessellation";
+import type {
+  OccNativeShimMeshSummary,
+  OccNativeTopologyBodyPayload,
+  OccNativeTopologyPayload,
+} from "@/infrastructure/occ/native-topology-payload";
+
+const FACE_PICK_PRIORITY = 20;
+const BODY_PICK_PRIORITY = 20;
+const SKETCH_CURVE_PICK_PRIORITY = 12;
+const EDGE_PICK_PRIORITY = 10;
+const REGION_PICK_PRIORITY = 8;
+const SKETCH_POINT_PICK_PRIORITY = 1;
+const VERTEX_PICK_PRIORITY = 0;
+const CONSTRUCTION_PICK_PRIORITY = 40;
+
+const DEFAULT_EDGE_SAMPLE_COUNT = 33;
+const DEFAULT_CIRCLE_SAMPLE_COUNT = 64;
+const DEFAULT_ARC_SAMPLE_COUNT = 33;
+const DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT = 64;
+const DEFAULT_POINT_DISPLAY_RADIUS = 0.25;
+const PROFILE_TEXT_WIDTH_FACTOR = 0.6;
+
+interface OccSnapshotBuildOptions {
+  lodTierId?: OccTessellationTierId;
+  // Adapter-normalized payload: topology and mesh bindings use tracked durable
+  // IDs, not raw shim IDs. Native -> durable translation belongs to the adapter
+  // (also used by native snapshot/history consumers), never this render read.
+  nativeTopologyPayload?: OccNativeTopologyPayload;
+}
+
+function sanitizeIdSegment(value: string) {
+  return value
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+/g, "")
+    .replace(/_+$/g, "");
+}
+
+function createReferenceId(target: DurableRef) {
+  return `ref_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ReferenceId;
+}
+
+function createSnapshotEntityId(target: DurableRef) {
+  return `snapshot_entity_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as SnapshotEntityId;
+}
+
+function orderContributorFeatureIds(
+  state: Pick<OccAuthoringState, "features">,
+  featureIds: readonly FeatureId[],
+) {
+  if (featureIds.length <= 1) {
+    return [...featureIds];
+  }
+
+  const featureOrder = new Map(
+    state.features.map((feature, index) => [feature.featureId, index]),
+  );
+  return [...featureIds].sort(
+    (left, right) =>
+      (featureOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (featureOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+function createRenderableId(target: DurableRef) {
+  return `renderable_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as RenderableId;
+}
+
+function createPickId(target: DurableRef) {
+  return `pick_occ_${sanitizeIdSegment(getOccDurableRefKey(target))}` as PickId;
+}
+
+function createFeatureTreeNodeId(prefix: string, target: DurableRef) {
+  return `feature_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as FeatureTreeNodeId;
+}
+
+function createObjectTreeNodeId(prefix: string, target: DurableRef) {
+  return `object_tree_node_occ_${prefix}_${sanitizeIdSegment(getOccDurableRefKey(target))}` as ObjectTreeNodeId;
+}
+
+function createFaceTarget(bodyId: BodyId, faceId: FaceId): FaceRef {
+  return { kind: "face", bodyId, faceId };
+}
+
+function createEdgeTarget(bodyId: BodyId, edgeId: EdgeId): EdgeRef {
+  return { kind: "edge", bodyId, edgeId };
+}
+
+function createVertexTarget(bodyId: BodyId, vertexId: VertexId): VertexRef {
+  return { kind: "vertex", bodyId, vertexId };
+}
+
+function toRenderPoint(point: {
+  X(): number;
+  Y(): number;
+  Z(): number;
+}): RenderPoint3D {
+  return [point.X(), point.Y(), point.Z()];
+}
+
+type OwnSnapshotTemporary = <T extends OccDisposable>(temporary: T) => T;
+
+/**
+ * Runs one native read and then releases every temporary it registered with
+ * `own`. The result must already be copied into JS values. A read failure is
+ * preserved together with any cleanup failure, and failed releases stay
+ * retryable through the nested OccCleanupError.
+ */
+function readWithSnapshotTemporaries<T>(
+  read: (own: OwnSnapshotTemporary) => T,
+): T {
+  const temporaries: OccDisposable[] = [];
+  let result: T;
+  try {
+    result = read((temporary) => {
+      temporaries.push(temporary);
+      return temporary;
+    });
+  } catch (error) {
+    try {
+      releaseOccObjects(temporaries);
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  releaseOccObjects(temporaries);
+  return result;
+}
+
+type OwnedRenderPoint = OccDisposable & {
+  X(): number;
+  Y(): number;
+  Z(): number;
+};
+
+/** Copies an owned point value into JS and releases it. */
+function consumeRenderPoint(point: OwnedRenderPoint): RenderPoint3D {
+  return readWithSnapshotTemporaries((own) => toRenderPoint(own(point)));
+}
+
+/** Copies an owned point value, transformed, into JS and releases both copies. */
+function consumeTransformedRenderPoint(
+  point: InstanceType<OccAuthoringState["oc"]["gp_Pnt"]>,
+  transformation: InstanceType<OccAuthoringState["oc"]["gp_Trsf"]>,
+): RenderPoint3D {
+  return readWithSnapshotTemporaries((own) =>
+    toRenderPoint(own(own(point).Transformed(transformation))),
+  );
+}
+
+function buildFeatureLabel(featureId: FeatureId, explicitLabel?: string) {
+  return explicitLabel ?? featureId;
+}
+function getFaceSemanticClasses(
+  state: OccAuthoringState,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
+) {
+  let plane: ReturnType<typeof extractPlanarFaceData>["plane"];
+  try {
+    plane = extractPlanarFaceData(state.oc, face).plane;
+  } catch (error) {
+    if (collectOccCleanupErrors(error).length > 0) {
+      throw error;
+    }
+    return {
+      entity: ["face"] as const,
+      render: "bodyFace" as const,
+    };
+  }
+  releaseOccObjects([plane]);
+  return {
+    entity: ["face", "planarFace", "planarReference"] as const,
+    render: "planarFace" as const,
+  };
+}
+
+type FaceSemanticClasses = ReturnType<typeof getFaceSemanticClasses>;
+
+function collectFeatureConsumedTargets(
+  definition: OccAuthoringState["features"][number]["definition"],
+) {
+  const targets: DurableRef[] = [];
+  let booleanScope: FeatureBooleanScope | null = null;
+
+  switch (definition.kind) {
+    case "extrude":
+      targets.push(...definition.parameters.profiles);
+      booleanScope =
+        definition.parameters.resultBodyType === "solid"
+          ? definition.parameters.booleanScope
+          : null;
+      break;
+    case "fillet":
+      targets.push(...definition.parameters.edgeTargets);
+      break;
+    case "plane":
+      if (definition.parameters.mode === "coplanar") {
+        targets.push(definition.parameters.reference.target);
+      }
+      break;
+    case "revolve":
+      targets.push(
+        ...definition.parameters.profiles,
+        definition.parameters.axis,
+      );
+      booleanScope =
+        definition.parameters.resultBodyType === "solid"
+          ? definition.parameters.booleanScope
+          : null;
+      break;
+    case "shell":
+      targets.push(
+        definition.parameters.bodyTarget,
+        ...definition.parameters.faceTargets,
+      );
+      booleanScope = definition.parameters.booleanScope;
+      break;
+    case "bakedBody":
+      break;
+    case "featureReplay":
+      targets.push(
+        ...definition.parameters.sourceFeatureIds.map((featureId) => ({
+          kind: "feature" as const,
+          featureId,
+        })),
+        definition.parameters.transform.kind === "linear"
+          ? definition.parameters.transform.direction
+          : definition.parameters.transform.plane,
+      );
+      break;
+    default:
+      targets.push(
+        ...definition.parameters.participants.flatMap((participant) => [
+          ...participant.targets,
+        ]),
+      );
+      break;
+  }
+
+  if (booleanScope?.kind === "targetBody") {
+    targets.push({ kind: "body", bodyId: booleanScope.bodyId });
+  } else if (booleanScope?.kind === "targetBodies") {
+    targets.push(
+      ...booleanScope.bodyIds.map(
+        (bodyId) => ({ kind: "body", bodyId }) as const,
+      ),
+    );
+  }
+
+  return targets;
+}
+
+function getFeatureConsumerKeys(target: DurableRef) {
+  const keys = [getOccDurableRefKey(target)];
+
+  if (target.kind === "region") {
+    keys.push(
+      getOccDurableRefKey({ kind: "sketch", sketchId: target.sketchId }),
+    );
+  }
+
+  return keys;
+}
+
+function createFeatureConsumerMap(
+  state: OccAuthoringState,
+  features: readonly OccAuthoringState["features"][number][] = state.features,
+) {
+  const consumers = new Map<string, FeatureId[]>();
+
+  for (const feature of features) {
+    const featureId = feature.featureId;
+    const uniqueKeys = new Set<string>();
+
+    for (const target of collectFeatureConsumedTargets(feature.definition)) {
+      for (const key of getFeatureConsumerKeys(target)) {
+        uniqueKeys.add(key);
+      }
+    }
+
+    for (const key of uniqueKeys) {
+      const current = consumers.get(key);
+
+      if (current) {
+        current.push(featureId);
+        continue;
+      }
+
+      consumers.set(key, [featureId]);
+    }
+  }
+
+  return consumers;
+}
+
+function createProducedTargetsByFeatureId(
+  features: readonly OccAuthoringState["features"][number][],
+) {
+  const producedTargetsByFeatureId = new Map<FeatureId, DurableRef[]>();
+
+  for (const feature of features) {
+    if (!feature.producedTargets || feature.producedTargets.length === 0) {
+      producedTargetsByFeatureId.set(feature.featureId, []);
+      continue;
+    }
+
+    producedTargetsByFeatureId.set(
+      feature.featureId,
+      [...feature.producedTargets].sort((left, right) =>
+        getOccDurableRefKey(left).localeCompare(getOccDurableRefKey(right)),
+      ),
+    );
+  }
+
+  return producedTargetsByFeatureId;
+}
+
+function createSnapshotFeatureDefinition(
+  definition: OccAuthoringState["features"][number]["definition"],
+): FeatureSnapshotRecord["definition"] {
+  switch (definition.kind) {
+    case "extrude":
+      return {
+        kind: "extrude",
+        featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+        parameters:
+          definition.parameters.resultBodyType === "solid"
+            ? {
+                resultBodyType: "solid",
+                profiles: definition.parameters.profiles,
+                startExtent: definition.parameters.startExtent,
+                extent: definition.parameters.extent,
+                operation: definition.parameters.operation,
+                booleanScope: definition.parameters.booleanScope,
+              }
+            : {
+                resultBodyType: "surface",
+                profiles: definition.parameters.profiles,
+                startExtent: definition.parameters.startExtent,
+                extent: definition.parameters.extent,
+              },
+      };
+    case "fillet":
+      return {
+        kind: "fillet",
+        featureTypeVersion: FILLET_FEATURE_SCHEMA_VERSION,
+        parameters: {
+          radius: definition.parameters.radius,
+          edgeTargets: definition.parameters.edgeTargets,
+        },
+      };
+    case "plane":
+      return {
+        kind: "plane",
+        featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+        parameters: definition.parameters,
+      };
+    case "revolve": {
+      return {
+        kind: "revolve",
+        featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+        parameters:
+          definition.parameters.resultBodyType === "solid"
+            ? {
+                resultBodyType: "solid",
+                profiles: definition.parameters.profiles,
+                axis: definition.parameters.axis,
+                startAngle: definition.parameters.startAngle,
+                extent: definition.parameters.extent,
+                operation: definition.parameters.operation,
+                booleanScope: definition.parameters.booleanScope,
+              }
+            : {
+                resultBodyType: "surface",
+                profiles: definition.parameters.profiles,
+                axis: definition.parameters.axis,
+                startAngle: definition.parameters.startAngle,
+                extent: definition.parameters.extent,
+              },
+      };
+    }
+    case "shell":
+      return {
+        kind: "shell",
+        featureTypeVersion: SHELL_FEATURE_SCHEMA_VERSION,
+        parameters: definition.parameters,
+      };
+    case "bakedBody":
+      return {
+        kind: "bakedBody",
+        featureTypeVersion: definition.featureTypeVersion,
+        parameters: {
+          assetId: definition.parameters.assetId,
+          format: definition.parameters.format,
+          hash: definition.parameters.hash,
+          byteLength: definition.parameters.byteLength,
+          label: definition.parameters.label,
+          provenance: structuredClone(definition.parameters.provenance),
+          replacement: structuredClone(definition.parameters.replacement),
+        },
+      };
+    case "featureReplay":
+      return {
+        kind: "featureReplay",
+        featureTypeVersion: definition.featureTypeVersion,
+        parameters: structuredClone(definition.parameters),
+      };
+    default:
+      return {
+        kind: definition.kind,
+        featureTypeVersion: definition.featureTypeVersion,
+        parameters: {
+          ...definition.parameters,
+          participants: definition.parameters.participants.map(
+            (participant) => ({
+              role: participant.role,
+              targets: [...participant.targets],
+            }),
+          ),
+        },
+      };
+  }
+}
+
+function buildSnapshotPresentationRecords(
+  state: OccAuthoringState,
+  producedTargetsByFeatureId: ReadonlyMap<FeatureId, readonly DurableRef[]>,
+) {
+  const features: FeatureSnapshotRecord[] = [];
+  const constructionFeatureTree: FeatureTreeNodeRecord[] = [];
+  const objects: ObjectTreeNodeRecord[] = [];
+  const sketchNodes = new Map<SketchId, FeatureTreeNodeRecord>();
+  const featureNodes = new Map<FeatureId, FeatureTreeNodeRecord>();
+
+  for (const construction of state.constructions) {
+    constructionFeatureTree.push({
+      id: createFeatureTreeNodeId("construction", construction.target),
+      label: construction.label,
+      description: "Construction plane",
+      kind: "plane",
+      target: construction.target,
+      ownerFeatureId: construction.ownerFeatureId,
+      ownerSketchId: null,
+      sourceFeatureId: construction.ownerFeatureId,
+    });
+    objects.push({
+      id: createObjectTreeNodeId("construction", construction.target),
+      label: construction.label,
+      description: "Construction plane",
+      kind: "construction",
+      target: construction.target,
+      ownerBodyId: null,
+      ownerFeatureId: construction.ownerFeatureId,
+      ownerSketchId: null,
+    });
+  }
+
+  for (const sketch of state.sketches) {
+    const target = { kind: "sketch", sketchId: sketch.sketchId } as const;
+    sketchNodes.set(sketch.sketchId, {
+      id: createFeatureTreeNodeId("sketch", target),
+      label: sketch.label,
+      description: "Authored sketch",
+      kind: "sketch",
+      target,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+      sourceFeatureId: sketch.ownerFeatureId,
+    });
+  }
+
+  for (const feature of state.features) {
+    const snapshot: FeatureSnapshotRecord = {
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: feature.featureId,
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: feature.featureId,
+      label: buildFeatureLabel(feature.featureId, feature.label),
+      suppressed: feature.suppressed,
+      definition: createSnapshotFeatureDefinition(feature.definition),
+      producedTargets: [
+        ...(producedTargetsByFeatureId.get(feature.featureId) ?? []),
+      ],
+    };
+
+    features.push(snapshot);
+    featureNodes.set(snapshot.featureId, {
+      id: createFeatureTreeNodeId("feature", {
+        kind: "feature",
+        featureId: snapshot.featureId,
+      }),
+      label: snapshot.label,
+      description: describeFeatureTreeNode(snapshot.definition),
+      kind: "feature",
+      target: { kind: "feature", featureId: snapshot.featureId },
+      ownerFeatureId: snapshot.featureId,
+      ownerSketchId: null,
+      sourceFeatureId: null,
+    });
+  }
+
+  const historyItems = createDocumentHistoryItems({
+    featureTree: [],
+    features,
+    sketches: state.sketches,
+    historyOrder: state.historyOrder,
+  });
+  const appliedHistoryItems = getAppliedDocumentHistoryItemsForDocumentCursor(
+    historyItems,
+    state.cursor,
+  );
+  const appliedSketchIds = getAppliedSketchIdsForDocumentCursor(
+    historyItems,
+    state.cursor,
+  );
+  const appliedFeatureIds = new Set(
+    appliedHistoryItems
+      .filter(
+        (
+          item,
+        ): item is Extract<
+          (typeof appliedHistoryItems)[number],
+          { kind: "feature" }
+        > => item.kind === "feature",
+      )
+      .map((item) => item.featureId),
+  );
+  const featureTree: FeatureTreeNodeRecord[] = [
+    ...constructionFeatureTree,
+    ...appliedHistoryItems.flatMap((item) => {
+      const node =
+        item.kind === "sketch"
+          ? sketchNodes.get(item.sketchId)
+          : featureNodes.get(item.featureId);
+      return node ? [node] : [];
+    }),
+  ];
+
+  for (const sketch of state.sketches) {
+    if (!appliedSketchIds.has(sketch.sketchId)) {
+      continue;
+    }
+
+    const target = { kind: "sketch", sketchId: sketch.sketchId } as const;
+    objects.push({
+      id: createObjectTreeNodeId("sketch", target),
+      label: sketch.label,
+      description: "Authored sketch",
+      kind: "sketch",
+      target,
+      ownerBodyId: null,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+    });
+  }
+
+  for (const body of state.bodies) {
+    const target = { kind: "body", bodyId: body.bodyId } as const;
+    objects.push({
+      id: createObjectTreeNodeId("body", target),
+      label: body.label,
+      description: body.bodyKind === "sheet" ? "Sheet body" : "Solid body",
+      kind: "body",
+      target,
+      ownerBodyId: body.bodyId,
+      ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
+    });
+  }
+
+  return {
+    features,
+    featureTree,
+    objects,
+    appliedSketches: state.sketches.filter((sketch) =>
+      appliedSketchIds.has(sketch.sketchId),
+    ),
+    appliedFeatures: state.features.filter((feature) =>
+      appliedFeatureIds.has(feature.featureId),
+    ),
+    appliedSketchIds,
+  };
+}
+
+function createFaceSemanticClassMap(state: OccAuthoringState) {
+  const faceSemanticClasses = new Map<string, FaceSemanticClasses>();
+
+  for (const body of state.bodies) {
+    for (const faceId of body.topology.faceIds) {
+      const face = body.facesById.get(faceId);
+
+      if (!face) {
+        continue;
+      }
+
+      const target = createFaceTarget(body.bodyId, faceId);
+      faceSemanticClasses.set(
+        getOccDurableRefKey(target),
+        getFaceSemanticClasses(state, face),
+      );
+    }
+  }
+
+  return faceSemanticClasses;
+}
+
+function buildBodyEntities(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  consumerMap: ReadonlyMap<string, FeatureId[]>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+): SnapshotEntityRecord[] {
+  const bodyTarget = { kind: "body", bodyId: body.bodyId } as const;
+  const records: SnapshotEntityRecord[] = [
+    {
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
+      ownerBodyId: body.bodyId,
+      id: createSnapshotEntityId(bodyTarget),
+      label: body.label,
+      target: bodyTarget,
+      relatedTargets: [],
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.contributingFeatureIds,
+      ),
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(bodyTarget)) ?? [],
+      selectionSemantics: ["body"],
+    },
+  ];
+
+  for (const faceId of body.topology.faceIds) {
+    const target = createFaceTarget(body.bodyId, faceId);
+    const face = body.facesById.get(faceId);
+
+    if (!face) {
+      continue;
+    }
+
+    const semantics =
+      faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+      getFaceSemanticClasses(state, face);
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
+      ownerBodyId: body.bodyId,
+      id: createSnapshotEntityId(target),
+      label: `${body.label} ${faceId}`,
+      target,
+      relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.faceContributingFeatureIdsById.get(faceId) ?? [],
+      ),
+      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
+      selectionSemantics: [...semantics.entity],
+    });
+  }
+
+  for (const edgeId of body.topology.edgeIds) {
+    const target = createEdgeTarget(body.bodyId, edgeId);
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
+      ownerBodyId: body.bodyId,
+      id: createSnapshotEntityId(target),
+      label: `${body.label} ${edgeId}`,
+      target,
+      relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.edgeContributingFeatureIdsById.get(edgeId) ?? [],
+      ),
+      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
+      selectionSemantics: ["edge"],
+    });
+  }
+
+  for (const vertexId of body.topology.vertexIds) {
+    const target = createVertexTarget(body.bodyId, vertexId);
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: body.ownerFeatureId,
+      ownerSketchId: null,
+      ownerBodyId: body.bodyId,
+      id: createSnapshotEntityId(target),
+      label: `${body.label} ${vertexId}`,
+      target,
+      relatedTargets: [bodyTarget],
+      contributingFeatureIds: orderContributorFeatureIds(
+        state,
+        body.vertexContributingFeatureIdsById.get(vertexId) ?? [],
+      ),
+      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
+      selectionSemantics: ["vertex"],
+    });
+  }
+
+  return records;
+}
+
+function buildConstructionEntities(
+  state: OccAuthoringState,
+  consumerMap: ReadonlyMap<string, FeatureId[]>,
+): SnapshotEntityRecord[] {
+  return state.constructions.map((construction) => ({
+    ownerDocumentId: state.documentId,
+    ownerRevisionId: state.revisionId,
+    ownerFeatureId: construction.ownerFeatureId,
+    ownerSketchId: null,
+    ownerBodyId: null,
+    id: createSnapshotEntityId(construction.target),
+    label: construction.label,
+    target: construction.target,
+    relatedTargets: [],
+    contributingFeatureIds: [],
+    consumedByFeatureIds:
+      consumerMap.get(getOccDurableRefKey(construction.target)) ?? [],
+    selectionSemantics: ["constructionPlane", "planarReference"],
+  }));
+}
+
+function buildSketchEntities(
+  state: OccAuthoringState,
+  sketch: SketchSnapshotRecord,
+  consumerMap: ReadonlyMap<string, FeatureId[]>,
+): SnapshotEntityRecord[] {
+  const sketchTarget = { kind: "sketch", sketchId: sketch.sketchId } as const;
+  const records: SnapshotEntityRecord[] = [
+    {
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+      ownerBodyId: null,
+      id: createSnapshotEntityId(sketchTarget),
+      label: sketch.label,
+      target: sketchTarget,
+      relatedTargets: [],
+      contributingFeatureIds: [],
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(sketchTarget)) ?? [],
+      selectionSemantics: ["existingSketch"],
+    },
+  ];
+
+  for (const region of sketch.sketch.derivedValidity.state === "current"
+    ? sketch.sketch.regions
+    : []) {
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: region.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+      ownerBodyId: region.ownerBodyId,
+      id: createSnapshotEntityId(region.target),
+      label: region.label,
+      target: region.target,
+      relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
+      consumedByFeatureIds:
+        consumerMap.get(getOccDurableRefKey(region.target)) ?? [],
+      selectionSemantics: ["existingSketch"],
+    });
+  }
+
+  for (const entity of sketch.sketch.definition.entities) {
+    const target = {
+      kind: "sketchEntity",
+      sketchId: sketch.sketchId,
+      entityId: entity.entityId,
+    } as const;
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+      ownerBodyId: null,
+      id: createSnapshotEntityId(target),
+      label: entity.label,
+      target,
+      relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
+      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
+      selectionSemantics: ["sketchEntity"],
+    });
+  }
+
+  for (const point of sketch.sketch.definition.points) {
+    const target = {
+      kind: "sketchPoint",
+      sketchId: sketch.sketchId,
+      pointId: point.pointId,
+    } as const;
+    records.push({
+      ownerDocumentId: state.documentId,
+      ownerRevisionId: state.revisionId,
+      ownerFeatureId: sketch.ownerFeatureId,
+      ownerSketchId: sketch.sketchId,
+      ownerBodyId: null,
+      id: createSnapshotEntityId(target),
+      label: point.label,
+      target,
+      relatedTargets: [sketchTarget],
+      contributingFeatureIds: [],
+      consumedByFeatureIds: consumerMap.get(getOccDurableRefKey(target)) ?? [],
+      selectionSemantics: [],
+    });
+  }
+
+  return records;
+}
+
+function buildSnapshotEntities(
+  state: OccAuthoringState,
+  consumerMap: ReadonlyMap<string, FeatureId[]>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  appliedSketches: readonly SketchSnapshotRecord[],
+) {
+  return [
+    ...buildConstructionEntities(state, consumerMap),
+    ...appliedSketches.flatMap((sketch) =>
+      buildSketchEntities(state, sketch, consumerMap),
+    ),
+    ...state.bodies.flatMap((body) =>
+      buildBodyEntities(state, body, consumerMap, faceSemanticClasses),
+    ),
+  ];
+}
+
+function buildReferenceRecords(
+  state: OccAuthoringState,
+  appliedSketchIds: ReadonlySet<SketchId>,
+): ReferenceRecord[] {
+  const entries = [
+    ...state.referenceState.liveReferencesByKey.values(),
+    ...state.referenceState.invalidatedReferencesByKey.values(),
+  ];
+
+  return entries
+    .filter(
+      (reference) =>
+        reference.ownerSketchId === null ||
+        appliedSketchIds.has(reference.ownerSketchId),
+    )
+    .slice()
+    .sort((left, right) =>
+      getOccDurableRefKey(left.target).localeCompare(
+        getOccDurableRefKey(right.target),
+      ),
+    )
+    .map((reference) => ({
+      id: createReferenceId(reference.target),
+      label: reference.label,
+      target: reference.target,
+      ownerDocumentId: reference.ownerDocumentId,
+      ownerRevisionId: reference.ownerRevisionId,
+      ownerFeatureId: reference.ownerFeatureId,
+      ownerSketchId: reference.ownerSketchId,
+      ownerBodyId: reference.ownerBodyId,
+      invalidation: reference.invalidation,
+    }));
+}
+
+export function buildOccSnapshotDiagnostics(
+  state: OccAuthoringState,
+  extraDiagnostics: readonly ModelingDiagnostic[],
+): ModelingDiagnostic[] {
+  return [...state.diagnostics, ...extraDiagnostics];
+}
+
+function buildConstructionRenderRecords(
+  state: OccAuthoringState,
+): RenderableEntityRecord[] {
+  return state.constructions.flatMap((construction) => {
+    const plane = state.constructionPlanes.get(construction.constructionId);
+
+    if (!plane) {
+      return [];
+    }
+
+    const size = 10;
+    const { origin, xAxis, yAxis } = plane.frame;
+    const points: RenderPoint3D[] = [
+      [
+        origin[0] + xAxis[0] * -size + yAxis[0] * -size,
+        origin[1] + xAxis[1] * -size + yAxis[1] * -size,
+        origin[2] + xAxis[2] * -size + yAxis[2] * -size,
+      ],
+      [
+        origin[0] + xAxis[0] * size + yAxis[0] * -size,
+        origin[1] + xAxis[1] * size + yAxis[1] * -size,
+        origin[2] + xAxis[2] * size + yAxis[2] * -size,
+      ],
+      [
+        origin[0] + xAxis[0] * size + yAxis[0] * size,
+        origin[1] + xAxis[1] * size + yAxis[1] * size,
+        origin[2] + xAxis[2] * size + yAxis[2] * size,
+      ],
+      [
+        origin[0] + xAxis[0] * -size + yAxis[0] * size,
+        origin[1] + xAxis[1] * -size + yAxis[1] * size,
+        origin[2] + xAxis[2] * -size + yAxis[2] * size,
+      ],
+    ];
+
+    const target = construction.target as ConstructionRef;
+    const normal = plane.frame.normal;
+
+    return [
+      {
+        id: createRenderableId(target),
+        label: construction.label,
+        ownerBodyId: null,
+        ownerFeatureId: construction.ownerFeatureId,
+        binding: {
+          pickId: createPickId(target),
+          pickPriority: CONSTRUCTION_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "construction",
+        },
+        geometry: {
+          kind: "mesh",
+          vertexPositions: points,
+          vertexNormals: [normal, normal, normal, normal],
+          triangleIndices: [
+            [0, 1, 2],
+            [0, 2, 3],
+          ],
+        },
+      } satisfies RenderableEntityRecord,
+      {
+        id: `${createRenderableId(target)}_outline` as RenderableId,
+        label: `${construction.label} outline`,
+        ownerBodyId: null,
+        ownerFeatureId: construction.ownerFeatureId,
+        binding: {
+          pickId: `${createPickId(target)}_outline` as PickId,
+          pickPriority: CONSTRUCTION_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "construction",
+        },
+        geometry: {
+          kind: "polyline",
+          points,
+          isClosed: true,
+        },
+      } satisfies RenderableEntityRecord,
+    ];
+  });
+}
+
+function buildMeshGeometryFromFace(
+  state: OccAuthoringState,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
+) {
+  return readWithSnapshotTemporaries((own) => {
+    const location = own(new state.oc.TopLoc_Location_1());
+    const triangulationHandle = own(
+      state.oc.BRep_Tool.Triangulation(face, location, 0 as never),
+    );
+
+    if (triangulationHandle.IsNull()) {
+      return null;
+    }
+
+    // Borrowed from triangulationHandle: read only inside this owner scope.
+    const triangulation = triangulationHandle.get();
+    const transformation = own(location.Transformation());
+    const nodeCount = triangulation.NbNodes();
+    const triangleCount = triangulation.NbTriangles();
+    const hasNormals = triangulation.HasNormals();
+    const isReversed = getFaceOrientationIsReversed(state, face);
+    const vertexPositions = new Array<RenderPoint3D>(nodeCount);
+    const vertexNormals = hasNormals
+      ? new Array<RenderPoint3D>(nodeCount)
+      : null;
+    const triangleIndices = new Array<readonly [number, number, number]>(
+      triangleCount,
+    );
+
+    for (let index = 1; index <= nodeCount; index += 1) {
+      vertexPositions[index - 1] = consumeTransformedRenderPoint(
+        triangulation.Node(index),
+        transformation,
+      );
+
+      if (vertexNormals) {
+        const baseNormal = readWithSnapshotTemporaries(
+          (ownNormal): RenderPoint3D => {
+            const transformedNormal = ownNormal(
+              ownNormal(triangulation.Normal_1(index)).Transformed(
+                transformation,
+              ),
+            );
+            return [
+              transformedNormal.X(),
+              transformedNormal.Y(),
+              transformedNormal.Z(),
+            ];
+          },
+        );
+
+        vertexNormals[index - 1] = isReversed
+          ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
+          : baseNormal;
+      }
+    }
+
+    for (let index = 1; index <= triangleCount; index += 1) {
+      triangleIndices[index - 1] = readWithSnapshotTemporaries(
+        (ownTriangle): readonly [number, number, number] => {
+          const triangle = ownTriangle(triangulation.Triangle(index));
+          const first = triangle.Value(1) - 1;
+          const second = triangle.Value(2) - 1;
+          const third = triangle.Value(3) - 1;
+
+          return isReversed ? [first, third, second] : [first, second, third];
+        },
+      );
+    }
+
+    return {
+      vertexPositions,
+      vertexNormals,
+      triangleIndices,
+    };
+  });
+}
+
+function getFaceOrientationIsReversed(
+  state: OccAuthoringState,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
+) {
+  return (
+    (face.Orientation_1() as { value?: number }).value ===
+    (state.oc.TopAbs_Orientation.TopAbs_REVERSED as { value?: number }).value
+  );
+}
+
+function buildFaceRenderRecord(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  faceId: FaceId,
+  face: InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+): RenderableEntityRecord | null {
+  const geometry = buildMeshGeometryFromFace(state, face);
+
+  if (!geometry) {
+    return null;
+  }
+
+  const target: FaceRef = createFaceTarget(body.bodyId, faceId);
+  const semantics =
+    faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+    getFaceSemanticClasses(state, face);
+
+  return {
+    id: createRenderableId(target),
+    label: `${body.label} ${faceId}`,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: FACE_PICK_PRIORITY,
+      target,
+      topology: "face",
+      semanticClass: semantics.render,
+    },
+    geometry: {
+      kind: "mesh",
+      vertexPositions: geometry.vertexPositions,
+      vertexNormals: geometry.vertexNormals,
+      triangleIndices: geometry.triangleIndices,
+    },
+  };
+}
+
+function buildBodyOnlyMeshRenderRecord(
+  body: OccTrackedBody,
+): RenderableEntityRecord {
+  const meshTriangles = body.meshExportFallback;
+  if (!meshTriangles || meshTriangles.length === 0) {
+    throw new Error(
+      `Body-only mesh ${body.bodyId} has no authoritative baked mesh fallback.`,
+    );
+  }
+  const vertexIndexByPoint = new Map<
+    (typeof meshTriangles)[number][number],
+    number
+  >();
+  const vertexPositions: RenderPoint3D[] = [];
+  const triangleIndices: Array<readonly [number, number, number]> = [];
+  const indexPoint = (point: (typeof meshTriangles)[number][number]) => {
+    const existing = vertexIndexByPoint.get(point);
+    if (existing !== undefined) return existing;
+    const index = vertexPositions.length;
+    vertexIndexByPoint.set(point, index);
+    vertexPositions.push([point[0], point[1], point[2]]);
+    return index;
+  };
+  for (const triangle of meshTriangles) {
+    triangleIndices.push([
+      indexPoint(triangle[0]),
+      indexPoint(triangle[1]),
+      indexPoint(triangle[2]),
+    ]);
+  }
+  const target = { kind: "body", bodyId: body.bodyId } as const;
+  return {
+    id: createRenderableId(target),
+    label: body.label,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: BODY_PICK_PRIORITY,
+      target,
+      topology: null,
+      semanticClass: "body",
+    },
+    geometry: {
+      kind: "mesh",
+      vertexPositions,
+      vertexNormals: null,
+      triangleIndices,
+    },
+  };
+}
+
+function getNativeTopologyBodyPayload(
+  body: OccTrackedBody,
+  options: OccSnapshotBuildOptions,
+) {
+  return options.nativeTopologyPayload?.bodies.find(
+    (candidate) => candidate.bodyId === body.bodyId,
+  );
+}
+
+function buildNativeFaceMeshGeometries(
+  mesh: OccNativeShimMeshSummary,
+  body: OccTrackedBody,
+  nativeBodyPayload: OccNativeTopologyBodyPayload,
+) {
+  const positions = mesh.positions;
+  const triangleIndices = mesh.triangleIndices;
+  const triangleFaceBindings = mesh.triangleFaceBindings;
+
+  if (
+    !positions ||
+    !triangleIndices ||
+    triangleIndices.length !== mesh.triangleCount
+  ) {
+    if (
+      mesh.triangleCount > 0 ||
+      triangleIndices?.length ||
+      triangleFaceBindings?.length
+    ) {
+      throw new Error(
+        `Native render mesh on body ${body.bodyId} is missing triangle geometry.`,
+      );
+    }
+    return new Map<FaceId, RenderMeshGeometry>();
+  }
+  if (
+    !triangleFaceBindings ||
+    triangleFaceBindings.length !== triangleIndices.length
+  ) {
+    throw new Error(
+      `Native render mesh on body ${body.bodyId} requires one durable face binding per triangle.`,
+    );
+  }
+
+  const durableFaceIds = new Set<string>(body.topology.faceIds);
+  const payloadFaceIds = new Set(
+    nativeBodyPayload.topology
+      .filter((record) => record.kind === "face")
+      .map((record) => record.id),
+  );
+  const geometryByFaceId = new Map<
+    FaceId,
+    {
+      vertexPositions: RenderPoint3D[];
+      nativeVertexToLocalIndex: Map<number, number>;
+      triangleIndices: Array<readonly [number, number, number]>;
+    }
+  >();
+
+  for (let index = 0; index < triangleIndices.length; index += 1) {
+    const faceId = triangleFaceBindings[index] as FaceId | undefined;
+    const triangle = triangleIndices[index]!;
+    // Native and durable namespaces can overlap with different meanings. Do not
+    // alias or guess here: a malformed payload must fail, not lose/misbind faces.
+    if (!faceId || !durableFaceIds.has(faceId) || !payloadFaceIds.has(faceId)) {
+      throw new Error(
+        `Native render mesh triangle ${index} on body ${body.bodyId} references unmatched durable face ID ${String(faceId)}.`,
+      );
+    }
+
+    const geometry =
+      geometryByFaceId.get(faceId) ??
+      (() => {
+        const next = {
+          vertexPositions: [] as RenderPoint3D[],
+          nativeVertexToLocalIndex: new Map<number, number>(),
+          triangleIndices: [] as Array<readonly [number, number, number]>,
+        };
+        geometryByFaceId.set(faceId, next);
+        return next;
+      })();
+    const getLocalVertexIndex = (nativeIndex: number) => {
+      const existing = geometry.nativeVertexToLocalIndex.get(nativeIndex);
+      if (existing !== undefined) {
+        return existing;
+      }
+
+      const position = positions[nativeIndex];
+      if (!position) {
+        throw new Error(
+          `Native render mesh triangle references missing vertex index ${nativeIndex}.`,
+        );
+      }
+
+      const localIndex = geometry.vertexPositions.length;
+      geometry.nativeVertexToLocalIndex.set(nativeIndex, localIndex);
+      geometry.vertexPositions.push([position[0], position[1], position[2]]);
+      return localIndex;
+    };
+
+    geometry.triangleIndices.push([
+      getLocalVertexIndex(triangle[0]),
+      getLocalVertexIndex(triangle[1]),
+      getLocalVertexIndex(triangle[2]),
+    ]);
+  }
+
+  return new Map(
+    [...geometryByFaceId].map(([faceId, geometry]) => [
+      faceId,
+      {
+        kind: "mesh" as const,
+        vertexPositions: geometry.vertexPositions,
+        vertexNormals: null,
+        triangleIndices: geometry.triangleIndices,
+      },
+    ]),
+  );
+}
+
+function buildNativeFaceRenderRecords(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  mesh: OccNativeShimMeshSummary,
+  nativeBodyPayload: OccNativeTopologyBodyPayload,
+) {
+  const records: RenderableEntityRecord[] = [];
+  const geometryByFaceId = buildNativeFaceMeshGeometries(
+    mesh,
+    body,
+    nativeBodyPayload,
+  );
+
+  for (const faceId of body.topology.faceIds) {
+    const geometry = geometryByFaceId.get(faceId);
+    if (!geometry) {
+      continue;
+    }
+
+    const target: FaceRef = createFaceTarget(body.bodyId, faceId);
+    const face = body.facesById.get(faceId);
+    const semantics =
+      faceSemanticClasses.get(getOccDurableRefKey(target)) ??
+      (face
+        ? getFaceSemanticClasses(state, face)
+        : { entity: ["face"] as const, render: "bodyFace" as const });
+    records.push({
+      id: createRenderableId(target),
+      label: `${body.label} ${faceId}`,
+      ownerBodyId: body.bodyId,
+      ownerFeatureId: body.ownerFeatureId,
+      binding: {
+        pickId: createPickId(target),
+        pickPriority: FACE_PICK_PRIORITY,
+        target,
+        topology: "face",
+        semanticClass: semantics.render,
+      },
+      geometry,
+    });
+  }
+
+  return records;
+}
+
+type MeshedBodyFaceMap =
+  /** Fresh face copies owned, and released, by the snapshot read. */
+  | {
+      ownership: "snapshot";
+      facesById: ReadonlyMap<
+        FaceId,
+        InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
+      >;
+    }
+  /** The body's state-owned faces; the snapshot must never release them. */
+  | { ownership: "body"; facesById: OccTrackedBody["facesById"] };
+
+function buildCurrentFaceMapForMeshedBody(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+): MeshedBodyFaceMap {
+  const facesById = new Map<
+    FaceId,
+    InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>
+  >();
+  try {
+    return readWithSnapshotTemporaries((own): MeshedBodyFaceMap => {
+      const faceMap = own(new state.oc.TopTools_IndexedMapOfShape_1());
+      state.oc.TopExp.MapShapes_1(
+        body.shape,
+        state.oc.TopAbs_ShapeEnum.TopAbs_FACE as never,
+        faceMap,
+      );
+
+      if (faceMap.Size() !== body.topology.faceIds.length) {
+        return { ownership: "body", facesById: body.facesById };
+      }
+
+      for (let index = 1; index <= faceMap.Size(); index += 1) {
+        const faceId = body.topology.faceIds[index - 1];
+        if (faceId) {
+          facesById.set(
+            faceId,
+            state.oc.TopoDS.Face_1(own(faceMap.FindKey(index))),
+          );
+        }
+      }
+
+      return { ownership: "snapshot", facesById };
+    });
+  } catch (error) {
+    // Fresh face copies never escape a failed build, including a failed
+    // release of the map or of the FindKey shape copies.
+    try {
+      releaseOccObjects(facesById.values());
+    } catch (cleanupError) {
+      throw combineOccCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+}
+
+/**
+ * A region whose exact profile face does not build keeps no part-mode fill
+ * but stays selectable; the diagnostic names it with the builder's stable
+ * code (a `profile-…` message prefix, or the `profile-face-invalid` code of a
+ * malformed record, T10 §2.2). Anything else is not a known profile failure
+ * (a code fault, an unbound binding): null, and the caller rethrows it
+ * (review A-4).
+ */
+function regionProfileFailureDiagnostic(
+  region: SketchSnapshotRecord["sketch"]["regions"][number],
+  error: unknown,
+): ModelingDiagnostic | null {
+  if (!(error instanceof Error)) return null;
+  const tagged = (error as Error & { code?: unknown }).code;
+  const code =
+    /^(profile-[a-z-]+):/.exec(error.message)?.[1] ??
+    (typeof tagged === "string" && tagged.startsWith("profile-")
+      ? tagged
+      : null);
+  if (code === null) return null;
+  return {
+    code,
+    severity: "warning",
+    message: `Region ${region.label} has no part-mode face: ${error.message}`,
+    target: region.target,
+    detail: null,
+  };
+}
+
+/**
+ * Region meshes per immutable sketch record and tessellation tier.
+ * Label/appearance-only revisions keep their sketch records, so their
+ * snapshots skip re-meshing every region profile face (cadara-lyi). Every
+ * tier is kept, so background LOD refinement can mesh the requested tier
+ * while snapshots stay at the displayed one (cadara-se2).
+ */
+let regionRenderRecordCache = new WeakMap<
+  SketchSnapshotRecord,
+  Map<
+    string,
+    {
+      oc: OccAuthoringState["oc"];
+      modelingTolerance: number;
+      records: readonly RenderableEntityRecord[];
+      diagnostics: readonly ModelingDiagnostic[];
+    }
+  >
+>();
+
+/** Lets `next`, a relabel of `previous` (cadara-kv69), reuse the region
+ * faces meshed for `previous`: region render records hold no sketch label. */
+export function carryOccSketchRegionRenderRecords(
+  previous: SketchSnapshotRecord,
+  next: SketchSnapshotRecord,
+) {
+  const tiers = regionRenderRecordCache.get(previous);
+  if (tiers) regionRenderRecordCache.set(next, tiers);
+}
+
+/** Makes the next snapshots mesh their region profile faces again. */
+export function resetRegionRenderRecordCacheForTest() {
+  regionRenderRecordCache = new WeakMap();
+}
+
+function buildRegionRenderRecords(
+  state: OccAuthoringState,
+  sketches: readonly SketchSnapshotRecord[],
+  options: OccSnapshotBuildOptions,
+  diagnostics: ModelingDiagnostic[],
+) {
+  const tessellationTier = getOccTessellationTier(options.lodTierId);
+
+  return sketches.flatMap((sketch) => {
+    const cached = getCachedRegionRenderRecords(
+      state,
+      sketch,
+      tessellationTier.id,
+    );
+    if (cached !== undefined) {
+      diagnostics.push(...cached.diagnostics);
+      return cached.records;
+    }
+
+    const sketchDiagnostics: ModelingDiagnostic[] = [];
+    const records = buildSketchRegionRenderRecords(
+      state,
+      sketch,
+      tessellationTier,
+      sketchDiagnostics,
+    );
+    let tiers = regionRenderRecordCache.get(sketch);
+    if (!tiers) {
+      tiers = new Map();
+      regionRenderRecordCache.set(sketch, tiers);
+    }
+    tiers.set(tessellationTier.id, {
+      oc: state.oc,
+      modelingTolerance: state.modelingTolerance,
+      records,
+      diagnostics: sketchDiagnostics,
+    });
+    diagnostics.push(...sketchDiagnostics);
+    return records;
+  });
+}
+
+function getCachedRegionRenderRecords(
+  state: OccAuthoringState,
+  sketch: SketchSnapshotRecord,
+  tierId: string,
+) {
+  const cached = regionRenderRecordCache.get(sketch)?.get(tierId);
+  return cached !== undefined &&
+    cached.oc === state.oc &&
+    cached.modelingTolerance === state.modelingTolerance
+    ? cached
+    : undefined;
+}
+
+/**
+ * One step of background LOD refinement (cadara-se2): meshes the region
+ * faces of the first applied sketch that has no cached records at `lodTierId`,
+ * so the next snapshot at that tier reuses them. False when none is left.
+ */
+export function refineNextOccSketchRegionRenderRecords(
+  state: OccAuthoringState,
+  lodTierId: OccTessellationTierId,
+) {
+  const { appliedSketches } = buildSnapshotPresentationRecords(
+    state,
+    createProducedTargetsByFeatureId(state.features),
+  );
+  const sketch = appliedSketches.find(
+    (candidate) =>
+      getCachedRegionRenderRecords(state, candidate, lodTierId) === undefined,
+  );
+  if (!sketch) return false;
+  buildRegionRenderRecords(state, [sketch], { lodTierId }, []);
+  return true;
+}
+
+function buildSketchRegionRenderRecords(
+  state: OccAuthoringState,
+  sketch: SketchSnapshotRecord,
+  tessellationTier: ReturnType<typeof getOccTessellationTier>,
+  diagnostics: ModelingDiagnostic[],
+) {
+  const records: RenderableEntityRecord[] = [];
+
+  for (const region of sketch.sketch.derivedValidity.state === "current"
+    ? sketch.sketch.regions
+    : []) {
+    let profileFace: ReturnType<typeof buildRegionProfileFace> | null = null;
+
+    try {
+      profileFace = buildRegionProfileFace(
+        state.oc,
+        {
+          plane: sketch.plane,
+          sketch: sketch.sketch,
+          modelingTolerance: state.modelingTolerance,
+        },
+        region,
+      );
+    } catch (error) {
+      if (collectOccCleanupErrors(error).length > 0) {
+        throw error;
+      }
+      if (!isProjectedRegionContractGap(error)) {
+        const diagnostic = regionProfileFailureDiagnostic(region, error);
+        if (diagnostic === null) throw error;
+        diagnostics.push(diagnostic);
+      }
+      continue;
+    }
+
+    try {
+      const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
+        profileFace.face,
+        Math.max(
+          state.modelingTolerance * 10,
+          tessellationTier.linearDeflectionModelUnits,
+        ),
+        false,
+        tessellationTier.angularDeflectionRadians,
+        false,
+      );
+      deleteOccObject(mesher);
+
+      const geometry = buildMeshGeometryFromFace(state, profileFace.face);
+
+      if (!geometry) {
+        console.warn(
+          `[occ-snapshot] Skipping region render ${region.regionId}: profile face produced no mesh geometry.`,
+        );
+      } else {
+        const target = region.target as RegionRef;
+        records.push({
+          id: createRenderableId(target),
+          label: region.label,
+          ownerBodyId: region.ownerBodyId,
+          ownerFeatureId: region.ownerFeatureId,
+          binding: {
+            pickId: createPickId(target),
+            pickPriority: REGION_PICK_PRIORITY,
+            target,
+            topology: null,
+            semanticClass: "region",
+          },
+          geometry: {
+            kind: "mesh",
+            vertexPositions: geometry.vertexPositions,
+            vertexNormals: geometry.vertexNormals,
+            triangleIndices: geometry.triangleIndices,
+          },
+        });
+      }
+    } catch (error) {
+      try {
+        releaseBuiltSketchProfileFace(profileFace);
+      } catch (cleanupError) {
+        throw combineOccCleanupError(error, cleanupError);
+      }
+      throw error;
+    }
+    releaseBuiltSketchProfileFace(profileFace);
+  }
+
+  return records;
+}
+
+function isProjectedRegionContractGap(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === OCC_CONTRACT_GAP_CODES.projectedRegionGeometryUnavailable
+  );
+}
+
+function sampleCurveByParameters(
+  state: OccAuthoringState,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+  sampleCount: number,
+) {
+  return readWithSnapshotTemporaries((own) => {
+    const curve = own(new state.oc.BRepAdaptor_Curve_2(edge));
+    const first = curve.FirstParameter();
+    const last = curve.LastParameter();
+    const points: RenderPoint3D[] = [];
+
+    if (!Number.isFinite(first) || !Number.isFinite(last) || sampleCount < 2) {
+      return null;
+    }
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      const parameter = first + ((last - first) * index) / (sampleCount - 1);
+      points.push(consumeRenderPoint(curve.Value(parameter)));
+    }
+
+    const isClosed =
+      curve.GetType() === state.oc.GeomAbs_CurveType.GeomAbs_Circle &&
+      points.length > 2 &&
+      points[0] !== undefined &&
+      points[points.length - 1] !== undefined &&
+      Math.abs(points[0][0] - points[points.length - 1]![0]) <
+        state.modelingTolerance &&
+      Math.abs(points[0][1] - points[points.length - 1]![1]) <
+        state.modelingTolerance &&
+      Math.abs(points[0][2] - points[points.length - 1]![2]) <
+        state.modelingTolerance;
+
+    return {
+      points,
+      isClosed,
+    };
+  });
+}
+
+function countDistinctRenderPoints(points: readonly RenderPoint3D[]) {
+  return new Set(points.map((point) => `${point[0]}:${point[1]}:${point[2]}`))
+    .size;
+}
+
+function buildEdgePolylineFromTriangulation(
+  state: OccAuthoringState,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+  faces: Iterable<InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>>,
+) {
+  for (const face of faces) {
+    const polyline = readWithSnapshotTemporaries((own) => {
+      const triangulationLocation = own(new state.oc.TopLoc_Location_1());
+      const triangulationHandle = own(
+        state.oc.BRep_Tool.Triangulation(
+          face,
+          triangulationLocation,
+          0 as never,
+        ),
+      );
+
+      if (triangulationHandle.IsNull()) {
+        return null;
+      }
+
+      const polygonLocation = own(new state.oc.TopLoc_Location_1());
+      const polygonHandle = own(
+        state.oc.BRep_Tool.PolygonOnTriangulation_1(
+          edge,
+          triangulationHandle,
+          polygonLocation,
+        ),
+      );
+
+      if (polygonHandle.IsNull()) {
+        return null;
+      }
+
+      // Borrowed from their handles: read only inside this owner scope.
+      const triangulation = triangulationHandle.get();
+      const polygon = polygonHandle.get();
+      const transformation = own(polygonLocation.Transformation());
+      const points: RenderPoint3D[] = [];
+
+      for (let index = 1; index <= polygon.NbNodes(); index += 1) {
+        const nodeIndex = polygon.Node(index);
+        points.push(
+          consumeTransformedRenderPoint(
+            triangulation.Node(nodeIndex),
+            transformation,
+          ),
+        );
+      }
+
+      const isClosed = state.oc.BRep_Tool.IsClosed_4(
+        edge,
+        triangulationHandle,
+        polygonLocation,
+      );
+
+      if (
+        points.length >= 2 &&
+        (!isClosed || countDistinctRenderPoints(points) >= 3)
+      ) {
+        return {
+          points,
+          isClosed,
+        };
+      }
+      return null;
+    });
+
+    if (polyline) {
+      return polyline;
+    }
+  }
+
+  return null;
+}
+
+function buildEdgePolylineFromPolygon3D(
+  state: OccAuthoringState,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+) {
+  return readWithSnapshotTemporaries((own) => {
+    const location = own(new state.oc.TopLoc_Location_1());
+    const polygonHandle = own(state.oc.BRep_Tool.Polygon3D(edge, location));
+
+    if (polygonHandle.IsNull()) {
+      return null;
+    }
+
+    // Borrowed from polygonHandle: read only inside this owner scope.
+    const polygon = polygonHandle.get();
+    const nodes = own(polygon.Nodes());
+    const transformation = own(location.Transformation());
+    const points: RenderPoint3D[] = [];
+
+    for (let index = 1; index <= polygon.NbNodes(); index += 1) {
+      points.push(
+        consumeTransformedRenderPoint(nodes.Value(index), transformation),
+      );
+    }
+
+    if (points.length < 2) {
+      return null;
+    }
+
+    return {
+      points,
+      isClosed: false,
+    };
+  });
+}
+
+function buildEdgeRenderRecord(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  edgeId: EdgeId,
+  edge: InstanceType<OccAuthoringState["oc"]["TopoDS_Edge"]>,
+  faces: Iterable<InstanceType<OccAuthoringState["oc"]["TopoDS_Face"]>>,
+): RenderableEntityRecord | null {
+  const polyline =
+    buildEdgePolylineFromTriangulation(state, edge, faces) ??
+    buildEdgePolylineFromPolygon3D(state, edge) ??
+    sampleCurveByParameters(state, edge, DEFAULT_EDGE_SAMPLE_COUNT);
+
+  if (!polyline || polyline.points.length < 2) {
+    return null;
+  }
+
+  const target: EdgeRef = createEdgeTarget(body.bodyId, edgeId);
+
+  return {
+    id: createRenderableId(target),
+    label: `${body.label} ${edgeId}`,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: EDGE_PICK_PRIORITY,
+      target,
+      topology: "edge",
+      semanticClass: "featureEdge",
+    },
+    geometry: {
+      kind: "polyline",
+      points: polyline.points,
+      isClosed: polyline.isClosed,
+    },
+  };
+}
+
+function buildVertexRenderRecord(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  vertexId: VertexId,
+  vertex: InstanceType<OccAuthoringState["oc"]["TopoDS_Vertex"]>,
+): RenderableEntityRecord {
+  const target: VertexRef = createVertexTarget(body.bodyId, vertexId);
+
+  return {
+    id: createRenderableId(target),
+    label: `${body.label} ${vertexId}`,
+    ownerBodyId: body.bodyId,
+    ownerFeatureId: body.ownerFeatureId,
+    binding: {
+      pickId: createPickId(target),
+      pickPriority: VERTEX_PICK_PRIORITY,
+      target,
+      topology: "vertex",
+      semanticClass: "featureVertex",
+    },
+    geometry: {
+      kind: "marker",
+      position: consumeRenderPoint(state.oc.BRep_Tool.Pnt(vertex)),
+      displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
+    },
+  };
+}
+
+function buildBodyRenderRecords(
+  state: OccAuthoringState,
+  body: OccTrackedBody,
+  faceSemanticClasses: ReadonlyMap<string, FaceSemanticClasses>,
+  options: OccSnapshotBuildOptions = {},
+) {
+  const records: RenderableEntityRecord[] = [];
+  const nativeBodyPayload = getNativeTopologyBodyPayload(body, options);
+  const nativeRenderMesh = nativeBodyPayload?.renderMeshSummary ?? null;
+
+  if (body.topologyPresentation === "bodyOnlyMesh") {
+    return [buildBodyOnlyMeshRenderRecord(body)];
+  }
+
+  if (nativeBodyPayload && nativeRenderMesh) {
+    records.push(
+      ...buildNativeFaceRenderRecords(
+        state,
+        body,
+        faceSemanticClasses,
+        nativeRenderMesh,
+        nativeBodyPayload,
+      ),
+    );
+
+    for (const edgeId of body.topology.edgeIds) {
+      const edge = body.edgesById.get(edgeId);
+
+      if (!edge) {
+        continue;
+      }
+
+      const record = buildEdgeRenderRecord(state, body, edgeId, edge, []);
+      if (record) {
+        records.push(record);
+      }
+    }
+
+    for (const vertexId of body.topology.vertexIds) {
+      const vertex = body.verticesById.get(vertexId);
+
+      if (!vertex) {
+        continue;
+      }
+
+      records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
+    }
+
+    return records;
+  }
+
+  const tessellationTier = getOccTessellationTier(options.lodTierId);
+
+  const mesher = new state.oc.BRepMesh_IncrementalMesh_2(
+    body.shape,
+    Math.max(
+      state.modelingTolerance * 10,
+      tessellationTier.linearDeflectionModelUnits,
+    ),
+    false,
+    tessellationTier.angularDeflectionRadians,
+    false,
+  );
+  deleteOccObject(mesher);
+
+  const meshedFaces = buildCurrentFaceMapForMeshedBody(state, body);
+  const meshedFacesById = meshedFaces.facesById;
+
+  // Snapshot-owned face copies must outlive face rendering and the edge
+  // triangulation fallback below; body-owned faces are never released here.
+  return readWithSnapshotTemporaries((own) => {
+    if (meshedFaces.ownership === "snapshot") {
+      for (const face of meshedFaces.facesById.values()) own(face);
+    }
+
+    for (const faceId of body.topology.faceIds) {
+      const face = meshedFacesById.get(faceId);
+
+      if (!face) {
+        continue;
+      }
+
+      const record = buildFaceRenderRecord(
+        state,
+        body,
+        faceId,
+        face,
+        faceSemanticClasses,
+      );
+      if (record) {
+        records.push(record);
+      }
+    }
+
+    for (const edgeId of body.topology.edgeIds) {
+      const edge = body.edgesById.get(edgeId);
+
+      if (!edge) {
+        continue;
+      }
+
+      const record = buildEdgeRenderRecord(
+        state,
+        body,
+        edgeId,
+        edge,
+        meshedFacesById.values(),
+      );
+      if (record) {
+        records.push(record);
+      }
+    }
+
+    for (const vertexId of body.topology.vertexIds) {
+      const vertex = body.verticesById.get(vertexId);
+
+      if (!vertex) {
+        continue;
+      }
+
+      records.push(buildVertexRenderRecord(state, body, vertexId, vertex));
+    }
+
+    return records;
+  });
+}
+
+function sampleCirclePoints(
+  center: readonly [number, number],
+  radius: number,
+  sampleCount: number,
+) {
+  const points: Array<readonly [number, number]> = [];
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const angle = (Math.PI * 2 * index) / sampleCount;
+    points.push([
+      center[0] + Math.cos(angle) * radius,
+      center[1] + Math.sin(angle) * radius,
+    ]);
+  }
+
+  return points;
+}
+
+function sampleEllipsePoints(
+  center: readonly [number, number],
+  majorAxisEndpoint: readonly [number, number],
+  minorRadius: number,
+  sampleCount: number,
+) {
+  const majorVector = [
+    majorAxisEndpoint[0] - center[0],
+    majorAxisEndpoint[1] - center[1],
+  ] as const;
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1]);
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return [];
+  }
+
+  const majorUnit = [
+    majorVector[0] / majorRadius,
+    majorVector[1] / majorRadius,
+  ] as const;
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const;
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const angle = (Math.PI * 2 * index) / sampleCount;
+    return [
+      center[0] +
+        Math.cos(angle) * majorRadius * majorUnit[0] +
+        Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] +
+        Math.cos(angle) * majorRadius * majorUnit[1] +
+        Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const;
+  });
+}
+
+function sampleEllipticalArcPoints(
+  center: readonly [number, number],
+  majorAxisEndpoint: readonly [number, number],
+  start: readonly [number, number],
+  end: readonly [number, number],
+  minorRadius: number,
+  sweepDirection: "clockwise" | "counterClockwise",
+  sampleCount: number,
+) {
+  const majorVector = [
+    majorAxisEndpoint[0] - center[0],
+    majorAxisEndpoint[1] - center[1],
+  ] as const;
+  const majorRadius = Math.hypot(majorVector[0], majorVector[1]);
+  if (majorRadius <= Number.EPSILON || minorRadius <= 0) {
+    return [];
+  }
+
+  const majorUnit = [
+    majorVector[0] / majorRadius,
+    majorVector[1] / majorRadius,
+  ] as const;
+  const minorUnit = [-majorUnit[1], majorUnit[0]] as const;
+  const ellipseAngle = (point: readonly [number, number]) => {
+    const delta = [point[0] - center[0], point[1] - center[1]] as const;
+    return Math.atan2(
+      (delta[0] * minorUnit[0] + delta[1] * minorUnit[1]) / minorRadius,
+      (delta[0] * majorUnit[0] + delta[1] * majorUnit[1]) / majorRadius,
+    );
+  };
+  const startAngle = ellipseAngle(start);
+  const endAngle = ellipseAngle(end);
+  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection);
+
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const angle =
+      sweepDirection === "counterClockwise"
+        ? startAngle + sweep * alpha
+        : startAngle - sweep * alpha;
+    return [
+      center[0] +
+        Math.cos(angle) * majorRadius * majorUnit[0] +
+        Math.sin(angle) * minorRadius * minorUnit[0],
+      center[1] +
+        Math.cos(angle) * majorRadius * majorUnit[1] +
+        Math.sin(angle) * minorRadius * minorUnit[1],
+    ] as const;
+  });
+}
+
+function sampleConicPoints(
+  start: readonly [number, number],
+  control: readonly [number, number],
+  end: readonly [number, number],
+  rho: number,
+  sampleCount: number,
+) {
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const oneMinusT = 1 - t;
+    const startWeight = oneMinusT * oneMinusT;
+    const controlWeight = 2 * rho * oneMinusT * t;
+    const endWeight = t * t;
+    const weight = startWeight + controlWeight + endWeight;
+    return [
+      (startWeight * start[0] +
+        controlWeight * control[0] +
+        endWeight * end[0]) /
+        weight,
+      (startWeight * start[1] +
+        controlWeight * control[1] +
+        endWeight * end[1]) /
+        weight,
+    ] as const;
+  });
+}
+
+function sampleBezierPoints(
+  controlPoints: readonly (readonly [number, number])[],
+  sampleCount: number,
+) {
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const t = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const oneMinusT = 1 - t;
+    if (controlPoints.length === 3) {
+      const [p0, p1, p2] = controlPoints;
+      return [
+        oneMinusT * oneMinusT * p0![0] +
+          2 * oneMinusT * t * p1![0] +
+          t * t * p2![0],
+        oneMinusT * oneMinusT * p0![1] +
+          2 * oneMinusT * t * p1![1] +
+          t * t * p2![1],
+      ] as const;
+    }
+
+    const [p0, p1, p2, p3] = controlPoints;
+    return [
+      oneMinusT ** 3 * p0![0] +
+        3 * oneMinusT * oneMinusT * t * p1![0] +
+        3 * oneMinusT * t * t * p2![0] +
+        t ** 3 * p3![0],
+      oneMinusT ** 3 * p0![1] +
+        3 * oneMinusT * oneMinusT * t * p1![1] +
+        3 * oneMinusT * t * t * p2![1] +
+        t ** 3 * p3![1],
+    ] as const;
+  });
+}
+
+function sampleProfileTextOutlinePoints(
+  entity: Extract<SolvedSketchEntityGeometryRecord, { kind: "profileText" }>,
+) {
+  const width = Math.max(
+    entity.height * PROFILE_TEXT_WIDTH_FACTOR,
+    entity.text.trim().length * entity.height * PROFILE_TEXT_WIDTH_FACTOR,
+  );
+  const x =
+    entity.horizontalAlign === "center"
+      ? -width / 2
+      : entity.horizontalAlign === "right"
+        ? -width
+        : 0;
+  const y =
+    entity.verticalAlign === "middle"
+      ? -entity.height / 2
+      : entity.verticalAlign === "top"
+        ? -entity.height
+        : entity.verticalAlign === "baseline"
+          ? -entity.height * 0.2
+          : 0;
+  const cos = Math.cos(entity.rotationRadians);
+  const sin = Math.sin(entity.rotationRadians);
+
+  return [
+    [x, y],
+    [x + width, y],
+    [x + width, y + entity.height],
+    [x, y + entity.height],
+  ].map(
+    (point) =>
+      [
+        entity.anchorPosition[0] + point[0]! * cos - point[1]! * sin,
+        entity.anchorPosition[1] + point[0]! * sin + point[1]! * cos,
+      ] as const,
+  );
+}
+
+function normalizeAngle(angle: number) {
+  while (angle < 0) {
+    angle += Math.PI * 2;
+  }
+
+  while (angle >= Math.PI * 2) {
+    angle -= Math.PI * 2;
+  }
+
+  return angle;
+}
+
+function computeArcSweep(
+  startAngle: number,
+  endAngle: number,
+  sweepDirection: "clockwise" | "counterClockwise",
+) {
+  const normalizedStart = normalizeAngle(startAngle);
+  const normalizedEnd = normalizeAngle(endAngle);
+
+  if (sweepDirection === "counterClockwise") {
+    return normalizedEnd >= normalizedStart
+      ? normalizedEnd - normalizedStart
+      : normalizedEnd + Math.PI * 2 - normalizedStart;
+  }
+
+  return normalizedEnd <= normalizedStart
+    ? normalizedStart - normalizedEnd
+    : normalizedStart + Math.PI * 2 - normalizedEnd;
+}
+
+function sampleArcPoints(
+  center: readonly [number, number],
+  start: readonly [number, number],
+  end: readonly [number, number],
+  sweepDirection: "clockwise" | "counterClockwise",
+  sampleCount: number,
+) {
+  const startAngle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+  const endAngle = Math.atan2(end[1] - center[1], end[0] - center[0]);
+  const sweep = computeArcSweep(startAngle, endAngle, sweepDirection);
+  const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
+  const points: Array<readonly [number, number]> = [];
+
+  for (let index = 0; index < sampleCount; index += 1) {
+    const alpha = sampleCount === 1 ? 0 : index / (sampleCount - 1);
+    const offset = sweep * alpha;
+    const angle =
+      sweepDirection === "counterClockwise"
+        ? startAngle + offset
+        : startAngle - offset;
+
+    points.push([
+      center[0] + Math.cos(angle) * radius,
+      center[1] + Math.sin(angle) * radius,
+    ]);
+  }
+
+  return points;
+}
+
+/**
+ * T17d2 (T17d review R-1; issue 03: one accepted geometry for display,
+ * selection, measurement and modeling; specification §5: stale display is
+ * marked and never consumed as current). A committed sketch whose derived
+ * validity is not current is drawn as sketch mode draws it on re-entry: at
+ * its held (authored) definition positions, splines by their authored
+ * reconstruction, held mirror/offset copies where the definition holds
+ * them, and offset shells by the record's spans (the spans the re-entered
+ * session draws). Never the rejected solve's positions. The viewport tints
+ * these records by the sketch's validity.
+ */
+function heldSketchGeometry(sketch: SketchSnapshotRecord) {
+  const { definition, solvedSnapshot } = sketch.sketch;
+  const positions = new Map(
+    definition.points.map((point) => [point.pointId, point.position] as const),
+  );
+  const shells = new Map(
+    solvedSnapshot.solvedEntities.map(
+      (record) => [record.entityId, record] as const,
+    ),
+  );
+  const all = (ids: readonly SketchPointId[]) => {
+    const found = ids.map((id) => positions.get(id));
+    return found.every((position) => position !== undefined) ? found : null;
+  };
+  const entities = definition.entities.flatMap(
+    (entity): SolvedSketchEntityGeometryRecord[] => {
+      const { entityId } = entity;
+      switch (entity.kind) {
+        case "point":
+          return [];
+        case "derivedPiecewiseCubic": {
+          const shell = shells.get(entityId);
+          return shell?.kind === "derivedPiecewiseCubic" ? [shell] : [];
+        }
+        case "lineSegment": {
+          const at = all([entity.startPointId, entity.endPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "lineSegment",
+                  startPosition: at[0]!,
+                  endPosition: at[1]!,
+                },
+              ]
+            : [];
+        }
+        case "circle": {
+          const at = all([entity.centerPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "circle",
+                  centerPosition: at[0]!,
+                  solvedRadius: entity.radius,
+                },
+              ]
+            : [];
+        }
+        case "arc": {
+          const at = all([
+            entity.centerPointId,
+            entity.startPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "arc",
+                  centerPosition: at[0]!,
+                  startPosition: at[1]!,
+                  endPosition: at[2]!,
+                  sweepDirection: entity.sweepDirection,
+                },
+              ]
+            : [];
+        }
+        case "spline":
+          return [
+            {
+              entityId,
+              kind: "spline",
+              reconstruction: reconstructSplineAggregate(
+                entity,
+                Object.fromEntries(positions) as Record<
+                  SketchPointId,
+                  SketchPoint2D
+                >,
+              ),
+            },
+          ];
+        case "ellipse": {
+          const at = all([entity.centerPointId, entity.majorAxisPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "ellipse",
+                  centerPosition: at[0]!,
+                  majorAxisEndpointPosition: at[1]!,
+                  minorRadius: entity.minorRadius,
+                },
+              ]
+            : [];
+        }
+        case "ellipticalArc": {
+          const at = all([
+            entity.centerPointId,
+            entity.majorAxisPointId,
+            entity.startPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "ellipticalArc",
+                  centerPosition: at[0]!,
+                  majorAxisEndpointPosition: at[1]!,
+                  startPosition: at[2]!,
+                  endPosition: at[3]!,
+                  minorRadius: entity.minorRadius,
+                  sweepDirection: entity.sweepDirection,
+                },
+              ]
+            : [];
+        }
+        case "conic": {
+          const at = all([
+            entity.startPointId,
+            entity.controlPointId,
+            entity.endPointId,
+          ]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "conic",
+                  startPosition: at[0]!,
+                  controlPosition: at[1]!,
+                  endPosition: at[2]!,
+                  rho: entity.rho,
+                },
+              ]
+            : [];
+        }
+        case "bezierCurve": {
+          const at = all(entity.controlPointIds);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "bezierCurve",
+                  controlPoints: at,
+                  degree: entity.degree,
+                },
+              ]
+            : [];
+        }
+        case "profileText": {
+          const at = all([entity.anchorPointId]);
+          return at
+            ? [
+                {
+                  entityId,
+                  kind: "profileText",
+                  anchorPosition: at[0]!,
+                  text: entity.text,
+                  height: entity.height,
+                  rotationRadians: entity.rotationRadians,
+                  horizontalAlign: entity.horizontalAlign,
+                  verticalAlign: entity.verticalAlign,
+                },
+              ]
+            : [];
+        }
+      }
+    },
+  );
+  return { entities, positions };
+}
+
+/** The geometry part mode draws: the solve if current, else the held geometry. */
+function drawnSketchGeometry(
+  sketch: SketchSnapshotRecord,
+): ReturnType<typeof heldSketchGeometry> {
+  const { derivedValidity, solvedSnapshot } = sketch.sketch;
+  return derivedValidity.state === "current"
+    ? {
+        entities: solvedSnapshot.solvedEntities,
+        positions: new Map(
+          solvedSnapshot.solvedPoints.map(
+            (point) => [point.pointId, point.solvedPosition] as const,
+          ),
+        ),
+      }
+    : heldSketchGeometry(sketch);
+}
+
+function buildSketchCurveRenderRecords(
+  sketch: SketchSnapshotRecord,
+  drawn: ReturnType<typeof drawnSketchGeometry>,
+) {
+  const authoredEntityMap = new Map(
+    sketch.sketch.definition.entities.map(
+      (entity) => [entity.entityId, entity] as const,
+    ),
+  );
+
+  return drawn.entities.flatMap((entity) => {
+    if (authoredEntityMap.get(entity.entityId)?.isConstruction) {
+      return [];
+    }
+
+    const target: SketchEntityRef = {
+      kind: "sketchEntity",
+      sketchId: sketch.sketchId,
+      entityId: entity.entityId,
+    };
+
+    if (entity.kind === "point") {
+      return [];
+    }
+
+    let points2D: ReadonlyArray<readonly [number, number]>;
+    let isClosed = false;
+
+    switch (entity.kind) {
+      case "lineSegment":
+        points2D = [entity.startPosition, entity.endPosition];
+        break;
+      case "circle":
+        points2D = sampleCirclePoints(
+          entity.centerPosition,
+          entity.solvedRadius,
+          DEFAULT_CIRCLE_SAMPLE_COUNT,
+        );
+        isClosed = true;
+        break;
+      case "arc":
+        points2D = sampleArcPoints(
+          entity.centerPosition,
+          entity.startPosition,
+          entity.endPosition,
+          entity.sweepDirection,
+          DEFAULT_ARC_SAMPLE_COUNT,
+        );
+        break;
+      case "spline": {
+        points2D = tessellateCubicSpans(entity.reconstruction.spans);
+        const authored = authoredEntityMap.get(entity.entityId);
+        if (
+          authored?.kind !== "spline" ||
+          !entity.reconstruction.diagnostics.some(
+            (diagnostic) => diagnostic.code === "coincident-points",
+          )
+        )
+          break;
+        // T17c3 (issue 08): a degenerate span (two consecutive fit points
+        // at one place) leaves no spans; the spline is still drawn, through
+        // its distinct drawn fit points (as in the sketch session).
+        isClosed = authored.closure === "smooth";
+        const fitPoints = (orderedSplineOccurrences(authored) ?? []).map(
+          (occurrence) => drawn.positions.get(occurrence.pointId)!,
+        );
+        points2D = fitPoints.filter((point, index) => {
+          const previous =
+            fitPoints[index - 1] ?? (isClosed ? fitPoints.at(-1) : undefined);
+          return (
+            !previous || previous[0] !== point[0] || previous[1] !== point[1]
+          );
+        });
+        break;
+      }
+      case "derivedPiecewiseCubic":
+        // The session display's tessellation: solved spans clipped to their
+        // drawn domains (T08b-g5b).
+        points2D = tessellateCubicSpans(solvedCubicSpans(entity));
+        break;
+      case "ellipse":
+        points2D = sampleEllipsePoints(
+          entity.centerPosition,
+          entity.majorAxisEndpointPosition,
+          entity.minorRadius,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        );
+        isClosed = true;
+        break;
+      case "ellipticalArc":
+        points2D = sampleEllipticalArcPoints(
+          entity.centerPosition,
+          entity.majorAxisEndpointPosition,
+          entity.startPosition,
+          entity.endPosition,
+          entity.minorRadius,
+          entity.sweepDirection,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        );
+        break;
+      case "conic":
+        points2D = sampleConicPoints(
+          entity.startPosition,
+          entity.controlPosition,
+          entity.endPosition,
+          entity.rho,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        );
+        break;
+      case "bezierCurve":
+        points2D = sampleBezierPoints(
+          entity.controlPoints,
+          DEFAULT_ADVANCED_CURVE_SAMPLE_COUNT,
+        );
+        break;
+      case "profileText":
+        points2D = sampleProfileTextOutlinePoints(entity);
+        isClosed = true;
+        break;
+    }
+
+    // T17d2 review R-2 (T17c3 finding 1): a curve with fewer distinct points
+    // than a polyline needs (2 open, 3 closed; normalization refuses less)
+    // is not drawn, as sketch mode draws nothing for it either (e.g. a
+    // spline whose reconstruction is invalid has no spans). Emitting it
+    // would break the whole document snapshot.
+    if (new Set(points2D.map(String)).size < (isClosed ? 3 : 2)) return [];
+
+    return [
+      {
+        id: createRenderableId(target),
+        label: `${sketch.label} ${entity.entityId}`,
+        ownerBodyId: null,
+        ownerFeatureId: sketch.ownerFeatureId,
+        binding: {
+          pickId: createPickId(target),
+          pickPriority: SKETCH_CURVE_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "sketchCurve",
+        },
+        geometry: {
+          kind: "polyline",
+          points: points2D.map((point) =>
+            mapSketchPointToWorld(sketch.plane, point),
+          ),
+          isClosed,
+        },
+      } satisfies RenderableEntityRecord,
+    ];
+  });
+}
+
+function buildSketchPointRenderRecords(
+  sketch: SketchSnapshotRecord,
+  drawn: ReturnType<typeof drawnSketchGeometry>,
+) {
+  return sketch.sketch.definition.points.flatMap((point) => {
+    if (point.isConstruction) {
+      return [];
+    }
+
+    const target: SketchPointRef = {
+      kind: "sketchPoint",
+      sketchId: sketch.sketchId,
+      pointId: point.pointId,
+    };
+    const position = drawn.positions.get(point.pointId) ?? point.position;
+
+    return [
+      {
+        id: createRenderableId(target),
+        label: `${sketch.label} ${point.pointId}`,
+        ownerBodyId: null,
+        ownerFeatureId: sketch.ownerFeatureId,
+        binding: {
+          pickId: createPickId(target),
+          pickPriority: SKETCH_POINT_PICK_PRIORITY,
+          target,
+          topology: null,
+          semanticClass: "sketchPoint",
+        },
+        geometry: {
+          kind: "marker",
+          position: mapSketchPointToWorld(sketch.plane, position),
+          displayRadius: DEFAULT_POINT_DISPLAY_RADIUS,
+        },
+      } satisfies RenderableEntityRecord,
+    ];
+  });
+}
+
+function buildSketchRenderRecords(
+  state: OccAuthoringState,
+  sketches: readonly SketchSnapshotRecord[],
+  options: OccSnapshotBuildOptions,
+  regionDiagnostics: ModelingDiagnostic[],
+) {
+  return [
+    ...buildRegionRenderRecords(state, sketches, options, regionDiagnostics),
+    ...sketches.flatMap((sketch) => {
+      const drawn = drawnSketchGeometry(sketch);
+      return [
+        ...buildSketchCurveRenderRecords(sketch, drawn),
+        ...buildSketchPointRenderRecords(sketch, drawn),
+      ];
+    }),
+  ];
+}
+
+export function buildOccRenderExport(
+  state: OccAuthoringState,
+  faceSemanticClasses: ReadonlyMap<
+    string,
+    FaceSemanticClasses
+  > = createFaceSemanticClassMap(state),
+  options: OccSnapshotBuildOptions = {},
+  appliedSketches: readonly SketchSnapshotRecord[] = state.sketches,
+  /** Receives one diagnostic per region whose profile face does not build. */
+  regionDiagnostics: ModelingDiagnostic[] = [],
+) {
+  const records: RenderableEntityRecord[] = [
+    ...buildConstructionRenderRecords(state),
+    ...buildSketchRenderRecords(
+      state,
+      appliedSketches,
+      options,
+      regionDiagnostics,
+    ),
+    ...state.bodies.flatMap((body) =>
+      buildBodyRenderRecords(state, body, faceSemanticClasses, options),
+    ),
+  ];
+
+  return {
+    schemaVersion: RENDER_EXPORT_SCHEMA_VERSION,
+    records,
+  };
+}
+
+export function buildOccKernelDocumentSnapshot(
+  state: OccAuthoringState,
+  extraDiagnostics: readonly ModelingDiagnostic[] = [],
+  options: OccSnapshotBuildOptions = {},
+): KernelDocumentSnapshot {
+  const producedTargetsByFeatureId = createProducedTargetsByFeatureId(
+    state.features,
+  );
+  const faceSemanticClasses = createFaceSemanticClassMap(state);
+  const {
+    features,
+    featureTree,
+    objects,
+    appliedSketches,
+    appliedFeatures,
+    appliedSketchIds,
+  } = buildSnapshotPresentationRecords(state, producedTargetsByFeatureId);
+  const consumerMap = createFeatureConsumerMap(state, appliedFeatures);
+  const entities = buildSnapshotEntities(
+    state,
+    consumerMap,
+    faceSemanticClasses,
+    appliedSketches,
+  );
+  const references = buildReferenceRecords(state, appliedSketchIds);
+  const regionDiagnostics: ModelingDiagnostic[] = [];
+  const render = buildOccRenderExport(
+    state,
+    faceSemanticClasses,
+    options,
+    appliedSketches,
+    regionDiagnostics,
+  );
+  const diagnostics = buildOccSnapshotDiagnostics(state, [
+    ...extraDiagnostics,
+    ...regionDiagnostics,
+  ]);
+
+  return {
+    contractVersion: CONTRACT_VERSION,
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    documentId: state.documentId,
+    name: state.name,
+    revisionId: state.revisionId,
+    settings: {
+      linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
+      modelingTolerance: state.modelingTolerance,
+      angularToleranceRadians: state.angularToleranceRadians,
+    },
+    capabilities: OCC_KERNEL_CAPABILITIES,
+    featureTree,
+    objects,
+    features,
+    cursor: state.cursor,
+    sketches: [...state.sketches],
+    bodies: state.referenceState.bodySnapshots.map(
+      (body): BodySnapshotRecord => {
+        const appearance = state.bodyAppearances.get(body.bodyId);
+        if (!appearance) {
+          throw new Error(`Body ${body.bodyId} has no appearance record.`);
+        }
+        return { ...body, appearance: structuredClone(appearance) };
+      },
+    ),
+    constructions: [...state.constructions],
+    variables: [...state.variables],
+    entities,
+    references,
+    diagnostics,
+    render,
+  };
+}
+
+export function buildOccWorkspaceSnapshot(
+  state: OccAuthoringState,
+  extraDiagnostics: readonly ModelingDiagnostic[] = [],
+  options: OccSnapshotBuildOptions = {},
+): WorkspaceSnapshot {
+  const document = buildOccKernelDocumentSnapshot(
+    state,
+    extraDiagnostics,
+    options,
+  );
+  const presentation: DocumentPresentationSnapshot = {
+    featureTree: document.featureTree,
+    objects: document.objects,
+    documentHistory: createDocumentHistoryItems({
+      featureTree: document.featureTree,
+      features: document.features,
+      sketches: document.sketches,
+      historyOrder: state.historyOrder,
+    }),
+    entities: document.entities,
+  };
+
+  return {
+    document,
+    presentation,
+    provenance: null,
+  };
+}

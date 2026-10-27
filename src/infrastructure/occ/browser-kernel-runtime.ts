@@ -6,11 +6,11 @@ import {
   noopPerformanceTelemetry,
   recordPerformanceMark,
 } from "@/contracts/performance/telemetry";
-import { createInstrumentedOccWorkerClient } from "@/domain/modeling/occ/instrumented-worker-client";
+import { createInstrumentedOccWorkerClient } from "@/infrastructure/occ/instrumented-worker-client";
 import {
   createOccPreloadController,
   type OccPreloadController,
-} from "@/domain/modeling/occ/preload";
+} from "@/infrastructure/occ/preload";
 import { createBrowserOccWorkerClient } from "@/domain/modeling/occ/worker-runtime";
 import {
   getBrowserGeometryAssetComposition,

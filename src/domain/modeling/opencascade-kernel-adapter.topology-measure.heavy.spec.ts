@@ -12,9 +12,9 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import type { OpenCascadeNativeTopologyKernelHost } from "@/infrastructure/occ/native-topology-payload";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

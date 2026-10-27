@@ -8,9 +8,9 @@ import type {
   ModelingKernelAdapter,
 } from "@/contracts/modeling/adapter";
 import type { DocumentExportResult } from "@/contracts/modeling/export";
-import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
-import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
+import type { OccNativeExactBrepPayload } from "@/infrastructure/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/infrastructure/occ/worker-protocol";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import { orchestrateGeometryExport } from "@/application/export/export-orchestrator";
 import { createExportProviderRegistry } from "@/core/export/provider-registry";
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";

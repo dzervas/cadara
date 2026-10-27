@@ -65,7 +65,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
@@ -76,11 +76,11 @@ import type {
   RevisionId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import boxFixture from "@/domain/modeling/occ/fixtures/topology-signatures/box.payload.json";
+import boxFixture from "@/infrastructure/occ/fixtures/topology-signatures/box.payload.json";
 import {
   createOccNativeExactBrepPayloadFromShimPayload,
   parseNativeShimPayloadJson,
-} from "@/domain/modeling/occ/native-topology-payload";
+} from "@/infrastructure/occ/native-topology-payload";
 
 // Use the REAL sketch constraint solver (pure TS, always available). It solves
 // against any revision, so we delegate each call to an instance configured for

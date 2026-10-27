@@ -5,7 +5,7 @@ export const typiaTransformInclude = [
   /[/\\]src[/\\]contracts[/\\]import[/\\](?:base-validation|onshape-capture-bundle|validation)\.ts$/,
   /[/\\]src[/\\]contracts[/\\]shared[/\\]typia-transform-sentinel\.spec\.ts$/,
   /[/\\]src[/\\]core[/\\]import[/\\]onshape[/\\]bundle-reader\.ts$/,
-  /[/\\]src[/\\]domain[/\\]modeling[/\\]occ[/\\](?:native-topology-payload|worker-protocol)\.ts$/,
+  /[/\\]src[/\\]infrastructure[/\\]occ[/\\](?:native-topology-payload|worker-protocol)\.ts$/,
 ];
 
 export function shouldTransformWithTypia(filePath: string) {

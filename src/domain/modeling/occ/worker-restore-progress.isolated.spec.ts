@@ -6,7 +6,7 @@ import { expect, test, vi } from "vitest";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { LoadingProgress } from "@/contracts/modeling/loading-status";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
-import type { OccWorkerRequest, OccWorkerResponse } from "./worker-protocol";
+import type { OccWorkerRequest, OccWorkerResponse } from "../../../infrastructure/occ/worker-protocol";
 
 const progress: LoadingProgress = {
   stage: "rebuilding-features",

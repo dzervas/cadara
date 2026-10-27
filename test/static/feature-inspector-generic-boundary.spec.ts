@@ -39,7 +39,7 @@ test("feature inspector presentation does not import modeling kernel modules", (
   const forbiddenImports = [
     "@/domain/modeling/occ",
     "opencascade.js",
-    "@/domain/modeling/occ/topology",
+    "@/infrastructure/occ",
   ] as const;
   const offenders: string[] = [];
 

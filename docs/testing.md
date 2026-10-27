@@ -65,6 +65,7 @@ Use Vitest (`bun run test`, `*.spec.ts`) for non-UI behavior in:
 - `src/domain/`
 - `src/application/`
 - `src/infrastructure/modeling/`
+- `src/infrastructure/occ/`
 - `src/infrastructure/persistence/`
 - `src/infrastructure/workers/`
 
@@ -78,7 +79,6 @@ Use Vitest (`bun run test`, `*.spec.tsx`) for presentational or UI-local behavio
 - `src/components/`
 - `src/hooks/`
 - `src/lib/`
-- `src/infrastructure/occ/`
 - `src/infrastructure/section-view/`
 - `src/infrastructure/viewport/`
 

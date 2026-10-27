@@ -22,8 +22,8 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   collectOccCleanupErrors,
   OccCleanupError,
-} from "@/domain/modeling/occ/memory";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+} from "@/infrastructure/occ/memory";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

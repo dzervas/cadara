@@ -45,7 +45,7 @@ const TESSELLATOR_ALLOWLIST: Record<string, string> = {
     "session display: shells, projected splines, region fill",
   "src/core/editor/sketch-session/draft-entity-geometry.ts":
     "session display of every spline entity (authored reconstruction)",
-  "src/domain/modeling/occ/snapshot.ts": "OCC snapshot display edges",
+  "src/infrastructure/occ/snapshot.ts": "OCC snapshot display edges",
   "src/core/sketch-tools/tools/spline.ts": "spline tool preview",
   "src/core/sketch-editing/offset-preview.ts":
     "offset tool preview of derived shells",
@@ -66,7 +66,7 @@ const BEZIER_DISPLAY_SAMPLER = /\bsample\w*Bezier\w*/;
 const BEZIER_SAMPLER_ALLOWLIST: Record<string, string> = {
   "src/core/sketch-tools/tools/advanced-curves.ts":
     "Bézier tool preview polyline",
-  "src/domain/modeling/occ/snapshot.ts":
+  "src/infrastructure/occ/snapshot.ts":
     "OCC snapshot display edges of Bézier entities",
   "src/core/editor/sketch-session/draft-entity-geometry.ts":
     "session display of Bézier entities",

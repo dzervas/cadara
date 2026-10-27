@@ -17,7 +17,7 @@ import {
 } from "@/domain/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";

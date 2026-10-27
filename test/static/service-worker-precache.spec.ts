@@ -12,7 +12,7 @@ import { build } from "vite";
 import { expect, test } from "vitest";
 
 import { createServiceWorkerPlugin } from "../../service-worker-plugin";
-import { OCC_ASSET_VERSION } from "../../src/domain/modeling/occ/asset-version";
+import { OCC_ASSET_VERSION } from "../../src/infrastructure/occ/asset-version";
 
 // Static lane (cadara-vk96): the shipped service worker's precache manifest,
 // built by the production plugin (`service-worker-plugin.ts`) from the real

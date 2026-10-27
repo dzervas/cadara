@@ -1,4 +1,4 @@
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 
 type OC = OpenCascadeInstance;
 type W = { delete(): void; isDeleted?(): boolean };

@@ -30,8 +30,8 @@ import {
 } from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
-import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
-import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
+import { buildOccRenderExport } from "@/infrastructure/occ/snapshot";
+import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 
 // T17p2 (F-2): the solver consumes the resolved definition; these fixtures

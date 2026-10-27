@@ -2,7 +2,7 @@ import { resolveRegionProfile } from "@/contracts/sketch/region-selector";
 import {
   ProfileRegionSelectionError,
   requireRegion,
-} from "@/domain/modeling/occ/features/shared";
+} from "@/infrastructure/occ/features/shared";
 import { createRevisionId, parseRevisionSequence } from "../../core/modeling/document-revision";
 import type {
   AuthoredDocumentRestoreOptions,
@@ -13,7 +13,7 @@ import type {
   MeasureTopologyRequest,
   MeasureTopologyResponse,
 } from "@/contracts/modeling/topology-measure";
-import { measureOccTopology } from "@/domain/modeling/occ/topology-measure";
+import { measureOccTopology } from "@/infrastructure/occ/topology-measure";
 import type {
   NeutralCurveJoinRequest,
   NeutralCurveQueryCapability,
@@ -146,8 +146,8 @@ import {
   type OccAuthoringFeatureRecord,
   type OccAuthoringState,
   type OccFeatureStageCheckpoint,
-} from "@/domain/modeling/occ/authoring-state";
-import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+} from "@/infrastructure/occ/authoring-state";
+import { extractPlanarFaceData } from "@/infrastructure/occ/planes";
 import {
   cross,
   dot,
@@ -155,32 +155,32 @@ import {
   normalize,
   scale,
   subtract,
-} from "@/domain/modeling/occ/math";
+} from "@/core/modeling/vector-frame-math";
 import {
   collectOccCleanupErrors,
   combineOccCleanupError,
   releaseDiscardedOccAuthoringStateObjects,
   releaseOccAuthoringStateObjects,
   releaseOccObjects,
-} from "@/domain/modeling/occ/memory";
-import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
+} from "@/infrastructure/occ/memory";
+import { OCC_CONTRACT_GAP_CODES } from "@/infrastructure/occ/implementation-policy";
 import { getOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
   type OpenCascadeInstance,
-} from "@/domain/modeling/occ/runtime";
+} from "@/infrastructure/occ/kernel-capabilities";
 import {
   getRebuildSlot,
   type RebuildSlot,
-} from "@/domain/modeling/occ/features/shared";
+} from "@/infrastructure/occ/features/shared";
 import {
   buildOccSnapshotDiagnostics,
   buildOccWorkspaceSnapshot,
   carryOccSketchRegionRenderRecords,
   refineNextOccSketchRegionRenderRecords,
-} from "@/domain/modeling/occ/snapshot";
-import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
-import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
+} from "@/infrastructure/occ/snapshot";
+import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/core/modeling/sketch-feature-input";
 import {
@@ -210,7 +210,7 @@ import {
   resolveOccReference,
   rewriteNativeTopologyPayloadIds,
   type OccTrackedBody,
-} from "@/domain/modeling/occ/topology";
+} from "@/infrastructure/occ/topology";
 import {
   createOccFeatureTopologyLineageMap,
   isSameTopologyLineageOutput,
@@ -218,7 +218,7 @@ import {
   serializeOccFeatureTopologyLineage,
   serializeOccTopologyStageOutput,
   type OccFeatureTopologyStage,
-} from "@/domain/modeling/occ/topology-stage";
+} from "@/infrastructure/occ/topology-stage";
 import {
   getExtrudeFeatureExtent,
   getRevolveFeatureExtent,
@@ -237,16 +237,16 @@ import {
   type OccNativeExactBrepPayload,
   type OccNativeMeshExportPayload,
   type OccNativeTopologyPayload,
-} from "@/domain/modeling/occ/native-topology-payload";
-import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
+} from "@/infrastructure/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/infrastructure/occ/worker-protocol";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_DOCUMENT_NAME,
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
-import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
+import { getOccTessellationTier } from "@/infrastructure/occ/tessellation";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/infrastructure/occ/neutral-curve-query";
 import {
   createModelCheckpointKey,
   hydrateModelCheckpoint,

@@ -9,7 +9,7 @@ import { expect, test } from "vitest";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { LoadingProgress } from "@/contracts/modeling/loading-status";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

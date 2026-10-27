@@ -15,9 +15,9 @@ import { expect, test, vi } from "vitest";
 
 // Counts feature executions without retaining their (large) arguments.
 const featureRuns = vi.hoisted(() => ({ count: 0 }));
-vi.mock("@/domain/modeling/occ/features", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/features", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/features")>();
+    await importOriginal<typeof import("@/infrastructure/occ/features")>();
   return {
     ...actual,
     executeOccFeature: (
@@ -35,7 +35,7 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

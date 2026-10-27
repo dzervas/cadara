@@ -26,7 +26,7 @@ test("lofts reuse canonical options, browser hydration/build and exact productio
   expect(cli).not.toMatch(
     /prepareLoftFeatureDefinition|executeLoftFeature|BRepOffsetAPI|addPathDrivenLoftSections/,
   );
-  const signatures = read("src/domain/modeling/occ/topology-signatures.ts");
+  const signatures = read("src/infrastructure/occ/topology-signatures.ts");
   expect(signatures).toContain('case "bSpline":');
   expect(signatures).not.toMatch(/BRepAdaptor|BRepOffsetAPI|sectionCount/);
 });

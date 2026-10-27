@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { OCC_ASSET_VERSION } from "../../src/domain/modeling/occ/asset-version";
+import { OCC_ASSET_VERSION } from "../../src/infrastructure/occ/asset-version";
 import { FeatureWorkbenchHarness } from "../helpers/feature-workbench";
 import {
   reachable,

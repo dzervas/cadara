@@ -3,8 +3,8 @@ import {
   type OpenCascadeInstance,
   type OpenCascadeInitializer,
   type OpenCascadeMainJS,
-} from "@/domain/modeling/occ/runtime";
-import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
+} from "@/infrastructure/occ/kernel-capabilities";
+import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/infrastructure/occ/assets";
 
 interface OpenCascadeDynamicLibraryHost {
   loadDynamicLibrary(

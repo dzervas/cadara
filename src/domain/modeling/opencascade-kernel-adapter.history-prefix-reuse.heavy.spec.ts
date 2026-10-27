@@ -40,9 +40,9 @@ import { expect, test, vi } from "vitest";
 
 // Counts feature executions without retaining their (large) arguments.
 const featureRuns = vi.hoisted(() => ({ count: 0 }));
-vi.mock("@/domain/modeling/occ/features", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/features", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/features")>();
+    await importOriginal<typeof import("@/infrastructure/occ/features")>();
   return {
     ...actual,
     executeOccFeature: (
@@ -55,10 +55,10 @@ vi.mock("@/domain/modeling/occ/features", async (importOriginal) => {
 });
 // Counts region profile faces built (snapshot meshing and feature profiles).
 const regionFaces = vi.hoisted(() => ({ count: 0 }));
-vi.mock("@/domain/modeling/occ/sketch-profile", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/sketch-profile", async (importOriginal) => {
   const actual =
     await importOriginal<
-      typeof import("@/domain/modeling/occ/sketch-profile")
+      typeof import("@/infrastructure/occ/sketch-profile")
     >();
   return {
     ...actual,

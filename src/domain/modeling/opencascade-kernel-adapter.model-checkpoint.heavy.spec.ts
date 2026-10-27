@@ -9,9 +9,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
 const featureRuns = vi.hoisted(() => ({ count: 0 }));
-vi.mock("@/domain/modeling/occ/features", async (importOriginal) => {
+vi.mock("@/infrastructure/occ/features", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/domain/modeling/occ/features")>();
+    await importOriginal<typeof import("@/infrastructure/occ/features")>();
   return {
     ...actual,
     executeOccFeature: (
@@ -36,7 +36,7 @@ import type {
   ModelCheckpointStore,
 } from "@/domain/modeling/model-checkpoint-store";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

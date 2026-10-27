@@ -1,7 +1,7 @@
 import {
   OccWorkerClient,
   type OccWorkerClientOptions,
-} from "@/domain/modeling/occ/worker-client";
+} from "@/infrastructure/occ/worker-client";
 import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 
 export function canUseOccModuleWorker() {

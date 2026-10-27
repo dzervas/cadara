@@ -132,9 +132,9 @@ import {
 import {
   executeOccFeature,
   type OccFeatureExecutionContext,
-} from "@/domain/modeling/occ/features";
-import { createOccTopologyProvenanceIndex } from "@/domain/modeling/occ/topology-stage";
-import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
+} from "@/infrastructure/occ/features";
+import { createOccTopologyProvenanceIndex } from "@/infrastructure/occ/topology-stage";
+import { trackNewSolidBody } from "@/infrastructure/occ/topology";
 import {
   NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
   nonAcceptedOffsetFeatureInputMessage,
@@ -183,14 +183,14 @@ import { collectSketchInteractionGeometry } from "@/core/sketch-interaction/geom
 import { collectSketchSnapGeometries } from "@/core/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
-import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
+import { buildOccRenderExport } from "@/infrastructure/occ/snapshot";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   buildRegionProfileFace,
   regionBoundaryBasisOfSketchRecord,
   releaseBuiltSketchProfileFace,
-} from "@/domain/modeling/occ/sketch-profile";
+} from "@/infrastructure/occ/sketch-profile";
 import { resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-curves";
 import {
   NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,

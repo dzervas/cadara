@@ -34,10 +34,10 @@ import {
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
-} from "@/domain/modeling/occ/authoring-state";
-import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
+} from "@/infrastructure/occ/authoring-state";
+import { extractPlanarFaceData } from "@/infrastructure/occ/planes";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
-import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
+import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { getTargetContributingFeatureIds } from "@/core/modeling/document-snapshot-view";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";

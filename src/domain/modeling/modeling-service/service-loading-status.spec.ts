@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { OccCleanupError } from "@/domain/modeling/occ/memory";
+import { OccCleanupError } from "@/infrastructure/occ/memory";
 import { noopPerformanceTelemetry } from "@/contracts/performance/telemetry";
 import { createInstrumentedModelingService } from "./instrumented-service";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";

@@ -1,4 +1,4 @@
-import type { OccCheckpointShapeRecord } from "@/domain/modeling/occ/authoring-checkpoint";
+import type { OccCheckpointShapeRecord } from "@/infrastructure/occ/authoring-checkpoint";
 
 /**
  * cadara-3sq.6: an optional, disposable store of evaluated native checkpoints

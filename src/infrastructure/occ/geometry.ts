@@ -1,0 +1,31 @@
+export {
+  add,
+  cross,
+  dot,
+  magnitude,
+  negate,
+  normalize,
+  scale,
+  subtract,
+  type Vec3,
+} from "@/core/modeling/vector-frame-math";
+
+export {
+  createPlaneAxes,
+  extractPlanarFaceData,
+  getSignedDistanceToSketchPlane,
+  mapSketchPointToWorld,
+  mapWorldPointToSketch,
+  toGpAx1,
+  toGpAx3,
+  toGpDir,
+  toGpPlane,
+  toGpPnt,
+  toGpVec,
+  toSketchPlaneFrameFromGpAx3,
+  toSketchPlaneFrameFromGpPlane,
+  toVec3FromGpPoint,
+  type ExtractedPlanarFaceData,
+  type OpenCascadePlaneAxes,
+  type SketchPlaneFrameInput,
+} from "@/infrastructure/occ/planes";

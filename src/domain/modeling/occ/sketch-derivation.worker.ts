@@ -16,16 +16,16 @@
  * thread never loads OCC for derivation.
  */
 import type { DocumentId } from "@/contracts/shared/ids";
-import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/domain/modeling/occ/assets";
-import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
+import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/infrastructure/occ/assets";
+import { createOpenCascadeNeutralCurveQueryCapability } from "@/infrastructure/occ/neutral-curve-query";
 import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   normalizeOccWorkerFailure,
   validateOccWorkerRequestEnvelope,
   type OccWorkerRequest,
   type OccWorkerResponse,
-} from "@/domain/modeling/occ/worker-protocol";
+} from "@/infrastructure/occ/worker-protocol";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 interface SketchDerivationWorkerScope {

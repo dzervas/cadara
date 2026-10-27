@@ -14,13 +14,13 @@ import {
   OccCheckpointUnsupportedError,
   decodeOccAuthoringCheckpoint,
   encodeOccAuthoringCheckpoint,
-} from "@/domain/modeling/occ/authoring-checkpoint";
-import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+} from "@/infrastructure/occ/authoring-checkpoint";
+import type { OccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   OccShapeSetCheckpointUnavailableError,
   OccShapeSetCheckpointWriteError,
-} from "@/domain/modeling/occ/shape-set-checkpoint";
+} from "@/infrastructure/occ/shape-set-checkpoint";
 
 /**
  * cadara-3sq.6: how the production OCC adapter consults and fills a

@@ -14,8 +14,8 @@ import {
 } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { RenderPoint3D } from "@/contracts/render/schema";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import { getOccTessellationTier } from "@/infrastructure/occ/tessellation";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";

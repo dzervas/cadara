@@ -10,8 +10,8 @@ import {
   parseNativeShimPayloadJson,
   type OccNativeShimPayload,
   type OpenCascadeNativeTopologyKernelHost,
-} from "@/domain/modeling/occ/native-topology-payload";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
+} from "@/infrastructure/occ/native-topology-payload";
+import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

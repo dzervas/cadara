@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 
-import type { OccWorkerRequest, OccWorkerResponse } from "./worker-protocol";
+import type { OccWorkerRequest, OccWorkerResponse } from "../../../infrastructure/occ/worker-protocol";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
 
 const owners = vi.hoisted(

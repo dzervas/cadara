@@ -4,7 +4,7 @@ import type { NeutralCurve } from "@/contracts/modeling/neutral-curve-query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { OpenCascadeKernelAdapter } from "./opencascade-kernel-adapter";
-import { OccWorkerClient } from "./occ/worker-client";
+import { OccWorkerClient } from "../../infrastructure/occ/worker-client";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_DOCUMENT_ID,

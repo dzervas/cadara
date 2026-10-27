@@ -3,8 +3,8 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
-import { OCC_ASSET_VERSION } from "../../src/domain/modeling/occ/assets";
-import { OCC_WASM_BYTE_LENGTH } from "../../src/domain/modeling/occ/asset-version";
+import { OCC_ASSET_VERSION } from "../../src/infrastructure/occ/assets";
+import { OCC_WASM_BYTE_LENGTH } from "../../src/infrastructure/occ/asset-version";
 
 function sha256Artifact(name: "cadara-occ.js" | "cadara-occ.wasm") {
   return createHash("sha256")

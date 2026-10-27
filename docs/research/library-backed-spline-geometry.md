@@ -40,14 +40,14 @@ The [layering ADR](../adr/0001-layered-runtime-boundaries.md#dependency-rules) f
 | Current path | Verified interpretation / consequence |
 | --- | --- |
 | [schema.ts](../../src/contracts/sketch/schema.ts), spline authored/solved variants, lines 359–373 and 1247–1256 | Fit/control-point ambiguity, degree `2 | 3`; no ordinary-spline tangent override or smooth-closure representation in those variants. |
-| [display.ts](../../src/domain/editor/sketch-session/display.ts), `sampleSplinePoints`, line 65; call near 728 | Separate edit-time sampler. |
-| [snapshot.ts](../../src/domain/modeling/occ/snapshot.ts), lines 2053–2054 | Finished spline rendering uses `entity.fitPoints` directly. |
-| [interaction geometry.ts](../../src/domain/sketch-interaction/geometry.ts), `sampleSplinePoints`, line 518 | Few points are interpreted as Bézier controls; larger sets use sampled Catmull–Rom spans. |
+| [display.ts](../../src/infrastructure/editor/sketch-session/display.ts), `sampleSplinePoints`, line 65; call near 728 | Separate edit-time sampler. |
+| [snapshot.ts](../../src/infrastructure/occ/snapshot.ts), lines 2053–2054 | Finished spline rendering uses `entity.fitPoints` directly. |
+| [interaction geometry.ts](../../src/core/sketch-interaction/geometry.ts), `sampleSplinePoints`, line 518 | Few points are interpreted as Bézier controls; larger sets use sampled Catmull–Rom spans. |
 | `solver-core.ts` (then `src/contracts/sketch/solver-core.ts`, now split under `src/core/sketch-solver/`), `pointSplineDistance`, line 767 | Distance to fit-point polyline, including projected spline operands. |
-| [snap-candidates.ts](../../src/domain/sketch-snapping/snap-candidates.ts), `nearestPointOnSpline`, line 1066 | Nearest point on the fit-point polyline. |
+| [snap-candidates.ts](../../src/core/sketch-snapping/snap-candidates.ts), `nearestPointOnSpline`, line 1066 | Nearest point on the fit-point polyline. |
 | [offset-geometry.ts](../../src/contracts/sketch/offset-geometry.ts), comment/function near 469, trim handling near 1241 | Offset interprets fit-point polylines; spline join/trim handling is not exact trimmed-cubic geometry. |
 | [region-extraction.ts](../../src/contracts/sketch/region-extraction.ts), `buildSegments`, near 562–682 | Ordinary spline boundaries are not admitted as curve segments. Existing traversal/nesting/diagnostics cannot simply be assumed sufficient for arbitrary crossings. |
-| [sketch-profile.ts](../../src/domain/modeling/occ/sketch-profile.ts), spline rejection near 287, 1085, 1394 | Local and projected spline profile consumption is rejected. |
+| [sketch-profile.ts](../../src/infrastructure/occ/sketch-profile.ts), spline rejection near 287, 1085, 1394 | Local and projected spline profile consumption is rejected. |
 | [custom recipe](../../opencascade-recipe.yaml), [custom declarations](../../public/cadara-occ.d.ts) | Required constructors are not bound. Runtime export check confirms absence (§6); references to spline handle types in declarations are not constructible bindings. |
 
 This verifies the central mismatch rather than relying only on the prior audit. Other consumers, including measurement and derived geometry, still require a call-site inventory during implementation; this is not a claim that every interpretation was exhaustively traced.

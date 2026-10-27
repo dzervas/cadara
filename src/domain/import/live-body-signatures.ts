@@ -7,7 +7,7 @@ import type { AuthoredFeatureTopologyLineage } from "@/contracts/modeling/author
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { BodyId, FaceId } from "@/contracts/shared/ids";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 
 export interface LiveBodySignatureDiagnostic {
   severity: "info" | "warning" | "error";
@@ -68,7 +68,7 @@ function deriveBodyMeshSignature(
 }
 
 function deriveFaceIncidence(
-  payload: import("@/domain/modeling/occ/native-topology-payload").OccNativeExactBrepPayload,
+  payload: import("@/infrastructure/occ/native-topology-payload").OccNativeExactBrepPayload,
 ): HistoryProbeFaceIncidence[] {
   const body = payload.brep.bodies[0];
   if (!body) return [];
