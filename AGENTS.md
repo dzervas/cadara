@@ -42,7 +42,7 @@ New docs go in the matching row. Files live in the repo, so links point only at 
 - Exceptions bubble to the error handling path (`reported-error-boundary`) or are handled with a visible outcome; every catch does one of the two.
 - UI: Mantine components and theme tokens first, Tailwind for layout glue, minimal custom CSS. Keep the dense dark CAD feel.
 - Presentational components stay free of scene logic, event contracts and event-loop concerns.
-- Keep files under 2000 lines and 50 KB so they fit one read; `test/static/file-size-budget.spec.ts` enforces it.
+- New files stay under 2000 lines and 50 KB so they fit one read (`test/static/file-size-budget.spec.ts`; older oversized files are listed there and may still change). Split along real responsibilities; never compress code to meet the number.
 - Name files after what they contain (`sketch-constraint-registry.ts`, not another `registry.ts`), never after the project phase that produced them. Rename when you touch a file anyway.
 - Comments state the invariant or the reason in words a reader without the tracker understands; ticket IDs and evidence paths belong in the commit message.
 

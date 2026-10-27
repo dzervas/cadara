@@ -1,374 +1,95 @@
-{
-  "docs/archive/onshape-importer-completion-plan.md": {
-    "lines": 3270,
-    "bytes": 212165
-  },
-  "docs/research/agent-modelling-interface.md": {
-    "lines": 432,
-    "bytes": 55622
-  },
-  "e2e/acceptance-annotations.spec.ts": {
-    "lines": 1349,
-    "bytes": 51612
-  },
-  "scripts/mutation-latency-benchmark.ts": {
-    "lines": 1735,
-    "bytes": 60560
-  },
-  "src/application/editor/editor-event-loop.spec.ts": {
-    "lines": 1740,
-    "bytes": 60094
-  },
-  "src/application/editor/sketch-authored-actions.spec.ts": {
-    "lines": 4828,
-    "bytes": 177379
-  },
-  "src/cli/commands/onshape-capture/references.ts": {
-    "lines": 1406,
-    "bytes": 52420
-  },
-  "src/components/cad/sketch-constraint-annotations.spec.tsx": {
-    "lines": 2504,
-    "bytes": 86096
-  },
-  "src/components/cad/three-cad-viewport-pick-candidates.spec.ts": {
-    "lines": 3075,
-    "bytes": 103764
-  },
-  "src/components/cad/three-cad-viewport.spec.ts": {
-    "lines": 1712,
-    "bytes": 54987
-  },
-  "src/components/cad/three-cad-viewport.tsx": {
-    "lines": 4335,
-    "bytes": 146373
-  },
-  "src/contracts/modeling/advanced-solid.spec.ts": {
-    "lines": 2132,
-    "bytes": 63922
-  },
-  "src/contracts/modeling/advanced-solid.ts": {
-    "lines": 1966,
-    "bytes": 59145
-  },
-  "src/contracts/modeling/neutral-curve-query.ts": {
-    "lines": 1615,
-    "bytes": 66157
-  },
-  "src/contracts/modeling/operation-history.spec.ts": {
-    "lines": 1680,
-    "bytes": 56317
-  },
-  "src/contracts/modeling/schema.ts": {
-    "lines": 1805,
-    "bytes": 65368
-  },
-  "src/contracts/sketch/derived-geometry.spec.ts": {
-    "lines": 1597,
-    "bytes": 51570
-  },
-  "src/contracts/sketch/derived-geometry.ts": {
-    "lines": 1837,
-    "bytes": 66233
-  },
-  "src/contracts/sketch/edit-intersections.spec.ts": {
-    "lines": 1718,
-    "bytes": 64169
-  },
-  "src/contracts/sketch/edit-intersections.ts": {
-    "lines": 1400,
-    "bytes": 53583
-  },
-  "src/contracts/sketch/mirror-requirements.spec.ts": {
-    "lines": 3730,
-    "bytes": 119631
-  },
-  "src/contracts/sketch/mirror-requirements.ts": {
-    "lines": 1912,
-    "bytes": 67311
-  },
-  "src/contracts/sketch/offset-chain-topology.heavy.spec.ts": {
-    "lines": 9232,
-    "bytes": 335470
-  },
-  "src/contracts/sketch/offset-chain-topology.ts": {
-    "lines": 4594,
-    "bytes": 177889
-  },
-  "src/contracts/sketch/offset-chain.fixtures.ts": {
-    "lines": 2158,
-    "bytes": 68334
-  },
-  "src/contracts/sketch/offset-derivation-frame.heavy.spec.ts": {
-    "lines": 3406,
-    "bytes": 126115
-  },
-  "src/contracts/sketch/offset-derivation-frame.ts": {
-    "lines": 2591,
-    "bytes": 97214
-  },
-  "src/contracts/sketch/region-extraction.heavy.spec.ts": {
-    "lines": 6140,
-    "bytes": 226237
-  },
-  "src/contracts/sketch/region-extraction.ts": {
-    "lines": 4437,
-    "bytes": 157582
-  },
-  "src/contracts/sketch/schema.ts": {
-    "lines": 1887,
-    "bytes": 77486
-  },
-  "src/contracts/sketch/solver-core-mirror.spec.ts": {
-    "lines": 2132,
-    "bytes": 77418
-  },
-  "src/contracts/sketch/solver-core.spec.ts": {
-    "lines": 8089,
-    "bytes": 262888
-  },
-  "src/contracts/sketch/solver-core.ts": {
-    "lines": 15948,
-    "bytes": 561226
-  },
-  "src/contracts/sketch/spline-geometry.spec.ts": {
-    "lines": 2346,
-    "bytes": 78814
-  },
-  "src/contracts/sketch/spline-geometry.ts": {
-    "lines": 1560,
-    "bytes": 57605
-  },
-  "src/contracts/sketch/spline-offset-geometry.spec.ts": {
-    "lines": 1880,
-    "bytes": 59388
-  },
-  "src/core/editor/state-machine/types.ts": {
-    "lines": 1652,
-    "bytes": 64853
-  },
-  "src/core/sketch-constraints/registry.ts": {
-    "lines": 3691,
-    "bytes": 105615
-  },
-  "src/domain/editor/sketch-geometry-editing.heavy.spec.ts": {
-    "lines": 7102,
-    "bytes": 254392
-  },
-  "src/domain/editor/sketch-mirror-editing.spec.ts": {
-    "lines": 2685,
-    "bytes": 104798
-  },
-  "src/domain/editor/sketch-offset-live-cutover.heavy.spec.ts": {
-    "lines": 9411,
-    "bytes": 360529
-  },
-  "src/domain/editor/sketch-session/annotations.ts": {
-    "lines": 4418,
-    "bytes": 134316
-  },
-  "src/domain/editor/sketch-session/display.ts": {
-    "lines": 1913,
-    "bytes": 60206
-  },
-  "src/domain/editor/sketch-session/editing.ts": {
-    "lines": 4509,
-    "bytes": 159160
-  },
-  "src/domain/editor/sketch-session/internals.ts": {
-    "lines": 2732,
-    "bytes": 85918
-  },
-  "src/domain/editor/sketch-session/tools.ts": {
-    "lines": 2448,
-    "bytes": 74857
-  },
-  "src/domain/editor/state-machine.spec.ts": {
-    "lines": 5885,
-    "bytes": 191233
-  },
-  "src/domain/feature-authoring/registry.spec.ts": {
-    "lines": 3138,
-    "bytes": 109861
-  },
-  "src/domain/import/kernel-history-probe.spec.ts": {
-    "lines": 1454,
-    "bytes": 57491
-  },
-  "src/domain/import/onshape/apply-pipeline.heavy.spec.ts": {
-    "lines": 6202,
-    "bytes": 221195
-  },
-  "src/domain/import/onshape/provider.heavy.spec.ts": {
-    "lines": 3683,
-    "bytes": 135991
-  },
-  "src/domain/import/onshape/provider.ts": {
-    "lines": 5254,
-    "bytes": 218373
-  },
-  "src/domain/import/onshape/sketch-translator.ts": {
-    "lines": 1995,
-    "bytes": 71272
-  },
-  "src/domain/import/onshape/wave-b-body-feature-translators.spec.ts": {
-    "lines": 1504,
-    "bytes": 66067
-  },
-  "src/domain/import/orchestrator.ts": {
-    "lines": 2031,
-    "bytes": 76512
-  },
-  "src/domain/measure/measurement.ts": {
-    "lines": 3495,
-    "bytes": 102495
-  },
-  "src/domain/modeling/document-repository.spec.ts": {
-    "lines": 1546,
-    "bytes": 56510
-  },
-  "src/domain/modeling/mock-kernel-adapter.spec.ts": {
-    "lines": 4621,
-    "bytes": 159839
-  },
-  "src/domain/modeling/mock-kernel-adapter.ts": {
-    "lines": 8498,
-    "bytes": 266555
-  },
-  "src/domain/modeling/modeling-service-document-repository.spec.ts": {
-    "lines": 2604,
-    "bytes": 95699
-  },
-  "src/domain/modeling/modeling-service/normalization.ts": {
-    "lines": 1708,
-    "bytes": 52504
-  },
-  "src/domain/modeling/modeling-service/service.ts": {
-    "lines": 3015,
-    "bytes": 107284
-  },
-  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.spec.ts": {
-    "lines": 8543,
-    "bytes": 290561
-  },
-  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.ts": {
-    "lines": 7428,
-    "bytes": 300730
-  },
-  "src/domain/modeling/neutral-curve-certification/fixed-degree-exact.ts": {
-    "lines": 2726,
-    "bytes": 87883
-  },
-  "src/domain/modeling/neutral-curve-certification/joined-pair.ts": {
-    "lines": 1758,
-    "bytes": 61232
-  },
-  "src/domain/modeling/neutral-curve-certification/query.spec.ts": {
-    "lines": 1596,
-    "bytes": 53774
-  },
-  "src/domain/modeling/occ/authoring-state.ts": {
-    "lines": 1512,
-    "bytes": 51759
-  },
-  "src/domain/modeling/occ/features.spec.ts": {
-    "lines": 6415,
-    "bytes": 217024
-  },
-  "src/domain/modeling/occ/features/boolean-operations.ts": {
-    "lines": 2424,
-    "bytes": 73164
-  },
-  "src/domain/modeling/occ/features/combine-split-delete.ts": {
-    "lines": 1515,
-    "bytes": 53097
-  },
-  "src/domain/modeling/occ/features/extrude.ts": {
-    "lines": 2096,
-    "bytes": 67637
-  },
-  "src/domain/modeling/occ/native-topology-payload.spec.ts": {
-    "lines": 1514,
-    "bytes": 52013
-  },
-  "src/domain/modeling/occ/neutral-curve-query.heavy.spec.ts": {
-    "lines": 3615,
-    "bytes": 105521
-  },
-  "src/domain/modeling/occ/production-asset-conformance.spec.ts": {
-    "lines": 2706,
-    "bytes": 93346
-  },
-  "src/domain/modeling/occ/sketch-profile.spec.ts": {
-    "lines": 2137,
-    "bytes": 72148
-  },
-  "src/domain/modeling/occ/sketch-profile.ts": {
-    "lines": 1659,
-    "bytes": 53841
-  },
-  "src/domain/modeling/occ/snapshot.spec.ts": {
-    "lines": 1660,
-    "bytes": 55998
-  },
-  "src/domain/modeling/occ/snapshot.ts": {
-    "lines": 2854,
-    "bytes": 84675
-  },
-  "src/domain/modeling/occ/topological-naming.spec.ts": {
-    "lines": 2658,
-    "bytes": 84317
-  },
-  "src/domain/modeling/occ/topology-naming.ts": {
-    "lines": 1768,
-    "bytes": 51841
-  },
-  "src/domain/modeling/occ/topology.ts": {
-    "lines": 2277,
-    "bytes": 69958
-  },
-  "src/domain/modeling/opencascade-kernel-adapter.ts": {
-    "lines": 7232,
-    "bytes": 228155
-  },
-  "src/domain/sketch-constraints/registry.spec.ts": {
-    "lines": 3274,
-    "bytes": 118706
-  },
-  "src/domain/sketch-editing/mirror-repair.spec.ts": {
-    "lines": 1602,
-    "bytes": 58066
-  },
-  "src/domain/sketch-editing/operations.spec.ts": {
-    "lines": 4558,
-    "bytes": 165413
-  },
-  "src/domain/sketch-editing/operations.ts": {
-    "lines": 4824,
-    "bytes": 152218
-  },
-  "src/domain/sketch-tools/registry.spec.ts": {
-    "lines": 1610,
-    "bytes": 52779
-  },
-  "src/domain/solver/mock-sketch-solver-adapter.ts": {
-    "lines": 1935,
-    "bytes": 62881
-  },
-  "src/infrastructure/modeling/semantic-sketch-port.ts": {
-    "lines": 1018,
-    "bytes": 68345
-  },
-  "src/infrastructure/viewport/render-picking.spec.ts": {
-    "lines": 1865,
-    "bytes": 54969
-  },
-  "src/infrastructure/workers/document-sync-worker-client.spec.ts": {
-    "lines": 1631,
-    "bytes": 53152
-  },
-  "src/workbench/shell/cad-workbench.tsx": {
-    "lines": 2048,
-    "bytes": 73906
-  }
-}
+[
+  "docs/archive/onshape-importer-completion-plan.md",
+  "docs/research/agent-modelling-interface.md",
+  "e2e/acceptance-annotations.spec.ts",
+  "scripts/mutation-latency-benchmark.ts",
+  "src/application/editor/editor-event-loop.spec.ts",
+  "src/application/editor/sketch-authored-actions.spec.ts",
+  "src/cli/commands/onshape-capture/references.ts",
+  "src/components/cad/sketch-constraint-annotations.spec.tsx",
+  "src/components/cad/three-cad-viewport-pick-candidates.spec.ts",
+  "src/components/cad/three-cad-viewport.spec.ts",
+  "src/components/cad/three-cad-viewport.tsx",
+  "src/contracts/modeling/advanced-solid.spec.ts",
+  "src/contracts/modeling/advanced-solid.ts",
+  "src/contracts/modeling/neutral-curve-query.ts",
+  "src/contracts/modeling/operation-history.spec.ts",
+  "src/contracts/modeling/schema.ts",
+  "src/contracts/sketch/derived-geometry.spec.ts",
+  "src/contracts/sketch/derived-geometry.ts",
+  "src/contracts/sketch/edit-intersections.spec.ts",
+  "src/contracts/sketch/edit-intersections.ts",
+  "src/contracts/sketch/mirror-requirements.spec.ts",
+  "src/contracts/sketch/mirror-requirements.ts",
+  "src/contracts/sketch/offset-chain-topology.heavy.spec.ts",
+  "src/contracts/sketch/offset-chain-topology.ts",
+  "src/contracts/sketch/offset-chain.fixtures.ts",
+  "src/contracts/sketch/offset-derivation-frame.heavy.spec.ts",
+  "src/contracts/sketch/offset-derivation-frame.ts",
+  "src/contracts/sketch/region-extraction.heavy.spec.ts",
+  "src/contracts/sketch/region-extraction.ts",
+  "src/contracts/sketch/schema.ts",
+  "src/contracts/sketch/solver-core-mirror.spec.ts",
+  "src/contracts/sketch/solver-core.spec.ts",
+  "src/contracts/sketch/solver-core.ts",
+  "src/contracts/sketch/spline-geometry.spec.ts",
+  "src/contracts/sketch/spline-geometry.ts",
+  "src/contracts/sketch/spline-offset-geometry.spec.ts",
+  "src/core/editor/state-machine/types.ts",
+  "src/core/sketch-constraints/registry.ts",
+  "src/domain/editor/sketch-geometry-editing.heavy.spec.ts",
+  "src/domain/editor/sketch-mirror-editing.spec.ts",
+  "src/domain/editor/sketch-offset-live-cutover.heavy.spec.ts",
+  "src/domain/editor/sketch-session/annotations.ts",
+  "src/domain/editor/sketch-session/display.ts",
+  "src/domain/editor/sketch-session/editing.ts",
+  "src/domain/editor/sketch-session/internals.ts",
+  "src/domain/editor/sketch-session/tools.ts",
+  "src/domain/editor/state-machine.spec.ts",
+  "src/domain/feature-authoring/registry.spec.ts",
+  "src/domain/import/kernel-history-probe.spec.ts",
+  "src/domain/import/onshape/apply-pipeline.heavy.spec.ts",
+  "src/domain/import/onshape/provider.heavy.spec.ts",
+  "src/domain/import/onshape/provider.ts",
+  "src/domain/import/onshape/sketch-translator.ts",
+  "src/domain/import/onshape/wave-b-body-feature-translators.spec.ts",
+  "src/domain/import/orchestrator.ts",
+  "src/domain/measure/measurement.ts",
+  "src/domain/modeling/document-repository.spec.ts",
+  "src/domain/modeling/mock-kernel-adapter.spec.ts",
+  "src/domain/modeling/mock-kernel-adapter.ts",
+  "src/domain/modeling/modeling-service-document-repository.spec.ts",
+  "src/domain/modeling/modeling-service/normalization.ts",
+  "src/domain/modeling/modeling-service/service.ts",
+  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.spec.ts",
+  "src/domain/modeling/neutral-curve-certification/cubic-tube-chain.ts",
+  "src/domain/modeling/neutral-curve-certification/fixed-degree-exact.ts",
+  "src/domain/modeling/neutral-curve-certification/joined-pair.ts",
+  "src/domain/modeling/neutral-curve-certification/query.spec.ts",
+  "src/domain/modeling/occ/authoring-state.ts",
+  "src/domain/modeling/occ/features.spec.ts",
+  "src/domain/modeling/occ/features/boolean-operations.ts",
+  "src/domain/modeling/occ/features/combine-split-delete.ts",
+  "src/domain/modeling/occ/features/extrude.ts",
+  "src/domain/modeling/occ/native-topology-payload.spec.ts",
+  "src/domain/modeling/occ/neutral-curve-query.heavy.spec.ts",
+  "src/domain/modeling/occ/production-asset-conformance.spec.ts",
+  "src/domain/modeling/occ/sketch-profile.spec.ts",
+  "src/domain/modeling/occ/sketch-profile.ts",
+  "src/domain/modeling/occ/snapshot.spec.ts",
+  "src/domain/modeling/occ/snapshot.ts",
+  "src/domain/modeling/occ/topological-naming.spec.ts",
+  "src/domain/modeling/occ/topology-naming.ts",
+  "src/domain/modeling/occ/topology.ts",
+  "src/domain/modeling/opencascade-kernel-adapter.ts",
+  "src/domain/sketch-constraints/registry.spec.ts",
+  "src/domain/sketch-editing/mirror-repair.spec.ts",
+  "src/domain/sketch-editing/operations.spec.ts",
+  "src/domain/sketch-editing/operations.ts",
+  "src/domain/sketch-tools/registry.spec.ts",
+  "src/domain/solver/mock-sketch-solver-adapter.ts",
+  "src/infrastructure/modeling/semantic-sketch-port.ts",
+  "src/infrastructure/viewport/render-picking.spec.ts",
+  "src/infrastructure/workers/document-sync-worker-client.spec.ts",
+  "src/workbench/shell/cad-workbench.tsx"
+]
