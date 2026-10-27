@@ -35,7 +35,6 @@
 // native hash ids where an in-session rebuild re-mints them, so normalized
 // comparisons first rename the session's ids to the cold open's through a
 // positional correspondence (test/helpers/topology-id-correspondence.ts).
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { expect, test, vi } from "vitest";
 
@@ -78,367 +77,20 @@ import type {
   FeatureDefinition,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
-import type {
-  DocumentVariableId,
-  FeatureId,
-  PreviewId,
-  SketchId,
-} from "@/contracts/shared/ids";
-import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
+import type { FeatureId, SketchId } from "@/contracts/shared/ids";
+
 import {
-  createTopologyIdCorrespondence,
-  renameTopologyIds,
-} from "../../../test/helpers/topology-id-correspondence";
-
-let occ: Promise<OpenCascadeInstance> | null = null;
-/** A production OCC adapter holding `document`. */
-async function open(document: AuthoredModelDocument) {
-  occ ??= (async () => {
-    const module =
-      (await import("../../../public/cadara-occ.js")) as unknown as {
-        default: new (
-          module: Record<string, unknown>,
-        ) => Promise<OpenCascadeInstance>;
-      };
-    const wasmBinary = new Uint8Array(
-      await readFile(
-        new URL("../../../public/cadara-occ.wasm", import.meta.url),
-      ),
-    );
-    return new module.default({ wasmBinary });
-  })();
-  const instance = occ;
-  const adapter = new OpenCascadeKernelAdapter({
-    documentId: document.documentId,
-    getOpenCascadeInstance: () => instance,
-    createSolverAdapter: (revisionId) =>
-      new SketchConstraintSolverAdapter({
-        revisionId,
-        documentId: document.documentId,
-        neutralCurveQueries:
-          createCertifiedNeutralCurveQueryCapabilityForTest(),
-      }),
-  });
-  await adapter.restoreAuthoredModelDocument(document);
-  const request = {
-    contractVersion: CONTRACT_VERSION,
-    documentId: document.documentId,
-  } as const;
-  const snapshot = async () =>
-    (await adapter.getDocumentSnapshot(request)).snapshot;
-  const mutation = async () => ({
-    ...request,
-    baseRevisionId: (await snapshot()).document.revisionId,
-  });
-  const accepted = (
-    response: { revisionState: { kind: string } },
-    what: string,
-  ) => expect(response.revisionState.kind, what).toBe("accepted");
-  return {
-    adapter,
-    snapshot,
-    exported: () => adapter.exportAuthoredModelDocument(document.documentId),
-    restore: (restored: AuthoredModelDocument) =>
-      adapter.restoreAuthoredModelDocument(restored),
-    async setCursor(cursor: AuthoredModelDocument["cursor"]) {
-      accepted(
-        await adapter.setFeatureCursor({ ...(await mutation()), cursor }),
-        "cursor set",
-      );
-    },
-    async create(definition: FeatureDefinition) {
-      const response = await adapter.createFeature({
-        ...(await mutation()),
-        definition,
-      });
-      accepted(response, "feature created");
-      return response.featureId;
-    },
-    async deleteFeature(featureId: FeatureId) {
-      accepted(
-        await adapter.deleteTarget({
-          ...(await mutation()),
-          target: { kind: "feature", featureId },
-        }),
-        "feature deleted",
-      );
-    },
-    async update(featureId: FeatureId, definition: FeatureDefinition) {
-      accepted(
-        await adapter.updateFeature({
-          ...(await mutation()),
-          featureId,
-          definition,
-        }),
-        "feature updated",
-      );
-    },
-    async addVariable(name: string, valueText: string) {
-      const response = await adapter.addDocumentVariable({
-        ...(await mutation()),
-        name,
-        valueText,
-      });
-      accepted(response, "variable added");
-      return response.variableId;
-    },
-    async setVariable(
-      variableId: DocumentVariableId,
-      name: string,
-      valueText: string,
-    ) {
-      accepted(
-        await adapter.updateDocumentVariable({
-          ...(await mutation()),
-          variableId,
-          name,
-          valueText,
-        }),
-        "variable updated",
-      );
-    },
-    async removeVariable(variableId: DocumentVariableId) {
-      accepted(
-        await adapter.removeDocumentVariable({
-          ...(await mutation()),
-          variableId,
-        }),
-        "variable removed",
-      );
-    },
-    async preview(
-      definition: FeatureDefinition,
-      replacesFeatureId: FeatureId | null,
-    ) {
-      return adapter.evaluatePreview({
-        ...(await mutation()),
-        previewId: "preview_afj3" as PreviewId,
-        replacesFeatureId,
-        definition,
-      });
-    },
-  };
-}
-
-type Session = Awaited<ReturnType<typeof open>>;
-
-/** Features whose unapplied stage keeps its checkpoint (cadara-vjcv). */
-const keptTailCheckpoints = (session: Session) =>
-  [
-    ...(
-      session.adapter as unknown as {
-        runtimeState: {
-          authoringState: {
-            previousFeatureTopologyStages: ReadonlyMap<
-              FeatureId,
-              { checkpoint?: unknown }
-            >;
-          };
-        };
-      }
-    ).runtimeState.authoringState.previousFeatureTopologyStages,
-  ].flatMap(([featureId, stage]) => (stage.checkpoint ? [featureId] : []));
-
-/** Live bodies of the adapter's runtime state (premise checks only). */
-const runtimeBodies = (session: Session) =>
-  (
-    session.adapter as unknown as {
-      runtimeState: { authoringState: { bodies: readonly OccTrackedBody[] } };
-    }
-  ).runtimeState.authoringState.bodies;
-
-/** Topology tokens are normalized unless `tokens` is "exact" (restores). */
-type TokenComparison = "normalized" | "exact";
-const normalize = (text: string, tokens: TokenComparison = "normalized") =>
-  tokens === "exact"
-    ? text.replace(/rev_\d+/g, "rev")
-    : text
-        .replace(/rev_\d+/g, "rev")
-        .replace(/_t\d+_(\d+)/g, "_t_$1")
-        .replace(/"t\d+"/g, '"t"');
-const sorted = (values: readonly unknown[]) =>
-  values.map((value) => JSON.stringify(value)).sort();
-
-/** The evaluated model: bodies, objects, features, entities, live references
- * (and invalidated ones too when `tokens` is "exact"), diagnostics, and a
- * digest of every render record's geometry. `rename` maps topology ids first. */
-function evaluatedModel(
-  snapshot: WorkspaceSnapshot,
-  tokens: TokenComparison = "normalized",
-  rename: (text: string) => string = (text) => text,
-) {
-  const value = JSON.parse(
-    normalize(
-      rename(
-        JSON.stringify({
-          ...snapshot,
-          document: { ...snapshot.document, render: null },
-        }),
-      ),
-      tokens,
-    ),
-  ) as WorkspaceSnapshot;
-  return {
-    bodies: value.document.bodies,
-    objects: value.presentation.objects,
-    featureTree: value.presentation.featureTree,
-    features: value.document.features,
-    entities: sorted(value.document.entities),
-    references: sorted(
-      value.document.references.filter(
-        (reference) => tokens === "exact" || reference.invalidation === null,
-      ),
-    ),
-    diagnostics: value.document.diagnostics,
-    geometry: snapshot.document.render.records
-      .map(
-        ({ geometry, ...record }) =>
-          `${normalize(rename(JSON.stringify(record)), tokens)} ${createHash(
-            "sha256",
-          )
-            .update(JSON.stringify(geometry))
-            .digest("hex")}`,
-      )
-      .sort(),
-  };
-}
-
-/** The evaluated model with exact topology tokens and only live references:
- * invalidated ones depend on session history. */
-const shownModel = (snapshot: WorkspaceSnapshot) => {
-  const model = evaluatedModel(snapshot, "exact");
-  return {
-    ...model,
-    references: model.references.filter((reference) =>
-      reference.includes('"invalidation":null'),
-    ),
-  };
-};
-
-/** A preview's diagnostics and a digest of every render record's geometry. */
-const previewModel = (preview: Awaited<ReturnType<Session["preview"]>>) => ({
-  diagnostics: JSON.parse(
-    normalize(JSON.stringify(preview.diagnostics)),
-  ) as unknown,
-  geometry: preview.render.records
-    .map(
-      ({ geometry, ...record }) =>
-        `${normalize(JSON.stringify(record))} ${createHash("sha256")
-          .update(JSON.stringify(geometry))
-          .digest("hex")}`,
-    )
-    .sort(),
-});
-
-const authored = (
-  document: AuthoredModelDocument,
-  tokens: TokenComparison = "normalized",
-  rename: (text: string) => string = (text) => text,
-) =>
-  JSON.parse(
-    normalize(rename(JSON.stringify(document)), tokens),
-  ) as AuthoredModelDocument;
-
-/**
- * Drops what a session deliberately keeps for features behind the cursor and a
- * cold open of the rolled-back document cannot know: their produced targets
- * and keyed lineage from their last evaluation ("unapplied, not forgotten",
- * tryBuildNextAuthoringState). Main differs from a cold open there too.
- */
-function withoutRetainedEvaluation<
-  T extends {
-    features?: unknown;
-    topologyLineage?: readonly { featureId: FeatureId }[];
-  },
->(value: T, unapplied: ReadonlySet<FeatureId>): T {
-  const features = value.features as
-    | { featureId: FeatureId; producedTargets?: unknown }[]
-    | undefined;
-  return {
-    ...value,
-    features: features?.map((feature) =>
-      unapplied.has(feature.featureId)
-        ? { ...feature, producedTargets: null }
-        : feature,
-    ),
-    topologyLineage: value.topologyLineage?.filter(
-      (record) => !unapplied.has(record.featureId),
-    ),
-  };
-}
-
-/**
- * Asserts the session equals a cold open of `expected` (the edited document
- * built from the previous export, not from the session): the evaluated model
- * and the authored export, keyed topology lineage included.
- */
-async function expectColdEquivalent(
-  session: Session,
-  expected: AuthoredModelDocument,
-  step: string,
-  tokens: TokenComparison = "normalized",
-) {
-  const unapplied = new Set(
-    expected.featureOrder.filter(
-      (featureId) => !appliedFeatureIds(expected).includes(featureId),
-    ),
-  );
-  const cold = await open(expected);
-  try {
-    const live = {
-      snapshot: await session.snapshot(),
-      document: withoutRetainedEvaluation(await session.exported(), unapplied),
-    };
-    const reference = {
-      snapshot: await cold.snapshot(),
-      document: withoutRetainedEvaluation(await cold.exported(), unapplied),
-    };
-    // Exact comparisons keep the id form; normalized ones accept either valid
-    // form at each position, paired one to one per position.
-    const correspondence =
-      tokens === "exact"
-        ? new Map<string, string>()
-        : createTopologyIdCorrespondence(live, reference);
-    const rename = (text: string) => renameTopologyIds(text, correspondence);
-    expect(
-      withoutRetainedEvaluation(
-        evaluatedModel(live.snapshot, tokens, rename),
-        unapplied,
-      ),
-      `${step}: the session evaluates the same model as a cold open`,
-    ).toEqual(
-      withoutRetainedEvaluation(
-        evaluatedModel(reference.snapshot, tokens),
-        unapplied,
-      ),
-    );
-    expect(
-      authored(live.document, tokens, rename),
-      `${step}: and exports the same authored document and lineage`,
-    ).toEqual(authored(reference.document, tokens));
-  } finally {
-    cold.adapter.dispose();
-  }
-}
-
-const appliedFeatureIds = (document: AuthoredModelDocument) => {
-  const cursor = document.cursor;
-  const end = document.historyOrder.findIndex((item) =>
-    cursor.kind === "feature"
-      ? item.kind === "feature" && item.featureId === cursor.featureId
-      : cursor.kind === "sketch" &&
-        item.kind === "sketch" &&
-        item.sketchId === cursor.sketchId,
-  );
-  return document.historyOrder
-    .slice(0, end + 1)
-    .flatMap((item) => (item.kind === "feature" ? [item.featureId] : []));
-};
+  appliedFeatureIds,
+  evaluatedModel,
+  expectColdEquivalent,
+  keptTailCheckpoints,
+  occInstance,
+  open,
+  previewModel,
+  runtimeBodies,
+  type Session,
+  shownModel,
+} from "../../../test/helpers/occ-history-prefix-reuse-session";
 
 const tailPlane: FeatureDefinition = {
   featureTypeVersion: "feature-type/plane/v1alpha1",
@@ -938,7 +590,7 @@ test("snapshots after a cursor rollback it already showed, the Roll To End back,
   const session = await open(source);
   // Bodies whose native topology payload (triangles + ids) the snapshot built.
   const native = (
-    (await occ!) as unknown as {
+    (await occInstance()) as unknown as {
       CadaraBuildNativeTopologyPayload: {
         BuildJson: (...args: unknown[]) => string;
       };
@@ -1143,7 +795,7 @@ async function restoreAndSnapshot(
   document: AuthoredModelDocument,
 ) {
   const native = (
-    (await occ!) as unknown as {
+    (await occInstance()) as unknown as {
       CadaraBuildNativeTopologyPayload: {
         BuildJson: (...args: unknown[]) => string;
       };
@@ -1360,6 +1012,47 @@ test("a restore reuses a face sketch whose prefix is unchanged and re-places it 
     await session.restore(opened);
     expect(await faceSketchZ(), "undo puts it back").toBeCloseTo(topZ, 6);
     await expectColdEquivalent(session, opened, "undo", "exact");
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+// Finish Sketch publishes the sketch and then restores the committed document
+// (service.ts restorePublished). The restore must not replay the history to
+// re-solve a sketch that reads no upstream geometry: on the enclosure that
+// replay cost 8 s per Finish Sketch.
+test("a restore of the session's own export after a new base-plane sketch at the tail evaluates and meshes nothing (cadara-zs79)", async () => {
+  const source = await loadLandingModel("enclosure");
+  const session = await open(source);
+  try {
+    await session.snapshot();
+    const footprint = source.sketches[0]!;
+    expect(
+      [footprint.plane.support.kind, footprint.definition.references.length],
+      "premise: the copied sketch sits on a construction plane without references",
+    ).toEqual(["construction", 0]);
+    const sketchId = await session.commitSketch({
+      label: "Unrelated",
+      plane: footprint.plane,
+      definition: footprint.definition,
+    });
+    const committed = await session.snapshot();
+    expect(
+      committed.document.sketches.find((sketch) => sketch.sketchId === sketchId)
+        ?.sketch.regions.length,
+      "premise: the committed sketch has regions to mesh",
+    ).toBeGreaterThan(0);
+    const exported = await session.exported();
+    expect(
+      exported.historyOrder.at(-1),
+      "premise: the sketch is the history tail",
+    ).toEqual({ kind: "sketch", sketchId });
+
+    expect(
+      await restoreAndSnapshot(session, exported),
+      "restoring the publication of a reference-free sketch evaluates and meshes nothing",
+    ).toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+    await expectColdEquivalent(session, exported, "published sketch", "exact");
   } finally {
     session.adapter.dispose();
   }

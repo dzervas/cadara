@@ -350,6 +350,17 @@ function serializeCurrentOccTopologyLineage(state: OccAuthoringState) {
   );
 }
 
+function createAuthoredSketch(
+  sketch: SketchSnapshotRecord,
+): AuthoredModelDocument["sketches"][number] {
+  return {
+    sketchId: sketch.sketchId,
+    label: sketch.label,
+    plane: structuredClone(sketch.plane),
+    definition: structuredClone(sketch.sketch.definition),
+  };
+}
+
 function createAuthoredModelDocumentFromAuthoringState(
   state: OccAuthoringState,
 ): AuthoredModelDocument {
@@ -365,12 +376,7 @@ function createAuthoredModelDocumentFromAuthoringState(
       angularToleranceRadians: state.angularToleranceRadians,
     },
     variables: structuredClone([...state.variables]),
-    sketches: state.sketches.map((sketch) => ({
-      sketchId: sketch.sketchId,
-      label: sketch.label,
-      plane: structuredClone(sketch.plane),
-      definition: structuredClone(sketch.sketch.definition),
-    })),
+    sketches: state.sketches.map(createAuthoredSketch),
     features: state.features.map((feature) => ({
       featureId: feature.featureId,
       label: feature.label ?? feature.featureId,
@@ -1120,10 +1126,20 @@ function isSameRestoredSketchInputs(
   );
 }
 
+/** Whether a sketch's placement or projections read upstream geometry. */
+function sketchReadsUpstreamGeometry(
+  sketch: Pick<AuthoredModelDocument["sketches"][number], "plane" | "definition">,
+) {
+  return (
+    sketch.plane.support.kind === "face" ||
+    sketch.definition.references.length > 0
+  );
+}
+
 /** The RestoredSketchInputs key of `sketch` itself. Keys are stable JSON:
  * stored documents do not keep object key order. */
 function createRestoredSketchKey(
-  document: AuthoredModelDocument,
+  document: Pick<AuthoredModelDocument, "documentId" | "settings" | "variables">,
   sketch: AuthoredModelDocument["sketches"][number],
 ) {
   return JSON.stringify(
@@ -3190,11 +3206,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           const sketchKey = createRestoredSketchKey(document, authoredSketch);
           const inputs: RestoredSketchInputs = {
             sketch: sketchKey,
-            history:
-              authoredSketch.plane.support.kind === "face" ||
-              authoredSketch.definition.references.length > 0
-                ? readSketchHistory()
-                : null,
+            history: sketchReadsUpstreamGeometry(authoredSketch)
+              ? readSketchHistory()
+              : null,
           };
           pendingSketchHistory.push(() => sketchKey);
           const liveSketch = liveSketchById.get(authoredSketch.sketchId);
@@ -3207,6 +3221,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           ) {
             sketches.push(liveSketch);
             pendingProjection.push({ kind: "sketch", sketch: liveSketch });
+            continue;
+          }
+
+          // A sketch that reads no upstream geometry solves the same against
+          // any projection state: its placement is its authored frame and it
+          // projects nothing. Re-solving it must not evaluate the pending
+          // history (on the enclosure, 8 s per Finish Sketch, cadara-zs79).
+          if (inputs.history === null) {
+            const rebuiltSketch = await this.rebuildAuthoredSketchRecord(
+              document,
+              authoredSketch,
+              projectionState,
+            );
+            this.restoredSketchInputs.set(rebuiltSketch, inputs);
+            sketches.push(rebuiltSketch);
+            pendingProjection.push({ kind: "sketch", sketch: rebuiltSketch });
             continue;
           }
 
@@ -5181,6 +5211,29 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       derivedValidity,
       projectedReferences,
     );
+    // The publication of this commit restores the document it produced
+    // (cadara-zs79). Let that restore reuse this record as one it solved
+    // itself when no upstream geometry feeds the sketch; a face sketch's key
+    // needs the restore's own history items and is re-solved there.
+    const authoredRecord = createAuthoredSketch(snapshotRecord);
+    if (!sketchReadsUpstreamGeometry(authoredRecord)) {
+      this.restoredSketchInputs.set(snapshotRecord, {
+        sketch: createRestoredSketchKey(
+          {
+            documentId: this.documentId,
+            settings: {
+              linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
+              modelingTolerance: runtimeState.authoringState.modelingTolerance,
+              angularToleranceRadians:
+                runtimeState.authoringState.angularToleranceRadians,
+            },
+            variables: [...runtimeState.authoringState.variables],
+          },
+          authoredRecord,
+        ),
+        history: null,
+      });
+    }
     const isNewSketch = !runtimeState.authoringState.sketches.some(
       (entry) => entry.sketchId === sketchId,
     );
