@@ -16,7 +16,7 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:logic:coverage` emits the non-UI coverage report from the logic lane only.
 - `bun run test:ui` runs UI-local and browser-adjacent Bun specs.
 - `bun run test:static` runs repository policy guards under `test/static/`.
-- `bun run test:heavy` runs the heavy tier: `*.heavy.spec.ts` and the CLI subprocess specs under `src/cli/`, against a CLI bundle built once per run. Minutes, not seconds; final pass only.
+- `bun run test:heavy` runs the heavy tier: `*.heavy.spec.ts` and the CLI subprocess specs under `src/cli/`, against a CLI bundle built once per run. Minutes, not seconds; run it when the change calls for it (see Choosing validation lanes).
 - `bun run test:heavy:acceptance` is the heavy tier plus the opt-in full-import acceptance rows gated on `CADARA_FULL_IMPORT_ACCEPTANCE=1` (today: the ~18-minute 9841 real-OCC apply row); routine `test:heavy` / `test:all` skip them.
 - `bun run test:e2e` runs the fast Playwright browser lane with four workers; real-capture acceptance specs are excluded.
 - `bun run test:e2e:offline` builds the app with the debug platform on (`vite.offline-test.config.ts`, into `.tmp-offline-dist/`) and runs `e2e/offline/` against `vite preview` of that build, cutting the network after load; it is outside `test:all`.
@@ -25,7 +25,21 @@ This repository does not treat all tests as the same kind of asset. Choose the t
 - `bun run test:e2e:real-captures:diagnostic` runs that acceptance lane with retained failure traces and video.
 - `bun run test:e2e:all` runs the fast and real-capture Playwright lanes sequentially.
 - `bun run test:kernel-limitations` runs the expected-to-fail kernel-limitation specs (see "Kernel limitations"); it is outside every other command, including `test:all`.
-- `bun run test:all:acceptance` runs every validation lane, including real captures and the gated full-import acceptance rows; `bun run test:all` is the final pass: lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
+- `bun run test:all:acceptance` runs every validation lane, including real captures and the gated full-import acceptance rows; `bun run test:all` runs lint, build, spec typecheck, `test`, `test:heavy`, and the fast E2E lane.
+
+## Choosing validation lanes
+
+Every change runs `bun run test` and lints its touched files. Slower lanes cost minutes to tens of minutes and compete for the host (see Tiers), so add only the ones the change touches:
+
+| The change touches | Also run |
+| --- | --- |
+| Types shared across modules, specs excluded from the normal typecheck | `bun run typecheck:specs` |
+| Build config, `package.json`, Vite/TS config, service worker, assets | `bun run build` |
+| OCC kernel, modeling service, semantic session/schema/ports, importers, CLI, any `*.heavy.spec.ts` | `bun run test:heavy` |
+| UI, viewport, overlays, notifications, pointer handling, E2E helpers or hooks, sketch drag/solve (`solver-core*`) | `bun run test:e2e` |
+| Several rows above, a dependency upgrade, or a large cross-cutting move | `bun run test:all` |
+
+Docs-only changes need no test run beyond the static guards they could affect (`bun run test:static`). When unsure whether a row applies, run its lane rather than all of `test:all`.
 
 ## Tiers
 

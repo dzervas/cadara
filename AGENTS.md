@@ -43,6 +43,8 @@ New docs go in the matching row. Files live in the repo, so links point only at 
 - UI: Mantine components and theme tokens first, Tailwind for layout glue, minimal custom CSS. Keep the dense dark CAD feel.
 - Presentational components stay free of scene logic, event contracts and event-loop concerns.
 - Keep files under 2000 lines and 50 KB so they fit one read; `test/static/file-size-budget.spec.ts` enforces it.
+- Name files after what they contain (`sketch-constraint-registry.ts`, not another `registry.ts`), never after the project phase that produced them. Rename when you touch a file anyway.
+- Comments state the invariant or the reason in words a reader without the tracker understands; ticket IDs and evidence paths belong in the commit message.
 
 ## Testing
 
@@ -50,4 +52,4 @@ New docs go in the matching row. Files live in the repo, so links point only at 
 2. Before editing tests, state the lane (`logic`, `ui`, `e2e`, `static`), the seam under test and why that lane fits.
 3. In the final response, confirm `docs/testing.md` was reviewed, the lane used and the seam covered.
 
-Vitest runs through `bun run test`, never `bun test`. While working, run `bun run test` (about a minute). Before handing off, run `bun run test:all`: it is the only pass that runs the heavy and E2E tiers.
+Vitest runs through `bun run test`, never `bun test`. Run `bun run test` (about a minute) while working and before handing off. Add the slower lanes your change calls for, chosen with the table in `docs/testing.md` (Choosing validation lanes); `bun run test:all` is for changes that cross several of those areas.
