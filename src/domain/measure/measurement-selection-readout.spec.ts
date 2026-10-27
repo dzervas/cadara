@@ -28,7 +28,7 @@ import {
 import type { EditorCommandToolId } from "@/core/editor/state-machine/types";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
-import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
+import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
 import {
   deriveMeasurementViewModel,
   getMeasurementReadoutSource,

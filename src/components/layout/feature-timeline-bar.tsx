@@ -43,7 +43,7 @@ import {
   getSketchHistoryItems,
   type SketchHistoryItem,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { useEditorState } from "@/hooks/use-editor-state";
 import {
   getDocumentHistoryMenuEntryDescriptors,

@@ -13,7 +13,7 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

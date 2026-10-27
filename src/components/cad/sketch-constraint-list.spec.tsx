@@ -6,7 +6,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getSketchAnnotationListRows,
   type SketchAnnotationDescriptor,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { SketchConstraintList } from "./sketch-constraint-list";
 
 // T14e, UI lane (component markup seam `SketchConstraintList`, rows from the

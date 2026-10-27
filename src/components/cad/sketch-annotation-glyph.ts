@@ -1,4 +1,4 @@
-import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
+import type { SketchAnnotationDescriptor } from "@/core/editor/sketch-session";
 import { getToolIconAssetFileName } from "@/core/tools/tool-icons";
 import { getSketchRenderingPaletteToken } from "@/components/cad/sketch-rendering-palette";
 

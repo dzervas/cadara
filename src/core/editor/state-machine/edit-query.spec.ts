@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
-import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/edit-queries";
+import { prepareSketchIntersectionEdit } from "@/core/editor/sketch-session/edit-queries";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
@@ -18,11 +18,11 @@ import {
   updateSketchPointer,
   updateSketchEditToolHover,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   editQueryStaleMessage,
   TRIM_STALE_MESSAGE,
-} from "@/domain/editor/sketch-session/edit-queries";
+} from "@/core/editor/sketch-session/edit-queries";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -43,7 +43,7 @@ import type {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 // Logic lane (core seam): the Trim tool's exact edit query through the
 // post-transition emitter, the effect executor and the result handlers

@@ -21,7 +21,7 @@ import {
   type SketchAnnotationContext,
   type SketchAnnotationDescriptor,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,

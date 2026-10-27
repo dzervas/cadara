@@ -42,7 +42,7 @@ import {
   computeSketchCloseSplineState,
   clearActiveSketchTool,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -53,10 +53,10 @@ import { encodeAuthoredActionState } from "@/core/modeling/authored-action-histo
 import {
   appendReferenceImageOperations,
   updateReferenceImageOperationStates,
-} from "@/domain/editor/sketch-session/references";
+} from "@/core/editor/sketch-session/references";
 import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getEnterEvent,
@@ -65,7 +65,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import {
   eid,
   entityRef,

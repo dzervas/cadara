@@ -7,7 +7,7 @@
 import { Button } from "@mantine/core";
 
 import { SketchSelectionContextPanel } from "@/components/cad/sketch-selection-context";
-import type { SketchOffsetActionEntry } from "@/domain/editor/sketch-session";
+import type { SketchOffsetActionEntry } from "@/core/editor/sketch-session";
 
 const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;

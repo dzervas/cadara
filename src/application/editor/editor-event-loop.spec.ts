@@ -21,7 +21,7 @@ import {
   getSketchSessionPreviewLabel,
   startSketchDraw,
   withLiveSolveBasis,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,

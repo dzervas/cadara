@@ -1,4 +1,4 @@
-import { canUndoSketchDraftPoint } from "@/domain/editor/sketch-session";
+import { canUndoSketchDraftPoint } from "@/core/editor/sketch-session";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getNextDocumentHistoryCursor,

@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 test("browser and explicit offsets share canonical construction, expression-resolved certification basis and authored application", () => {
-  const owner = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
+  const owner = ["src/core/editor/sketch-session/geometry-deletion.ts", "src/core/editor/sketch-session/offset-editing.ts", "src/core/editor/sketch-session/edit-geometry-operations.ts", "src/core/editor/sketch-session/point-merge.ts", "src/core/editor/sketch-session/mirror-editing.ts", "src/core/editor/sketch-session/edit-queries.ts", "src/core/editor/sketch-session/edit-tool-interaction.ts", "src/core/editor/sketch-session/geometry-drag.ts", "src/core/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   expect(
     owner.match(/createSketchOffsetDerivationContribution\(/g),
   ).toHaveLength(1);
@@ -29,7 +29,7 @@ test("browser and explicit offsets share canonical construction, expression-reso
   expect(owner).toContain(
     "session.liveRegions.generation !== prepared.generation",
   );
-  const basis = ["src/domain/editor/sketch-session/session-definition.ts", "src/domain/editor/sketch-session/session-live-solve.ts", "src/domain/editor/sketch-session/draft-entity-geometry.ts", "src/domain/editor/sketch-session/definition-authoring.ts", "src/domain/editor/sketch-session/session-feedback.ts", "src/domain/editor/sketch-session/tool-placement.ts", "src/domain/editor/sketch-session/tool-authoring.ts"].map(read).join("\n");
+  const basis = ["src/core/editor/sketch-session/session-definition.ts", "src/core/editor/sketch-session/session-live-solve.ts", "src/core/editor/sketch-session/draft-entity-geometry.ts", "src/core/editor/sketch-session/definition-authoring.ts", "src/core/editor/sketch-session/session-feedback.ts", "src/core/editor/sketch-session/tool-placement.ts", "src/core/editor/sketch-session/tool-authoring.ts"].map(read).join("\n");
   expect(basis).toContain("resolveSketchDefinitionForSolve(");
   expect(basis).toContain("isOffsetPublicationSolveAccepted(solvedSnapshot)");
   const adapter = read("src/infrastructure/modeling/semantic-sketch-port.ts");
@@ -82,15 +82,15 @@ test("relationship label aliases delegate to the application resolver, not termi
   for (const source of [
     read("src/cli/commands/document-recipes.ts"),
     [
-      "src/domain/editor/sketch-session/geometry-deletion.ts",
-      "src/domain/editor/sketch-session/offset-editing.ts",
-      "src/domain/editor/sketch-session/edit-geometry-operations.ts",
-      "src/domain/editor/sketch-session/point-merge.ts",
-      "src/domain/editor/sketch-session/mirror-editing.ts",
-      "src/domain/editor/sketch-session/edit-queries.ts",
-      "src/domain/editor/sketch-session/edit-tool-interaction.ts",
-      "src/domain/editor/sketch-session/geometry-drag.ts",
-      "src/domain/editor/sketch-session/drag-solve.ts",
+      "src/core/editor/sketch-session/geometry-deletion.ts",
+      "src/core/editor/sketch-session/offset-editing.ts",
+      "src/core/editor/sketch-session/edit-geometry-operations.ts",
+      "src/core/editor/sketch-session/point-merge.ts",
+      "src/core/editor/sketch-session/mirror-editing.ts",
+      "src/core/editor/sketch-session/edit-queries.ts",
+      "src/core/editor/sketch-session/edit-tool-interaction.ts",
+      "src/core/editor/sketch-session/geometry-drag.ts",
+      "src/core/editor/sketch-session/drag-solve.ts",
     ]
       .map(read)
       .join("\n"),

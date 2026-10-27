@@ -93,8 +93,8 @@ import {
   updateSketchPointer,
   updateSketchReferenceProjection,
   type SketchSessionState
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   completeSketchEditQueriesForTest,
   deriveSketchRegionsForTest,
@@ -109,18 +109,18 @@ import {
   type SketchEditorState,
 } from "@/core/editor/state-machine";
 import { runEditorEffect } from "@/application/editor/effect-registry";
-import { previewSketchPlacement } from "@/domain/editor/sketch-session/drawing-pointer";
+import { previewSketchPlacement } from "@/core/editor/sketch-session/drawing-pointer";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
-} from "@/domain/editor/sketch-session/geometry-deletion";
-import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/edit-geometry-operations";
+} from "@/core/editor/sketch-session/geometry-deletion";
+import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/core/editor/sketch-session/edit-geometry-operations";
 import {
   NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE,
   offsetEditInputGate,
-} from "@/domain/editor/sketch-session/offset-editing";
-import { refreshSketchEditToolAfterOffsetRound } from "@/domain/editor/sketch-session/edit-tool-interaction";
+} from "@/core/editor/sketch-session/offset-editing";
+import { refreshSketchEditToolAfterOffsetRound } from "@/core/editor/sketch-session/edit-tool-interaction";
 import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
@@ -152,12 +152,12 @@ import {
 import {
   applySketchContribution,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+} from "@/core/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import {
   SKETCH_NOT_SOLVED_YET,
   withLiveSolveBasis,
-} from "@/domain/editor/sketch-session/session-live-solve";
+} from "@/core/editor/sketch-session/session-live-solve";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
@@ -170,17 +170,17 @@ import {
 } from "@/contracts/sketch/region-extraction";
 import { evaluateSplineSpan, solvedCubicSpans, tessellateCubicSpans } from "@/contracts/sketch/spline-geometry";
 import { offsetSeedSession } from "@/domain/editor/sketch-offset.fixtures";
-import { applySketchCloseSpline } from "@/domain/editor/sketch-session/close-spline";
-import { clearActiveSketchTool } from "@/domain/editor/sketch-session";
+import { applySketchCloseSpline } from "@/core/editor/sketch-session/close-spline";
+import { clearActiveSketchTool } from "@/core/editor/sketch-session";
 import { eid } from "@/domain/editor/sketch-mirror.fixtures";
-import { getStableSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+import { getStableSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   getDerivedShellDisplayValidity
-} from "@/domain/editor/sketch-session/display";
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
-import { getEntityAnchor } from "@/domain/editor/sketch-session/annotation-reference-geometry";
-import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
-import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";
+} from "@/infrastructure/editor/sketch-session/display";
+import { getSketchSessionDisplaySolvedSnapshot } from "@/core/editor/sketch-session/solved-snapshot";
+import { getEntityAnchor } from "@/core/editor/sketch-session/annotation-reference-geometry";
+import { collectSketchInteractionGeometry } from "@/core/sketch-interaction/geometry";
+import { collectSketchSnapGeometries } from "@/core/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
@@ -206,7 +206,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 /**
  * T08b-g7b fabricated triggers (spec-only): when a toggle names a

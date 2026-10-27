@@ -16,7 +16,7 @@ import {
 import {
   appendReferenceImageOperations,
   createNewSketchSession,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   createSketchSpecialModeHandleRef,
   createSketchSpecialModeTargetRef,

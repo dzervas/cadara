@@ -4,7 +4,7 @@ import type {
   SketchId,
 } from "@/contracts/shared/ids";
 import type { SketchOperationRef } from "@/contracts/shared/references";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {
   sketchSelectionFilter,
   type PrimitiveRef,

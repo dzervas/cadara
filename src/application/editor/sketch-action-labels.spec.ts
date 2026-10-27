@@ -31,12 +31,12 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   enterSketchSession,
   enterSketchSessionState,
 } from "@/domain/editor/sketch-entry.fixtures";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

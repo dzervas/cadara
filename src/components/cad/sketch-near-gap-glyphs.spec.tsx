@@ -9,7 +9,7 @@ import {
   SKETCH_NEAR_GAP_GLYPH_MIN_PX,
   SketchNearGapGlyphs,
 } from "@/components/cad/sketch-near-gap-glyphs";
-import type { SketchNearGap } from "@/domain/sketch-interaction/near-gap";
+import type { SketchNearGap } from "@/core/sketch-interaction/near-gap";
 
 const end = (name: string, x: number, y: number) => ({
   pointId: `sketch_point_${name}` as SketchPointId,

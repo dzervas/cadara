@@ -12,7 +12,7 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
   appendReferenceImageOperations,
   createNewSketchSessionFromSupport,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   createModelingService,
   type ModelingService,

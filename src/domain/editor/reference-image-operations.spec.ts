@@ -11,8 +11,8 @@ import {
   deleteSelectedSketchGeometry,
   startSketchDraw,
   updateReferenceImageOperationStates
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -26,7 +26,7 @@ import { solveReferenceImageOperationState } from "@/core/reference-image-calibr
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 function loadCapturedReferenceImageSketchFixture() {
   const sketch = {

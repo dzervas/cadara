@@ -19,7 +19,7 @@ import type {
   SketchAnnotationContext,
   SketchLiveRegionBasis,
   SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import type { SketchPlaneEditSessionState } from "@/domain/editor/sketch-plane-editing";
 import type {
   DocumentFeatureCursor,
@@ -780,7 +780,7 @@ export type EditorEvent =
   | { type: "sketch.draftRecoveryRequested"; draft: import("@/contracts/sketch/draft-recovery").PersistedSketchDraft }
   | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
-  | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/core/editor/sketch-session").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
   | { type: "sketch.imageEdited"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }>; edit: import("@/contracts/semantic/schema").SemanticReferenceImageEdit | { kind: "replace"; image: import("@/contracts/reference-image/schema").ReferenceImagePayload } }
   | { type: "sketch.imageRemoved"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }> }
   | { type: "sketch.imageAuthored"; payload: import("@/contracts/reference-image/schema").ReferenceImagePayload }
@@ -788,7 +788,7 @@ export type EditorEvent =
   | { type: "sketch.referenceAuthored"; target: Extract<import("@/contracts/semantic/schema").SemanticSketchCommand, { operation: "sketch.reference.add" }>["target"] }
   | { type: "sketch.derivationCreated"; input: Extract<import("@/contracts/semantic/schema").SemanticCommand, { operation: "sketch.derivation.create" }> }
   | { type: "sketch.mirrorRemoved"; derivationId: string }
-  | { type: "sketch.mirrorRepaired"; repair: import("@/domain/editor/sketch-session/types").SketchMirrorRepairState; target: import("@/core/editor/schema").PrimitiveRef }
+  | { type: "sketch.mirrorRepaired"; repair: import("@/core/editor/sketch-session/types").SketchMirrorRepairState; target: import("@/core/editor/schema").PrimitiveRef }
   | { type: "sketch.mirrorCreated"; targets: readonly Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }>[]; axis: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchEntity" }> | import("@/contracts/shared/references").SketchDatumReferenceRef }
   | { type: "sketch.offsetRemoved"; derivationId: string }
   | { type: "sketch.geometryBuilt"; input: import("@/contracts/semantic/schema").SemanticSketchConstruction }

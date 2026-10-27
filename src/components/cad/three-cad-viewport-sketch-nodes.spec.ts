@@ -12,20 +12,20 @@ import {
   createSketchSessionFromSnapshot,
   type SketchSessionDisplayRenderable,
   type SketchSessionState
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   getSketchRevealedHandleEntityIds,
   getSketchRevealedPointIds,
   type SketchPointMarkerContext,
-} from "@/domain/editor/sketch-session/display";
+} from "@/infrastructure/editor/sketch-session/display";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
+import { getSketchSessionDisplayDefinition } from "@/core/editor/sketch-session/session-definition";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
+import { resolveSketchPickStack } from "@/core/sketch-interaction/pick-stack";
 import { toSketchPickStackCandidates } from "@/infrastructure/viewport/render-picking";
 import {
   collectProjectedSketchCurveCandidates,

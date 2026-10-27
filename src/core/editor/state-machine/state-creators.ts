@@ -16,7 +16,7 @@ import {
 import {
   getSketchSessionPreviewLabel,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   SKETCH_PLANE_SUPPORT_FIELD_ID,
   type SketchPlaneEditSessionState,

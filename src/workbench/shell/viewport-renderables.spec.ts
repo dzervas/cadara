@@ -14,7 +14,7 @@ import {
   createNewSketchSessionFromSupport,
   finalizeSketchDraw,
   startSketchDraw,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -485,7 +485,7 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
     completeSketchOffsetPreviewPublication,
     patchSketchEditToolValue,
     selectSketchEditToolTarget,
-  } = await import("@/domain/editor/sketch-session");
+  } = await import("@/core/editor/sketch-session");
   const { createCertifiedNeutralCurveRequestQuery } =
     await import("@/core/modeling/neutral-curve-certification/query");
   const { createCertifiedCubicTubeChain } =

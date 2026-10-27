@@ -27,7 +27,7 @@ import {
 } from "@/domain/editor/state-machine";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
+import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import type { FeatureId, RegionId, SketchId } from "@/contracts/shared/ids";

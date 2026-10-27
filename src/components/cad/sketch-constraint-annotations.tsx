@@ -10,7 +10,7 @@ import {
 import type {
   SketchAnnotationContext,
   SketchAnnotationDescriptor,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,

@@ -39,9 +39,9 @@ import {
   updateSketchEditToolHover,
   updateSketchGeometryDrag,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/edit-geometry-operations";
-import { offsetEditInputGate } from "@/domain/editor/sketch-session/offset-editing";
+} from "@/core/editor/sketch-session";
+import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/core/editor/sketch-session/edit-geometry-operations";
+import { offsetEditInputGate } from "@/core/editor/sketch-session/offset-editing";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -58,16 +58,16 @@ import { nonAcceptedOutputProjectionMessage } from "@/core/modeling/sketch-refer
 import {
   appendDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session/definition-authoring";
 import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
   getSketchSessionDisplayDefinition,
-} from "@/domain/editor/sketch-session/session-definition";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+} from "@/core/editor/sketch-session/session-definition";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
-import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
-import { toggleSketchConstructionTarget } from "@/domain/editor/sketch-session/reference-authoring";
-import { patchSketchStyleValue } from "@/domain/editor/sketch-session/styles";
+import { applyTangentAction } from "@/core/editor/sketch-session/tangent-actions";
+import { toggleSketchConstructionTarget } from "@/core/editor/sketch-session/reference-authoring";
+import { patchSketchStyleValue } from "@/core/editor/sketch-session/styles";
 import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
 import {
   chainSession,

@@ -1,4 +1,4 @@
-import type { SketchNearGap } from "@/domain/sketch-interaction/near-gap";
+import type { SketchNearGap } from "@/core/sketch-interaction/near-gap";
 
 /** The smallest glyph ring, in px; larger gaps get a ring around both ends. */
 export const SKETCH_NEAR_GAP_GLYPH_MIN_PX = 14;

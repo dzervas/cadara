@@ -15,7 +15,7 @@ import {
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   getSketchSessionPreviewLabel,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { getConsumableSketchRegions } from "@/contracts/sketch/derived-validity";
 import {
   eid,

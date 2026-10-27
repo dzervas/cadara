@@ -17,7 +17,7 @@ import {
   setSketchInferenceSuppression,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
@@ -27,7 +27,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 test("src/components/cad/sketch-tool-panel.spec.tsx", () => {
   const markup = renderToStaticMarkup(

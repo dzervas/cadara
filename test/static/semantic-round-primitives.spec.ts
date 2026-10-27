@@ -19,7 +19,7 @@ it("round semantic authoring consumes browser contribution validation instead of
   expect(preparation).not.toMatch(
     /getCircumcircleFromPoints\(|getTangentArcCircle\(|createRegularPolygonVertices\(/,
   );
-  const owner = ["src/domain/editor/sketch-session/edit-tool-activation.ts", "src/domain/editor/sketch-session/drawing-tool-lifecycle.ts", "src/domain/editor/sketch-session/drawing-pointer.ts", "src/domain/editor/sketch-session/reference-authoring.ts", "src/domain/editor/sketch-session/drawing-commit.ts", "src/domain/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
+  const owner = ["src/core/editor/sketch-session/edit-tool-activation.ts", "src/core/editor/sketch-session/drawing-tool-lifecycle.ts", "src/core/editor/sketch-session/drawing-pointer.ts", "src/core/editor/sketch-session/reference-authoring.ts", "src/core/editor/sketch-session/drawing-commit.ts", "src/core/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
   expect(owner).toContain("sketchPrimitiveContributionInput(primitive)");
   expect(owner).toContain(
     'primitive.kind === "tangentArc" ? primitive.source?.entityId ?? null : null',
@@ -27,7 +27,7 @@ it("round semantic authoring consumes browser contribution validation instead of
 });
 it("browser and semantic tangent-source restrictions share a pure owner and clients do not emulate gestures", () => {
   for (const file of [
-    "src/domain/sketch-inference/placement-inference.ts",
+    "src/core/sketch-inference/placement-inference.ts",
     "src/infrastructure/modeling/semantic-sketch-port.ts",
   ])
     expect(read(file)).toContain("canUseTangentArcSourceAtPoint(");

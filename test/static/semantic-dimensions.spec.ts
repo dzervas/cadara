@@ -24,7 +24,7 @@ function body(file: string, name: string) {
 }
 
 it("browser and semantic dimensions share contribution, reference and solve preparation", () => {
-  const file = "src/domain/editor/sketch-session/constraints.ts";
+  const file = "src/core/editor/sketch-session/constraints.ts";
   const legacy = body(file, "authorSketchDimension");
   expect(legacy).toContain("authorSketchRequirement(");
   expect(legacy).not.toContain("solveCommittedConstraintDefinition(");
@@ -42,7 +42,7 @@ it("browser and semantic dimensions share contribution, reference and solve prep
   expect(shared).toContain("createConstraintCommitContribution(");
   expect(shared).toContain("toReferenceDimension(");
   expect(shared).toContain("solveCommittedConstraintDefinition(");
-  const annotations = "src/domain/editor/sketch-session/annotation-editing.ts";
+  const annotations = "src/core/editor/sketch-session/annotation-editing.ts";
   expect(body(annotations, "updateSketchDimensionValue")).toContain(
     "commitSketchAnnotationEditValue(",
   );

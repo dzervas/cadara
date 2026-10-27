@@ -21,8 +21,8 @@ import {
   createSketchSessionFromSnapshot,
   deleteSelectedSketchGeometry,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   eid,

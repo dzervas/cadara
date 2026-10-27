@@ -14,7 +14,7 @@ import {
   startSketchDraw,
   type SketchAuthoringToolId,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -24,7 +24,7 @@ import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixt
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import { transitionEditorState } from "./reducer-root";
 import { createShellRowSelectRequest } from "./selection-helpers";
 import { initialEditorState } from "./state-creators";

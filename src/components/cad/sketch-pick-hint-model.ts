@@ -10,8 +10,8 @@ import { createSketchMergePointsMutation } from "@/core/sketch-editing/merge-poi
 import {
   findSketchNearGapAt,
   type SketchNearGap,
-} from "@/domain/sketch-interaction/near-gap";
-import type { SketchPickClass } from "@/domain/sketch-interaction/pick-stack";
+} from "@/core/sketch-interaction/near-gap";
+import type { SketchPickClass } from "@/core/sketch-interaction/pick-stack";
 
 /**
  * The hint's left edge: in the top-left overlay row, past the sketch tool

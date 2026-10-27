@@ -40,7 +40,7 @@ import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
 } from "@/core/reference-image-calibration/mode/shared";
-import { updateReferenceImageOperationStates } from "@/domain/editor/sketch-session";
+import { updateReferenceImageOperationStates } from "@/core/editor/sketch-session";
 
 const ANCHOR_HIT_TOLERANCE = 10;
 

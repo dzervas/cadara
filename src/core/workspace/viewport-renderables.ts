@@ -1,5 +1,5 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
-import type { SketchConstraintDisplayTargetState } from "@/domain/editor/sketch-session";
+import type { SketchConstraintDisplayTargetState } from "@/core/editor/sketch-session";
 
 export type ViewportRenderableOrigin = "document" | "preview";
 

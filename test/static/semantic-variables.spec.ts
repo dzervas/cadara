@@ -25,7 +25,7 @@ it("variable commands retain shared production validation and dependent rebuild 
 });
 
 it("browser and semantic expression preparation stay shared without another evaluator or terminal semantics", () => {
-  const annotations = ["src/domain/editor/sketch-session/annotation-editing.ts", "src/core/editor/sketch-session/annotation-style.ts", "src/domain/editor/sketch-session/annotation-edit-presentation.ts", "src/domain/editor/sketch-session/annotation-selection.ts", "src/domain/editor/sketch-session/annotation-descriptors.ts", "src/domain/editor/sketch-session/annotation-anchors.ts", "src/domain/editor/sketch-session/dimension-overlays.ts", "src/domain/editor/sketch-session/annotation-geometry.ts", "src/domain/editor/sketch-session/annotation-reference-geometry.ts", "src/core/editor/sketch-session/annotation-labels.ts"].map(read).join("\n");
+  const annotations = ["src/core/editor/sketch-session/annotation-editing.ts", "src/core/editor/sketch-session/annotation-style.ts", "src/core/editor/sketch-session/annotation-edit-presentation.ts", "src/core/editor/sketch-session/annotation-selection.ts", "src/core/editor/sketch-session/annotation-descriptors.ts", "src/core/editor/sketch-session/annotation-anchors.ts", "src/core/editor/sketch-session/dimension-overlays.ts", "src/core/editor/sketch-session/annotation-geometry.ts", "src/core/editor/sketch-session/annotation-reference-geometry.ts", "src/core/editor/sketch-session/annotation-labels.ts"].map(read).join("\n");
   expect(annotations).toContain(
     "const pendingValue = normalizeConstraintValue(value)",
   );

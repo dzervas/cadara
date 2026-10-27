@@ -21,14 +21,14 @@ import {
   getSketchMirrorConfirmIntent,
   type SketchAuthoringToolId,
   type SketchSessionStatus,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import {
   SKETCH_PICK_CLASSES,
   type SketchPickClass,
-} from "@/domain/sketch-interaction/pick-stack";
+} from "@/core/sketch-interaction/pick-stack";
 
 export function getNavigationReopenRequest(
   snapshot: WorkspaceSnapshot | null,

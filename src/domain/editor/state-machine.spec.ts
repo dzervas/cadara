@@ -73,7 +73,7 @@ import {
   selectSketchConstraintTarget,
   startSketchDraw,
   toggleSketchSvgRendering,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
@@ -94,7 +94,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 const unusedSketchPorts: Pick<
   EditorEffectRuntime,

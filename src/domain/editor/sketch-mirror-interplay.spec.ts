@@ -24,7 +24,7 @@ import {
   publishSketchLiveRegions,
   updateSketchGeometryDrag,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {

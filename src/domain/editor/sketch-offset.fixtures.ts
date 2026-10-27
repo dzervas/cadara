@@ -17,12 +17,12 @@ import {
 import {
   createNewSketchSession,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   appendDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+} from "@/core/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import { createSketchOffsetDerivationContribution } from "@/core/sketch-editing/operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { eid, entityTarget, pid } from "@/domain/editor/sketch-mirror.fixtures";

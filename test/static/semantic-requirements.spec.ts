@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("completed semantic requirements and browser commits share target resolution, contribution construction and solve preparation", () => {
-  const owner = read("src/domain/editor/sketch-session/constraints.ts");
+  const owner = read("src/core/editor/sketch-session/constraints.ts");
   expect(owner).toContain("export function authorSketchRequirement(");
   expect(owner).toContain("resolveSketchConstraintTarget(input.tool,");
   expect(owner).toContain("return prepareSketchConstraintCommit(session, {");
@@ -22,7 +22,7 @@ it("completed semantic requirements and browser commits share target resolution,
   expect(reducer).toContain(
     "deleteSelectedSketchAnnotation(session, [target])",
   );
-  const annotations = ["src/domain/editor/sketch-session/annotation-editing.ts", "src/core/editor/sketch-session/annotation-style.ts", "src/domain/editor/sketch-session/annotation-edit-presentation.ts", "src/domain/editor/sketch-session/annotation-selection.ts", "src/domain/editor/sketch-session/annotation-descriptors.ts", "src/domain/editor/sketch-session/annotation-anchors.ts", "src/domain/editor/sketch-session/dimension-overlays.ts", "src/domain/editor/sketch-session/annotation-geometry.ts", "src/domain/editor/sketch-session/annotation-reference-geometry.ts", "src/core/editor/sketch-session/annotation-labels.ts"].map(read).join("\n");
+  const annotations = ["src/core/editor/sketch-session/annotation-editing.ts", "src/core/editor/sketch-session/annotation-style.ts", "src/core/editor/sketch-session/annotation-edit-presentation.ts", "src/core/editor/sketch-session/annotation-selection.ts", "src/core/editor/sketch-session/annotation-descriptors.ts", "src/core/editor/sketch-session/annotation-anchors.ts", "src/core/editor/sketch-session/dimension-overlays.ts", "src/core/editor/sketch-session/annotation-geometry.ts", "src/core/editor/sketch-session/annotation-reference-geometry.ts", "src/core/editor/sketch-session/annotation-labels.ts"].map(read).join("\n");
   expect(annotations).toContain(
     "return makeSketchAnnotationReference(session, edit)",
   );

@@ -7,7 +7,7 @@ import type {
   SketchDimensionRef,
 } from "@/contracts/shared/references";
 import { primitiveRefEquals, type PrimitiveRef } from "@/core/editor/schema";
-import type { SketchAnnotationListRow } from "@/domain/editor/sketch-session";
+import type { SketchAnnotationListRow } from "@/core/editor/sketch-session";
 import {
   getAnnotationConstraintColor,
   getAnnotationGlyphIconFileName,

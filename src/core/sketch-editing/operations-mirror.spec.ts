@@ -20,7 +20,7 @@ import {
 import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import {
   createSketchDerivedTransformContribution,
   createSketchFilletMutation,

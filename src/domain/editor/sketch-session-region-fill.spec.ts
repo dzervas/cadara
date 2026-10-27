@@ -23,9 +23,9 @@ import {
   publishSketchLiveRegions,
   withLiveSolveBasis,
   type SketchSessionState
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { measureSketchRegion } from "@/core/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {

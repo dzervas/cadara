@@ -18,9 +18,9 @@ import {
   createDocumentSolverTolerances,
   SOLVER_SCHEMA_VERSION,
 } from "@/contracts/solver/schema";
-import { solveDragEdit } from "@/domain/editor/sketch-session/drag-solve";
-import { appendDefinition } from "@/domain/editor/sketch-session/definition-authoring";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+import { solveDragEdit } from "@/core/editor/sketch-session/drag-solve";
+import { appendDefinition } from "@/core/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";

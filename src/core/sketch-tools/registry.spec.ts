@@ -17,10 +17,10 @@ import {
   patchSketchDrawingToolValue,
   startSketchDraw,
   updateSketchPointer
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import type { SketchId } from "@/contracts/shared/ids";
 import {

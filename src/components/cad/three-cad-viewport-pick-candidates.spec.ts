@@ -22,21 +22,21 @@ import {
   createPointDefinition,
   createSplineEntityDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
-import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
+} from "@/core/editor/sketch-session/definition-authoring";
+import { getSketchSessionDisplayDefinition } from "@/core/editor/sketch-session/session-definition";
 import {
   beginSketchAnnotationEdit,
   createNewSketchSession,
   getSketchAnnotationDescriptors,
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   eid,
   entityRef,
   mirroredSession,
 } from "@/domain/editor/sketch-mirror.fixtures";
-import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
+import { resolveSketchPickStack } from "@/core/sketch-interaction/pick-stack";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -61,9 +61,9 @@ import { applyMultiSelectionRequest } from "@/core/editor/state-machine/selectio
 import {
   createDisplayRenderableForProjectedGeometry,
   createDisplayRenderableForReferenceRecord,
-} from "@/domain/editor/sketch-session/display";
-import type { SketchPickCycle } from "@/domain/sketch-interaction/pick-stack";
-import { beginSketchTool } from "@/domain/editor/sketch-session";
+} from "@/infrastructure/editor/sketch-session/display";
+import type { SketchPickCycle } from "@/core/sketch-interaction/pick-stack";
+import { beginSketchTool } from "@/core/editor/sketch-session";
 import {
   createSketchPickChooserItems,
   createSketchPickHint,
@@ -93,12 +93,12 @@ import {
 } from "@/contracts/sketch/spline-geometry";
 import {
   createSketchSessionFromSnapshot
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
-} from "@/domain/sketch-snapping/snap-candidates";
+} from "@/core/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
@@ -2660,7 +2660,7 @@ test("T12d: tangent handle in pick-stack — authoredPoint class, after fit poin
     } as unknown as import("@/contracts/sketch/schema").SketchDefinition,
   };
   // Build candidates at equal distance (0 px) for both targets.
-  const candidates: import("@/domain/sketch-interaction/pick-stack").SketchPickStackCandidate[] =
+  const candidates: import("@/core/sketch-interaction/pick-stack").SketchPickStackCandidate[] =
     [
       {
         key: "sketchPoint:sketch_primary:sp_0",

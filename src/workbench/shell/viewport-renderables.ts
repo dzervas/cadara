@@ -1,11 +1,11 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 
 import { mergeSketchRenderables, type MergedSketchRenderables } from "@/domain/editor/sketch-session-renderables";
 import { getPrimitiveRefKey } from "@/core/editor/schema";

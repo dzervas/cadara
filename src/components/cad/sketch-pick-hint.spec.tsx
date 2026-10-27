@@ -9,13 +9,13 @@ import type {
   SketchId,
   SketchPointId,
 } from "@/contracts/shared/ids";
-import { findNearGapEndpoints } from "@/domain/sketch-interaction/near-gap";
+import { findNearGapEndpoints } from "@/core/sketch-interaction/near-gap";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   createLineEntityDefinition,
   createPointDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session/definition-authoring";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

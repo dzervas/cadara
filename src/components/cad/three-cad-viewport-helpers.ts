@@ -5,14 +5,14 @@ import type {
   SketchSessionState,
   SketchAuthoringToolId,
   SketchSessionStatus,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { shouldViewportStartSketchGeometryDrag } from "@/domain/editor/workbench-interactions";
 import {
   resolveHandleFromTarget,
   type SketchDragAcceptance,
 } from "@/core/editor/sketch-session/drag-intent";
 
-import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
+import { getSketchSessionDisplaySolvedSnapshot } from "@/core/editor/sketch-session/solved-snapshot";
 import {
   getSketchToolDefinition,
   isRegisteredSketchToolId,

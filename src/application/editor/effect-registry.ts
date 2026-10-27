@@ -6,7 +6,7 @@ import {
 import {
   getSketchSessionDerivationSettings,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import {
   buildSketchPlaneCommitRequest,

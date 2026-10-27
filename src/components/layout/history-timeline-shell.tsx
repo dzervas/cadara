@@ -16,7 +16,7 @@ import {
   HistoryActionStrip,
   type HistoryActionStripEntry,
 } from "@/components/layout/history-action-strip";
-import { type SketchSessionState } from "@/domain/editor/sketch-session";
+import { type SketchSessionState } from "@/core/editor/sketch-session";
 import type {
   DocumentFeatureCursor,
   DocumentHistoryItemRecord,

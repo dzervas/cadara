@@ -7,7 +7,7 @@
 import { Button } from "@mantine/core";
 
 import { SketchSelectionContextPanel } from "@/components/cad/sketch-selection-context";
-import type { SketchMirrorActionEntry } from "@/domain/editor/sketch-session";
+import type { SketchMirrorActionEntry } from "@/core/editor/sketch-session";
 
 const plural = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;

@@ -27,9 +27,9 @@ import {
 } from "@/core/modeling/opencascade-kernel-seed";
 import {
   createNewSketchSession
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";

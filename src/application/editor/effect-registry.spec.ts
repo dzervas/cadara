@@ -16,7 +16,7 @@ import {
   deleteSelectedSketchGeometry,
   getSketchSessionLiveRegionBasis,
   startSketchDraw,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   createModelingServiceEditorEffectRuntime,
@@ -35,14 +35,14 @@ import type {
   EditorEffect,
   SketchEditorState,
 } from "@/core/editor/state-machine/types";
-import { withLiveSolveBasis } from "@/domain/editor/sketch-session";
+import { withLiveSolveBasis } from "@/core/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 test("commits the current authored sketch after deletion without resurrecting a history tail", async () => {
   function addLine(

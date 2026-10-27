@@ -13,7 +13,7 @@ import {
   type CollaborativeDocument,
 } from "./collaborative-document";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
@@ -25,7 +25,7 @@ import {
 import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import {
   makeReferenceDimensionCases,
@@ -35,7 +35,7 @@ import {
 import {
   makeReferenceDimensionInDefinition,
   updateAnnotationValueInDefinition,
-} from "@/domain/editor/sketch-session/annotation-editing";
+} from "@/core/editor/sketch-session/annotation-editing";
 
 async function fixture() {
   const seed = await createSeedAuthoredModelDocument();

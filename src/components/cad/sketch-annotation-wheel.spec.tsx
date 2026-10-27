@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { SketchAnnotationWheel } from "@/components/cad/sketch-annotation-wheel";
 import type { SketchAnnotationLayerItem } from "@/components/cad/sketch-constraint-annotation-visibility";
-import type { SketchAnnotationDescriptor } from "@/domain/editor/sketch-session";
+import type { SketchAnnotationDescriptor } from "@/core/editor/sketch-session";
 
 // Lane: ui (docs/testing.md: `src/components/`). Seam: the wheel component's
 // markup (`renderToStaticMarkup`): native buttons in tab order (centre, then

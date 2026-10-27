@@ -6,8 +6,8 @@ import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
-} from "@/domain/sketch-inference/placement-inference";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+} from "@/core/sketch-inference/placement-inference";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import type {
   ConstraintId,

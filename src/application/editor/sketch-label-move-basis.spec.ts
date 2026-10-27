@@ -19,9 +19,9 @@ import {
   patchSketchDimensionAnnotationPlacement,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
-import { getSketchNearGapBasis } from "@/domain/sketch-interaction/near-gap";
+} from "@/core/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
+import { getSketchNearGapBasis } from "@/core/sketch-interaction/near-gap";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

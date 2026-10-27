@@ -18,9 +18,9 @@ import {
   resolveSketchDrawingEscapeStep,
   startSketchDraw,
   updateSketchPointer,
-} from "@/domain/editor/sketch-session";
-import { getSketchToolMarkerPointIds } from "@/domain/editor/sketch-session/display";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { getSketchToolMarkerPointIds } from "@/infrastructure/editor/sketch-session/display";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -29,7 +29,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 // T11g (T11-D9, D10, D19, D20): the lifecycle metadata of every drawing
 // tool and the Escape/Enter steps an armed tool takes.

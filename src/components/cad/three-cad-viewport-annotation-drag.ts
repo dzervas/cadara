@@ -1,7 +1,7 @@
 import type {
   SketchAnnotationDescriptor,
   SketchDimensionAnnotationDragHandle,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,

@@ -10,13 +10,13 @@ import {
   createNewSketchSession,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   getSketchSelectionCycleContext,
   isSketchSelectionCyclePickRetained,
   isSketchSelectionCycleTargetEligible,
-} from "@/domain/editor/sketch-session/selection";
+} from "@/core/editor/sketch-session/selection";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -24,12 +24,12 @@ import {
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
-import type { SketchAuthoringToolId } from "@/domain/editor/sketch-session";
+import type { SketchAuthoringToolId } from "@/core/editor/sketch-session";
 import type { SketchEditorState } from "./types";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 // Logic lane (core seam): a repeated-click cycle selection
 // (`viewport.selectionRequested` with `cycleReplaces`, T11d) through the

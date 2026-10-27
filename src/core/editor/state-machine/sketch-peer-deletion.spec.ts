@@ -20,7 +20,7 @@ import { enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createNewSketchSession,
   createSketchSessionFromSnapshot,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   createStandardPlaneDefinition,

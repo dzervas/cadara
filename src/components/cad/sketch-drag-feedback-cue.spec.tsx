@@ -11,9 +11,9 @@ import {
   clearActiveSketchTool,
   startSketchDraw,
   updateSketchGeometryDrag,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 // UI lane: the local refusal must not turn into a second global status on release.

@@ -28,7 +28,7 @@ import {
   type CollaborativeDocument,
 } from "../../core/modeling/collaborative-document";
 import type { DocumentRepository } from "./document-repository";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createStandardPlaneDefinition } from "../../core/modeling/opencascade-kernel-seed";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";

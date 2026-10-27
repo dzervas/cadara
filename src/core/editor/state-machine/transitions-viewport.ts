@@ -17,7 +17,7 @@ import {
   updateSketchEditToolHover,
   updateSketchStyleFocusTarget,
   withoutSketchAnnotationWheel,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   doesSketchSpecialModeAcceptTarget,
   handleSketchSpecialModeHover,
@@ -29,7 +29,7 @@ import {
   hasSketchSelectionCycleDeselectEntry,
   isSketchSelectionCyclePickRetained,
   withoutSketchSelectionCyclePick,
-} from "@/domain/editor/sketch-session/selection";
+} from "@/core/editor/sketch-session/selection";
 import { createSectionViewSession } from "@/core/section-view/session";
 import { resolveSketchConstraintTarget } from "@/core/sketch-constraints/registry";
 import {

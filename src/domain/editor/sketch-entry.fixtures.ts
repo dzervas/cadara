@@ -10,7 +10,7 @@ import {
   type SelectionCommandEditorState,
   type SketchEditorState,
 } from "@/core/editor/state-machine";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 
 /**
  * T17-10′ entered-session test builder (logic and UI lanes). Opens `session`

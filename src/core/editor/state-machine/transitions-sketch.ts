@@ -43,16 +43,16 @@ import {
   type SketchDrawingEscapeStep,
   appendReferenceImageOperations,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   applySketchMirrorRemoval,
   applySketchMirrorRepair,
   beginSketchMirrorRepair,
   cancelSketchMirrorRepair,
-} from "@/domain/editor/sketch-session/mirror-actions";
-import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
-import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
-import { applySketchCloseSpline } from "@/domain/editor/sketch-session/close-spline";
+} from "@/core/editor/sketch-session/mirror-actions";
+import { applySketchOffsetRemoval } from "@/core/editor/sketch-session/offset-actions";
+import { applyTangentAction } from "@/core/editor/sketch-session/tangent-actions";
+import { applySketchCloseSpline } from "@/core/editor/sketch-session/close-spline";
 import {
   enterSketchSpecialMode,
   getSketchSpecialModeSelectionFilter,

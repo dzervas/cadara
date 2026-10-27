@@ -53,7 +53,7 @@ import {
   getSketchConstraintDefinition,
   resolveSketchConstraintTarget,
 } from "@/core/sketch-constraints/registry";
-import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
+import { solveCommittedConstraintDefinition } from "@/core/editor/sketch-session/constraints";
 import { applySolvedSketchToDefinition } from "@/core/editor/sketch-session/definition-patches";
 import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
@@ -68,9 +68,9 @@ import {
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
-} from "@/domain/sketch-inference/placement-inference";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { createSketchPointRef } from "@/domain/editor/sketch-session/session-definition";
+} from "@/core/sketch-inference/placement-inference";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
+import { createSketchPointRef } from "@/core/editor/sketch-session/session-definition";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {

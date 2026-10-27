@@ -2,7 +2,7 @@ import type { ToolId } from "@/core/tools/tool-registry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchPlaneSupportRef } from "@/contracts/shared/sketch-plane";
 import type { CommandSessionId, RequestId } from "@/contracts/shared/ids";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 import type {
   EditorCommandToolId,
   EditorState,

@@ -14,7 +14,7 @@ import type {
   EditorHistoryAvailability,
 } from "@/domain/editor/state-machine";
 import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {
   createAppError,
   errorContext,

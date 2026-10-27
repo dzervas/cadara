@@ -5,7 +5,7 @@ import type {
   AuthoredActionResult,
   AuthoredActionState,
 } from "@/contracts/modeling/authored-actions";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";

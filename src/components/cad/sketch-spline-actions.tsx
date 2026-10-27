@@ -1,6 +1,6 @@
 import { SketchSpecialModePanel } from "./sketch-special-mode-panel";
 import type { SketchSpecialModePanelSection } from "@/core/sketch-special-modes/schema";
-import type { SketchCloseSplineState } from "@/domain/editor/sketch-session";
+import type { SketchCloseSplineState } from "@/core/editor/sketch-session";
 
 interface SketchSplineActionsProps {
   closeSpline: SketchCloseSplineState | null;

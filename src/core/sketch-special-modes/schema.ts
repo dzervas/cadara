@@ -9,7 +9,7 @@ import type {
   SelectionTargetCatalog,
 } from "@/core/editor/schema";
 import type { SketchToolAnchorDescriptor } from "@/core/sketch-tools/editor-schema";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 
 export type SketchSpecialModeId = string;
 export type SketchSpecialModeTargetId = `sketch_special_target_${string}`;

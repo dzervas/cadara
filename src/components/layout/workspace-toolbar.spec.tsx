@@ -16,7 +16,7 @@ import {
   focusSketchStyleTool,
   startSketchDraw,
   toggleSketchSvgRendering,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession, enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -28,7 +28,7 @@ import { workbenchTheme } from "@/theme/workbench-theme";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
   function getToolMarkup(markup: string, toolId: string) {

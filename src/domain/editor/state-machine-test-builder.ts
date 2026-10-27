@@ -16,7 +16,7 @@ import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersecti
 import {
   completeSketchEditQuery,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 
 /**
  * Fake-runtime `deriveSketchRegions` backed by the production solver adapter,

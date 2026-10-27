@@ -12,7 +12,7 @@ import {
   type SelectionFilter,
   type SelectionTargetCatalog,
 } from "@/core/editor/schema";
-import { getSketchSelectionCycleContext } from "@/domain/editor/sketch-session/selection";
+import { getSketchSelectionCycleContext } from "@/core/editor/sketch-session/selection";
 import type { EditorExtensionDependencies } from "./dependencies";
 import type {
   EditorState,

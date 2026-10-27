@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import * as THREE from "three";
 
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
 import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
 
 test("src/infrastructure/viewport/sketch-camera-framing.spec.ts", async () => {

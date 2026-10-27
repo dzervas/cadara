@@ -5,10 +5,10 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("browser and explicit style/image authoring retain shared authored owners", () => {
-  const styles = read("src/domain/editor/sketch-session/styles.ts");
+  const styles = read("src/core/editor/sketch-session/styles.ts");
   expect(styles.match(/return applySketchStylePatch\(/g)).toHaveLength(2);
   expect(styles).toContain("applyStylePatchToDefinition(");
-  const references = read("src/domain/editor/sketch-session/references.ts");
+  const references = read("src/core/editor/sketch-session/references.ts");
   expect(references).toContain(
     "return appendReferenceImageOperations(session,",
   );

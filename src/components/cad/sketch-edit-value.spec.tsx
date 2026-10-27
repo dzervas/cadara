@@ -11,14 +11,14 @@ import {
   selectSketchEditToolTarget,
   patchSketchEditToolValue,
   getSketchToolPresentation,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
 import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,
-} from "@/domain/editor/sketch-session/annotation-editing";
+} from "@/core/editor/sketch-session/annotation-editing";
 import { collectSketchViewportFeedbackAnchors } from "./sketch-viewport-feedback-model";
 
 // UI lane: the session's invalid Offset parameter is red in both editing

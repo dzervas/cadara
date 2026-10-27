@@ -17,7 +17,7 @@ import {
   refreshSketchEditToolAfterOffsetRound,
   updateSketchReferenceProjection,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { getSketchPlaneEditSelectionTarget } from "@/domain/editor/sketch-plane-editing";
 import {
   applySketchSpecialModeEffectResult,

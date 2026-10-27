@@ -12,7 +12,7 @@ import {
   patchSketchConstraintValue,
   selectSketchConstraintTarget,
   startSketchDraw,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {

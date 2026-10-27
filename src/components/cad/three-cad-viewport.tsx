@@ -147,30 +147,30 @@ import {
   SKETCH_PICK_CLASSES,
   type SketchPickClass,
   type SketchPickCycle,
-} from "@/domain/sketch-interaction/pick-stack";
-import { getSketchMarqueeMode } from "@/domain/sketch-interaction/marquee";
+} from "@/core/sketch-interaction/pick-stack";
+import { getSketchMarqueeMode } from "@/core/sketch-interaction/marquee";
 import {
   getSelectionClickRequestMode,
   getSelectionMarqueeMode,
 } from "@/core/editor/selection-click-mode";
 import type { SelectionRequestMode } from "@/core/editor/state-machine/types";
-import { getSketchSelectionCycleContext } from "@/domain/editor/sketch-session/selection";
+import { getSketchSelectionCycleContext } from "@/core/editor/sketch-session/selection";
 import {
   findNearGapEndpoints,
   getSketchNearGapBasis,
   type SketchNearGap,
-} from "@/domain/sketch-interaction/near-gap";
+} from "@/core/sketch-interaction/near-gap";
 import {
   createSketchPointRef,
   getSketchSessionDisplayDefinition,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import type { SketchId } from "@/contracts/shared/ids";
-import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
+import { mapSketchPointToWorld } from "@/core/editor/sketch-session/state";
 import {
   getSketchRevealedPointIds,
   getSketchRevealedHandleEntityIds,
   getSketchToolMarkerPointIds,
-} from "@/domain/editor/sketch-session/display";
+} from "@/infrastructure/editor/sketch-session/display";
 import type {
   SketchDefinition,
   SolvedSketchSnapshot,

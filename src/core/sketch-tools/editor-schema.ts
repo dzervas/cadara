@@ -4,7 +4,7 @@ import type { WorkspaceVec3 } from "@/core/workspace/sketch-plane-mapping";
 import type {
   SketchSnapCandidateKind,
   SketchSnapGlyphKind,
-} from "@/domain/sketch-snapping/snap-candidates";
+} from "@/core/sketch-snapping/snap-candidates";
 
 export type SketchToolControlValue = string | number | boolean | null;
 

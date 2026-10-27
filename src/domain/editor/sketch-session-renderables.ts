@@ -3,8 +3,8 @@ import type { ViewportRenderableRecord } from "@/core/workspace/viewport-rendera
 import type {
   SketchSessionState,
   SketchSessionDisplayRenderable,
-} from "./sketch-session/types";
-import { getSketchSessionDisplayRenderables } from "./sketch-session/display";
+} from "../../core/editor/sketch-session/types";
+import { getSketchSessionDisplayRenderables } from "../../infrastructure/editor/sketch-session/display";
 export function mergeSketchRenderables<
   T extends RenderableEntityRecord | ViewportRenderableRecord,
 >(documentRenderables: T[], session: SketchSessionState | null) {

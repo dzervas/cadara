@@ -9,8 +9,8 @@ import {
   createSketchSessionFromSnapshot,
   startSketchDraw,
   toggleSketchConstructionTarget
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -22,7 +22,7 @@ import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 // T17p2 (F-2): the solver consumes the resolved definition; these fixtures
 // author literal values, resolved before each solve (`literalResolvedDefinition`).

@@ -43,15 +43,15 @@ import {
   selectSketchEditToolTarget,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { getSketchDegenerateSplineSpans } from "@/domain/editor/sketch-session/session-live-solve";
-import { getSketchSessionInvalidFeedback } from "@/domain/editor/sketch-session/session-feedback";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import { getSketchDegenerateSplineSpans } from "@/core/editor/sketch-session/session-live-solve";
+import { getSketchSessionInvalidFeedback } from "@/core/editor/sketch-session/session-feedback";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,

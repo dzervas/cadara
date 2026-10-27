@@ -19,7 +19,7 @@ import {
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session";
+import { deleteSelectedSketchGeometry } from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   eid,

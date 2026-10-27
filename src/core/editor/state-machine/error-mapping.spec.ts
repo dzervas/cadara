@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { createAppError } from "@/contracts/errors";
-import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
+import { createNewSketchSessionFromSupport } from "@/core/editor/sketch-session";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import type { EditorEffect, EditorEvent } from "./types";
 import {

@@ -3,7 +3,7 @@ import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values
 import { readFileSync } from "node:fs";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import type { SketchSessionState } from "@/domain/editor/sketch-session";
+import type { SketchSessionState } from "@/core/editor/sketch-session";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
@@ -39,11 +39,11 @@ import {
   updateSketchPointer,
   updateSketchReferenceProjection,
   acceptSketchDraw
-} from "@/domain/editor/sketch-session";
-import { updateSketchGeometryDragUntilSettled as updateSketchGeometryDrag } from "@/domain/editor/sketch-session/test-drag-replay";
+} from "@/core/editor/sketch-session";
+import { updateSketchGeometryDragUntilSettled as updateSketchGeometryDrag } from "@/core/editor/sketch-session/test-drag-replay";
 import { getSketchSessionDisplayRenderables, getStableSketchSessionDisplayRenderables, getTransientSketchSessionDisplayRenderables 
-} from "@/domain/editor/sketch-session/display";
-import { getStableSketchSessionDisplayKey } from "@/domain/editor/sketch-session/solved-snapshot";
+} from "@/infrastructure/editor/sketch-session/display";
+import { getStableSketchSessionDisplayKey } from "@/core/editor/sketch-session/solved-snapshot";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
   createStandardPlaneDefinition,
@@ -52,7 +52,7 @@ import {
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
-import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/edit-queries";
+import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/core/editor/sketch-session/edit-queries";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
@@ -67,7 +67,7 @@ import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-c
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   function assertClosePoint(

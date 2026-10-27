@@ -41,7 +41,7 @@
   "src/domain/editor/sketch-geometry-editing.heavy.spec.ts",
   "src/domain/editor/sketch-mirror-editing.spec.ts",
   "src/domain/editor/sketch-offset-live-cutover.heavy.spec.ts",
-  "src/domain/editor/sketch-session/display.ts",
+  "src/infrastructure/editor/sketch-session/display.ts",
   "src/domain/editor/state-machine.spec.ts",
   "src/domain/import/kernel-history-probe.spec.ts",
   "src/domain/import/onshape/apply-pipeline.heavy.spec.ts",

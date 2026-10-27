@@ -60,7 +60,7 @@ import {
   getActiveSketchStyleToolId,
   isSketchSvgRenderingEnabled,
   isSketchConstructionSelected,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { isSketchStyleToolId } from "@/core/sketch-styles/definition";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";

@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import { SVGLoader } from "three-stdlib";
 
-import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
 import {
   getSketchPointMarkerVisibility,
   getSketchHandleVisibility,
-} from "@/domain/editor/sketch-session/display";
+} from "@/infrastructure/editor/sketch-session/display";
 import { type PrimitiveRef, primitiveRefEquals } from "@/core/editor/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import {

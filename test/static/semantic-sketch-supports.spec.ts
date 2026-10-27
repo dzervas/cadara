@@ -11,7 +11,7 @@ it("browser and semantic support/reference commands share native resolution, ref
   expect(runtime).toContain(
     "modelingService.projectSketchExternalReferences({",
   );
-  const tools = ["src/domain/editor/sketch-session/edit-tool-activation.ts", "src/domain/editor/sketch-session/drawing-tool-lifecycle.ts", "src/domain/editor/sketch-session/drawing-pointer.ts", "src/domain/editor/sketch-session/reference-authoring.ts", "src/domain/editor/sketch-session/drawing-commit.ts", "src/domain/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
+  const tools = ["src/core/editor/sketch-session/edit-tool-activation.ts", "src/core/editor/sketch-session/drawing-tool-lifecycle.ts", "src/core/editor/sketch-session/drawing-pointer.ts", "src/core/editor/sketch-session/reference-authoring.ts", "src/core/editor/sketch-session/drawing-commit.ts", "src/core/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
   expect(tools).toContain(
     "session.referenceTargetPicking ? authorSketchReference(session, target) : session",
   );

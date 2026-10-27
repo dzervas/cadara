@@ -38,9 +38,9 @@ import {
   startSketchDraw,
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   eid,
@@ -50,7 +50,7 @@ import {
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";

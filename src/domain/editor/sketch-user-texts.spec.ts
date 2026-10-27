@@ -30,14 +30,14 @@ import {
   nonAcceptedOffsetFeaturePointMessage,
 } from "@/core/modeling/sketch-feature-input";
 import { nonAcceptedOutputProjectionMessage } from "@/core/modeling/sketch-reference-projection";
-import { offsetEditInputGate } from "@/domain/editor/sketch-session/offset-editing";
+import { offsetEditInputGate } from "@/core/editor/sketch-session/offset-editing";
 import {
   deleteSelectedSketchGeometry,
   updateSketchReferenceProjection,
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDerivationSettings } from "@/domain/editor/sketch-session/session-definition";
-import { getSketchSessionInvalidFeedback } from "@/domain/editor/sketch-session/session-feedback";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDerivationSettings } from "@/core/editor/sketch-session/session-definition";
+import { getSketchSessionInvalidFeedback } from "@/core/editor/sketch-session/session-feedback";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   eid,
   entityRef,

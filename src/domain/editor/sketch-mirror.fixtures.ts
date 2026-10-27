@@ -22,15 +22,15 @@ import {
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   appendDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session/definition-authoring";
 import {
   createSessionCommitFactories,
   getSessionSketchId,
-} from "@/domain/editor/sketch-session/tool-authoring";
+} from "@/core/editor/sketch-session/tool-authoring";
 import {
   createSketchDerivedTransformContribution,
   createSketchOffsetDerivationContribution,

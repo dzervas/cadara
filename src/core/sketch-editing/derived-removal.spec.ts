@@ -23,7 +23,7 @@ import type {
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   eid,
   entityTarget,

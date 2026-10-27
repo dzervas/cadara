@@ -6,12 +6,12 @@ import {
   deleteSelectedSketchGeometry,
   getSketchHistoryItems,
   startSketchDraw,
-} from "./sketch-session";
+} from "../../core/editor/sketch-session";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 
 test("sketch contents reflect current authored records rather than a replay cursor", () => {

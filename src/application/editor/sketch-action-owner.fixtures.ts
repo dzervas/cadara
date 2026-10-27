@@ -23,11 +23,11 @@ import {
   finalizeSketchDraw,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

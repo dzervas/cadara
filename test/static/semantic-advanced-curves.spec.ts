@@ -20,7 +20,7 @@ it("advanced semantic inputs reuse browser contribution validators and the ordin
   expect(semantic).not.toMatch(
     /sample(?:Ellipse|EllipticalArc|Conic|Bezier)|reconstructSpline|create\w+Entity\(/,
   );
-  const owner = ["src/domain/editor/sketch-session/edit-tool-activation.ts", "src/domain/editor/sketch-session/drawing-tool-lifecycle.ts", "src/domain/editor/sketch-session/drawing-pointer.ts", "src/domain/editor/sketch-session/reference-authoring.ts", "src/domain/editor/sketch-session/drawing-commit.ts", "src/domain/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
+  const owner = ["src/core/editor/sketch-session/edit-tool-activation.ts", "src/core/editor/sketch-session/drawing-tool-lifecycle.ts", "src/core/editor/sketch-session/drawing-pointer.ts", "src/core/editor/sketch-session/reference-authoring.ts", "src/core/editor/sketch-session/drawing-commit.ts", "src/core/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
   expect(owner).toContain("sketchPrimitiveContributionInput(primitive)");
   expect(owner).toContain("prepareSketchContribution(");
 });
@@ -28,22 +28,22 @@ it("advanced semantic inputs reuse browser contribution validators and the ordin
 it("browser and semantic closure reuse the same explicit point merge and do not emulate gestures", () => {
   for (const source of [
     [
-      "src/domain/editor/sketch-session/geometry-deletion.ts",
-      "src/domain/editor/sketch-session/offset-editing.ts",
-      "src/domain/editor/sketch-session/edit-geometry-operations.ts",
-      "src/domain/editor/sketch-session/point-merge.ts",
-      "src/domain/editor/sketch-session/mirror-editing.ts",
-      "src/domain/editor/sketch-session/edit-queries.ts",
-      "src/domain/editor/sketch-session/edit-tool-interaction.ts",
-      "src/domain/editor/sketch-session/geometry-drag.ts",
-      "src/domain/editor/sketch-session/drag-solve.ts",
+      "src/core/editor/sketch-session/geometry-deletion.ts",
+      "src/core/editor/sketch-session/offset-editing.ts",
+      "src/core/editor/sketch-session/edit-geometry-operations.ts",
+      "src/core/editor/sketch-session/point-merge.ts",
+      "src/core/editor/sketch-session/mirror-editing.ts",
+      "src/core/editor/sketch-session/edit-queries.ts",
+      "src/core/editor/sketch-session/edit-tool-interaction.ts",
+      "src/core/editor/sketch-session/geometry-drag.ts",
+      "src/core/editor/sketch-session/drag-solve.ts",
     ]
       .map(read)
       .join("\n"),
-    read("src/domain/editor/sketch-session/geometry-actions.ts"),
+    read("src/core/editor/sketch-session/geometry-actions.ts"),
   ])
     expect(source).toContain("prepareSketchPointMerge(");
-  expect(["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n")).toContain(
+  expect(["src/core/editor/sketch-session/geometry-deletion.ts", "src/core/editor/sketch-session/offset-editing.ts", "src/core/editor/sketch-session/edit-geometry-operations.ts", "src/core/editor/sketch-session/point-merge.ts", "src/core/editor/sketch-session/mirror-editing.ts", "src/core/editor/sketch-session/edit-queries.ts", "src/core/editor/sketch-session/edit-tool-interaction.ts", "src/core/editor/sketch-session/geometry-drag.ts", "src/core/editor/sketch-session/drag-solve.ts"].map(read).join("\n")).toContain(
     "createSketchMergePointsMutation(",
   );
   for (const file of [

@@ -5,7 +5,7 @@ import type { EditorEffectRuntime } from "@/core/editor/state-machine";
 import { createSketchDraftRecoveryController } from "./controller";
 import { makeSketchDraftRecoveryFixture } from "./recovery.fixtures";
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
-import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
+import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
 
 for (const published of [false, true]) {
   test(`Resume uses normal sketch opening for a ${published ? "published" : "new private"} sketch and never invokes publication`, async () => {

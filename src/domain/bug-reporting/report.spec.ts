@@ -23,7 +23,7 @@ import {
   formatMarkdownJsonDisclosure,
 } from "@/domain/bug-reporting/report";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   MODELING_OPERATION_HISTORY_STORAGE_KEY,

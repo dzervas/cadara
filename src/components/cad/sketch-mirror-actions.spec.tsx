@@ -9,7 +9,7 @@ import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
-import type { SketchMirrorActionEntry } from "@/domain/editor/sketch-session";
+import type { SketchMirrorActionEntry } from "@/core/editor/sketch-session";
 import { SketchMirrorActions } from "./sketch-mirror-actions";
 
 const healthy: SketchMirrorActionEntry = {

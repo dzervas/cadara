@@ -14,8 +14,8 @@ import {
   entityRef,
   seedDefinition,
 } from "@/domain/editor/sketch-mirror.fixtures";
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

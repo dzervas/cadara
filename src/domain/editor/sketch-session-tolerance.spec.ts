@@ -17,18 +17,18 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
-import { createEmptyDefinition } from "@/domain/editor/sketch-session/session-definition";
+import { createEmptyDefinition } from "@/core/editor/sketch-session/session-definition";
 import {
   createLineEntityDefinition,
   createPointDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/definition-authoring";
+} from "@/core/editor/sketch-session/definition-authoring";
 import {
   getSketchSessionDerivedValidity,
   getSketchSessionLiveRegionBasis,
   getSketchSessionSolvedSnapshot,
   publishSketchLiveRegions,
-} from "@/domain/editor/sketch-session/session-live-solve";
+} from "@/core/editor/sketch-session/session-live-solve";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

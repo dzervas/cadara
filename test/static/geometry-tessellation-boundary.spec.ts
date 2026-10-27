@@ -41,9 +41,9 @@ const TESSELLATORS = [
  * loop) need no entry for the names they define.
  */
 const TESSELLATOR_ALLOWLIST: Record<string, string> = {
-  "src/domain/editor/sketch-session/display.ts":
+  "src/infrastructure/editor/sketch-session/display.ts":
     "session display: shells, projected splines, region fill",
-  "src/domain/editor/sketch-session/draft-entity-geometry.ts":
+  "src/core/editor/sketch-session/draft-entity-geometry.ts":
     "session display of every spline entity (authored reconstruction)",
   "src/domain/modeling/occ/snapshot.ts": "OCC snapshot display edges",
   "src/core/sketch-tools/tools/spline.ts": "spline tool preview",
@@ -68,7 +68,7 @@ const BEZIER_SAMPLER_ALLOWLIST: Record<string, string> = {
     "Bézier tool preview polyline",
   "src/domain/modeling/occ/snapshot.ts":
     "OCC snapshot display edges of Bézier entities",
-  "src/domain/editor/sketch-session/draft-entity-geometry.ts":
+  "src/core/editor/sketch-session/draft-entity-geometry.ts":
     "session display of Bézier entities",
 };
 
@@ -138,11 +138,11 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
   expect(
     scan([
       {
-        path: "src/domain/sketch-snapping/snap-candidates.ts",
+        path: "src/core/sketch-snapping/snap-candidates.ts",
         text: 'import { tessellateCubicSpans } from "@/contracts/sketch/spline-geometry";',
       },
     ]).unlisted,
-  ).toEqual(["src/domain/sketch-snapping/snap-candidates.ts"]);
+  ).toEqual(["src/core/sketch-snapping/snap-candidates.ts"]);
   expect(
     scan([
       {

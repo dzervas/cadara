@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { createNewSketchSession } from "@/domain/editor/sketch-session";
+import { createNewSketchSession } from "@/core/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

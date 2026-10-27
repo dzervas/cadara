@@ -14,8 +14,8 @@ import {
   isSketchSelectionCycleTargetEligible,
   isSketchSelectionCyclePickRetained,
   type SketchSelectionCycleContext,
-} from "@/domain/editor/sketch-session/selection";
-import { getSketchMirrorLinkedGeometryRefs } from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session/selection";
+import { getSketchMirrorLinkedGeometryRefs } from "@/core/editor/sketch-session";
 import { shouldViewportClickRequestSelection } from "@/domain/editor/workbench-interactions";
 import {
   getArmedSketchPickCycleIndex,
@@ -23,13 +23,13 @@ import {
   reduceSketchPickCycle,
   type SketchPickCycle,
   type SketchPickCyclePointer,
-} from "@/domain/sketch-interaction/pick-stack";
+} from "@/core/sketch-interaction/pick-stack";
 import {
   mapSketchPointToWorld,
   type SketchAnnotationDescriptor,
   type SketchSessionDisplayRenderable,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   closestPointOnSketchInteractionCurve,
   collectSketchInteractionGeometry,
@@ -37,12 +37,12 @@ import {
   getSketchInteractionCurveBounds,
   type SketchInteractionCurveGeometry,
   isSketchInteractionCurveGeometry,
-} from "@/domain/sketch-interaction/geometry";
+} from "@/core/sketch-interaction/geometry";
 import { mapWorldPointToWorkspaceSketch } from "@/core/workspace/sketch-plane-mapping";
 import {
   sampleSketchMarqueeGeometry,
   selectSketchMarqueeTargets,
-} from "@/domain/sketch-interaction/marquee";
+} from "@/core/sketch-interaction/marquee";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,

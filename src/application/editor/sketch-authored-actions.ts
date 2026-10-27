@@ -19,8 +19,8 @@ import {
   restageSketchMirrorTool,
   withoutSketchAnnotationWheel,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session";
 import { getToolById } from "@/core/tools/tool-registry";
 import { describeBlockedSketchAction } from "@/core/modeling/document-action-blocked";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
@@ -29,7 +29,7 @@ import {
   parseSketchStylePatch,
   SKETCH_STYLE_PATCH_INTENT,
 } from "@/core/sketch-styles/definition";
-import { getSketchStylePatchToolId } from "@/domain/editor/sketch-session/styles";
+import { getSketchStylePatchToolId } from "@/core/editor/sketch-session/styles";
 import {
   AuthoredActionHistory,
   encodeAuthoredActionState,

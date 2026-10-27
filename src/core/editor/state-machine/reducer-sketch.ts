@@ -1,13 +1,13 @@
 import { getPeerDeletedSketchNotice } from "./selectors";
-import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
+import { authorSketchDimension, authorSketchRequirement } from "@/core/editor/sketch-session/constraints";
 import {
   updateSketchDimensionValue,
   deleteSelectedSketchAnnotation,
   makeSketchAnnotationReference,
-} from "@/domain/editor/sketch-session";
-import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
-import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
-import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
+} from "@/core/editor/sketch-session";
+import { updateSketchGeometry, setSketchItemLabel } from "@/core/editor/sketch-session/geometry-actions";
+import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/core/editor/sketch-session/mirror-actions";
+import { applySketchOffsetRemoval } from "@/core/editor/sketch-session/offset-actions";
 import {
   createSketchDerivation,
   createSketchMirror,
@@ -15,14 +15,14 @@ import {
   buildSketchGeometry,
   completeSketchIntersectionEdit,
   deleteSelectedSketchGeometry,
-} from "@/domain/editor/sketch-session";
-import { authorReferenceImage, editReferenceImage } from "@/domain/editor/sketch-session/references";
-import { authorSketchStyle } from "@/domain/editor/sketch-session/styles";
+} from "@/core/editor/sketch-session";
+import { authorReferenceImage, editReferenceImage } from "@/core/editor/sketch-session/references";
+import { authorSketchStyle } from "@/core/editor/sketch-session/styles";
 import {
   authorSketchReference,
   setSketchConstructionTarget,
   authorSketchPrimitive,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";
@@ -36,7 +36,7 @@ import {
   getSketchSessionPreviewLabel,
   isSketchSvgRenderingEnabled,
   toggleSketchSvgRendering,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   cancelSketchSpecialMode,
   commitSketchSpecialMode,

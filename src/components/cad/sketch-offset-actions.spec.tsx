@@ -10,7 +10,7 @@ import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
-import type { SketchOffsetActionEntry } from "@/domain/editor/sketch-session";
+import type { SketchOffsetActionEntry } from "@/core/editor/sketch-session";
 import { SketchMirrorActions } from "./sketch-mirror-actions";
 import { SketchOffsetActions } from "./sketch-offset-actions";
 import { SketchSelectionContextStack } from "./sketch-selection-context";

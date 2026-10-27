@@ -1,9 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
-import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
+import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import { updateSketchReferenceProjection } from "@/core/editor/sketch-session/references";
 import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 import type {
@@ -37,8 +37,8 @@ import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extrac
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createArcEndpointDimensions } from "@/core/sketch-tools/constraints";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { describeSketchSessionUnsatisfiedRequirements } from "@/domain/editor/sketch-session/session-feedback";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
+import { describeSketchSessionUnsatisfiedRequirements } from "@/core/editor/sketch-session/session-feedback";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import type { DimensionId, DocumentVariableId } from "@/contracts/shared/ids";

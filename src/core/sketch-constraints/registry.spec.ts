@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
-import { buildCommittedDimensionOverlays } from "@/domain/editor/sketch-session/dimension-overlays";
-import { inferCommittedDimensionAnnotationPlacement } from "@/domain/editor/sketch-session/annotation-edit-presentation";
+import { buildCommittedDimensionOverlays } from "@/core/editor/sketch-session/dimension-overlays";
+import { inferCommittedDimensionAnnotationPlacement } from "@/core/editor/sketch-session/annotation-edit-presentation";
 import type { DimensionId } from "@/contracts/shared/ids";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {
@@ -26,7 +26,7 @@ import {
   updateSketchReferenceProjection,
   updateSketchPointer,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -49,7 +49,7 @@ import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 
 test("src/domain/sketch-constraints/registry.spec.ts", async () => {
   function createSessionWithTwoLines() {

@@ -14,11 +14,11 @@ import {
   toggleSketchSvgRendering,
   withLiveSolveBasis,
   type SketchSessionState
-} from "@/domain/editor/sketch-session";
-import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { getFirstSketchStyleTarget } from "@/domain/editor/sketch-session/styles";
+import { getFirstSketchStyleTarget } from "@/core/editor/sketch-session/styles";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   emitPendingSketchOffsetPreviewPublication,

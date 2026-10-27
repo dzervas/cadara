@@ -25,11 +25,11 @@ import {
   clearActiveSketchTool,
   getSketchSessionPreviewLabel,
   startSketchDraw,
-} from "@/domain/editor/sketch-session";
-import { publishSketchLiveRegions } from "@/domain/editor/sketch-session/session-live-solve";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
-import { SPEC_SKETCH_UNITS_PER_PIXEL } from "@/domain/editor/sketch-session/test-snap-scale";
-import { describeSketchSessionWithheldRegions } from "@/domain/editor/sketch-session/region-feedback";
+} from "@/core/editor/sketch-session";
+import { publishSketchLiveRegions } from "@/core/editor/sketch-session/session-live-solve";
+import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
+import { SPEC_SKETCH_UNITS_PER_PIXEL } from "@/core/editor/sketch-session/test-snap-scale";
+import { describeSketchSessionWithheldRegions } from "@/core/editor/sketch-session/region-feedback";
 import { createCertifiedNeutralCurveQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createSketchActionOwnerFixture,

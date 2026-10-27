@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
 import {
   createViewportCameraFrame,
   type ViewportCamera,

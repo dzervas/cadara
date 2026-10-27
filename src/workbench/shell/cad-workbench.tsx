@@ -9,7 +9,7 @@ import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-pan
 import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
 import { SketchOffsetActions } from "@/components/cad/sketch-offset-actions";
 import { SketchSplineActions } from "@/components/cad/sketch-spline-actions";
-import { getSketchSessionDiagnosticPresentation } from "@/domain/editor/sketch-session/diagnostic-presentation";
+import { getSketchSessionDiagnosticPresentation } from "@/core/editor/sketch-session/diagnostic-presentation";
 import {
   SketchSelectionContextStack,
   SketchValidationStatus,
@@ -116,7 +116,7 @@ import {
   getSketchAnnotationDescriptors,
   getSketchAnnotationListRows,
   getSketchToolPresentation,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import {
   doesSketchSpecialModeAcceptTarget,
   getSketchSpecialModePanel,

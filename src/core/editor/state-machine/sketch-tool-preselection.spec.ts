@@ -11,8 +11,8 @@ import {
   setSketchInferenceSuppression,
   startSketchDraw,
   type SketchSessionState,
-} from "@/domain/editor/sketch-session";
-import { getSketchEditOperatorResult } from "@/domain/editor/sketch-session/edit-geometry-operations";
+} from "@/core/editor/sketch-session";
+import { getSketchEditOperatorResult } from "@/core/editor/sketch-session/edit-geometry-operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
@@ -22,7 +22,7 @@ import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixt
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
-} from "@/domain/editor/sketch-session/test-snap-scale";
+} from "@/core/editor/sketch-session/test-snap-scale";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";

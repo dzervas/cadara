@@ -41,9 +41,9 @@ import {
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
-} from "@/domain/sketch-inference/placement-inference";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { createSketchPointRef } from "@/domain/editor/sketch-session/session-definition";
+} from "@/core/sketch-inference/placement-inference";
+import { createSessionCommitFactories } from "@/core/editor/sketch-session/tool-authoring";
+import { createSketchPointRef } from "@/core/editor/sketch-session/session-definition";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
@@ -110,7 +110,7 @@ import {
   closestSplineSpanLocation,
   evaluateSplineSpan,
 } from "@/contracts/sketch/spline-geometry";
-import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
+import { solveCommittedConstraintDefinition } from "@/core/editor/sketch-session/constraints";
 import {
   offsetFrameShellSpans,
   ownerSpanKey,

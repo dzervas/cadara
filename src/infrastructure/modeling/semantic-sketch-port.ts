@@ -1,5 +1,5 @@
 import { snapshotRepresentsRepositoryDocument } from "@/contracts/modeling/repository-basis";
-import { keptSketchWithheldRegionText } from "@/domain/editor/sketch-session/region-feedback";
+import { keptSketchWithheldRegionText } from "@/core/editor/sketch-session/region-feedback";
 import { getPeerDeletedSketchNotice } from "@/core/editor/state-machine/selectors";
 import type {
   SemanticSketchCommand,
@@ -20,12 +20,12 @@ import {
   getSketchSessionDerivedValidity,
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { sketchPrimitiveContributionInput, validateSketchPrimitive } from "@/core/sketch-tools/semantic-primitive";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
 import { canStartSketchFromTarget } from "@/domain/editor/sketch-session-controller";
-import { canUseTangentArcSourceAtPoint } from "@/domain/sketch-inference/placement-inference";
+import { canUseTangentArcSourceAtPoint } from "@/core/sketch-inference/placement-inference";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
@@ -37,18 +37,18 @@ import { isReferenceDimension } from "@/contracts/sketch/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
-import { getSketchMirrorActionEntries } from "@/domain/editor/sketch-session/mirror-actions";
-import { getSketchOffsetHealth } from "@/domain/editor/sketch-session/offset-actions";
+import { getSketchMirrorActionEntries } from "@/core/editor/sketch-session/mirror-actions";
+import { getSketchOffsetHealth } from "@/core/editor/sketch-session/offset-actions";
 import {
   prepareSketchOffset,
   prepareSketchIntersectionEdit,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { requireQuerySketchEditIntersectionsResponse } from "@/contracts/solver/runtime-schema";
 
 /** Only accepted solved geometry, shared by mirror and other derived-output discovery. */
 function currentDerivedOutputGeometry(
-  s: import("@/domain/editor/sketch-session/types").SketchSessionState,
+  s: import("@/core/editor/sketch-session/types").SketchSessionState,
   outputIds: readonly import("@/contracts/shared/ids").SketchEntityId[],
 ): NonNullable<SemanticDiscovery["sketch"]>["offsets"][number]["currentGeometry"] {
   if (!hasAcceptedLiveSolveOfDefinition(s)) return null;
@@ -76,7 +76,7 @@ function entityDiscovery(definition: Pick<import("@/contracts/sketch/schema").Sk
 }
 
 /** Authored relationships and certified outputs remain separate from display fallbacks. */
-function offsetDiscovery(session: import("@/domain/editor/sketch-session").SketchSessionState): NonNullable<SemanticDiscovery["sketch"]>["offsets"] {
+function offsetDiscovery(session: import("@/core/editor/sketch-session").SketchSessionState): NonNullable<SemanticDiscovery["sketch"]>["offsets"] {
   const snapshot = session.liveSolve!.solvedSnapshot;
   const solved = solvedPairDefinition(session.liveSolve!.definition, snapshot);
   const entities = entityDiscovery(solved);

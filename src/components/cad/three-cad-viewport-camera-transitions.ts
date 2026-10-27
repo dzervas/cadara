@@ -1,5 +1,5 @@
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
-import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
+import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
 import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
 import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
 import {
