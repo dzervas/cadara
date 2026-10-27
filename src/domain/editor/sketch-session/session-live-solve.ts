@@ -670,20 +670,6 @@ export function getSketchSessionDerivedValidity(
     : { state: "invalid", diagnostics };
 }
 
-export function getHistorySequence(id: string) {
-  const match = id.match(/_(\d+)_/);
-  const parsed = match ? Number.parseInt(match[1], 10) : Number.NaN;
-  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-}
-
-export function getDefinitionSketchId(definition: SketchDefinition) {
-  return (
-    definition.entities[0]?.target.sketchId ??
-    definition.points[0]?.target.sketchId ??
-    ("sketch_draft" as SketchId)
-  );
-}
-
 export function getNextDefinitionSequence(definition: SketchDefinition) {
   const ids = [
     ...definition.referenceIds,

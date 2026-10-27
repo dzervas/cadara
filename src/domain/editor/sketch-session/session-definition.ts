@@ -10,7 +10,6 @@ import type {
 import type {
   SketchEntityRef,
   SketchPointRef,
-  SketchOperationRef,
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
@@ -90,13 +89,6 @@ export function createDimensionId(
   return `dimension_${sequence}_${suffix}_${crypto.randomUUID()}` as DimensionId;
 }
 
-export function createAuthoringOperationId(
-  sequence: number,
-  suffix: string,
-): SketchAuthoringOperationId {
-  return `sketch_operation_${sequence}_${suffix}_${crypto.randomUUID()}` as SketchAuthoringOperationId;
-}
-
 export function createSketchEntityRef(
   sketchId: SketchId,
   entityId: SketchEntityId,
@@ -116,17 +108,6 @@ export function createSketchPointRef(
     kind: "sketchPoint",
     sketchId,
     pointId,
-  };
-}
-
-export function createSketchOperationRef(
-  sketchId: SketchId,
-  operationId: SketchAuthoringOperationId,
-): SketchOperationRef {
-  return {
-    kind: "sketchOperation",
-    sketchId,
-    operationId,
   };
 }
 
