@@ -8,7 +8,7 @@
 import { expect, test } from "vitest";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import { isReferenceDimension } from "@/contracts/sketch/schema";
-import { probeSketchDimensionRedundancy } from "@/contracts/sketch/solver-core";
+import { probeSketchDimensionRedundancy } from "@/core/sketch-solver";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   acceptSketchDraw,

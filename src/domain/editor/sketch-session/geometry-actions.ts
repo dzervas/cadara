@@ -3,7 +3,7 @@ import type {
   SemanticSketchGeometryEdit,
   SemanticSketchLabelTarget,
 } from "@/contracts/semantic/schema";
-import type { SketchDragTarget } from "@/contracts/sketch/solver-core";
+import type { SketchDragTarget } from "@/core/sketch-solver";
 import type { SketchSessionState } from "./types";
 import {
   getSessionSketchId,

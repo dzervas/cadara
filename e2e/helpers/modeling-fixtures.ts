@@ -9,7 +9,7 @@ import type {
   CreateFeatureRequest,
 } from "../../src/contracts/modeling/schema";
 import { createSketchArrangementDeriver } from "../../src/contracts/sketch/region-extraction";
-import { solveSketchDefinitionCore } from "../../src/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createLiteralAuthoredValue } from "../../src/contracts/modeling/authored-values";
 import { resolveSketchDimensionValues } from "../../src/domain/modeling/sketch-dimension-expressions";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../../src/domain/modeling/neutral-curve-certification/query";

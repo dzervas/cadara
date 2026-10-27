@@ -30,18 +30,8 @@ import {
 } from "@/contracts/solver/schema";
 import { validateSketchSolverEnvelope } from "@/contracts/solver/runtime-schema";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
-import {
-  compileSketchSolveProgram,
-  createCompiledSketchSolveSession,
-  createSketchArrangementDeriver,
-  solveSketchDefinitionCore,
-  updateCompiledSketchSolveSession,
-  validateSketchDefinitionCore,
-  type SketchArrangementDeriver,
-  type SketchCompiledSolveSession,
-  type ProjectedSketchGeometryRef,
-  type SketchSolveDiagnostic,
-} from "@/contracts/sketch";
+import { createSketchArrangementDeriver, type SketchArrangementDeriver, type ProjectedSketchGeometryRef, type SketchSolveDiagnostic } from "@/contracts/sketch";
+import { compileSketchSolveProgram, createCompiledSketchSolveSession, solveSketchDefinitionCore, updateCompiledSketchSolveSession, validateSketchDefinitionCore, type SketchCompiledSolveSession } from "@/core/sketch-solver";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import { OffsetCertificationMemo } from "@/contracts/sketch/offset-derivation-frame";
 import {

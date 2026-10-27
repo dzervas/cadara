@@ -3,7 +3,7 @@ import {
   literalAuthoredDefinition,
   literalResolvedDefinition,
 } from "@/contracts/sketch/region-extraction.fixtures";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { describe, test, expect } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import {

@@ -12,7 +12,7 @@ import {
 import {
   solveSketchDefinitionCore as solveSketchDefinitionCoreResolved,
   validateSketchDefinitionCore as validateSketchDefinitionCoreResolved,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

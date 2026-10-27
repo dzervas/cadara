@@ -35,7 +35,7 @@ import {
   withOffset,
 } from "@/domain/editor/sketch-offset.fixtures";
 import { eid } from "@/domain/editor/sketch-mirror.fixtures";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {
   makeReferenceDimensionCases,
   makeReferenceDimensionSketch,

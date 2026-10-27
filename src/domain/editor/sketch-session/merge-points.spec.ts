@@ -20,7 +20,7 @@ import {
   requireSketchDefinition,
   validateSketchDefinition,
 } from "@/contracts/sketch/runtime-schema";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {
   beginSketchTool,
   createSketchSessionFromSnapshot,

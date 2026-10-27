@@ -1,7 +1,7 @@
 import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {
   acceptSketchDraw,
   appendReferenceImageOperations,

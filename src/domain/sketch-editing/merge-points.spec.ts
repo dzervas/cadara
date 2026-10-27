@@ -23,7 +23,7 @@ import {
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";

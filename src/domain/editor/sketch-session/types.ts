@@ -275,7 +275,7 @@ export interface SketchGeometryDragState {
    */
   feedback?: SketchDragFeedback | null;
   interactiveSolveSession:
-    | import("@/contracts/sketch/solver-core").SketchCompiledSolveSession
+    | import("@/core/sketch-solver").SketchCompiledSolveSession
     | null;
 }
 

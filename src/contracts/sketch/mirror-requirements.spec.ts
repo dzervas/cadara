@@ -54,7 +54,7 @@ import {
   correspondingMirrorDimensions,
   linkedMirrorRefs,
 } from "@/contracts/sketch/mirror-requirements";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 

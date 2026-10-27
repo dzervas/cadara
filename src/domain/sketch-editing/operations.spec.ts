@@ -34,7 +34,7 @@ import {
   type SketchEditIntersectionResult,
 } from "@/contracts/sketch/edit-intersections";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createArcEndpointDimensions } from "@/core/sketch-tools/constraints";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 import {

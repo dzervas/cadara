@@ -8,7 +8,7 @@ import {
   SKETCH_SOLVER_BENCHMARK_FIXTURES,
   type SketchSolverBenchmarkFixture,
   type SketchSolverBenchmarkEvaluation,
-} from "../src/contracts/sketch/solver-benchmark.ts";
+} from "@/core/sketch-solver";
 import type { RequestId } from "../src/contracts/shared/ids.ts";
 import { CONTRACT_VERSION } from "../src/contracts/shared/versioning.ts";
 import { SOLVER_SCHEMA_VERSION } from "../src/contracts/solver/schema.ts";
@@ -20,7 +20,7 @@ import {
   solveSketchDefinitionCore,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
-} from "../src/contracts/sketch/solver-core.ts";
+} from "@/core/sketch-solver";
 
 const sketchSolver = new SketchConstraintSolverAdapter({
   ...SKETCH_SOLVER_BENCHMARK_DOCUMENT,

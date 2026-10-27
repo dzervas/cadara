@@ -22,9 +22,9 @@ import type {
 
 /** Counts synchronous sketch solves (the entry's cost, review R-5). */
 const solveCount = vi.hoisted(() => ({ value: 0 }));
-vi.mock("@/contracts/sketch/solver-core", async (importOriginal) => {
+vi.mock("@/core/sketch-solver", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("@/contracts/sketch/solver-core")>();
+    await importOriginal<typeof import("@/core/sketch-solver")>();
   return {
     ...actual,
     solveSketchDefinitionCore: (

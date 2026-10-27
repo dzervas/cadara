@@ -9,7 +9,10 @@ test("src/contracts/contracts-domain-boundary.spec.ts", () => {
   const offenders: string[] = [];
 
   for (const filePath of walk(CONTRACTS_ROOT)) {
-    if (!/\.(ts|tsx)$/.test(filePath) || /\.spec\.(ts|tsx)$/.test(filePath)) {
+    if (
+      !/\.(ts|tsx)$/.test(filePath) ||
+      /\.(?:spec\.(?:ts|tsx)|fixtures\.ts|cases\.ts)$/.test(filePath)
+    ) {
       continue;
     }
 

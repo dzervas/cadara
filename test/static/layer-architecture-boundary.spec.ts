@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import ts from "typescript";
 import { test, expect } from "vitest";
 
 const ROOT = process.cwd();
@@ -27,12 +28,63 @@ function walk(directory: string): string[] {
   }
 }
 
+function isTestSupport(filePath: string) {
+  return /\.(?:spec\.(?:ts|tsx)|fixtures\.ts|cases\.ts)$/.test(filePath);
+}
+
 function getLayerFiles(layerRoot: string) {
   return walk(join(ROOT, layerRoot)).filter(
-    (filePath) =>
-      /\.(ts|tsx)$/.test(filePath) && !/\.spec\.(ts|tsx)$/.test(filePath),
+    (filePath) => /\.(ts|tsx)$/.test(filePath) && !isTestSupport(filePath),
   );
 }
+
+test("production source does not import test-support modules", () => {
+  const offenders: string[] = [];
+  for (const filePath of getLayerFiles("src")) {
+    const source = ts.createSourceFile(
+      filePath,
+      readFileSync(filePath, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    function visit(node: ts.Node) {
+      let specifier: string | undefined;
+      if (
+        (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        specifier = node.moduleSpecifier.text;
+      } else if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0])
+      ) {
+        specifier = node.arguments[0].text;
+      } else if (
+        ts.isImportTypeNode(node) &&
+        ts.isLiteralTypeNode(node.argument) &&
+        ts.isStringLiteral(node.argument.literal)
+      ) {
+        specifier = node.argument.literal.text;
+      }
+      if (specifier) {
+        const target = specifier.startsWith("@/")
+          ? join(ROOT, "src", specifier.slice(2))
+          : resolve(dirname(filePath), specifier);
+        if (/\.(?:fixtures|cases)(?:\.ts)?$/.test(target)) {
+          offenders.push(`${relative(ROOT, filePath)} -> ${specifier}`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(source);
+  }
+  expect(offenders, "Production source must not import test support").toEqual(
+    [],
+  );
+});
 
 test("src/layer-architecture-boundary.spec.ts core stays framework and browser free", () => {
   const offenders: string[] = [];

@@ -22,7 +22,7 @@ import {
   isReferenceDimension,
   type SketchDefinition,
 } from "@/contracts/sketch/schema";
-import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";

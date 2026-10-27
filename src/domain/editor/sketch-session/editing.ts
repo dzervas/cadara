@@ -37,7 +37,7 @@ import {
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
   type SketchDragTarget,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import type {
   ProjectedSketchReferenceRecord,
   SolverTolerancePolicy,

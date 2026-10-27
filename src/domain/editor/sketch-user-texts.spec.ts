@@ -21,7 +21,7 @@ import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.
 import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
-import { validateSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";

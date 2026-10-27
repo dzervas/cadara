@@ -24,7 +24,7 @@ import { createMemoryOperationHistoryStore } from "@/domain/modeling/modeling-hi
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import type { ModelingCommitSketchResult } from "@/domain/modeling/modeling-service";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

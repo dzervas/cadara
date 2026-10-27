@@ -23,7 +23,7 @@ import type {
 import {
   probeSketchDimensionRedundancy,
   solveSketchDefinitionCore,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import type {
   ProjectedSketchReferenceRecord,
   SolverTolerancePolicy,

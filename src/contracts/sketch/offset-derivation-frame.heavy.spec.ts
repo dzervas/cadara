@@ -16,7 +16,7 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   evaluateSketchDerivationJvp,

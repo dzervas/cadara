@@ -66,7 +66,7 @@ import {
 import {
   describeDegenerateSplineSpan,
   solveSketchDefinitionCore,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import {
   correspondingMirrorDimensions,
   type MirrorDimensionCorrespondence,

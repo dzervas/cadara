@@ -57,7 +57,7 @@ import {
 import {
   probeSketchDimensionRedundancy,
   solveSketchDefinitionCore,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import { linkedMirrorRefs } from "@/contracts/sketch/mirror-requirements";
 import {
   type ProjectedSketchReferenceRecord,

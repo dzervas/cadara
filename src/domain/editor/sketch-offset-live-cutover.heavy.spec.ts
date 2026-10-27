@@ -54,11 +54,15 @@ import type {
 import {
   DERIVED_SHELL_REQUIREMENT_UNSUPPORTED,
   OFFSET_REQUIREMENT_BLOCKED,
+} from "@/core/sketch-solver/derived-requirement-diagnostics";
+import {
   evaluateSketchScalarConstraintForTest,
   getSketchSolveInitialValuesForTest,
+} from "@/core/sketch-solver/solver-test-seams";
+import {
   solveSketchDefinitionCore,
   validateSketchDefinitionCore,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import {
   SOLVER_SCHEMA_VERSION,
   type DeriveSketchRegionsRequest,

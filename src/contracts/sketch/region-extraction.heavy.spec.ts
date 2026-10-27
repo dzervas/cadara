@@ -40,7 +40,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { regionBranchKey } from "@/contracts/sketch/region-identity";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {
   applyOffsetPublications,
   publishSketchOffsets,

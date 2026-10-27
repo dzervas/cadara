@@ -11,7 +11,7 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import {
   deriveSketchValidity,

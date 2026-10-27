@@ -19,7 +19,7 @@ import type {
 } from "@/contracts/sketch/schema";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
-import { solveSketchDefinitionCore } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 
 export type Vector = readonly [number, number];
 /** One native tool commit contribution (after snap inference). */

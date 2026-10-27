@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
-import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type {
   SketchDefinition,

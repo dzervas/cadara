@@ -54,7 +54,7 @@ import {
   unsatisfiedRequirementDiagnostics,
   updateCompiledSketchSolveSession,
   type SketchCompiledSolveSession,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import {
   isReferenceDimension,
   SOLVED_SKETCH_SCHEMA_VERSION,

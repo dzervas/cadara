@@ -7,7 +7,7 @@ import type {
   SketchStyleRecord,
 } from "@/contracts/sketch/schema";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
-import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/contracts/sketch/solver-core";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";

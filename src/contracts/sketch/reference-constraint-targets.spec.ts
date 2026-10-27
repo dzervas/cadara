@@ -5,7 +5,7 @@ import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import {
   solveSketchDefinitionCore as solveSketchDefinitionCoreResolved,
   validateSketchDefinitionCore as validateSketchDefinitionCoreResolved,
-} from "@/contracts/sketch/solver-core";
+} from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
