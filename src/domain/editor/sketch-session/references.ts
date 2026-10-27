@@ -10,14 +10,13 @@ import { stripReferenceImageRuntimeState, createDefaultReferenceImageCalibration
 import { validateReferenceImageOperationState } from "@/contracts/reference-image/runtime-schema";
 import type { SketchSessionState } from "./types";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
-import { getSessionSketchId, hasAcceptedLiveSolveOfDefinition } from "./internals";
-import {
-  appendDefinition,
-  getSketchSessionInvalidFeedback,
-  mergeDerivedProjectedReferences,
-  rebuildSessionCommitRequest,
-  withLiveSolveBasis,
-} from "./internals";
+import { getSessionSketchId } from "./tool-authoring";
+import { hasAcceptedLiveSolveOfDefinition } from "./session-live-solve";
+import { appendDefinition } from "./definition-authoring";
+import { getSketchSessionInvalidFeedback } from "./session-feedback";
+import { mergeDerivedProjectedReferences } from "./session-definition";
+import { rebuildSessionCommitRequest } from "./tool-authoring";
+import { withLiveSolveBasis } from "./session-live-solve";
 
 /** One explicit image intent delegates to the same append owner as browser imports. */
 export function authorReferenceImage(

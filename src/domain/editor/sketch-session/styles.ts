@@ -11,12 +11,15 @@ import {
   parseSketchStylePatch,
 } from "@/domain/sketch-styles/definition";
 import type { SketchSessionState } from "./types";
-import { getSessionSketchId, rebuildSessionCommitRequest } from "./internals";
+import {
+  getSessionSketchId,
+  rebuildSessionCommitRequest,
+} from "./tool-authoring";
 import {
   applyStylePatchToDefinition,
   isFillStylePatch,
   sketchStyleRecordToDefinition,
-} from "./annotations";
+} from "./annotation-style";
 
 export function focusSketchStyleTool(
   session: SketchSessionState,

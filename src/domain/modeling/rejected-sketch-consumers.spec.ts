@@ -40,7 +40,7 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   eid,

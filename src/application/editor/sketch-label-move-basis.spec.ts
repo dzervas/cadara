@@ -20,7 +20,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { getSketchNearGapBasis } from "@/domain/sketch-interaction/near-gap";
 import {
   createStandardPlaneDefinition,

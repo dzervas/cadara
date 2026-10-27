@@ -30,11 +30,11 @@ import type { SketchConstraintDisplayState, SketchSessionState } from "./types";
 import {
   cloneDefinition,
   createEmptyDefinition,
-  getNextDefinitionSequence,
-  getSessionSketchId,
   getSketchSessionDerivationSettings,
-  mapDefinitionEntityToDraftEntity,
-} from "./internals";
+} from "./session-definition";
+import { getNextDefinitionSequence } from "./session-live-solve";
+import { getSessionSketchId } from "./tool-authoring";
+import { mapDefinitionEntityToDraftEntity } from "./draft-entity-geometry";
 import { buildCommitRequest } from "./history";
 import {
   getSelectedReferenceImageOperationIds,

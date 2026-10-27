@@ -42,7 +42,7 @@ it("browser and semantic dimensions share contribution, reference and solve prep
   expect(shared).toContain("createConstraintCommitContribution(");
   expect(shared).toContain("toReferenceDimension(");
   expect(shared).toContain("solveCommittedConstraintDefinition(");
-  const annotations = "src/domain/editor/sketch-session/annotations.ts";
+  const annotations = "src/domain/editor/sketch-session/annotation-editing.ts";
   expect(body(annotations, "updateSketchDimensionValue")).toContain(
     "commitSketchAnnotationEditValue(",
   );

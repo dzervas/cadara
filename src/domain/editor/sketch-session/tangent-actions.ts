@@ -25,8 +25,8 @@ import type { SketchSessionState } from "./types";
 import {
   getSessionSketchId,
   rebuildSessionCommitRequest,
-  withLiveSolveBasis,
-} from "./internals";
+} from "./tool-authoring";
+import { withLiveSolveBasis } from "./session-live-solve";
 
 // ── Target resolution ────────────────────────────────────────────────────
 

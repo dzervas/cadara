@@ -31,7 +31,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/domain/modeling/opencascade-kernel-seed";
-import { createPlacedPointDimensionLine } from "@/domain/editor/sketch-session/annotations";
+import { createPlacedPointDimensionLine } from "./annotation-geometry";
 import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";

@@ -30,7 +30,7 @@ import {
   solvedCubicSpans,
   type SolvedCubicSpan,
 } from "@/contracts/sketch/spline-geometry";
-import { isAcceptedSketchSolve } from "@/domain/editor/sketch-session/internals";
+import { isAcceptedSketchSolve } from "@/domain/editor/sketch-session";
 import {
   SKETCH_ALIGNMENT_SNAP_RADII_PX,
   SKETCH_CURVE_RADII_PX,

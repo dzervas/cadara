@@ -20,9 +20,9 @@ import {
 } from "@/domain/editor/sketch-session";
 import {
   appendDefinition,
-  createSessionCommitFactories,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createSketchOffsetDerivationContribution } from "@/domain/sketch-editing/operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { eid, entityTarget, pid } from "@/domain/editor/sketch-mirror.fixtures";

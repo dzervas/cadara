@@ -42,10 +42,8 @@ import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
 } from "@/domain/sketch-inference/placement-inference";
-import {
-  createSessionCommitFactories,
-  createSketchPointRef,
-} from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+import { createSketchPointRef } from "@/domain/editor/sketch-session/session-definition";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";

@@ -40,10 +40,8 @@ import {
   updateSketchGeometryDrag,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import {
-  MIRROR_DATUM_AXIS_ORDER_MESSAGE,
-  offsetEditInputGate,
-} from "@/domain/editor/sketch-session/editing";
+import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/edit-geometry-operations";
+import { offsetEditInputGate } from "@/domain/editor/sketch-session/offset-editing";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -59,14 +57,16 @@ import {
 import { nonAcceptedOutputProjectionMessage } from "@/domain/modeling/sketch-reference-projection";
 import {
   appendDefinition,
-  CONSTRAINED_DRAG_BLOCKED_MESSAGE,
-  createSessionCommitFactories,
-  getSketchSessionDisplayDefinition,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/definition-authoring";
+import {
+  CONSTRAINED_DRAG_BLOCKED_MESSAGE,
+  getSketchSessionDisplayDefinition,
+} from "@/domain/editor/sketch-session/session-definition";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
-import { toggleSketchConstructionTarget } from "@/domain/editor/sketch-session/tools";
+import { toggleSketchConstructionTarget } from "@/domain/editor/sketch-session/reference-authoring";
 import { patchSketchStyleValue } from "@/domain/editor/sketch-session/styles";
 import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
 import {

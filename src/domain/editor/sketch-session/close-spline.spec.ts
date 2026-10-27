@@ -51,9 +51,9 @@ import {
 } from "@/domain/editor/sketch-session";
 import {
   appendDefinition,
-  createSessionCommitFactories,
   rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "./definition-authoring";
+import { createSessionCommitFactories } from "./tool-authoring";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

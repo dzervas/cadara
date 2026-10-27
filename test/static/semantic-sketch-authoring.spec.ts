@@ -23,7 +23,7 @@ function body(file: string, name: string) {
   return declaration.body.getText(ast);
 }
 it("browser and semantic primitive authoring share contribution factories and solve preparation", () => {
-  const file = "src/domain/editor/sketch-session/tools.ts";
+  const file = "src/domain/editor/sketch-session/drawing-commit.ts";
   for (const name of ["commitSketchDraw", "authorSketchPrimitive"]) {
     const source = body(file, name);
     expect(source).toContain("prepareSketchContribution(");
@@ -37,12 +37,12 @@ it("browser and semantic primitive authoring share contribution factories and so
   expect(preparation).not.toContain("createPointDefinition(");
 });
 it("browser and semantic geometry edits share solving, deletion and construction owners", () => {
-  const tools = "src/domain/editor/sketch-session/tools.ts";
+  const tools = "src/domain/editor/sketch-session/reference-authoring.ts";
   expect(body(tools, "toggleSketchConstructionTarget")).toContain("setSketchConstructionTarget(");
   expect(body(tools, "setSketchConstructionTarget")).toContain("toggleConstructionTargetInDefinition(");
   expect(body("src/domain/editor/sketch-session/geometry-actions.ts", "updateSketchGeometry")).toContain("solveDragEdit(");
-  expect(body("src/domain/editor/sketch-session/editing.ts", "applySketchGeometryDrag")).toContain("solveDragEdit(");
-  expect(body("src/domain/editor/sketch-session/editing.ts", "beginSketchGeometryDrag")).toContain("prepareSketchTangentEditDefinition(");
+  expect(body("src/domain/editor/sketch-session/geometry-drag.ts", "applySketchGeometryDrag")).toContain("solveDragEdit(");
+  expect(body("src/domain/editor/sketch-session/geometry-drag.ts", "beginSketchGeometryDrag")).toContain("prepareSketchTangentEditDefinition(");
   expect(body("src/domain/editor/sketch-session/geometry-actions.ts", "updateSketchGeometry")).toContain("prepareSketchTangentEditDefinition(");
   const reducer = readFileSync(resolve(root, "src/core/editor/state-machine/reducer-sketch.ts"), "utf8");
   expect(reducer).toContain("deleteSelectedSketchGeometry(state.session, event.targets)");

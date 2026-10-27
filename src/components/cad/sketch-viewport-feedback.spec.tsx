@@ -14,7 +14,7 @@ import {
 } from "@/components/cad/sketch-viewport-feedback-model";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/tools";
+import { buildSketchEditToolPresentation } from "@/domain/editor/sketch-session/edit-tool-activation";
 import {
   editDimension,
   makeCircleWithDiameterSession,
@@ -31,7 +31,7 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
 import { transitionEditorState } from "@/core/editor/state-machine/reducer-root";

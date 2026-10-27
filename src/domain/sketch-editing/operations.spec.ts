@@ -37,10 +37,8 @@ import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extrac
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createArcEndpointDimensions } from "@/core/sketch-tools/constraints";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
-import {
-  createSessionCommitFactories,
-  describeSketchSessionUnsatisfiedRequirements,
-} from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+import { describeSketchSessionUnsatisfiedRequirements } from "@/domain/editor/sketch-session/session-feedback";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
 import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
 import type { DimensionId, DocumentVariableId } from "@/contracts/shared/ids";

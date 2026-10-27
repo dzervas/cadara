@@ -26,11 +26,9 @@ import type {
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchSessionState } from "./types";
-import {
-  getSessionSketchId,
-  hasAcceptedLiveSolveOfDefinition,
-  rebuildSessionForDefinition,
-} from "./internals";
+import { getSessionSketchId } from "./tool-authoring";
+import { hasAcceptedLiveSolveOfDefinition } from "./session-live-solve";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 
 type SplineEntity = Extract<SketchEntityDefinition, { kind: "spline" }>;
 

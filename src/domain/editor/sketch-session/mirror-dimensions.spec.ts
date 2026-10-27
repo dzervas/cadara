@@ -11,10 +11,8 @@ import {
   mirroredSession,
   pid,
 } from "@/domain/editor/sketch-mirror.fixtures";
-import {
-  getSketchSessionInvalidFeedback,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+import { getSketchSessionInvalidFeedback } from "./session-feedback";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 import {
   beginSketchAnnotationEdit,
   beginSketchTool,
@@ -26,7 +24,7 @@ import {
   selectSketchConstraintTarget,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { commitSketchAnnotationEditValue } from "@/domain/editor/sketch-session/annotations";
+import { commitSketchAnnotationEditValue } from "./annotation-editing";
 import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
 
 // T16f, logic lane, seam: the sketch session (live solve, invalid feedback,

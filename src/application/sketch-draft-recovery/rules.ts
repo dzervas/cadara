@@ -2,7 +2,7 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import type { PersistedSketchDraft } from "@/contracts/sketch/draft-recovery";
 import { canStartSketchFromTarget } from "@/domain/editor/sketch-session-controller";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import type { EditorTransitionResult } from "@/core/editor/state-machine";
 import { emitSketchReferenceProjection } from "@/core/editor/state-machine/effect-emitters";

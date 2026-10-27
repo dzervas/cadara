@@ -58,7 +58,7 @@ import type {
   SketchSessionState,
 } from "./types";
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
-import { getSketchEditOperatorResult } from "./editing";
+import { getSketchEditOperatorResult } from "./edit-geometry-operations";
 import {
   REFERENCE_IMAGE_ANCHOR_MARKER_COLOR,
   REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS,
@@ -70,9 +70,9 @@ import {
   getReferenceImageOperationOverrides,
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
-  getSketchSessionDerivedValidity,
-  mapDefinitionEntityToDraftEntity,
-} from "./internals";
+} from "./session-definition";
+import { getSketchSessionDerivedValidity } from "./session-live-solve";
+import { mapDefinitionEntityToDraftEntity } from "./draft-entity-geometry";
 import { mapSketchPointToWorld } from "./state";
 import {
   getSketchConstraintDisplayForTarget,

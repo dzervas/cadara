@@ -37,13 +37,14 @@ import {
   getSketchMirrorRepairCandidate,
   leaveSketchMirrorRepair,
   restageSketchMirrorRepair,
-} from "./editing";
-import { beginSketchTool, clearActiveSketchTool } from "./tools";
+} from "./mirror-editing";
 import {
-  getSessionSketchId,
-  getSketchSessionDerivationSettings,
-  rebuildSessionForDefinition,
-} from "./internals";
+  beginSketchTool,
+  clearActiveSketchTool,
+} from "./drawing-tool-lifecycle";
+import { getSessionSketchId } from "./tool-authoring";
+import { getSketchSessionDerivationSettings } from "./session-definition";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 
 export interface SketchMirrorActionEntry {
   derivationId: string;

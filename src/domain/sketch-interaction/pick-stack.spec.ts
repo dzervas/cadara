@@ -20,8 +20,8 @@ import {
   createLineEntityDefinition,
   createPointDefinition,
   createPointEntityDefinition,
-  getSketchSessionDisplayDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/definition-authoring";
+import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
 import {
   createNewSketchSession,
   type SketchSessionState,

@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("browser and explicit mirrors share canonical creation, candidate repair, health and removal owners", () => {
-  const editing = read("src/domain/editor/sketch-session/editing.ts");
+  const editing = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   expect(editing.match(/getSketchMirrorResult\(session,/g)).toHaveLength(2);
   expect(editing.match(/operatorKind: "mirror"/g)).toHaveLength(1);
   expect(editing).toContain("offsetEditInputGate(session, entityIds");

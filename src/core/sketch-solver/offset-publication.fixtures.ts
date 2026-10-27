@@ -9,7 +9,7 @@ import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { literalAuthoredDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
 import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";

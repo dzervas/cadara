@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (file: string) => readFileSync(resolve(root, file), "utf8");
 
 it("browser and semantic movement share handle intent, tangent preparation and constrained solve owners", () => {
-  const browser = read("src/domain/editor/sketch-session/editing.ts");
+  const browser = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   const semantic = read("src/domain/editor/sketch-session/geometry-actions.ts");
   for (const source of [browser, semantic]) {
     expect(source).toContain("resolveHandleFromTarget(");

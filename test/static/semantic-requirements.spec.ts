@@ -22,7 +22,7 @@ it("completed semantic requirements and browser commits share target resolution,
   expect(reducer).toContain(
     "deleteSelectedSketchAnnotation(session, [target])",
   );
-  const annotations = read("src/domain/editor/sketch-session/annotations.ts");
+  const annotations = ["src/domain/editor/sketch-session/annotation-editing.ts", "src/domain/editor/sketch-session/annotation-style.ts", "src/domain/editor/sketch-session/annotation-edit-presentation.ts", "src/domain/editor/sketch-session/annotation-selection.ts", "src/domain/editor/sketch-session/annotation-descriptors.ts", "src/domain/editor/sketch-session/annotation-anchors.ts", "src/domain/editor/sketch-session/dimension-overlays.ts", "src/domain/editor/sketch-session/annotation-geometry.ts", "src/domain/editor/sketch-session/annotation-reference-geometry.ts", "src/domain/editor/sketch-session/annotation-labels.ts"].map(read).join("\n");
   expect(annotations).toContain(
     "return makeSketchAnnotationReference(session, edit)",
   );

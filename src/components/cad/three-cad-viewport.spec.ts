@@ -30,10 +30,8 @@ import {
   derivedTargetsDefinition,
   mirroredSession,
 } from "@/domain/editor/sketch-mirror.fixtures";
-import {
-  getSketchSessionDisplayDefinition,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {

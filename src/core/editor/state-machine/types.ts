@@ -780,7 +780,7 @@ export type EditorEvent =
   | { type: "sketch.draftRecoveryRequested"; draft: import("@/contracts/sketch/draft-recovery").PersistedSketchDraft }
   | { type: "sketchPlaneEdit.supportCommitted"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef }
   | { type: "sketch.beginRequested"; target: import("@/contracts/shared/sketch-plane").SketchPlaneSupportRef | import("@/contracts/shared/references").SketchRef }
-  | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session/editing").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
+  | { type: "sketch.offsetCompleted"; prepared: Exclude<ReturnType<typeof import("@/domain/editor/sketch-session").prepareSketchOffset>, { message: string }>; record: import("@/contracts/solver/schema").SketchOffsetPublicationRecord }
   | { type: "sketch.imageEdited"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }>; edit: import("@/contracts/semantic/schema").SemanticReferenceImageEdit | { kind: "replace"; image: import("@/contracts/reference-image/schema").ReferenceImagePayload } }
   | { type: "sketch.imageRemoved"; target: Extract<import("@/contracts/shared/references").DurableRef, { kind: "sketchOperation" }> }
   | { type: "sketch.imageAuthored"; payload: import("@/contracts/reference-image/schema").ReferenceImagePayload }

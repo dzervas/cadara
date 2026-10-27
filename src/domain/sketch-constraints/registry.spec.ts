@@ -1,8 +1,6 @@
 import { test, expect } from "vitest";
-import {
-  buildCommittedDimensionOverlays,
-  inferCommittedDimensionAnnotationPlacement,
-} from "@/domain/editor/sketch-session/annotations";
+import { buildCommittedDimensionOverlays } from "@/domain/editor/sketch-session/dimension-overlays";
+import { inferCommittedDimensionAnnotationPlacement } from "@/domain/editor/sketch-session/annotation-edit-presentation";
 import type { DimensionId } from "@/contracts/shared/ids";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import {

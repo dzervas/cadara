@@ -52,7 +52,7 @@ import {
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
-import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/editing";
+import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/edit-queries";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,

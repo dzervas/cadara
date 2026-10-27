@@ -25,11 +25,9 @@ import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dime
 import { getEntityPointIds } from "@/domain/sketch-editing/definition-references";
 import { removeDerivedRelationship } from "@/domain/sketch-editing/derived-removal";
 import type { SketchSessionState } from "./types";
-import {
-  getSessionSketchId,
-  getSketchSessionDerivationSettings,
-  rebuildSessionForDefinition,
-} from "./internals";
+import { getSessionSketchId } from "./tool-authoring";
+import { getSketchSessionDerivationSettings } from "./session-definition";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 
 type OffsetRelationship = Extract<
   SketchDerivationDefinition,

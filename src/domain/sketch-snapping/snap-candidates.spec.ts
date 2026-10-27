@@ -32,7 +32,7 @@ import {
   createSketchSessionFromSnapshot
 } from "@/domain/editor/sketch-session";
 import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
+import { withLiveSolveBasis } from "@/domain/editor/sketch-session/session-live-solve";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

@@ -1,4 +1,4 @@
-import { setSketchSnapScale } from "./tools";
+import { setSketchSnapScale } from "./drawing-commit";
 import type { SketchSessionState } from "./types";
 
 /**

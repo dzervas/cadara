@@ -18,10 +18,8 @@ import {
   startSketchDraw,
   updateSketchPointer,
 } from "@/domain/editor/sketch-session";
-import {
-  createSessionCommitFactories,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "./tool-authoring";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 import type { SketchSessionState } from "@/domain/editor/sketch-session/types";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {

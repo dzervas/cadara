@@ -13,7 +13,7 @@ import {
   neutralSpan,
   projectedSpline,
 } from "@/contracts/sketch/region-extraction.fixtures";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createSketchOffsetDerivationContribution } from "@/domain/sketch-editing/operations";
 import type { ComponentJacobian } from "./automatic-differentiation";
 import type {

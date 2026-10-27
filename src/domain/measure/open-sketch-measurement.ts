@@ -5,7 +5,7 @@ import {
   getSketchSessionDerivedValidity,
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session";
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import type { SketchSessionState } from "@/domain/editor/sketch-session/types";
 import type { OpenSketchMeasurementRecord } from "@/domain/measure/measurement";

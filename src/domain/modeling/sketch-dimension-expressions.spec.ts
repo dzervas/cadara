@@ -18,17 +18,15 @@ import {
   resolveSketchDimensionValues,
 } from "@/domain/modeling/sketch-dimension-expressions";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import {
-  getSketchSessionDisplayDefinition,
-  rebuildSessionCommitRequest,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
+import { rebuildSessionCommitRequest } from "@/domain/editor/sketch-session/tool-authoring";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import {
   beginSketchTool,
   patchSketchEditToolValue,
   selectSketchEditToolTarget,
 } from "@/domain/editor/sketch-session";
-import { getSketchEditOperatorResult } from "@/domain/editor/sketch-session/editing";
+import { getSketchEditOperatorResult } from "@/domain/editor/sketch-session/edit-geometry-operations";
 import { applyOffsetPublications } from "@/contracts/sketch/offset-publication";
 import {
   offsetSeedSession,

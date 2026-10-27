@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 test("browser and explicit offsets share canonical construction, expression-resolved certification basis and authored application", () => {
-  const owner = read("src/domain/editor/sketch-session/editing.ts");
+  const owner = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   expect(
     owner.match(/createSketchOffsetDerivationContribution\(/g),
   ).toHaveLength(1);
@@ -29,7 +29,7 @@ test("browser and explicit offsets share canonical construction, expression-reso
   expect(owner).toContain(
     "session.liveRegions.generation !== prepared.generation",
   );
-  const basis = read("src/domain/editor/sketch-session/internals.ts");
+  const basis = ["src/domain/editor/sketch-session/session-definition.ts", "src/domain/editor/sketch-session/session-live-solve.ts", "src/domain/editor/sketch-session/draft-entity-geometry.ts", "src/domain/editor/sketch-session/definition-authoring.ts", "src/domain/editor/sketch-session/session-feedback.ts", "src/domain/editor/sketch-session/tool-placement.ts", "src/domain/editor/sketch-session/tool-authoring.ts"].map(read).join("\n");
   expect(basis).toContain("resolveSketchDefinitionForSolve(");
   expect(basis).toContain("isOffsetPublicationSolveAccepted(solvedSnapshot)");
   const adapter = read("src/infrastructure/modeling/semantic-sketch-port.ts");
@@ -79,13 +79,25 @@ test("relationship label aliases delegate to the application resolver, not termi
   expect(client).toContain('from "@/application/semantic/sdk"');
   expect(read("src/application/semantic/sdk.ts")).toContain("resolveSemanticCommand(input,");
   expect(client).toContain("sdk.execute(operation.command,");
-  for (const path of [
-    "src/cli/commands/document-recipes.ts",
-    "src/domain/editor/sketch-session/editing.ts",
-    "src/infrastructure/modeling/semantic-sketch-port.ts",
+  for (const source of [
+    read("src/cli/commands/document-recipes.ts"),
+    [
+      "src/domain/editor/sketch-session/geometry-deletion.ts",
+      "src/domain/editor/sketch-session/offset-editing.ts",
+      "src/domain/editor/sketch-session/edit-geometry-operations.ts",
+      "src/domain/editor/sketch-session/point-merge.ts",
+      "src/domain/editor/sketch-session/mirror-editing.ts",
+      "src/domain/editor/sketch-session/edit-queries.ts",
+      "src/domain/editor/sketch-session/edit-tool-interaction.ts",
+      "src/domain/editor/sketch-session/geometry-drag.ts",
+      "src/domain/editor/sketch-session/drag-solve.ts",
+    ]
+      .map(read)
+      .join("\n"),
+    read("src/infrastructure/modeling/semantic-sketch-port.ts"),
   ]) {
-    expect(read(path)).not.toContain("TargetAlias");
-    expect(read(path)).not.toContain("aliases.get(");
-    expect(read(path)).not.toContain("function resolveLabelled");
+    expect(source).not.toContain("TargetAlias");
+    expect(source).not.toContain("aliases.get(");
+    expect(source).not.toContain("function resolveLabelled");
   }
 });

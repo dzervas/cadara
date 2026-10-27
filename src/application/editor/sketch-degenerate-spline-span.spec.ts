@@ -45,11 +45,9 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import {
-  getSketchDegenerateSplineSpans,
-  getSketchSessionInvalidFeedback,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+import { getSketchDegenerateSplineSpans } from "@/domain/editor/sketch-session/session-live-solve";
+import { getSketchSessionInvalidFeedback } from "@/domain/editor/sketch-session/session-feedback";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

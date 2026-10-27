@@ -3,9 +3,9 @@ import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
 import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,
-} from "./annotations";
+} from "./annotation-editing";
 import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
-import { getSketchSessionDerivationSettings } from "./internals";
+import { getSketchSessionDerivationSettings } from "./session-definition";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 
 test("committed offset distance uses the annotation editor, stages text, cancels without mutation and commits in place", () => {

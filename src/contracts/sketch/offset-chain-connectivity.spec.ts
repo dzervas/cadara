@@ -7,7 +7,7 @@ import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
 } from "@/domain/sketch-inference/placement-inference";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import type {
   ConstraintId,

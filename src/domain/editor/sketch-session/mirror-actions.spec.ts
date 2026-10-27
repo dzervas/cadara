@@ -43,7 +43,7 @@ import {
 } from "@/domain/editor/workbench-interactions";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 import {
   chainSession,
   eid,

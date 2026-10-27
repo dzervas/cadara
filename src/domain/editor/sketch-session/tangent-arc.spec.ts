@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { acceptSketchDraw, beginSketchTool, createNewSketchSession, finalizeSketchDraw, startSketchDraw, updateSketchPointer } from "@/domain/editor/sketch-session";
-import { reconcileSketchToolDraft } from "./internals";
+import { reconcileSketchToolDraft } from "./tool-placement";
 import { withSketchSnapScale, SPEC_SKETCH_UNITS_PER_PIXEL } from "./test-snap-scale";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 

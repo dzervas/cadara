@@ -19,7 +19,7 @@ it("round semantic authoring consumes browser contribution validation instead of
   expect(preparation).not.toMatch(
     /getCircumcircleFromPoints\(|getTangentArcCircle\(|createRegularPolygonVertices\(/,
   );
-  const owner = read("src/domain/editor/sketch-session/tools.ts");
+  const owner = ["src/domain/editor/sketch-session/edit-tool-activation.ts", "src/domain/editor/sketch-session/drawing-tool-lifecycle.ts", "src/domain/editor/sketch-session/drawing-pointer.ts", "src/domain/editor/sketch-session/reference-authoring.ts", "src/domain/editor/sketch-session/drawing-commit.ts", "src/domain/editor/sketch-session/tool-presentation.ts"].map(read).join("\n");
   expect(owner).toContain("sketchPrimitiveContributionInput(primitive)");
   expect(owner).toContain(
     'primitive.kind === "tangentArc" ? primitive.source?.entityId ?? null : null',

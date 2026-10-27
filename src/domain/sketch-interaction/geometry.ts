@@ -31,7 +31,7 @@ import {
   getSketchSessionDisplayDefinition,
   getSketchSessionDisplayProjectedReferences,
   isAcceptedSketchSolve,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session";
 import { getSketchDatumGuideExtent } from "@/domain/editor/sketch-session/definition-patches";
 
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";

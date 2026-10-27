@@ -28,10 +28,8 @@ import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 import { orderedSplinePointIds } from "@/contracts/sketch/spline-geometry";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
-import {
-  appendDefinition,
-  createSessionCommitFactories,
-} from "@/domain/editor/sketch-session/internals";
+import { appendDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import {
   createSketchDerivedTransformContribution,
   createSketchOffsetDerivationContribution,

@@ -25,10 +25,12 @@ import {
 } from "@/domain/editor/sketch-session";
 import {
   appendDefinition,
+  rebuildSessionForDefinition,
+} from "@/domain/editor/sketch-session/definition-authoring";
+import {
   createSessionCommitFactories,
   getSessionSketchId,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/tool-authoring";
 import {
   createSketchDerivedTransformContribution,
   createSketchOffsetDerivationContribution,

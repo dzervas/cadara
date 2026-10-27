@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("browser and semantic corner/slot construction share canonical builders, gates and solve-basis handoff", () => {
-  const source = read("src/domain/editor/sketch-session/editing.ts");
+  const source = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   // cadara-h026.2: Fillet and Chamfer build through the per-corner builder.
   for (const builder of [
     "createSketchCornersMutation",

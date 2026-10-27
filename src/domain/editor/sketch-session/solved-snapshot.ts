@@ -1,6 +1,6 @@
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import type { SketchSessionState } from "./types";
-import { SKETCH_NOT_SOLVED_YET } from "./internals";
+import { SKETCH_NOT_SOLVED_YET } from "./session-live-solve";
 
 const stableDisplayObjectIds = new WeakMap<object, number>();
 let nextStableDisplayObjectId = 1;

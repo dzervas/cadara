@@ -163,7 +163,7 @@ import {
 import {
   createSketchPointRef,
   getSketchSessionDisplayDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session";
 import type { SketchId } from "@/contracts/shared/ids";
 import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import {

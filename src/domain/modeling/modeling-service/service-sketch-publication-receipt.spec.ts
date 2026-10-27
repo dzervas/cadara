@@ -4,7 +4,7 @@ import { expect, it } from "vitest";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
-import { authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
+import { authorSketchPrimitive } from "@/domain/editor/sketch-session/drawing-commit";
 import { createNewSketchSession } from "@/domain/editor/sketch-session/state";
 import {
   createStandardPlaneDefinition,

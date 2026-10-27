@@ -23,8 +23,8 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { describeSketchSessionUnsatisfiedRequirements } from "@/domain/editor/sketch-session/internals";
-import { buildCommittedDimensionOverlays } from "@/domain/editor/sketch-session/annotations";
+import { describeSketchSessionUnsatisfiedRequirements } from "./session-feedback";
+import { buildCommittedDimensionOverlays } from "./dimension-overlays";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

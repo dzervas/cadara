@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 it("explicit and browser intersection edits share accepted-basis preparation, exact-result gates and mutation builders", () => {
-  const session = read("src/domain/editor/sketch-session/editing.ts");
+  const session = ["src/domain/editor/sketch-session/geometry-deletion.ts", "src/domain/editor/sketch-session/offset-editing.ts", "src/domain/editor/sketch-session/edit-geometry-operations.ts", "src/domain/editor/sketch-session/point-merge.ts", "src/domain/editor/sketch-session/mirror-editing.ts", "src/domain/editor/sketch-session/edit-queries.ts", "src/domain/editor/sketch-session/edit-tool-interaction.ts", "src/domain/editor/sketch-session/geometry-drag.ts", "src/domain/editor/sketch-session/drag-solve.ts"].map(read).join("\n");
   expect(
     session.match(/sketchEditIntersectionInput\(session, operation\)/g)!.length,
   ).toBeGreaterThanOrEqual(2);

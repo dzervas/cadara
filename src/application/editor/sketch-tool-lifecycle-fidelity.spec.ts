@@ -23,7 +23,7 @@ import {
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import {
   eid,
   entityRef,

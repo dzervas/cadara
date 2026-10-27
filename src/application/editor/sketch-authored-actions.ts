@@ -20,7 +20,7 @@ import {
   withoutSketchAnnotationWheel,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session";
 import { getToolById } from "@/core/tools/tool-registry";
 import { describeBlockedSketchAction } from "@/domain/modeling/document-action-blocked";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";

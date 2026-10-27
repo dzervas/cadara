@@ -7,18 +7,20 @@ import type { SketchDragTarget } from "@/core/sketch-solver";
 import type { SketchSessionState } from "./types";
 import {
   getSessionSketchId,
-  getSketchSessionInvalidFeedback,
-  getSketchSessionDerivationSettings,
   rebuildSessionCommitRequest,
-  rebuildSessionForDefinition,
-  withLiveSolveBasis,
-} from "./internals";
+} from "./tool-authoring";
+import { getSketchSessionInvalidFeedback } from "./session-feedback";
+import { getSketchSessionDerivationSettings } from "./session-definition";
+import { rebuildSessionForDefinition } from "./definition-authoring";
+import { withLiveSolveBasis } from "./session-live-solve";
 import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
   type SketchDragIntent,
 } from "./drag-intent";
-import { prepareSketchPointMerge, prepareSketchTangentEditDefinition, solveDragEdit } from "./editing";
+import { prepareSketchPointMerge } from "./point-merge";
+import { prepareSketchTangentEditDefinition } from "./geometry-drag";
+import { solveDragEdit } from "./drag-solve";
 
 /** One completed parameter edit through the same solver and target gate as browser edits. */
 export function updateSketchGeometry(

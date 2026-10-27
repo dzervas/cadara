@@ -12,7 +12,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { getSketchEditOperatorResult } from "@/domain/editor/sketch-session/editing";
+import { getSketchEditOperatorResult } from "@/domain/editor/sketch-session/edit-geometry-operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,

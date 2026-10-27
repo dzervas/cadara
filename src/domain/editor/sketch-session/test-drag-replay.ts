@@ -1,4 +1,4 @@
-import { updateSketchGeometryDrag } from "./editing";
+import { updateSketchGeometryDrag } from "./geometry-drag";
 import type { SketchSessionState } from "./types";
 
 // Preview budgets defer verdicts; the UI continues on the next pointer move.

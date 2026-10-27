@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
-import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
+import { prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/edit-queries";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SketchRegionDerivationSupersededError } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
@@ -22,7 +22,7 @@ import {
 import {
   editQueryStaleMessage,
   TRIM_STALE_MESSAGE,
-} from "@/domain/editor/sketch-session/editing";
+} from "@/domain/editor/sketch-session/edit-queries";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

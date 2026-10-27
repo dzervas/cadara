@@ -79,7 +79,7 @@ import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
 } from "@/domain/sketch-inference/placement-inference";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";

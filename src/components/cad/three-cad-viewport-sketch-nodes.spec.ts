@@ -20,7 +20,7 @@ import {
   type SketchPointMarkerContext,
 } from "@/domain/editor/sketch-session/display";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/internals";
+import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-session/session-definition";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

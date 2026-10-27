@@ -52,7 +52,7 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
-import { buildCommittedDimensionOverlays } from "@/domain/editor/sketch-session/annotations";
+import { buildCommittedDimensionOverlays } from "./dimension-overlays";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,

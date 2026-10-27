@@ -56,7 +56,7 @@ import {
 } from "@/domain/editor/sketch-session/references";
 import { createReferenceImageOperation } from "@/domain/reference-image/operations";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getEnterEvent,

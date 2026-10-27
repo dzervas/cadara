@@ -31,10 +31,8 @@ import {
   FIXTURE_TOLERANCE,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
-import {
-  appendDefinition,
-  createSessionCommitFactories,
-} from "@/domain/editor/sketch-session/internals";
+import { appendDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
 import {
   findNearGapEndpoints,

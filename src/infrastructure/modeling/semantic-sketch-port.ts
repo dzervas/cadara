@@ -20,7 +20,7 @@ import {
   getSketchSessionDerivedValidity,
   hasAcceptedLiveSolveOfDefinition,
   getLiveRegionBoundaryDiagnostics,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session";
 import { sketchPrimitiveContributionInput, validateSketchPrimitive } from "@/core/sketch-tools/semantic-primitive";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
@@ -39,7 +39,10 @@ import { getEntityPointIds } from "@/domain/sketch-editing/definition-references
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
 import { getSketchMirrorActionEntries } from "@/domain/editor/sketch-session/mirror-actions";
 import { getSketchOffsetHealth } from "@/domain/editor/sketch-session/offset-actions";
-import { prepareSketchOffset, prepareSketchIntersectionEdit } from "@/domain/editor/sketch-session/editing";
+import {
+  prepareSketchOffset,
+  prepareSketchIntersectionEdit,
+} from "@/domain/editor/sketch-session";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { requireQuerySketchEditIntersectionsResponse } from "@/contracts/solver/runtime-schema";
 

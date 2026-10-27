@@ -1,13 +1,28 @@
 import { getPeerDeletedSketchNotice } from "./selectors";
 import { authorSketchDimension, authorSketchRequirement } from "@/domain/editor/sketch-session/constraints";
-import { updateSketchDimensionValue, deleteSelectedSketchAnnotation, makeSketchAnnotationReference } from "@/domain/editor/sketch-session/annotations";
+import {
+  updateSketchDimensionValue,
+  deleteSelectedSketchAnnotation,
+  makeSketchAnnotationReference,
+} from "@/domain/editor/sketch-session";
 import { updateSketchGeometry, setSketchItemLabel } from "@/domain/editor/sketch-session/geometry-actions";
 import { applySketchMirrorRemoval, completeSketchMirrorRepair } from "@/domain/editor/sketch-session/mirror-actions";
 import { applySketchOffsetRemoval } from "@/domain/editor/sketch-session/offset-actions";
-import { createSketchDerivation, createSketchMirror, completeSketchOffset, buildSketchGeometry, completeSketchIntersectionEdit, deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/editing";
+import {
+  createSketchDerivation,
+  createSketchMirror,
+  completeSketchOffset,
+  buildSketchGeometry,
+  completeSketchIntersectionEdit,
+  deleteSelectedSketchGeometry,
+} from "@/domain/editor/sketch-session";
 import { authorReferenceImage, editReferenceImage } from "@/domain/editor/sketch-session/references";
 import { authorSketchStyle } from "@/domain/editor/sketch-session/styles";
-import { authorSketchReference, setSketchConstructionTarget, authorSketchPrimitive } from "@/domain/editor/sketch-session/tools";
+import {
+  authorSketchReference,
+  setSketchConstructionTarget,
+  authorSketchPrimitive,
+} from "@/domain/editor/sketch-session";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchEditToolId } from "@/core/sketch-edit-tools/registry";

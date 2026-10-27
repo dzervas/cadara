@@ -21,11 +21,9 @@ import {
   MIRROR_DIAGNOSTIC_CODES,
 } from "@/contracts/sketch/mirror-requirements";
 import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/internals";
-import {
-  deleteSelectedSketchGeometry,
-  offsetEditInputGate,
-} from "@/domain/editor/sketch-session/editing";
+import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
+import { deleteSelectedSketchGeometry } from "@/domain/editor/sketch-session/geometry-deletion";
+import { offsetEditInputGate } from "@/domain/editor/sketch-session/offset-editing";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
 import {
   chainSession,

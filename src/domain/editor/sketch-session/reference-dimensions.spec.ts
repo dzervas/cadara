@@ -44,11 +44,11 @@ import {
   validateSketchDefinition,
 } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
+import { getSketchSessionDerivationSettings } from "./session-definition";
 import {
-  getSketchSessionDerivationSettings,
   resolveSketchDefinitionForSolve,
   SKETCH_NOT_SOLVED_YET,
-} from "@/domain/editor/sketch-session/internals";
+} from "./session-live-solve";
 
 function draw(
   session: SketchSessionState,

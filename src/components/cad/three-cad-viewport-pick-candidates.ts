@@ -15,7 +15,7 @@ import {
   isSketchSelectionCyclePickRetained,
   type SketchSelectionCycleContext,
 } from "@/domain/editor/sketch-session/selection";
-import { getSketchMirrorLinkedGeometryRefs } from "@/domain/editor/sketch-session/annotations";
+import { getSketchMirrorLinkedGeometryRefs } from "@/domain/editor/sketch-session";
 import { shouldViewportClickRequestSelection } from "@/domain/editor/workbench-interactions";
 import {
   getArmedSketchPickCycleIndex,

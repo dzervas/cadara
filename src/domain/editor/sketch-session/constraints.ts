@@ -51,35 +51,41 @@ import type {
   SketchSessionState,
   SketchSharedDimensionEdit,
 } from "./types";
+import { applySketchContribution } from "./definition-authoring";
 import {
-  applySketchContribution,
   getSketchSessionInvalidFeedback,
+  describeSharedMirrorPath,
+  getSketchSessionSharedMirrorDimensions,
+  sharedMirrorDriverRefusal,
+} from "./session-feedback";
+import {
   hasAcceptedLiveSolveOfDefinition,
+  withLiveSolveBasis,
+  resolveSketchDefinitionForSolve,
+} from "./session-live-solve";
+import {
   createConstraintId,
   createDimensionId,
   createSketchConstraintRef,
   createSketchDimensionRef,
-  withLiveSolveBasis,
-  resolveSketchDefinitionForSolve,
+  getSketchSessionDerivationSettings,
+} from "./session-definition";
+import {
   getSessionSketchId,
   getTargetKey,
   normalizeConstraintValue,
   rebuildSessionCommitRequest,
-  getSketchSessionDerivationSettings,
-  describeSharedMirrorPath,
-  getSketchSessionSharedMirrorDimensions,
-  sharedMirrorDriverRefusal,
-} from "./internals";
+} from "./tool-authoring";
 import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,
-  updateDimensionAnnotationPlacementInDefinition,
-} from "./annotations";
+} from "./annotation-editing";
+import { updateDimensionAnnotationPlacementInDefinition } from "./annotation-edit-presentation";
 import {
   applySolvedSketchToDefinition,
   addAnchorOffset,
 } from "./definition-patches";
-import { getConstraintDedupeKey } from "./tools";
+import { getConstraintDedupeKey } from "@/domain/sketch-inference/placement-inference";
 
 export function buildConstraintSelectionGuide(
   toolId: SketchConstraintToolId,

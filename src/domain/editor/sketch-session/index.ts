@@ -47,7 +47,7 @@ export {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
 } from "./drag-intent";
-export type { SketchAnnotationListRow } from "./annotations";
+export type { SketchAnnotationListRow } from "./annotation-descriptors";
 
 export {
   createProjectedPrimitiveRef,
@@ -58,17 +58,24 @@ export {
 
 export {
   beginSketchAnnotationEdit,
+  updateSketchDimensionValue,
+  makeSketchAnnotationReference,
+} from "./annotation-editing";
+export {
   deleteSelectedSketchAnnotation,
   getSketchAnnotationAffectedGeometryRefs,
   getSketchAnnotationContextRefs,
-  getSketchAnnotationDescriptors,
-  getSketchAnnotationListRows,
-  isSketchAnnotationDrawnInViewport,
   isSketchAnnotationInContext,
   pruneSketchAnnotationContext,
   selectSketchAnnotation,
   withoutSketchAnnotationWheel,
-} from "./annotations";
+  getSketchMirrorLinkedGeometryRefs,
+} from "./annotation-selection";
+export {
+  getSketchAnnotationDescriptors,
+  getSketchAnnotationListRows,
+  isSketchAnnotationDrawnInViewport,
+} from "./annotation-descriptors";
 
 export {
   addAnchorOffset,
@@ -90,36 +97,57 @@ export {
 export {
   beginSketchGeometryDrag,
   cancelSketchGeometryDrag,
-  completeSketchOffsetPreviewPublication,
-  completeSketchEditQuery,
-  deleteSelectedSketchGeometry,
-  failSketchEditQuery,
   finishSketchGeometryDrag,
-  getSketchMirrorConfirmIntent,
-  isSketchMergePointsReady,
+  updateSketchGeometryDrag,
+} from "./geometry-drag";
+export {
+  completeSketchOffsetPreviewPublication,
   isSketchOffsetConfirmable,
+  prepareSketchOffset,
+  completeSketchOffset,
+} from "./offset-editing";
+export {
+  completeSketchEditQuery,
+  failSketchEditQuery,
+  completeSketchIntersectionEdit,
+  prepareSketchIntersectionEdit,
+} from "./edit-queries";
+export { deleteSelectedSketchGeometry } from "./geometry-deletion";
+export {
+  getSketchMirrorConfirmIntent,
   isSketchMirrorReady,
+  restageSketchMirrorTool,
+} from "./mirror-editing";
+export {
+  isSketchMergePointsReady,
+  restageSketchMergePointsTool,
+} from "./point-merge";
+export {
   patchSketchEditToolValue,
   refreshSketchEditToolAfterOffsetRound,
-  restageSketchMergePointsTool,
-  restageSketchMirrorTool,
   selectSketchEditToolTarget,
   updateSketchEditToolHover,
-  updateSketchGeometryDrag,
-} from "./editing";
+} from "./edit-tool-interaction";
 
 export { buildCommitRequest, getSketchHistoryItems } from "./history";
 
 export {
   failSketchLiveRegions,
-  getSketchSessionDerivationSettings,
   getSketchSessionDerivedValidity,
   getSketchSessionLiveRegionBasis,
   getSketchSessionRegionDiagnostics,
   hasAcceptedLiveSolveOfDefinition,
   publishSketchLiveRegions,
   withLiveSolveBasis,
-} from "./internals";
+  isAcceptedSketchSolve,
+  getLiveRegionBoundaryDiagnostics,
+} from "./session-live-solve";
+export {
+  getSketchSessionDerivationSettings,
+  getSketchSessionDisplayDefinition,
+  getSketchSessionDisplayProjectedReferences,
+  createSketchPointRef,
+} from "./session-definition";
 
 export {
   appendReferenceImageOperations,
@@ -179,31 +207,54 @@ export {
 
 export {
   acceptSketchDraw,
+  setSketchSnapScale,
+  startSketchDraw,
+  authorSketchPrimitive,
+} from "./drawing-commit";
+export {
   adoptCompatibleSketchEditToolTargets,
+  removeSketchToolCyclePick,
+  selectSketchEditTarget,
+} from "./edit-tool-activation";
+export {
   beginSketchConstraintToolFromSelection,
   beginSketchTool,
-  removeSketchToolCyclePick,
   canUndoSketchDraftPoint,
   undoSketchDraftPoint,
   clearActiveSketchTool,
   confirmSketchDrawing,
-  deleteSketchReferenceTarget,
   escapeSketchDrawing,
   finalizeSketchDraw,
+  resolveSketchDrawingEscapeStep,
+} from "./drawing-tool-lifecycle";
+export type { SketchDrawingEscapeStep } from "./drawing-tool-lifecycle";
+export {
+  deleteSketchReferenceTarget,
+  selectSketchReferenceTarget,
+  toggleSketchConstructionTarget,
+  authorSketchReference,
+  setSketchConstructionTarget,
+} from "./reference-authoring";
+export {
   getSketchSessionPreviewLabel,
   getSketchToolPresentation,
   patchSketchDrawingToolValue,
-  resolveSketchDrawingEscapeStep,
-  selectSketchEditTarget,
-  selectSketchReferenceTarget,
+} from "./tool-presentation";
+export {
   setSketchInferenceSuppression,
   planSketchSnapIntersectionQuery,
   getSketchSnapIntersectionQueryToIssue,
   completeSketchSnapIntersectionQuery,
   failSketchSnapIntersectionQuery,
-  setSketchSnapScale,
-  startSketchDraw,
-  toggleSketchConstructionTarget,
   updateSketchPointer,
-  type SketchDrawingEscapeStep,
-} from "./tools";
+} from "./drawing-pointer";
+
+export {
+  createSketchDerivation,
+  createSketchMirror,
+  buildSketchGeometry,
+} from "./edit-geometry-operations";
+
+export { rebuildSessionForDefinition } from "./definition-authoring";
+
+export { getSessionSketchId } from "./tool-authoring";

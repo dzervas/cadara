@@ -109,16 +109,18 @@ import {
   type SketchEditorState,
 } from "@/core/editor/state-machine";
 import { runEditorEffect } from "@/application/editor/effect-registry";
-import { previewSketchPlacement } from "@/domain/editor/sketch-session/tools";
+import { previewSketchPlacement } from "@/domain/editor/sketch-session/drawing-pointer";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   DERIVED_SHELL_DELETE_MESSAGE,
   DERIVED_SHELL_POINT_DELETE_MESSAGE,
-  MIRROR_DATUM_AXIS_ORDER_MESSAGE,
+} from "@/domain/editor/sketch-session/geometry-deletion";
+import { MIRROR_DATUM_AXIS_ORDER_MESSAGE } from "@/domain/editor/sketch-session/edit-geometry-operations";
+import {
   NON_ACCEPTED_OFFSET_EDIT_INPUT_CODE,
   offsetEditInputGate,
-  refreshSketchEditToolAfterOffsetRound,
-} from "@/domain/editor/sketch-session/editing";
+} from "@/domain/editor/sketch-session/offset-editing";
+import { refreshSketchEditToolAfterOffsetRound } from "@/domain/editor/sketch-session/edit-tool-interaction";
 import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
@@ -149,11 +151,13 @@ import {
 } from "@/contracts/sketch/offset-chain.fixtures";
 import {
   applySketchContribution,
-  createSessionCommitFactories,
   rebuildSessionForDefinition,
+} from "@/domain/editor/sketch-session/definition-authoring";
+import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
+import {
   SKETCH_NOT_SOLVED_YET,
   withLiveSolveBasis,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/session-live-solve";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
@@ -174,7 +178,7 @@ import {
   getDerivedShellDisplayValidity
 } from "@/domain/editor/sketch-session/display";
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
-import { getEntityAnchor } from "@/domain/editor/sketch-session/annotations";
+import { getEntityAnchor } from "@/domain/editor/sketch-session/annotation-reference-geometry";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
 import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/domain/measure/measurement";

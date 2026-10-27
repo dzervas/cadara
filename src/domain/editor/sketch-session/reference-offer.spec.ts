@@ -23,7 +23,7 @@ import {
   type SketchSessionState,
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { createSessionCommitFactories } from "@/domain/editor/sketch-session/internals";
+import { createSessionCommitFactories } from "./tool-authoring";
 import { createSketchFilletMutation } from "@/domain/sketch-editing/operations";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
 import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";

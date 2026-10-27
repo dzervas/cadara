@@ -30,8 +30,8 @@ import {
 import {
   getSketchSessionDerivedValidity,
   publishSketchLiveRegions,
-  rebuildSessionForDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "./session-live-solve";
+import { rebuildSessionForDefinition } from "./definition-authoring";
 import {
   eid,
   entityRef,

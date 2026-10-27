@@ -58,7 +58,7 @@ import {
   orderedSplineOccurrences,
 } from "@/contracts/sketch/spline-geometry";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { withLiveSolveBasis } from "@/domain/editor/sketch-session/internals";
+import { withLiveSolveBasis } from "./session-live-solve";
 import { mapSketchPointToWorld } from "@/domain/editor/sketch-session/state";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
 

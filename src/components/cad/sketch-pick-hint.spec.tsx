@@ -14,7 +14,7 @@ import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures
 import {
   createLineEntityDefinition,
   createPointDefinition,
-} from "@/domain/editor/sketch-session/internals";
+} from "@/domain/editor/sketch-session/definition-authoring";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
