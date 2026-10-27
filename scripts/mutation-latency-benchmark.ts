@@ -33,6 +33,13 @@
 // --mutations a,b, --settle MS (idle wait after opening, default 1500),
 // --profile-worst K (default 2, 0 disables), --skip-build, --no-minify
 // (readable profiles; still a production-mode build), --dist DIR.
+// PLAYWRIGHT_GPU=1 renders on the host GPU (Vulkan ANGLE) instead of
+// SwiftShader. The sketch and chamfer rows drive the debug platform
+// (`window.__cadaraDebug`), which only a build with
+// `import.meta.env.TEST = "true"` exposes; they are skipped otherwise:
+//   SENTRY_AUTH_TOKEN= bunx vite build --config vite.offline-test.config.ts \
+//     --minify false --outDir .scratch/bench-dist
+//   bun run bench:mutation -- --skip-build --dist .scratch/bench-dist ...
 import {
   chromium,
   type Browser,
@@ -89,7 +96,23 @@ const MUTATION_KINDS = [
   "depthUndo",
   "depthRedo",
   "save",
+  // Sketch session and edge-feature rows read the debug platform
+  // (`window.__cadaraDebug`), which only a build with
+  // `import.meta.env.TEST = "true"` exposes (vite.offline-test.config.ts).
+  "sketchCreate",
+  "sketchDraw",
+  "sketchExit",
+  "chamferPreview",
+  "chamferCommit",
 ] as const;
+
+const DEBUG_BRIDGE_KINDS: ReadonlySet<string> = new Set([
+  "sketchCreate",
+  "sketchDraw",
+  "sketchExit",
+  "chamferPreview",
+  "chamferCommit",
+]);
 type MutationKind = (typeof MUTATION_KINDS)[number];
 
 interface FixtureDefinition {
@@ -123,6 +146,7 @@ if (!existsSync(resolve(workspace, "package.json"))) {
   );
 }
 
+const useGPU = process.env.PLAYWRIGHT_GPU === "1";
 const port = Number(options.port);
 const baseUrl = `http://127.0.0.1:${port}`;
 const steadyRuns = Number(options.runs);
@@ -773,6 +797,159 @@ async function addPlane(session: Session, timed: boolean) {
   return null;
 }
 
+// ---------------------------------------------- debug-platform driven rows
+
+/** `window.__cadaraDebug.getState()[field]` contains `text` (TEST builds only). */
+const debugStateContains = ({ field, text }: { field: string; text: string }) =>
+  String(
+    ((
+      window as unknown as {
+        __cadaraDebug?: { getState(): Record<string, unknown> | null };
+      }
+    ).__cadaraDebug?.getState() ?? {})[field] ?? "",
+  ).includes(text);
+
+const toolbarButton = (page: Page, tooltip: string) =>
+  page.locator(
+    `button[aria-label="${tooltip}"], button[data-tool-tooltip="${tooltip}"]`,
+  );
+
+/**
+ * Presses a tool by tooltip: its own button, or (narrow toolbars collapse
+ * whole islands into one dropdown) the island that hides it, then its menu
+ * item; a tool family's dropdown trigger, then its primary variant.
+ */
+async function activateTool(page: Page, tooltip: string) {
+  const direct = toolbarButton(page, tooltip);
+  const island = page.locator(
+    `button[data-toolbar-group-tools*="|${tooltip}|"]`,
+  );
+  await direct.or(island).first().waitFor({ timeout: SAMPLE_TIMEOUT_MS });
+  if ((await direct.count()) > 0) {
+    await direct.first().click();
+  } else {
+    await island.click();
+    await page
+      .locator(`[role="menuitem"][data-tool-tooltip="${tooltip}"]`)
+      .click();
+  }
+  // A family trigger opens its variant menu: pick the variant with this tooltip.
+  const variant = page.locator(
+    `[role="menuitem"][data-tool-tooltip="${tooltip}"]`,
+  );
+  if (await variant.isVisible().catch(() => false)) await variant.click();
+}
+
+async function hasDebugBridge(page: Page) {
+  return page.evaluate(
+    () =>
+      typeof (window as unknown as { __cadaraDebug?: unknown })
+        .__cadaraDebug !== "undefined",
+  );
+}
+
+async function selectableTargets(page: Page, pattern: RegExp) {
+  return page.evaluate(
+    ({ source, flags }) => {
+      const matcher = new RegExp(source, flags);
+      const targets =
+        (
+          window as unknown as {
+            __cadaraDebug?: {
+              getState(): { selectableTargets?: string[] } | null;
+            };
+          }
+        ).__cadaraDebug?.getState()?.selectableTargets ?? [];
+      return targets.filter((target) => matcher.test(target));
+    },
+    { source: pattern.source, flags: pattern.flags },
+  );
+}
+
+/** Starts a sketch on the Top plane; the plane pick is the timed gesture. */
+async function enterTopSketch(session: Session, timed: boolean) {
+  const { page } = session;
+  await page.locator('button[data-tool-id="sketch"]').click();
+  const plane = partsTree(page).locator(
+    '[data-parts-tree-target="construction:construction_plane-xy"]',
+  );
+  await plane.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
+  const act = () => plane.click();
+  const reflected = () =>
+    waitInPage(page, debugStateContains, {
+      field: "machineState",
+      text: "editingSketch",
+    });
+  // Entering a sketch is not an undoable action: no persisted signal.
+  if (timed) return timedSample(session, act, reflected, "none");
+  await act();
+  await reflected();
+  return null;
+}
+
+/** Canvas points of the drawn rectangle (viewport 1600x1000). */
+const RECTANGLE = [
+  { x: 700, y: 400 },
+  { x: 1000, y: 650 },
+] as const;
+
+async function glideClickCanvas(page: Page, point: { x: number; y: number }) {
+  const canvas = (await page.locator("main canvas").first().boundingBox())!;
+  await page.mouse.move(canvas.x + point.x, canvas.y + point.y, { steps: 8 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await page.mouse.down();
+  await page.mouse.up();
+}
+
+/**
+ * Draws one rectangle in the open sketch; the closing corner click is the
+ * timed gesture (reflected: 4 entities staged; persisted: "Create Sketch
+ * Geometry" in the undo strip). Leaves the Rectangle tool afterwards.
+ */
+async function drawRectangle(session: Session, timed = true) {
+  const { page } = session;
+  await activateTool(page, "Create rectangle geometry.");
+  await glideClickCanvas(page, RECTANGLE[0]);
+  const act = () => glideClickCanvas(page, RECTANGLE[1]);
+  const reflected = () =>
+    waitInPage(page, debugStateContains, {
+      field: "sketchSession",
+      text: "4 entities staged",
+    });
+  let timing: SampleTiming | null = null;
+  if (timed) {
+    timing = await timedSample(session, act, reflected);
+  } else {
+    const before = await historySignature(page);
+    const since = now();
+    await act();
+    await reflected();
+    await waitForHistoryChange(page, before, since);
+  }
+  await page.keyboard.press("Escape");
+  return timing!;
+}
+
+/** Exits the open sketch; the machine returning to idle is the reflected signal. */
+async function exitSketch(session: Session, timed = false) {
+  const { page } = session;
+  const act = () => activateTool(page, "Exit the active sketch.");
+  const reflected = () =>
+    waitInPage(page, debugStateContains, {
+      field: "machineState",
+      text: "idle",
+    });
+  if (timed) return timedSample(session, act, reflected, "none");
+  await act();
+  await reflected();
+  return null;
+}
+
 /**
  * Reopens the last literal-depth extrude and fills a new depth (10% deeper
  * than the opened document's, or that original); resolves to its Commit
@@ -1033,6 +1210,133 @@ async function prepareMutation(
           () => redoButton.click(),
           () => waitForRowLabel(page, body.target, renamed),
         );
+      };
+    }
+    case "sketchCreate":
+      return async () => {
+        const timing = await enterTopSketch(session, true);
+        await exitSketch(session);
+        return timing!;
+      };
+    case "sketchDraw":
+      return async () => {
+        await enterTopSketch(session, false);
+        const timing = await drawRectangle(session);
+        await exitSketch(session);
+        return timing;
+      };
+    case "sketchExit":
+      return async () => {
+        await enterTopSketch(session, false);
+        await drawRectangle(session, false);
+        return (await exitSketch(session, true))!;
+      };
+    case "chamferPreview":
+    case "chamferCommit": {
+      const edges = await selectableTargets(page, /^body_[^.]+\.edge_/);
+      if (edges.length === 0) return "no selectable body edge";
+      const openChamfer = async () => {
+        await activateTool(page, "Bevel selected edges.");
+        const distance = page.getByRole("spinbutton", { name: "Distance" });
+        await distance.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
+        await distance.fill("0.25");
+      };
+      const cancelChamfer = async () => {
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
+        await waitInPage(page, debugStateContains, {
+          field: "machineState",
+          text: "idle",
+        });
+      };
+      const preview = () =>
+        waitInPage(page, debugStateContains, {
+          field: "featureSession",
+          text: "create:chamfer:previewReady",
+        });
+      const select = (id: string) =>
+        page.evaluate(
+          (id) =>
+            void (
+              window as unknown as {
+                __cadaraDebug: { selectTarget(id: string): boolean };
+              }
+            ).__cadaraDebug.selectTarget(id),
+          id,
+        );
+      const previewDiagnostics = () =>
+        page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __cadaraDebug: {
+                  getState(): { previewDiagnostics?: string } | null;
+                };
+              }
+            ).__cadaraDebug.getState()?.previewDiagnostics ?? "",
+        );
+      // Untimed setup: the first edge OCC chamfers cleanly (some enclosure
+      // edges reject the committed shape).
+      let edge: string | null = null;
+      for (const candidate of edges.slice(0, 12)) {
+        await openChamfer();
+        await select(candidate);
+        await preview();
+        const diagnostics = await previewDiagnostics();
+        await cancelChamfer();
+        await waitForOccQuiet(page);
+        if (!/\berror\b/i.test(diagnostics)) {
+          edge = candidate;
+          break;
+        }
+      }
+      if (!edge) return "no edge previews a clean chamfer";
+      return async () => {
+        await openChamfer();
+        const assertPreviewOk = async () => {
+          const diagnostics = await previewDiagnostics();
+          if (/\berror\b/i.test(diagnostics)) {
+            throw new Error(`chamfer preview failed: ${diagnostics}`);
+          }
+        };
+        if (kind === "chamferPreview") {
+          // The preview is not an undoable action: no persisted signal.
+          const timing = await timedSample(
+            session,
+            () => select(edge),
+            preview,
+            "none",
+          );
+          await assertPreviewOk();
+          await cancelChamfer();
+          return timing;
+        }
+        await select(edge);
+        await preview();
+        await assertPreviewOk();
+        const commit = page.getByRole("button", {
+          name: "Commit",
+          exact: true,
+        });
+        const countBefore = await page.evaluate(timelineCount);
+        const timing = await timedSample(
+          session,
+          () => commit.click(),
+          () =>
+            waitInPage(
+              page,
+              (count: number) =>
+                document.querySelectorAll(
+                  "button[data-history-feature-id], button[data-history-sketch-id]",
+                ).length > count,
+              countBefore,
+            ),
+        );
+        // Undo the chamfer so the next sample starts from the opened model.
+        const before = await historySignature(page);
+        const since = now();
+        await page.locator('button[data-tool-id="undo"]').click();
+        await waitForHistoryChange(page, before, since);
+        return timing;
       };
     }
     case "save":
@@ -1402,6 +1706,11 @@ async function runRow(
     row.skipped = "fixture has no benchmark variable";
     return row;
   }
+  if (DEBUG_BRIDGE_KINDS.has(kind) && debugBridgeAvailable === false) {
+    row.skipped =
+      'needs a build with import.meta.env.TEST = "true" (vite.offline-test.config.ts)';
+    return row;
+  }
   const { context, page, telemetry } = await createInstrumentedContext(browser);
   const session: Session = {
     page,
@@ -1414,6 +1723,12 @@ async function runRow(
   const profiles: SampleProfile[] = [];
   try {
     row.openMs = round(await openFixture(page, fixture.name, document));
+    debugBridgeAvailable ??= await hasDebugBridge(page);
+    if (DEBUG_BRIDGE_KINDS.has(kind) && !debugBridgeAvailable) {
+      row.skipped =
+        'needs a build with import.meta.env.TEST = "true" (vite.offline-test.config.ts)';
+      return row;
+    }
     await delay(settleMs);
     const runner = await prepareMutation(session, kind);
     if (typeof runner === "string") {
@@ -1523,6 +1838,8 @@ async function runRow(
   return row;
 }
 let releaseInfo: string | null = null;
+/** Whether the served build exposes `window.__cadaraDebug` (read on first open). */
+let debugBridgeAvailable: boolean | null = null;
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
@@ -1546,9 +1863,19 @@ async function main() {
   try {
     await waitForServer(`${baseUrl}/app`);
     // Full chromium (new headless): the headless shell aborts in its font manager on menus.
+    // PLAYWRIGHT_GPU=1: Vulkan ANGLE on the host GPU, as playwright.config.ts.
     browser = await chromium.launch({
       channel: "chromium",
-      args: [`--remote-debugging-port=${debugPort}`],
+      args: [
+        `--remote-debugging-port=${debugPort}`,
+        ...(useGPU
+          ? [
+              "--use-angle=vulkan",
+              "--enable-features=Vulkan",
+              "--ignore-gpu-blocklist",
+            ]
+          : []),
+      ],
     });
     const documents = new Map<string, Buffer>();
     for (const fixture of selectedFixtures) {
@@ -1608,7 +1935,13 @@ async function main() {
         minify: !options["no-minify"],
         built: !options["skip-build"],
       },
-      browser: { name: "chromium", version: browser.version(), headless: true },
+      browser: {
+        name: "chromium",
+        version: browser.version(),
+        headless: true,
+        gpu: useGPU,
+        debugBridge: debugBridgeAvailable,
+      },
       host: {
         hostname: hostname(),
         cpus: cpus().length,
