@@ -37,8 +37,6 @@
   "src/core/sketch-constraints/registry.spec.ts",
   "src/core/sketch-constraints/registry.ts",
   "src/core/sketch-editing/mirror-repair.spec.ts",
-  "src/core/sketch-solver/build-system.ts",
-  "src/core/sketch-solver/validate-definition.ts",
   "src/core/sketch-tools/registry.spec.ts",
   "src/domain/editor/sketch-geometry-editing.heavy.spec.ts",
   "src/domain/editor/sketch-mirror-editing.spec.ts",
