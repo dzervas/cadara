@@ -6,8 +6,8 @@ import {
   transitionEditorState,
   type EditorState,
 } from "@/domain/editor/state-machine";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
-import { getPreviousDocumentHistoryCursor } from "@/domain/modeling/document-history";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
+import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 
 test("src/contracts/editor/history-undo-redo.spec.ts", async () => {

@@ -48,7 +48,7 @@ import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-test-builder";
@@ -56,13 +56,13 @@ import { TRIM_BASIS_NOT_ACCEPTED_MESSAGE } from "@/domain/editor/sketch-session/
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,
   SPLINE_SLOT_UNSUPPORTED_MESSAGE,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { toolDefinitions } from "@/core/tools/tool-registry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,

@@ -21,7 +21,7 @@ import {
   createFeatureEditSession,
   getFeatureEditorFormSchema,
   patchFeatureEditSession,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import type { ToolId } from "@/core/tools/tool-registry";
 import { EditorContext } from "@/hooks/editor-context";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";

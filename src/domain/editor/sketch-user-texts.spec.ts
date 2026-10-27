@@ -15,7 +15,7 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
@@ -24,12 +24,12 @@ import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication
 import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
   nonAcceptedOffsetFeatureInputMessage,
   nonAcceptedOffsetFeaturePointMessage,
-} from "@/domain/modeling/sketch-feature-input";
-import { nonAcceptedOutputProjectionMessage } from "@/domain/modeling/sketch-reference-projection";
+} from "@/core/modeling/sketch-feature-input";
+import { nonAcceptedOutputProjectionMessage } from "@/core/modeling/sketch-reference-projection";
 import { offsetEditInputGate } from "@/domain/editor/sketch-session/offset-editing";
 import {
   deleteSelectedSketchGeometry,

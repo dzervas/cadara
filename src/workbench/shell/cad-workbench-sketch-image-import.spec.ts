@@ -3,7 +3,7 @@
 // `state-machine.spec.ts`); Finish publishes the draft. These rows keep the
 // kernel/service side: a draft whose content is an imported image publishes
 // and restores. (The import-and-commit flow they used to drive is gone.)
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
@@ -22,8 +22,8 @@ import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-a
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+} from "@/core/modeling/opencascade-kernel-seed";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 /** A new Top-plane draft holding one imported image, finished through `service`. */

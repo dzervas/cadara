@@ -27,7 +27,7 @@ import type {
   WorkspaceSnapshot,
   DocumentVariableRecord,
 } from "@/contracts/modeling/schema";
-import { createDocumentHistoryOrder } from "@/domain/modeling/document-history";
+import { createDocumentHistoryOrder } from "@/core/modeling/document-history";
 import { documentHistoryOrdersEqual } from "@/workbench/history/workbench-history";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";

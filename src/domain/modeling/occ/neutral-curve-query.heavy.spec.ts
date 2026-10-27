@@ -9,8 +9,8 @@ import {
   type NumericNeutralLine,
 } from "@/contracts/modeling/neutral-curve-query";
 import { reconstructSpline } from "@/contracts/sketch/spline-geometry";
-import { ExactQueryProofBudgetExceeded } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
-import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { ExactQueryProofBudgetExceeded } from "@/core/modeling/neutral-curve-certification/fixed-degree-exact";
+import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createOpenCascadeNeutralCurveQueryCapability,
   createOpenCascadeNeutralCurveQueryCapabilityWithBudgetObserverForTest,

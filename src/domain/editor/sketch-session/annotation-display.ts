@@ -8,7 +8,7 @@ import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getConstraintAffectedGeometryRefs,
   getDimensionAffectedGeometryRefs,
-} from "./annotation-targets";
+} from "../../../core/editor/sketch-session/annotation-targets";
 import type {
   SketchConstraintDisplayState,
   SketchConstraintDisplaySummary,

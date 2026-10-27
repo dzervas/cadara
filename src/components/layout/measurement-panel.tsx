@@ -4,7 +4,7 @@ import type { Ref } from "react";
 import type {
   MeasurementDistanceMode,
   MeasurementViewModel,
-} from "@/domain/measure/measurement";
+} from "@/core/measure/measurement";
 
 interface MeasurementPanelProps {
   measurement: MeasurementViewModel | null;

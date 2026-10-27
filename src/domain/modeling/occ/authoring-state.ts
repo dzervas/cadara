@@ -33,16 +33,16 @@ import {
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
+} from "@/core/modeling/opencascade-kernel-seed";
+import type { DocumentHistoryOrderEntry } from "@/core/modeling/document-history";
 import {
   createConstructionPresentationArtifacts,
   executeOccFeature,
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/domain/modeling/occ/features";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
+import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {
   combineOccCleanupError,

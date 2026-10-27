@@ -5,14 +5,14 @@ import {
 import {
   extrudeSketchPointExtentFeatureIds,
   planExtrudeFeature,
-} from "@/domain/import/onshape/extrude-planner";
-import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
+} from "@/application/import/onshape/extrude-planner";
+import type { OnshapeFeatureNode } from "@/core/import/onshape/bundle-reader";
 import {
   dependencyFeatureIds,
   type FeatureDependencyInput,
   type OnshapeFeatureTranslator,
 } from "@/domain/import/onshape/feature-translator-registry";
-import { readRollbackTopologySnapshot } from "@/domain/import/onshape/rollback-topology-reader";
+import { readRollbackTopologySnapshot } from "@/core/import/onshape/rollback-topology-reader";
 
 function currentProfileEvidence(
   feature: OnshapeFeatureNode,

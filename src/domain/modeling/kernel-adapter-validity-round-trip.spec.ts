@@ -31,9 +31,9 @@ import {
   pid,
 } from "@/domain/editor/sketch-mirror.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 

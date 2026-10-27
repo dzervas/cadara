@@ -30,7 +30,7 @@ import { publishSketchLiveRegions } from "@/domain/editor/sketch-session/session
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { SPEC_SKETCH_UNITS_PER_PIXEL } from "@/domain/editor/sketch-session/test-snap-scale";
 import { describeSketchSessionWithheldRegions } from "@/domain/editor/sketch-session/region-feedback";
-import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createSketchActionOwnerFixture,
   drawnMixedOutlineSession,

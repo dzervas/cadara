@@ -34,16 +34,16 @@ import {
   primitiveRefEquals,
   type PrimitiveRef,
 } from "@/core/editor/schema";
-import { formatInspectorDiagnosticDetail } from "@/domain/modeling/diagnostic-formatting";
+import { formatInspectorDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
 import {
   getMissingRegionSketchLabel,
   getReferenceTargetLabel,
-} from "@/domain/modeling/document-snapshot-view";
+} from "@/core/modeling/document-snapshot-view";
 import {
   PROFILE_REGION_RESELECT_CODE,
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
-} from "@/domain/modeling/feature-diagnostic-mapping";
-import { getFeatureEditorFormSchema } from "@/domain/editor/feature-editing";
+} from "@/core/modeling/feature-diagnostic-mapping";
+import { getFeatureEditorFormSchema } from "@/core/editor/feature-editing";
 import {
   createFeatureEditorExpressionControlFormValue,
   createFeatureEditorLiteralControlFormValue,

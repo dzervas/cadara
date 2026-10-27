@@ -10,11 +10,11 @@ import {
   getFeatureEditorExpressionSourceState,
   normalizeFeatureEditorFormValues,
 } from "@/core/feature-authoring/form-adapter";
-import { getFeatureEditorFormSchema } from "@/domain/editor/feature-editing";
+import { getFeatureEditorFormSchema } from "@/core/editor/feature-editing";
 import {
   createFeatureEditSession,
   patchFeatureEditSession,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   createExpressionAuthoredValue,
   isExpressionAuthoredValue,

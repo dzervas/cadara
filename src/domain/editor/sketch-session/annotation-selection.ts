@@ -4,7 +4,7 @@ import { clearSketchAnnotationEdit } from "./annotation-editing";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { getSketchEntityDefiningPointIds } from "./drag-intent";
+import { getSketchEntityDefiningPointIds } from "../../../core/editor/sketch-session/drag-intent";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,

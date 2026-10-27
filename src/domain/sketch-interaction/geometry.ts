@@ -32,7 +32,7 @@ import {
   getSketchSessionDisplayProjectedReferences,
   isAcceptedSketchSolve,
 } from "@/domain/editor/sketch-session";
-import { getSketchDatumGuideExtent } from "@/domain/editor/sketch-session/definition-patches";
+import { getSketchDatumGuideExtent } from "@/core/editor/sketch-session/definition-patches";
 
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";

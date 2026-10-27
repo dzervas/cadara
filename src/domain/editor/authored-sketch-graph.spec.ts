@@ -16,7 +16,7 @@ import {
   startSketchDraw,
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 /** A rectangle drawn in a session entered as the app enters it (T17-10′). */
 function rectangle() {

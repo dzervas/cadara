@@ -13,7 +13,7 @@ import type {
   EditorRuntimeTraceEntry,
   EditorRuntimeTraceSnapshot,
   EditorRuntimeTraceStateSummary,
-} from "@/domain/debug/debug-platform";
+} from "@/core/debug/debug-platform";
 
 const DEFAULT_TRACE_ENTRY_LIMIT = 200;
 

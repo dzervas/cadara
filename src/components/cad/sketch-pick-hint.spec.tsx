@@ -19,7 +19,7 @@ import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   createDwellHint,
   SKETCH_HINT_DWELL_MS,

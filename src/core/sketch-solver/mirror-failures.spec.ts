@@ -45,7 +45,7 @@ import type {
   SketchPoint2D,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { describe, expect, test } from "vitest";
 
 describe("failure encoding: one relationship error, held outputs, the rest solves (T-8/T-16)", () => {

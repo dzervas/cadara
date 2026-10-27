@@ -24,7 +24,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { createSessionCommitFactories } from "./tool-authoring";
-import { createSketchFilletMutation } from "@/domain/sketch-editing/operations";
+import { createSketchFilletMutation } from "@/core/sketch-editing/operations";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
 import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/references";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
@@ -37,7 +37,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

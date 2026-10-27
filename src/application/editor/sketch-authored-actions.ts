@@ -22,7 +22,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session";
 import { getToolById } from "@/core/tools/tool-registry";
-import { describeBlockedSketchAction } from "@/domain/modeling/document-action-blocked";
+import { describeBlockedSketchAction } from "@/core/modeling/document-action-blocked";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
 import { isRegisteredSketchConstraintToolId } from "@/core/sketch-constraints/registry";
 import {
@@ -33,7 +33,7 @@ import { getSketchStylePatchToolId } from "@/domain/editor/sketch-session/styles
 import {
   AuthoredActionHistory,
   encodeAuthoredActionState,
-} from "@/domain/modeling/authored-action-history";
+} from "@/core/modeling/authored-action-history";
 
 function authoredState(
   documentId: DocumentId,

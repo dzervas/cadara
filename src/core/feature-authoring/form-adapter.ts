@@ -4,7 +4,7 @@ import {
   isExpressionAuthoredValue,
 } from "@/contracts/modeling/authored-values";
 import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
-import { previewFeatureValueExpression } from "@/domain/modeling/feature-value-expressions";
+import { previewFeatureValueExpression } from "@/core/modeling/feature-value-expressions";
 
 import { createFeatureEditorFieldPatch } from "@/core/feature-authoring/form-events";
 import type {

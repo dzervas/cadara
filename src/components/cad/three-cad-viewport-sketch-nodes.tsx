@@ -22,7 +22,7 @@ import {
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import { ScreenSpacePointMarker } from "@/components/cad/screen-space-point-marker";
 import { isProjectedSketchDisplayPointTarget } from "@/components/cad/three-cad-viewport-pick-candidates";
-import { createReferenceImageDataUrl } from "@/domain/reference-image/rendering";
+import { createReferenceImageDataUrl } from "@/core/reference-image/rendering";
 import type { SketchSessionDisplayRenderable } from "@/domain/editor/sketch-session";
 import {
   applyWireMaterialDepthPolicy,

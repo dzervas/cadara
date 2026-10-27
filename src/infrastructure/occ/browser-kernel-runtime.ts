@@ -15,7 +15,7 @@ import { createBrowserOccWorkerClient } from "@/domain/modeling/occ/worker-runti
 import {
   getBrowserGeometryAssetComposition,
 } from "@/infrastructure/modeling/browser-geometry-asset-store";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { DocumentId } from "@/contracts/shared/ids";
 

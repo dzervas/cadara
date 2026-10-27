@@ -13,7 +13,7 @@ import { createInstrumentedModelingService } from "@/domain/modeling/modeling-se
 import { isLocalFileSyncDocumentRepository } from "@/domain/modeling/document-repository";
 import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrumented-document-repository";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { getBrowserSketchRegionDerivation } from "@/domain/modeling/occ/sketch-derivation-worker-runtime";
 import { createInstrumentedSketchSolverAdapter } from "@/domain/solver/instrumented-sketch-solver-adapter";
@@ -22,7 +22,7 @@ import {
   reduceWorkbenchTabs,
   type WorkbenchTab,
   type WorkbenchTabsState,
-} from "@/domain/workspace/workbench-tabs";
+} from "@/core/workspace/workbench-tabs";
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";

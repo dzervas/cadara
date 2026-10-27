@@ -22,13 +22,13 @@ import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
+import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   entityRef,

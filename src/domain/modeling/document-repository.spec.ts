@@ -26,10 +26,10 @@ import {
   materializeCollaborativeDocument,
   createCollaborativeDocument,
   type CollaborativeDocument,
-} from "./collaborative-document";
+} from "../../core/modeling/collaborative-document";
 import type { DocumentRepository } from "./document-repository";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
-import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "../../core/modeling/opencascade-kernel-seed";
 import type { AppResultAsync } from "@/contracts/errors";
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";
 import { getDefaultCadaraExportOptions } from "@/contracts/modeling/export.runtime-schema";
@@ -1485,7 +1485,7 @@ import type {
   AutomergeRepositoryLike,
   AutomergeHandleLike,
 } from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 export class RealAutomergeHandle<T> implements AutomergeHandleLike<T> {
   readonly documentId = crypto.randomUUID();

@@ -5,7 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import type { ObjectExportModalState } from "@/domain/export/object-export-state";
+import type { ObjectExportModalState } from "@/core/export/object-export-state";
 
 const EMPTY_RECORD: Record<string, never> = Object.freeze({});
 

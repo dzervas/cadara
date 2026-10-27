@@ -1,5 +1,5 @@
 import type { FeatureId } from "@/contracts/shared/ids";
-import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
+import type { DocumentHistoryOrderEntry } from "@/core/modeling/document-history";
 import type { DurableRef } from "@/contracts/shared/references";
 import type {
   AuthoredFeatureTopologyLineage,

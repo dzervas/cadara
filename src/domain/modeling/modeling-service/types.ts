@@ -41,7 +41,7 @@ import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions
 import type { OperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import type { DocumentRepository } from "@/domain/modeling/document-repository";
 import type { AppResultAsync } from "@/contracts/errors";
-import type { ExportProviderRegistry } from "@/domain/export/provider-registry";
+import type { ExportProviderRegistry } from "@/core/export/provider-registry";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
 import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";

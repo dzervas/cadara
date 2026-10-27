@@ -14,7 +14,7 @@ import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-sessi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";

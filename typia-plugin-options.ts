@@ -4,7 +4,7 @@ export const typiaTransformInclude = [
   /[/\\]src[/\\].*(?:[/\\]|\.)runtime-schema\.ts$/,
   /[/\\]src[/\\]contracts[/\\]import[/\\](?:base-validation|onshape-capture-bundle|validation)\.ts$/,
   /[/\\]src[/\\]contracts[/\\]shared[/\\]typia-transform-sentinel\.spec\.ts$/,
-  /[/\\]src[/\\]domain[/\\]import[/\\]onshape[/\\]bundle-reader\.ts$/,
+  /[/\\]src[/\\]core[/\\]import[/\\]onshape[/\\]bundle-reader\.ts$/,
   /[/\\]src[/\\]domain[/\\]modeling[/\\]occ[/\\](?:native-topology-payload|worker-protocol)\.ts$/,
 ];
 

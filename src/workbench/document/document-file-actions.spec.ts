@@ -4,7 +4,7 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import type { LocalFileSyncDocumentRepository } from "@/domain/modeling/document-repository";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
-import type { WorkbenchTab } from "@/domain/workspace/workbench-tabs";
+import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import {
   exportWorkbenchDocument,
   openDocumentCopyAsTab,

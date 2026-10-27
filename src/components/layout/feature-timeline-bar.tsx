@@ -52,7 +52,7 @@ import {
   getTimelineCursorIndex,
   resolveTimelineReorderDrop,
 } from "@/components/layout/feature-timeline-bar.helpers";
-import { getDocumentHistoryCursorForIndex } from "@/domain/modeling/document-history";
+import { getDocumentHistoryCursorForIndex } from "@/core/modeling/document-history";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
 import {
   getDocumentHistoryItemToolIcon,

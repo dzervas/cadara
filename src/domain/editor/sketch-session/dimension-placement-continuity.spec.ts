@@ -57,7 +57,7 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 /** Pointer step along every path, in sketch units. */
 const PATH_STEP = 0.05;

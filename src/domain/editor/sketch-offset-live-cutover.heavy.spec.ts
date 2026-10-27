@@ -6,7 +6,7 @@
 // the authored-action history.
 import { describe, expect, test, vi } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 
 import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
@@ -121,14 +121,14 @@ import {
   offsetEditInputGate,
 } from "@/domain/editor/sketch-session/offset-editing";
 import { refreshSketchEditToolAfterOffsetRound } from "@/domain/editor/sketch-session/edit-tool-interaction";
-import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
+import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   executeOccFeature,
   type OccFeatureExecutionContext,
@@ -138,13 +138,13 @@ import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
 import {
   NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
   nonAcceptedOffsetFeatureInputMessage,
-} from "@/domain/modeling/sketch-feature-input";
+} from "@/core/modeling/sketch-feature-input";
 import {
   createSketchDerivedTransformContribution,
   createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   offsetSideForSketchPoint,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import {
   withLineLength,
   withoutFilletRelationships,
@@ -163,7 +163,7 @@ import {
   MockSketchSolverAdapter,
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createSketchArrangementDeriver,
   offsetArrangementInput,
@@ -181,8 +181,8 @@ import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-se
 import { getEntityAnchor } from "@/domain/editor/sketch-session/annotation-reference-geometry";
 import { collectSketchInteractionGeometry } from "@/domain/sketch-interaction/geometry";
 import { collectSketchSnapGeometries } from "@/domain/sketch-snapping/snap-candidates";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
-import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
+import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
@@ -195,7 +195,7 @@ import { resolveRegionBoundaryCurve } from "@/contracts/sketch/region-boundary-c
 import {
   NON_ACCEPTED_OFFSET_OUTPUT_PROJECTION_CODE,
   projectSketchExternalReferencesFromSnapshot,
-} from "@/domain/modeling/sketch-reference-projection";
+} from "@/core/modeling/sketch-reference-projection";
 import {
   closedCurvesSignedArea,
   cubicOracle,

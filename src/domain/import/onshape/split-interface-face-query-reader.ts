@@ -1,4 +1,4 @@
-import { decodeCompressedQuery } from "@/domain/import/onshape/compressed-query-decoder";
+import { decodeCompressedQuery } from "@/core/import/onshape/compressed-query-decoder";
 
 /**
  * Exact decoded form used by 9841's post-sheet-split sketch supports. This is

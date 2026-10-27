@@ -58,7 +58,7 @@ import type {
   ModelingExportDocumentResult,
 } from "./types";
 import { CONTRACT_VERSION, SNAPSHOT_SCHEMA_VERSION } from "./helpers";
-import { normalizeWorkspaceSnapshot } from "./normalization";
+import { normalizeWorkspaceSnapshot } from "../../../core/modeling/modeling-service/normalization";
 
 export function buildDocumentRequest(
   documentId: WorkspaceSnapshot["document"]["documentId"],

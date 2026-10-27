@@ -15,7 +15,7 @@ import type {
   EditorEffect,
   EditorEffectRuntime,
 } from "@/core/editor/state-machine";
-import { createFeatureEditSession } from "@/domain/editor/feature-editing";
+import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import {
   createEditorEffectFailureEvent,
   hydrateFeatureSessionFromSnapshot,

@@ -10,7 +10,7 @@ import {
 } from "@/domain/editor/state-machine";
 import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 

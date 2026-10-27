@@ -1,0 +1,85 @@
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/core/reference-image/operation-test-fixtures";
+import { test, expect } from "vitest";
+
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import {
+  buildReferenceImageAnchorProjectedReferences,
+  mergeReferenceImageAnchorReferences,
+} from "@/core/reference-image-calibration/export/references";
+
+test("src/domain/reference-image-calibration/export/references.spec.ts does not synthesize exported anchor references into the sketch definition", () => {
+  const operation = createReferenceImageOperation({
+    sequence: 1,
+    sketchId: "sketch_primary",
+    payload: {
+      mediaType: "image/png",
+      fileName: "reference.png",
+      pixelWidth: 400,
+      pixelHeight: 200,
+      base64Data: "cG5n",
+    },
+  });
+
+  const definition: SketchDefinition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: [],
+    points: [],
+    entityIds: [],
+    entities: [],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    svgRenderingEnabled: true,
+    derivedRelationships: [],
+    referenceImages: [operation],
+  };
+
+  const merged = mergeReferenceImageAnchorReferences(
+    definition,
+    "sketch_primary",
+  );
+
+  expect(
+    merged.references.length === 0 && merged.referenceIds.length === 0,
+    "Reference-image calibration should no longer synthesize fixed exported anchor references.",
+  ).toBeTruthy();
+});
+
+test("src/domain/reference-image-calibration/export/references.spec.ts does not emit projected anchor geometry records", () => {
+  const operation = createReferenceImageOperation({
+    sequence: 1,
+    sketchId: "sketch_primary",
+    payload: {
+      mediaType: "image/png",
+      fileName: "reference.png",
+      pixelWidth: 400,
+      pixelHeight: 200,
+      base64Data: "cG5n",
+    },
+  });
+
+  const projectedReferences = buildReferenceImageAnchorProjectedReferences({
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: [],
+    points: [],
+    entityIds: [],
+    entities: [],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    svgRenderingEnabled: true,
+    derivedRelationships: [],
+    referenceImages: [operation],
+  } satisfies SketchDefinition);
+
+  expect(
+    projectedReferences.length,
+    "Reference-image calibration should no longer export projected anchor geometry into the main sketch solve.",
+  ).toBe(0);
+});

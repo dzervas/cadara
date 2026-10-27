@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect, vi } from "vitest";
 
 import {
@@ -12,7 +12,7 @@ import {
 } from "@/domain/modeling/modeling-service";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";

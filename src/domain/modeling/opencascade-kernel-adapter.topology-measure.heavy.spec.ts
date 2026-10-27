@@ -10,8 +10,8 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import type { TopologyMeasure } from "@/contracts/modeling/topology-measure";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/domain/modeling/occ/native-topology-payload";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/domain/modeling/occ/topology-signatures";

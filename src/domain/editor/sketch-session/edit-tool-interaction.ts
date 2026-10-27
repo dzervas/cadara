@@ -30,8 +30,8 @@ import {
   getSketchEditOperatorResult,
   getSelectedSketchEntityIds,
 } from "./edit-geometry-operations";
-import { mirrorEditRefusal } from "@/domain/sketch-editing/operations";
-import type { SketchEditOperationResult } from "@/domain/sketch-editing/operations";
+import { mirrorEditRefusal } from "@/core/sketch-editing/operations";
+import type { SketchEditOperationResult } from "@/core/sketch-editing/operations";
 import { withSketchToolValidation } from "./session-definition";
 import { withLiveSolveBasis } from "./session-live-solve";
 import { primitiveRefEquals } from "@/core/editor/schema";

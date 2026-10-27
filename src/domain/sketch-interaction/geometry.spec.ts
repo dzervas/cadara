@@ -15,7 +15,7 @@ import type {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   createArcEntityDefinition,
   createBezierCurveEntityDefinition,

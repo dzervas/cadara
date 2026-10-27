@@ -22,8 +22,8 @@ import {
   createModelingServiceEditorEffectRuntime,
   runEditorEffect,
 } from "./effect-registry";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createRecordingNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createRecordingNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   SketchConstraintSolverAdapter,
   SketchRegionDerivationSupersededError,

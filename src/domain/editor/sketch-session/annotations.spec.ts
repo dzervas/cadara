@@ -32,7 +32,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 // T14b T-7, logic lane (descriptor seam `getSketchAnnotationDescriptors`): an
 // arc's end bindings are constraint-class contextual descriptors (glyph

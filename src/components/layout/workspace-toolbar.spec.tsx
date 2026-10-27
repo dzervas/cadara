@@ -21,7 +21,7 @@ import { enterSketchSession, enterSketchSessionState } from "@/domain/editor/ske
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { EditorContext } from "@/hooks/editor-context";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { workbenchTheme } from "@/theme/workbench-theme";

@@ -20,13 +20,13 @@ import {
   CONTRACT_VERSION,
   EXTRUDE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
 import type { OccSnapshotLodRefinementOutcome } from "@/domain/modeling/occ/worker-protocol";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const request = {

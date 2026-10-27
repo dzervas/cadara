@@ -47,14 +47,14 @@ import type {
   SketchConstraintRef,
   SketchDimensionRef,
 } from "@/contracts/shared/references";
-import { resolveMeasureSelectionCandidate } from "@/domain/measure/measurement";
+import { resolveMeasureSelectionCandidate } from "@/core/measure/measurement";
 import { createFeatureEditorReferenceSelectionPatch } from "@/core/feature-authoring/form-events";
 import {
   applySelectionToFeatureEditSession,
   getSelectionFilterForFeatureType,
   patchFeatureEditSession,
   type FeatureEditSessionState,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   applySelectionToSketchPlaneEditSession,
   getSketchPlaneEditSelectionTarget,

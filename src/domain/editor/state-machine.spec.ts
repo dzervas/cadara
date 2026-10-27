@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect, assert } from "vitest";
 import {
   getEditorHistoryAvailability,
@@ -74,8 +74,8 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
 } from "@/domain/editor/sketch-session";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
-import { getPreviousDocumentHistoryCursor } from "@/domain/modeling/document-history";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
+import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createModelingService } from "@/domain/modeling/modeling-service";
@@ -84,9 +84,9 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createAppError, ResultAsync, type AppError } from "@/contracts/errors";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import {
   createScopedImportProviderRegistryForTest,
   createScopedSketchSpecialModeRegistryForTest,

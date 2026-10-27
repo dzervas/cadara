@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 
 import { createAppError } from "@/contracts/errors";
 import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
-import { createFeatureEditSession } from "@/domain/editor/feature-editing";
+import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import type { EditorEffect, EditorEvent } from "./types";
 import {
   createEditorEffectFailureEvent,
@@ -13,7 +13,7 @@ import {
   isModelingMutationError,
   modelingMutationErrorToDiagnostic,
 } from "./error-mapping";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 function makeFeatureSession() {
   return createFeatureEditSession({

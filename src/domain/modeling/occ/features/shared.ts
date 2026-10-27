@@ -28,7 +28,7 @@ import type {
 import {
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
   profileRegionSketchNotCurrentGuidance,
-} from "@/domain/modeling/feature-diagnostic-mapping";
+} from "@/core/modeling/feature-diagnostic-mapping";
 import { OCC_CONTRACT_GAP_CODES } from "@/domain/modeling/occ/implementation-policy";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import type {

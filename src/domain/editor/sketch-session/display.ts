@@ -39,15 +39,15 @@ import {
 } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchTangentHandleRef } from "@/contracts/shared/references";
-import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
+import { solveReferenceImageOperationState } from "@/core/reference-image-calibration/state";
 import {
   collectActiveReferenceImageOperations,
   createReferenceImageOperationTarget,
-} from "@/domain/reference-image/operations";
+} from "@/core/reference-image/operations";
 import {
   createReferenceImageTextureSourceKey,
   getReferenceImageCornerPoints,
-} from "@/domain/reference-image/rendering";
+} from "@/core/reference-image/rendering";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { ShapeUtils, Vector2 } from "three";
 import type {
@@ -78,7 +78,7 @@ import {
   getSketchConstraintDisplayForTarget,
   getSketchConstraintDisplaySummary,
 } from "./annotation-display";
-import { getSketchDatumGuideExtent } from "./definition-patches";
+import { getSketchDatumGuideExtent } from "../../../core/editor/sketch-session/definition-patches";
 import { isSketchSvgRenderingEnabled } from "./styles";
 
 export function sketchSessionHasReferenceImage(

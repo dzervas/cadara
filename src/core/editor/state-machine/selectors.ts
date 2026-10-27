@@ -3,11 +3,11 @@ import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getNextDocumentHistoryCursor,
   getPreviousDocumentHistoryCursor,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import {
   hydrateFeatureEditSession as hydrateFeatureEditSessionFromEntry,
   type FeatureEditSessionState,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { FeatureId } from "@/contracts/shared/ids";
 import type { EditorHistoryAvailability, EditorState } from "./types";

@@ -5,7 +5,7 @@
 // binding patches make Handle_TNaming_NamedShape deletes throw before deleting, and
 // an independent ledger records, at every TDocStd_Document delete, whether a failed
 // attribute handle of that document is still live.
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 

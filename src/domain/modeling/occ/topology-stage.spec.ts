@@ -6,7 +6,7 @@ import type {
 } from "@/contracts/modeling/authored-document";
 import type { BodyId, EdgeId, FaceId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
+import type { DocumentHistoryOrderEntry } from "@/core/modeling/document-history";
 import {
   getOccDurableRefKey,
   type OccTrackedBody,

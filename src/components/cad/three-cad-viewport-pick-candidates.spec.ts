@@ -40,7 +40,7 @@ import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
@@ -99,10 +99,10 @@ import {
   collectSketchSnapGeometries,
   resolveSketchSnap,
 } from "@/domain/sketch-snapping/snap-candidates";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
-import { svgSketchExportProvider } from "@/domain/export/providers/svg-sketch-export-provider";
+import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
+import { svgSketchExportProvider } from "@/application/export/providers/svg-sketch-export-provider";
 import type { ExportCapabilities } from "@/contracts/export/capabilities";
 
 test("src/components/cad/three-cad-viewport-pick-candidates.spec.ts", () => {

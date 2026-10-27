@@ -34,7 +34,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 // T13g (T13-D15–D21): what a placement shows before its click is exactly
 // what its commit authors. Every row reads the shown text from the tool

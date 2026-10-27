@@ -13,7 +13,7 @@ test("semantic exports use shared provider preparation and adapter-owned binary 
   expect(semantic).not.toMatch(
     /TextDecoder|writeBinaryStl|zipSync|serializeSvg|serializeDxf|STEPControl/,
   );
-  const orchestrator = read("src/domain/export/export-orchestrator.ts");
+  const orchestrator = read("src/application/export/export-orchestrator.ts");
   expect(orchestrator).toContain("provider.validateOptions?.(input.options)");
   expect(orchestrator).toContain("provider.export({");
   for (const provider of [
@@ -23,7 +23,7 @@ test("semantic exports use shared provider preparation and adapter-owned binary 
     "svg-sketch-export-provider",
     "dxf-sketch-export-provider",
   ])
-    expect(read(`src/domain/export/providers/${provider}.ts`)).toContain(
+    expect(read(`src/application/export/providers/${provider}.ts`)).toContain(
       "requireGeometryExportOptions(",
     );
   const cli = read("src/cli/commands/document-recipes.ts");

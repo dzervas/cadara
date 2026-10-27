@@ -13,7 +13,7 @@ import type {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   createNewSketchSession,
   type SketchSessionState,
@@ -23,7 +23,7 @@ import {
   rebuildSessionForDefinition,
 } from "@/domain/editor/sketch-session/definition-authoring";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { createSketchOffsetDerivationContribution } from "@/domain/sketch-editing/operations";
+import { createSketchOffsetDerivationContribution } from "@/core/sketch-editing/operations";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { eid, entityTarget, pid } from "@/domain/editor/sketch-mirror.fixtures";
 

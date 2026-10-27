@@ -11,18 +11,18 @@ import type {
   DimensionDefinition,
   SketchDefinition,
 } from "@/contracts/sketch/schema";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import {
   deriveSketchValidity,
   sketchProfileGateFailures,
 } from "@/contracts/sketch/derived-validity";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   acceptSketchDraw,
   beginSketchTool,

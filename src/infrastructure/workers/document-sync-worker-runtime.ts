@@ -1,4 +1,4 @@
-import { normalizeCollaborativeAuthoredModelDocument } from "@/domain/modeling/collaborative-authored-document";
+import { normalizeCollaborativeAuthoredModelDocument } from "@/core/modeling/collaborative-authored-document";
 import type {
   AuthoredModelDocument,
   AuthoredModelDocumentDiagnostic,

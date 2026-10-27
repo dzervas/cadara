@@ -17,7 +17,7 @@ import { getShapeVertexPoints } from "@/domain/modeling/occ/features/extrude";
 import { add, scale, dot, subtract, cross, normalize, toGpPnt, toGpVec, type Vec3, toGpDir } from "@/domain/modeling/occ/geometry";
 import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION, type AdvancedSolidFeatureDefinition } from "@/contracts/modeling/advanced-solid";
 import { executeOccFeature } from "@/domain/modeling/occ/features";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 
 // cadara-z4s: pinned production-asset failure; cadara-mpn qualifies the bounded

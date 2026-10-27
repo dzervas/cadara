@@ -4,7 +4,7 @@ import {
   type WorkbenchTabsLoadFailure,
   type WorkbenchTabsLoadResult,
 } from "@/contracts/workspace/workbench-tabs.runtime-schema";
-import type { WorkbenchTabsState } from "@/domain/workspace/workbench-tabs";
+import type { WorkbenchTabsState } from "@/core/workspace/workbench-tabs";
 
 export interface StorageLike {
   getItem(key: string): string | null;

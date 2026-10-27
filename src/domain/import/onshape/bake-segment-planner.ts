@@ -9,7 +9,7 @@ import {
   diffRollbackTopologySnapshots,
   type RollbackBodyTopology,
   type RollbackTopologySnapshot,
-} from "@/domain/import/onshape/rollback-topology-reader";
+} from "@/core/import/onshape/rollback-topology-reader";
 
 export type BakeSegmentPreflightCode =
   | "bake-segment-boundary-snapshot-missing"

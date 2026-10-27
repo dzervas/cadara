@@ -28,7 +28,7 @@ import type {
   ModelingExportDocumentInput,
   ModelingExportDocumentResult,
 } from "@/domain/modeling/modeling-service";
-import type { ObjectExportModalState } from "@/domain/export/object-export-state";
+import type { ObjectExportModalState } from "@/core/export/object-export-state";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type { ExportProvider } from "@/contracts/export/provider";
 import type {

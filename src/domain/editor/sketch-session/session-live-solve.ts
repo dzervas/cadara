@@ -29,7 +29,7 @@ import type { DocumentVariableRecord } from "@/contracts/modeling/schema";
 import {
   resolveSketchDimensionValues,
   resolveSketchDerivationDistances,
-} from "@/domain/modeling/sketch-dimension-expressions";
+} from "@/core/modeling/sketch-dimension-expressions";
 import type { SketchExactIntersection } from "@/domain/sketch-snapping/snap-candidates";
 import {
   isUnevaluatedMetadataOnlySketch,

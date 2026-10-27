@@ -46,7 +46,7 @@ import type {
   SketchPoint2D,
 } from "@/contracts/sketch/schema";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,

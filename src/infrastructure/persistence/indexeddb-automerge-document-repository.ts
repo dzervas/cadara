@@ -32,8 +32,8 @@ import {
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";
 
-import { AuthoredActionHistory } from "@/domain/modeling/authored-action-history";
-import { describeBlockedDocumentAction } from "@/domain/modeling/document-action-blocked";
+import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
+import { describeBlockedDocumentAction } from "@/core/modeling/document-action-blocked";
 import {
   applyCollaborativeWrites,
   DocumentProvenanceConflict,
@@ -42,7 +42,7 @@ import {
   materializeCollaborativeDocument,
   updateDocumentProvenance,
   type CollaborativeDocument,
-} from "@/domain/modeling/collaborative-document";
+} from "@/core/modeling/collaborative-document";
 import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
 import {
   createLocalStorageDocumentRepositoryUrlStore,

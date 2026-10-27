@@ -5,8 +5,8 @@ import {
   createSketchSlotContribution,
   createSketchCornersMutation,
   createSketchDerivedTransformContribution,
-} from "@/domain/sketch-editing/operations";
-import type { SketchEditOperationResult } from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
+import type { SketchEditOperationResult } from "@/core/sketch-editing/operations";
 import { offsetEditInputGate, refusedEditOperation } from "./offset-editing";
 import { getSketchEditToolDefinition } from "@/core/sketch-edit-tools/registry";
 import {

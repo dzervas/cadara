@@ -15,14 +15,14 @@ import type {
   SketchPlaneSupportRef,
 } from "@/contracts/shared/sketch-plane";
 import { createRegionBoundaryBasis } from "@/contracts/sketch/region-boundary-curves";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   deriveStandardPlaneKeyFromConstructionId,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import { buildReferenceImageAnchorProjectedReferences } from "@/domain/reference-image-calibration/export/references";
+} from "@/core/modeling/opencascade-kernel-seed";
+import { buildReferenceImageAnchorProjectedReferences } from "@/core/reference-image-calibration/export/references";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
 import { mapSketchPointToWorkspaceWorld } from "@/core/workspace/sketch-plane-mapping";
 import { getEntityPointIds } from "@/core/sketch-editing/definition-references";

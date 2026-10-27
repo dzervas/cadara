@@ -4,7 +4,7 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import {
   createInitialWorkbenchTabsState,
   reduceWorkbenchTabs,
-} from "@/domain/workspace/workbench-tabs";
+} from "@/core/workspace/workbench-tabs";
 import {
   createDocumentRepositoryUrlStorageKey,
   createLocalStorageDocumentRepositoryUrlStore,

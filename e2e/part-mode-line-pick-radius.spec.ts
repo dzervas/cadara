@@ -7,7 +7,7 @@ import {
 } from "../src/contracts/modeling/operation-history";
 import type { CommitSketchRequest } from "../src/contracts/modeling/schema";
 import { SKETCH_SCHEMA_VERSION } from "../src/contracts/sketch/schema";
-import { createStandardPlaneDefinition } from "../src/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "../src/core/modeling/opencascade-kernel-seed";
 import {
   mean,
   selectRegionInViewport,

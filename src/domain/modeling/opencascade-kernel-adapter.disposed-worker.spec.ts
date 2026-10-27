@@ -9,7 +9,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
-} from "./opencascade-kernel-seed";
+} from "../../core/modeling/opencascade-kernel-seed";
 
 const documentId = OCC_KERNEL_DOCUMENT_ID;
 const revisionId = OCC_KERNEL_INITIAL_REVISION_ID;

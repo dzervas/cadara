@@ -21,7 +21,7 @@ import {
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type { CollaborativeDocument } from "@/domain/modeling/collaborative-document";
+import type { CollaborativeDocument } from "@/core/modeling/collaborative-document";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";

@@ -53,7 +53,7 @@ import type {
 import {
   createCertifiedNeutralCurveQueryCapabilityForTest,
   createCertifiedNeutralCurveRequestQuery,
-} from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/neutral-curve-certification/query";
 import type {
   SketchEntityId,
   SketchId,
@@ -74,14 +74,14 @@ import {
   createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
 } from "@/domain/sketch-inference/placement-inference";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
 import {
   ARCH_POINTS,

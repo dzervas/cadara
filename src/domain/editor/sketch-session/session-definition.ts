@@ -15,18 +15,18 @@ import type {
 } from "@/contracts/shared/references";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/domain/reference-image-calibration/mode/shared";
-import type { ReferenceImageCalibrationModeState } from "@/domain/reference-image-calibration/mode/shared";
+import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
+import type { ReferenceImageCalibrationModeState } from "@/core/reference-image-calibration/mode/shared";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
-import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
-import type { ReferenceImageOperationStateOverride } from "@/domain/reference-image/operations";
+import { collectActiveReferenceImageOperations } from "@/core/reference-image/operations";
+import type { ReferenceImageOperationStateOverride } from "@/core/reference-image/operations";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import {
   buildReferenceImageAnchorProjectedReferences,
   mergeReferenceImageAnchorReferences,
-} from "@/domain/reference-image-calibration/export/references";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
-import type { AuthoredSketchDerivationSettings } from "@/domain/modeling/sketch-dimension-expressions";
+} from "@/core/reference-image-calibration/export/references";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
+import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
   "Geometry is constrained and cannot move to that position.";

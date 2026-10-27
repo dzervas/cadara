@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
@@ -9,7 +9,7 @@ import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { onshapeImportProvider } from "@/domain/import/onshape/provider";
-import { importedOnshapeSketchEntityId } from "@/domain/import/onshape/sketch-translator";
+import { importedOnshapeSketchEntityId } from "@/application/import/onshape/sketch-translator";
 import {
   applyImportPreparedActions,
   createImportCapabilities,

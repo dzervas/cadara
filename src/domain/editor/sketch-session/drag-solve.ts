@@ -20,9 +20,9 @@ import type {
   ProjectedSketchReferenceRecord,
   SolverTolerancePolicy,
 } from "@/contracts/solver/schema";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
-import type { AuthoredSketchDerivationSettings } from "@/domain/modeling/sketch-dimension-expressions";
-import type { SketchDragIntent } from "./drag-intent";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
+import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
+import type { SketchDragIntent } from "../../../core/editor/sketch-session/drag-intent";
 import { resolveSketchDefinitionForSolve } from "./session-live-solve";
 import {
   CONSTRAINED_DRAG_BLOCKED_MESSAGE,
@@ -32,7 +32,7 @@ import {
 import {
   applySolvedSketchToDefinition,
   applyPointPositionsToDefinition,
-} from "./definition-patches";
+} from "../../../core/editor/sketch-session/definition-patches";
 import { carriedOffsetPlans } from "@/contracts/sketch/offset-publication";
 
 /** T12f: structured drag edit result with optional feedback cue. */

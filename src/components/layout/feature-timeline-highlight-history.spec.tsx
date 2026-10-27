@@ -38,8 +38,8 @@ import {
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
-import { getTargetContributingFeatureIds } from "@/domain/modeling/document-snapshot-view";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
+import { getTargetContributingFeatureIds } from "@/core/modeling/document-snapshot-view";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";

@@ -11,7 +11,7 @@ import {
 } from "@/domain/modeling/occ/features/mirror-transform";
 import { applyBooleanPolicy } from "@/domain/modeling/occ/features/boolean-operations";
 import { buildExtrudeFeatureShape } from "@/domain/modeling/occ/features/extrude";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
 import type {
   OccFeatureExecutionContext,
   OccFeatureExecutionResult,

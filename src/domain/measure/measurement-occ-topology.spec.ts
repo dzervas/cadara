@@ -5,7 +5,7 @@ import type {
   TopologyMeasure,
 } from "@/contracts/modeling/topology-measure";
 import type { BodyId } from "@/contracts/shared/ids";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import { type OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";

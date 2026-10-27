@@ -14,7 +14,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 // UI lane: the local refusal must not turn into a second global status on release.
 test("a fixed-point refusal stays local instead of repeating on release", () => {

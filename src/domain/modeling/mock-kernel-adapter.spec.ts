@@ -1,8 +1,8 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { MockKernelAdapter } from "./mock-kernel-adapter";
-import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { createModelingService } from "./modeling-service";
 // T17o review A-1: `modelingRuntimeValidators` (no production consumer) is
 // deleted; its members were these individually exported normalizers.
@@ -11,7 +11,7 @@ import { createModelingService } from "./modeling-service";
 import {
   normalizeRenderables,
   normalizeWorkspaceSnapshot,
-} from "./modeling-service/normalization";
+} from "../../core/modeling/modeling-service/normalization";
 import { MockSketchSolverAdapter } from "@/domain/solver/mock-sketch-solver-adapter";
 import {
   bindRenderableObject,

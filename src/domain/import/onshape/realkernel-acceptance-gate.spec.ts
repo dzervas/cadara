@@ -5,19 +5,19 @@ import type {
   OnshapeGeometricSignature,
   OnshapeResolvedReference,
 } from "@/contracts/import/onshape-capture-bundle";
-import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
-import { matchSignature, type TopologyMatchTolerance } from "@/domain/import/onshape/signature-matcher";
+import { createRollbackTopologyTimeline } from "@/core/import/onshape/rollback-topology-reader";
+import { matchSignature, type TopologyMatchTolerance } from "@/core/import/onshape/signature-matcher";
 import {
   resolveTopologyReferences,
   type ResolveTopologyReferencesInput,
-} from "@/domain/import/onshape/topology-reference-resolver";
+} from "@/core/import/onshape/topology-reference-resolver";
 import {
   computeCaptureFrameToWorld,
   computeParametricTransformReframe,
   reframeSignature,
-} from "@/domain/import/onshape/capture-frame";
-import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
-import type { OnshapeTopologyQueryRef } from "@/domain/import/onshape/topology-query-reader";
+} from "@/core/import/onshape/capture-frame";
+import type { OnshapeFeatureNode } from "@/core/import/onshape/bundle-reader";
+import type { OnshapeTopologyQueryRef } from "@/core/import/onshape/topology-query-reader";
 
 // Real-kernel acceptance-gate pins (Phase W follow-up, step 3 of 4).
 //

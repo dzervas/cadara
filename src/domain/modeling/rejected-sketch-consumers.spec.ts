@@ -51,19 +51,19 @@ import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
 } from "@/domain/editor/sketch-session/test-snap-scale";
-import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { normalizeWorkspaceSnapshot } from "@/domain/modeling/modeling-service/normalization";
+import { normalizeWorkspaceSnapshot } from "@/core/modeling/modeling-service/normalization";
 import { mapSketchPointToWorld } from "@/domain/modeling/occ/geometry";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
+} from "@/core/modeling/opencascade-kernel-seed";
+import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const request = {

@@ -15,11 +15,11 @@ import {
 } from "@/contracts/modeling/authored-values";
 import { FILLET_FEATURE_SCHEMA_VERSION, SHELL_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { ConstructionId, SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import type { OnshapeFeatureNode, OnshapeSolvedSketch } from "@/domain/import/onshape/bundle-reader";
+import type { OnshapeFeatureNode, OnshapeSolvedSketch } from "@/core/import/onshape/bundle-reader";
 import type { FeatureDependencyInput, OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
-import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
-import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
-import type { TopologyQuerySlot } from "@/domain/import/onshape/topology-query-reader";
+import { translateSolvedSketch } from "@/application/import/onshape/solved-sketch-projection";
+import { translateOnshapeExpression } from "@/core/import/onshape/expression-translator";
+import type { TopologyQuerySlot } from "@/core/import/onshape/topology-query-reader";
 import type { FeaturePlan, PlannedFeatureReplay } from "@/domain/import/onshape/fidelity-planner";
 export interface PlannedConstructionFromFeatureRef {
   kind: "constructionFromFeature";
@@ -976,7 +976,7 @@ export type PlannedAdvancedParticipantTarget =
 
 export function buildResolvedBodyConsumerDefinition(
   planned: PlannedBodyTopologyConsumer,
-  bindings: readonly import("@/domain/import/onshape/topology-reference-resolver").TopologyResolutionBinding[],
+  bindings: readonly import("@/core/import/onshape/topology-reference-resolver").TopologyResolutionBinding[],
 ): ImportDeferredFeatureDefinition {
   // Review-only exact body ownership carries a source feature id until provider
   // preparation emits the authoritative ordered action. It is rebased before this

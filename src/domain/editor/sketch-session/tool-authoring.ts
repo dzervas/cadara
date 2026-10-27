@@ -1,6 +1,6 @@
 import type { SketchSessionState, SketchAuthoringToolId } from "./types";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import {
   getSketchSessionDerivationSettings,
   createPointId,

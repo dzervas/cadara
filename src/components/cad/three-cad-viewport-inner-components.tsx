@@ -16,7 +16,7 @@ import { flushSync } from "react-dom";
 import { getMeasurementWitnessStyleConfig } from "@/components/cad/measurement-witness-style";
 import { ScreenSpacePointMarker } from "@/components/cad/screen-space-point-marker";
 import { ACTIVE_SKETCH_FEEDBACK_PIXEL_BOUNDS } from "@/components/cad/sketch-display-style";
-import type { MeasurementWitness } from "@/domain/measure/measurement";
+import type { MeasurementWitness } from "@/core/measure/measurement";
 import {
   MARKER_SPHERE_GEOMETRY,
   getVisibleMarkerRadius,

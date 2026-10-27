@@ -25,7 +25,7 @@ import {
   type SketchDragGesturePhase,
 } from "@/components/cad/three-cad-viewport-helpers";
 import { resolveSketchDragTarget } from "@/domain/editor/workbench-interactions";
-import { resolveHandleFromTarget } from "@/domain/editor/sketch-session/drag-intent";
+import { resolveHandleFromTarget } from "@/core/editor/sketch-session/drag-intent";
 import {
   derivedTargetsDefinition,
   mirroredSession,
@@ -42,7 +42,7 @@ import { createDimensionAnnotationPlacementPatch } from "@/components/cad/three-
 import { bindRenderableObject } from "@/infrastructure/viewport/render-picking";
 import { measureSelectionFilter } from "@/core/editor/schema";
 import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import * as THREE from "three";
 
 test("src/components/cad/three-cad-viewport.spec.ts", () => {

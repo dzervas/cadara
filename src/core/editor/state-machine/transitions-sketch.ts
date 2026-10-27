@@ -4,7 +4,7 @@ import {
 } from "./selection-helpers";
 import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import type { SketchToolId } from "@/core/sketch-tools/definition";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
 import {

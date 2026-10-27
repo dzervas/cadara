@@ -27,7 +27,7 @@ import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-sessi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 const palette = {
   constrained: 0x222222,

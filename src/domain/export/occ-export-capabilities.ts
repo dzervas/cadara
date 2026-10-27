@@ -9,7 +9,7 @@ import type {
 } from "@/contracts/export/capabilities";
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
-import { buildSketchVectorExportModel } from "@/domain/export/sketch-vector-export-model";
+import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
 import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import type { OccTrackedBody } from "@/domain/modeling/occ/topology";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";

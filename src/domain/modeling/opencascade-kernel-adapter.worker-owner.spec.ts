@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
@@ -11,7 +11,7 @@ import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-clien
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import {
   literalResolvedDefinition,

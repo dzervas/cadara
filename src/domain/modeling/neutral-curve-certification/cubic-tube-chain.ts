@@ -39,7 +39,7 @@ import {
   exactSqrtInterval,
   normalizedExact,
   restrictCubicBernstein,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-exact";
 import {
   ExactProofBudget,
   ExactQueryProofBudgetExceeded,
@@ -56,7 +56,7 @@ import {
   subtractExact,
   type ExactFraction,
   type ExactProofBudgetSnapshot,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-primitives";
 
 /**
  * C6-S1′ tube-stability certificate of one emitted cubic chain (design review

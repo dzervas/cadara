@@ -75,7 +75,7 @@ import {
   getBodyDisplayColors,
   isTargetHidden,
 } from "@/workbench/shell/viewport-renderables";
-import { createObjectExportModalState } from "@/domain/export/object-export-state";
+import { createObjectExportModalState } from "@/core/export/object-export-state";
 import { createCadaraDebugSession } from "@/workbench/debug/cadara-debug-session";
 import { selectCadaraDebugTarget } from "@/workbench/debug/cadara-debug-actions";
 import {
@@ -87,7 +87,7 @@ import type { WorkbenchDocumentActionResult } from "@/workbench/document/documen
 import type {
   WorkbenchTab,
   WorkbenchTabsState,
-} from "@/domain/workspace/workbench-tabs";
+} from "@/core/workspace/workbench-tabs";
 import type { BodyId, DocumentId } from "@/contracts/shared/ids";
 import {
   resolveBodyAppearanceHex,
@@ -133,19 +133,19 @@ import {
   getWorkbenchVisibilityState,
   reconcileVisibilityIntentKeys,
   toggleWorkbenchTargetVisibility,
-} from "@/domain/editor/visibility";
+} from "@/core/editor/visibility";
 import {
   getFeatureSnapshot,
   getSelectionDetail,
   getTargetContributingFeatureIds,
-} from "@/domain/modeling/document-snapshot-view";
+} from "@/core/modeling/document-snapshot-view";
 import {
   deriveMeasurementViewModel,
   getMeasurementReadoutSource,
   type MeasurementDistanceMode,
-} from "@/domain/measure/measurement";
+} from "@/core/measure/measurement";
 import { openSketchMeasurementRecord } from "@/domain/measure/open-sketch-measurement";
-import { createTopologyDebugSummary } from "@/domain/modeling/topology-debug";
+import { createTopologyDebugSummary } from "@/core/modeling/topology-debug";
 import { useCadaraDebugPlatform } from "@/workbench/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";

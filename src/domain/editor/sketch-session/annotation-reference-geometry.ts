@@ -18,7 +18,7 @@ import {
   createSketchEntityRef,
 } from "./session-definition";
 import { getLineSegmentGeometry } from "./annotation-geometry";
-import { getSketchDatumGuideExtent } from "./definition-patches";
+import { getSketchDatumGuideExtent } from "../../../core/editor/sketch-session/definition-patches";
 import {
   orderedSplinePointIds,
   solvedCubicSpans,

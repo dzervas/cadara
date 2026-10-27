@@ -38,7 +38,7 @@ import type {
   SplinePoles,
   SplineVector,
 } from "@/contracts/sketch/spline-geometry";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 
 let capability: NeutralCurveQueryCapability;
 beforeAll(async () => {

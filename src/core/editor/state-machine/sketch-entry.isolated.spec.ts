@@ -1,9 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
-import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/domain/reference-image-calibration/mode/shared";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
+import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";

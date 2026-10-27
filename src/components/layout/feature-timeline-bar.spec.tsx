@@ -31,7 +31,7 @@ import { createSketchSessionFromSnapshot } from "@/domain/editor/sketch-session"
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import type { FeatureId, RegionId, SketchId } from "@/contracts/shared/ids";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 test.each(["150", ""])(
   "variable errors stay below the row control inside the panel (value %j)",

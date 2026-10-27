@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import { fallbackFeatureTranslator } from "@/domain/import/onshape/fallback-feature-translator";
 import { onshapeFeatureTranslatorRegistry } from "@/domain/import/onshape/fidelity-planner";
-import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
+import type { OnshapeFeatureNode } from "@/core/import/onshape/bundle-reader";
 
 function reason(featureType: string) {
   return fallbackFeatureTranslator.plan({

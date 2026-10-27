@@ -11,7 +11,7 @@ import type {
   CreateFeatureRequest,
 } from "../../src/contracts/modeling/schema";
 import { SKETCH_SCHEMA_VERSION } from "../../src/contracts/sketch/schema";
-import { createStandardPlaneDefinition } from "../../src/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "../../src/core/modeling/opencascade-kernel-seed";
 
 // Small current-format sketches seeded through the operation history, for
 // the rows whose specification says "in separate small fixtures" (§2

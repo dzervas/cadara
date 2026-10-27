@@ -24,7 +24,7 @@ import { executeOccFeature } from "@/domain/modeling/occ/features";
 import { toGpPnt } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { trackNewSolidBody } from "@/domain/modeling/occ/topology";
-import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
 
 // Lane: logic (per docs/testing.md).
 // Seam: exported OCC advanced-solid pattern execution, generated body identity,

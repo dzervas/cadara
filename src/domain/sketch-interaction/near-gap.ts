@@ -8,7 +8,7 @@ import type {
 import { declaredJoinClasses } from "@/contracts/sketch/region-extraction";
 import { orderedSplineOccurrences } from "@/contracts/sketch/spline-geometry";
 import type { SketchSessionState } from "@/domain/editor/sketch-session";
-import { getSketchMergePointRefusal } from "@/domain/sketch-editing/merge-points";
+import { getSketchMergePointRefusal } from "@/core/sketch-editing/merge-points";
 import { SKETCH_POINT_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 
 export interface SketchScreenPoint {

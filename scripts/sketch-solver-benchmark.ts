@@ -13,7 +13,7 @@ import type { RequestId } from "../src/contracts/shared/ids.ts";
 import { CONTRACT_VERSION } from "../src/contracts/shared/versioning.ts";
 import { SOLVER_SCHEMA_VERSION } from "../src/contracts/solver/schema.ts";
 import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/domain/modeling/neutral-curve-certification/query.ts";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/core/modeling/neutral-curve-certification/query.ts";
 import {
   compileSketchSolveProgram,
   createCompiledSketchSolveSession,

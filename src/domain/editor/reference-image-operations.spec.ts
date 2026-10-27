@@ -1,4 +1,4 @@
-import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/core/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
@@ -16,13 +16,13 @@ import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-sessi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
-} from "@/domain/reference-image-calibration/mode/shared";
+} from "@/core/reference-image-calibration/mode/shared";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { solveReferenceImageOperationState } from "@/domain/reference-image-calibration/state";
+import { solveReferenceImageOperationState } from "@/core/reference-image-calibration/state";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

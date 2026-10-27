@@ -31,7 +31,7 @@ import {
 } from "@/domain/modeling/occ/geometry";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { deleteOccObject } from "@/domain/modeling/occ/memory";
-import { assertAcceptedSketchFeaturePoint } from "@/domain/modeling/sketch-feature-input";
+import { assertAcceptedSketchFeaturePoint } from "@/core/modeling/sketch-feature-input";
 import {
   requireSolidBody,
   requireSketchSnapshot,

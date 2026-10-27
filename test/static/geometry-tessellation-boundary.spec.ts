@@ -49,9 +49,9 @@ const TESSELLATOR_ALLOWLIST: Record<string, string> = {
   "src/core/sketch-tools/tools/spline.ts": "spline tool preview",
   "src/core/sketch-editing/offset-preview.ts":
     "offset tool preview of derived shells",
-  "src/domain/export/providers/dxf-sketch-export-provider.ts":
+  "src/application/export/providers/dxf-sketch-export-provider.ts":
     "DXF output polylines",
-  "src/domain/measure/measurement.ts": "measurement witness polylines",
+  "src/core/measure/measurement.ts": "measurement witness polylines",
   "src/contracts/sketch/region-boundary-curves.ts":
     "tessellateBoundaryLoop draws its cubic segments with the one tessellator",
 };
@@ -162,7 +162,7 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
   expect(
     scan([
       {
-        path: "src/domain/measure/measurement.ts",
+        path: "src/core/measure/measurement.ts",
         text: "const points = sampleBezierPoints(controlPoints, 32);",
       },
       {
@@ -170,7 +170,7 @@ test("test/static/geometry-tessellation-boundary.spec.ts", () => {
         text: "sampleBezierSketchPoints(controlPoints, 8);",
       },
     ]).unlistedSamplers,
-  ).toEqual(["src/domain/measure/measurement.ts"]);
+  ).toEqual(["src/core/measure/measurement.ts"]);
 
   const root = process.cwd();
   const files = sourceFiles(join(root, "src")).map((path) => ({

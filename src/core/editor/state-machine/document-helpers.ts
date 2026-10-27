@@ -1,8 +1,8 @@
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import {
   getDocumentHistoryCursorBeforeTarget,
   type DocumentHistoryOrderEntry,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
 import { hydrateSketchPlaneEditSession } from "@/domain/editor/sketch-plane-editing";
 import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";

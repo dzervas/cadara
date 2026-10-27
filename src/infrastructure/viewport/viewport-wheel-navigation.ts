@@ -3,7 +3,7 @@ import type { OrbitControls } from "three-stdlib";
 import {
   wheelCameraIntent,
   type PointingDeviceScheme,
-} from "@/domain/workspace/wheel-camera-intent";
+} from "@/core/workspace/wheel-camera-intent";
 
 export function viewportPanOffset(
   camera: PerspectiveCamera | OrthographicCamera,

@@ -6,4 +6,4 @@
 export {
   OCC_KERNEL_CAPABILITIES as headlessKernelCapabilities,
   OCC_KERNEL_SETTINGS as headlessDocumentSettings,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";

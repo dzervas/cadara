@@ -9,7 +9,7 @@ import { createNewSketchSession } from "@/domain/editor/sketch-session/state";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createModelingService } from "./service";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { createSketchPublicationFailureFixture } from "./sketch-publication.fixtures";

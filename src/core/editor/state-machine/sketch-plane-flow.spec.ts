@@ -1,8 +1,8 @@
 import { test, expect } from "vitest";
 
 import { planeSelectionFilter } from "@/core/editor/schema";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
-import { getDocumentHistoryCursorBeforeTarget } from "@/domain/modeling/document-history";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
+import { getDocumentHistoryCursorBeforeTarget } from "@/core/modeling/document-history";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   getSketchPlaneEditPreviewLabel,

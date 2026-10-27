@@ -41,20 +41,7 @@ export {
   normalizeSketchConstraintDisplayState,
 } from "./annotation-display";
 
-export type { SketchDragHandle, SketchDragIntent } from "./drag-intent";
-export {
-  getSketchEntityDefiningPointIds,
-  resolveHandleFromTarget,
-  resolveSketchDragIntent,
-} from "./drag-intent";
 export type { SketchAnnotationListRow } from "./annotation-descriptors";
-
-export {
-  createProjectedPrimitiveRef,
-  createReferencePrimitiveRef,
-  getConstraintAffectedGeometryRefs,
-  getDimensionAffectedGeometryRefs,
-} from "./annotation-targets";
 
 export {
   beginSketchAnnotationEdit,
@@ -76,12 +63,6 @@ export {
   getSketchAnnotationListRows,
   isSketchAnnotationDrawnInViewport,
 } from "./annotation-descriptors";
-
-export {
-  addAnchorOffset,
-  applyPointPositionsToDefinition,
-  getSketchDatumGuideExtent,
-} from "./definition-patches";
 
 export {
   patchSketchConstraintValue,

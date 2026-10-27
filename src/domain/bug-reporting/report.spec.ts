@@ -22,7 +22,7 @@ import {
   createGithubBugReportUrl,
   formatMarkdownJsonDisclosure,
 } from "@/domain/bug-reporting/report";
-import { createFeatureEditSession } from "@/domain/editor/feature-editing";
+import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
@@ -32,7 +32,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
 
 test("src/domain/bug-reporting/report.spec.ts", async () => {

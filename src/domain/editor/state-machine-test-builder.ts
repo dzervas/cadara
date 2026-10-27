@@ -11,7 +11,7 @@ import {
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { querySketchEditIntersections } from "@/contracts/sketch/edit-intersections";
 import {
   completeSketchEditQuery,

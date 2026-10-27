@@ -11,7 +11,7 @@ import {
 } from "@/contracts/modeling/authored-values";
 import { getAdvancedParticipant } from "@/contracts/modeling/advanced-solid";
 import type { Vec3 } from "@/domain/modeling/occ/math";
-import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
+import { assertAcceptedSketchFeatureInput } from "@/core/modeling/sketch-feature-input";
 import {
   combineOccCleanupError,
   releaseOccObjects,

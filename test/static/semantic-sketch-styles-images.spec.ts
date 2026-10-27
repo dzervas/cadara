@@ -35,17 +35,17 @@ it("browser and explicit style/image authoring retain shared authored owners", (
 });
 
 it("filesystem and browser acquire bytes separately and share the existing metadata preparation without decoders or browser shims", () => {
-  const raster = read("src/domain/reference-image/raster.ts");
+  const raster = read("src/infrastructure/reference-image/raster.ts");
   expect(raster).toContain("readRasterImageDimensions(input.bytes)");
   expect(raster).toContain("requireReferenceImagePayload(");
-  expect(read("src/domain/reference-image/import-flow.ts")).toContain(
+  expect(read("src/infrastructure/reference-image/import-flow.ts")).toContain(
     "return prepareReferenceImagePayload(",
   );
   const files = read("src/infrastructure/modeling/reference-image-file-io.ts");
   expect(files).toContain("await readFile(path)");
   expect(files).toContain("prepareReferenceImagePayload(");
   for (const path of [
-    "src/domain/reference-image/raster.ts",
+    "src/infrastructure/reference-image/raster.ts",
     "src/infrastructure/modeling/reference-image-file-io.ts",
     "src/infrastructure/modeling/semantic-sketch-port.ts",
   ]) {

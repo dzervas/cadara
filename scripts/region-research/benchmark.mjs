@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/domain/modeling/neutral-curve-certification/query.ts";
+import { createCertifiedNeutralCurveQueryWithBudgetObserverForTest } from "@/core/modeling/neutral-curve-certification/query.ts";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction.ts";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures.ts";
 const label = process.argv[2] || "baseline",

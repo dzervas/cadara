@@ -27,8 +27,8 @@ registerHooks({
       const relative = fileURLToPath(url).slice(root.length);
       if (
         [
-          "src/domain/modeling/neutral-curve-certification/fixed-degree-primitives.ts",
-          "src/domain/modeling/neutral-curve-certification/cubic-pair-exact.ts",
+          "src/core/modeling/neutral-curve-certification/fixed-degree-primitives.ts",
+          "src/core/modeling/neutral-curve-certification/cubic-pair-exact.ts",
           "src/contracts/sketch/region-extraction.ts",
         ].includes(relative)
       ) {

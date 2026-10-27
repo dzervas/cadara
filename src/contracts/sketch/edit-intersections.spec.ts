@@ -22,7 +22,7 @@ import {
 import { collectArrangementBranches } from "@/contracts/sketch/region-extraction";
 import { nextDown, nextUp } from "@/contracts/sketch/region-interval-geometry";
 import type { SketchEntityId } from "@/contracts/shared/ids";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 
 // Contract seam (logic lane): the exact edit-intersection service, on the
 // arrangement fixtures and the kernel-free certified capability.

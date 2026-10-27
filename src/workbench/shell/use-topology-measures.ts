@@ -5,7 +5,7 @@ import { ok } from "@/contracts/errors";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { MeasureTopologyResponse } from "@/contracts/modeling/topology-measure";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
-import { getTopologyMeasureTargets } from "@/domain/measure/measurement";
+import { getTopologyMeasureTargets } from "@/core/measure/measurement";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { runReportedAction } from "@/lib/reported-action";
 

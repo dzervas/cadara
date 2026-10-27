@@ -3,7 +3,7 @@ import * as THREE from "three";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { FaceId, PickId, RenderableId } from "@/contracts/shared/ids";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import {
   createSectionCapRenderables,
   createSectionClippingPlane,

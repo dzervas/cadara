@@ -8,7 +8,7 @@ import {
 import {
   readRollbackTopologySnapshot,
   type RollbackTopologySnapshot,
-} from "./rollback-topology-reader";
+} from "../../../core/import/onshape/rollback-topology-reader";
 import type { OnshapeRollbackSnapshot } from "@/contracts/import/onshape-capture-bundle";
 
 const vertices: [number, number, number][] = [

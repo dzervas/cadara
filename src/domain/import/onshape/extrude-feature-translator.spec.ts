@@ -1,16 +1,16 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
-import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+import { readPartStudio } from "@/core/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
-} from "@/domain/import/onshape/profile-resolver";
+} from "@/application/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const profileVerifier = {

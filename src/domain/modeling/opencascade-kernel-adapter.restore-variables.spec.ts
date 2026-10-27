@@ -1,7 +1,7 @@
 import {
   createCertifiedNeutralCurveQueryCapabilityForTest,
   createRecordingNeutralCurveQueryCapabilityForTest,
-} from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/neutral-curve-certification/query";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 

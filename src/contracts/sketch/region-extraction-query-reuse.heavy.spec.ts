@@ -8,7 +8,7 @@ import {
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import type { SplinePoles } from "@/contracts/sketch/spline-geometry";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 
 // Verbatim solved poles of Spline 5 and Spline 10 from the read-only T18
 // t18-regions-blocked-fixed.cadara capture. Project them without reconstructing

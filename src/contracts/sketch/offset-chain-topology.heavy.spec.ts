@@ -54,7 +54,7 @@ import {
   resolveSketchConstraintTarget,
 } from "@/core/sketch-constraints/registry";
 import { solveCommittedConstraintDefinition } from "@/domain/editor/sketch-session/constraints";
-import { applySolvedSketchToDefinition } from "@/domain/editor/sketch-session/definition-patches";
+import { applySolvedSketchToDefinition } from "@/core/editor/sketch-session/definition-patches";
 import { lineSketchToolDefinition } from "@/core/sketch-tools/tools/line";
 import { splineSketchToolDefinition } from "@/core/sketch-tools/tools/spline";
 import { centerPointArcSketchToolDefinition } from "@/core/sketch-tools/tools/center-point-arc";
@@ -64,7 +64,7 @@ import {
   createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
@@ -72,7 +72,7 @@ import {
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createSketchPointRef } from "@/domain/editor/sketch-session/session-definition";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
   canonicalArcSupport,
   seedArcLeafSplits,
@@ -151,8 +151,8 @@ import {
   createCertifiedNeutralCurveRequestQuery,
   createCertifiedNeutralCurveRequestQueryWithBudgetObserverForTest,
   createCertifiedNeutralCurveRequestQueryWithLowerBudgetForTest,
-} from "@/domain/modeling/neutral-curve-certification/query";
-import type { ExactProofBudgetSnapshot } from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+} from "@/core/modeling/neutral-curve-certification/query";
+import type { ExactProofBudgetSnapshot } from "@/core/modeling/neutral-curve-certification/fixed-degree-primitives";
 
 const SKETCH_DIRECT_EDIT_TOLERANCES =
   createDocumentSolverTolerances(OCC_KERNEL_SETTINGS);

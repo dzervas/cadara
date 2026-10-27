@@ -35,10 +35,10 @@ import {
   getTopologyMeasureTargets,
   MAX_TOPOLOGY_MEASURE_TARGETS,
   type MeasurementDistanceMode,
-} from "@/domain/measure/measurement";
-import { createMeasurementSnapshotForTest } from "@/domain/measure/measurement.fixtures";
+} from "@/core/measure/measurement";
+import { createMeasurementSnapshotForTest } from "@/core/measure/measurement.fixtures";
 import { openSketchMeasurementRecord } from "@/domain/measure/open-sketch-measurement";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 const snapshot = createMeasurementSnapshotForTest();
 

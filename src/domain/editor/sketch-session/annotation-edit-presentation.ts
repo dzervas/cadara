@@ -55,7 +55,7 @@ import {
 } from "./session-feedback";
 import { getTargetKey } from "./tool-authoring";
 import { buildSketchAnnotationDescriptors } from "./annotation-descriptors";
-import { addAnchorOffset } from "./definition-patches";
+import { addAnchorOffset } from "../../../core/editor/sketch-session/definition-patches";
 
 export function updateDimensionAnnotationPlacementInDefinition(
   session: SketchSessionState,

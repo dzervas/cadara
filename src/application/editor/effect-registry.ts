@@ -2,7 +2,7 @@ import {
   buildFeatureDefinition,
   getFeaturePrimarySelectionTarget,
   type FeatureEditSessionState,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   getSketchSessionDerivationSettings,
   type SketchSessionState,
@@ -12,7 +12,7 @@ import {
   buildSketchPlaneCommitRequest,
   getSketchPlaneEditSelectionTarget,
 } from "@/domain/editor/sketch-plane-editing";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import type {
   DocumentFeatureCursor,
   WorkspaceSnapshot,
@@ -27,7 +27,7 @@ import type {
   SketchId,
 } from "@/contracts/shared/ids";
 import type { AuthoredActionSketch } from "@/contracts/modeling/authored-actions";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
   requireQuerySketchEditIntersectionsResponse,

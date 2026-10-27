@@ -12,7 +12,7 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createCertifiedNeutralCurveQueryCapabilityForTest,
   createRecordingNeutralCurveQueryCapabilityForTest,
-} from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

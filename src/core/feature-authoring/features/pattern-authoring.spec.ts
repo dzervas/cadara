@@ -11,7 +11,7 @@ import {
   getFeatureEditorFormSchema,
   hydrateFeatureEditSession,
   patchFeatureEditSession,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 
 // Lane: logic (per docs/testing.md).
 // Seam: feature authoring definition normalization/registry for body pattern tools.

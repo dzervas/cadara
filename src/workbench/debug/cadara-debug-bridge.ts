@@ -4,7 +4,7 @@ import type {
   EditorRuntimeTraceSnapshot,
   SketchDebugSnapshot,
   WorkbenchDebugState,
-} from "@/domain/debug/debug-platform";
+} from "@/core/debug/debug-platform";
 
 export function isCadaraDebugPlatformEnabled(
   input: {

@@ -26,12 +26,12 @@ import {
 } from "@/domain/editor/sketch-session";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-session/display";
-import { measureSketchRegion } from "@/domain/measure/measurement";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { measureSketchRegion } from "@/core/measure/measurement";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 let capability: NeutralCurveQueryCapability;
 beforeAll(async () => {

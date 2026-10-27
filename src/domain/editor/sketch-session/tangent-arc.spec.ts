@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { acceptSketchDraw, beginSketchTool, createNewSketchSession, finalizeSketchDraw, startSketchDraw, updateSketchPointer } from "@/domain/editor/sketch-session";
 import { reconcileSketchToolDraft } from "./tool-placement";

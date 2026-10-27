@@ -11,7 +11,7 @@
 import { describe, expect, test } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { SketchPointId } from "@/contracts/shared/ids";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { MIRROR_DIAGNOSTIC_CODES } from "@/contracts/sketch/mirror-requirements";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
@@ -22,7 +22,7 @@ import type {
   SketchDerivationDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import {
   eid,

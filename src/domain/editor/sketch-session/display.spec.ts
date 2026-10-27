@@ -20,10 +20,10 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import * as mirror from "@/domain/editor/sketch-mirror.fixtures";
 import {

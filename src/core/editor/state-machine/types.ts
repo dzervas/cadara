@@ -1,7 +1,7 @@
 import type { ToolId } from "@/core/tools/tool-registry";
 import type { ToolbarMode } from "@/core/tools/schema";
-import type { FeatureEditSessionState } from "@/domain/editor/feature-editing";
-import type { FeatureDraftPatch } from "@/domain/editor/feature-editing";
+import type { FeatureEditSessionState } from "@/core/editor/feature-editing";
+import type { FeatureDraftPatch } from "@/core/editor/feature-editing";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import type {
   SketchSpecialModeHandleRef,
@@ -56,7 +56,7 @@ import type {
   SketchSolveDiagnostic,
 } from "@/contracts/sketch/schema";
 import type { AppErrorContextEntry } from "@/contracts/errors";
-import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
+import type { DocumentHistoryOrderEntry } from "@/core/modeling/document-history";
 
 export type EditorCommandToolId = ToolId | "sketchPlaneEdit";
 

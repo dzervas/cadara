@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { err, ok } from "neverthrow";
 import { expect, test } from "vitest";
 
@@ -25,9 +25,9 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
-import { translateSketch } from "@/domain/import/onshape/sketch-translator";
+import { translateSketch } from "@/application/import/onshape/sketch-translator";
 import { captureSplitInterfaceOwnerWitness } from "@/domain/import/onshape/split-interface-owner-witness";
-import type { RollbackTopologySnapshot } from "@/domain/import/onshape/rollback-topology-reader";
+import type { RollbackTopologySnapshot } from "@/core/import/onshape/rollback-topology-reader";
 function makeSnapshot(revisionId: RevisionId, bodies: readonly { bodyId: BodyId }[]) {
   return {
     document: {

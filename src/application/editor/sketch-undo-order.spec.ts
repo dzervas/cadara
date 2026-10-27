@@ -19,7 +19,7 @@ import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/defi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
 
 /** The seed with three dimensions; `ab` and `ar` carry `style: undefined` as Trim/Split outputs do. */

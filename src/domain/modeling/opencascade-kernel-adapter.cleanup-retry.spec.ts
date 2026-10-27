@@ -1,7 +1,7 @@
 // Lane: logic (docs/testing.md).
 // Seam: exported OpenCascadeKernelAdapter / ModelingService commit, projection,
 // and disposal use real OCC wrappers; runtime binding patches inject cleanup failures.
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { makeOccWrapperTracker } from "../../../test/helpers/occ-wrapper-tracker";
 import { readFile } from "node:fs/promises";

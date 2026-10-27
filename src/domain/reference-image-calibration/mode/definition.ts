@@ -30,16 +30,16 @@ import type {
   SketchSpecialModeViewportOverlay,
   SketchSpecialModeViewportPresentation,
 } from "@/core/sketch-special-modes/schema";
-import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
+import { collectActiveReferenceImageOperations } from "@/core/reference-image/operations";
 import {
   createReferenceImageCalibrationAnchor,
   replaceReferenceImagePayloadPreservingCalibration,
   solveReferenceImageOperationState,
-} from "@/domain/reference-image-calibration/state";
+} from "@/core/reference-image-calibration/state";
 import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
-} from "@/domain/reference-image-calibration/mode/shared";
+} from "@/core/reference-image-calibration/mode/shared";
 import { updateReferenceImageOperationStates } from "@/domain/editor/sketch-session";
 
 const ANCHOR_HIT_TOLERANCE = 10;

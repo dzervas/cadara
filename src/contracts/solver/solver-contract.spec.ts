@@ -21,7 +21,7 @@ import {
   MockSketchSolverAdapter,
 } from "@/domain/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 // T17p2 (F-2): the solver works on resolved definitions (numbers).
 import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";

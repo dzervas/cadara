@@ -8,7 +8,7 @@ import {
   getFeatureEditorFormSchema,
   hydrateFeatureEditSession,
   patchFeatureEditSession,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   createFeatureEditorClearReferencePatch,
   createFeatureEditorFieldPatch,

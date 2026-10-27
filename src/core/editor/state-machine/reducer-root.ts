@@ -12,7 +12,7 @@ import {
   adoptCompatibleFeatureSelection,
   createFeatureEditSession,
   getSelectionFilterForFeatureType,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   getSketchPlaneEditSelectionTarget,
   applySelectionToSketchPlaneEditSession,
@@ -21,7 +21,7 @@ import {
 import {
   getDocumentHistoryCursorIndex,
   isValidDocumentHistoryCursor,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import type {
   EditorEvent,
   EditorState,

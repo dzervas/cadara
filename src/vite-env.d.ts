@@ -6,7 +6,7 @@ interface ImportMetaEnv {
 }
 
 interface Window {
-  __cadaraDebug?: import("@/domain/debug/debug-platform").CadaraDebugNamespace;
+  __cadaraDebug?: import("@/core/debug/debug-platform").CadaraDebugNamespace;
   __cadProjectToScreen?: (objectId: string) => { x: number; y: number } | null;
   __cadReadCamera?: () => { position: number[]; target: number[]; zoom: number } | null;
   __cadFlushCameraDamping?: () => boolean;

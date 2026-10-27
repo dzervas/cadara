@@ -16,7 +16,7 @@ import type { EditorEvent } from "@/domain/editor/state-machine";
 import type {
   EditorRuntimeTraceSnapshot,
   WorkbenchDebugState,
-} from "@/domain/debug/debug-platform";
+} from "@/core/debug/debug-platform";
 
 test("src/app/cadara-debug-platform.spec.ts installs the formal dev namespace and exports state plus trace accessors", () => {
   const trace: EditorRuntimeTraceSnapshot = {

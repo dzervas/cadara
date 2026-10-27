@@ -18,7 +18,7 @@ import type { BodyId } from "@/contracts/shared/ids";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

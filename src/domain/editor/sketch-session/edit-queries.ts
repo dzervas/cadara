@@ -25,11 +25,11 @@ import {
   createSketchTrimMutation,
   createSketchExtendMutation,
   createSketchSplitMutation,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import type {
   SketchMutationResult,
   SketchEditOperationResult,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import {
   hasAcceptedLiveSolveOfDefinition,
   withLiveSolveBasis,

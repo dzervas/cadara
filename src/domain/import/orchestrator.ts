@@ -1,4 +1,4 @@
-import { enrichRegionProfile } from "@/domain/modeling/region-profile-selection";
+import { enrichRegionProfile } from "@/core/modeling/region-profile-selection";
 import type {
   ImportCapabilities,
   ImportHistoryProbeCapabilities,
@@ -61,13 +61,13 @@ import {
   durableTopologyReferenceKey,
   followExactTopologySuccessor,
   LIVE_TOPOLOGY_MATCH_TOLERANCE,
-} from "@/domain/import/historical-topology-selector";
+} from "@/core/import/historical-topology-selector";
 import {
   selectInnermostContainingRegion,
   type RegionSelectionSketch,
-} from "@/domain/import/region-containment";
+} from "@/core/import/region-containment";
 import { describeUnknownError } from "@/contracts/errors";
-import { matchSignature } from "@/domain/import/onshape/signature-matcher";
+import { matchSignature } from "@/core/import/onshape/signature-matcher";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import { selectSplitInterfaceOwner } from "@/domain/import/onshape/split-interface-owner-witness";
 import { createOccTopologyProvenanceIndex, createOccFeatureTopologyLineageMap } from "@/domain/modeling/occ/topology-stage";

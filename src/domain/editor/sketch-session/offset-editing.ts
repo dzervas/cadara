@@ -20,11 +20,11 @@ import {
   createSketchOffsetDerivationContribution,
   offsetSideForSketchPoint,
   offsetCurveDescriptorFromProjectedGeometry,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import type {
   SketchEditOperationResult,
   OffsetCurveDescriptor,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import type { OffsetFramePlan } from "@/contracts/sketch/offset-derivation-frame";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -33,7 +33,7 @@ import {
   rebuildSessionCommitRequest,
 } from "./tool-authoring";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { applySolvedSketchToDefinition } from "./definition-patches";
+import { applySolvedSketchToDefinition } from "../../../core/editor/sketch-session/definition-patches";
 import { getSketchSessionDerivationSettings } from "./session-definition";
 import { buildSketchEditToolPresentation } from "./edit-tool-activation";
 import { applySketchContribution } from "./definition-authoring";

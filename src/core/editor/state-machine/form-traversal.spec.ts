@@ -7,8 +7,8 @@ import type {
   FeatureReferenceCollectionField,
   FeatureReferencePickerField,
 } from "@/core/feature-authoring/form-schema";
-import { getFeatureEditorFormSchema } from "@/domain/editor/feature-editing";
-import { createFeatureEditSession } from "@/domain/editor/feature-editing";
+import { getFeatureEditorFormSchema } from "@/core/editor/feature-editing";
+import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import type {
   FeatureEditorState,

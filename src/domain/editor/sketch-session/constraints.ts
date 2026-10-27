@@ -1,4 +1,4 @@
-import type { AuthoredSketchDerivationSettings } from "@/domain/modeling/sketch-dimension-expressions";
+import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
 import {
   isAcceptedConstraintStatus,
   isReferenceDimension,
@@ -84,7 +84,7 @@ import { updateDimensionAnnotationPlacementInDefinition } from "./annotation-edi
 import {
   applySolvedSketchToDefinition,
   addAnchorOffset,
-} from "./definition-patches";
+} from "../../../core/editor/sketch-session/definition-patches";
 import { getConstraintDedupeKey } from "@/domain/sketch-inference/placement-inference";
 
 export function buildConstraintSelectionGuide(

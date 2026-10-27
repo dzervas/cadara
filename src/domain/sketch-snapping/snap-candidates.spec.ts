@@ -18,7 +18,7 @@ import {
   querySketchEditIntersections,
   querySketchSnapIntersections,
 } from "@/contracts/sketch/edit-intersections";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { SKETCH_CURVE_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 import {
   literalResolvedDefinition,
@@ -36,7 +36,7 @@ import { withLiveSolveBasis } from "@/domain/editor/sketch-session/session-live-
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   closestSplineSpanLocation,
   reconstructSplineAggregate,

@@ -3,8 +3,8 @@ import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { MeasurementPanel } from "@/components/layout/measurement-panel";
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
-import { createIdLabelledMeasurementSnapshotForTest } from "@/domain/measure/measurement.fixtures";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
+import { createIdLabelledMeasurementSnapshotForTest } from "@/core/measure/measurement.fixtures";
 
 test("src/components/layout/measurement-panel.spec.tsx", () => {
   const populatedMarkup = renderToStaticMarkup(

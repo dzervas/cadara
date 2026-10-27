@@ -29,7 +29,7 @@ import {
   createCertifiedCubicTubeChainWithBudgetObserverForTest,
   createCertifiedCubicTubeChainWithLowerBudgetForTest,
 } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { crossExact } from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+import { crossExact } from "@/core/modeling/neutral-curve-certification/fixed-degree-exact";
 import {
   ExactProofBudget,
   addExact,
@@ -42,7 +42,7 @@ import {
   subtractExact,
   type ExactFraction,
   type ExactProofBudgetSnapshot,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-primitives";
 
 const certifier = createCertifiedCubicTubeChain();
 const TOLERANCE = 1e-3;

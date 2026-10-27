@@ -4,7 +4,7 @@ import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,
 } from "./annotation-editing";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { getSketchSessionDerivationSettings } from "./session-definition";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 

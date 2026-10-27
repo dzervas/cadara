@@ -11,9 +11,9 @@ import {
   createModelingService,
   type ModelingService,
 } from "@/domain/modeling/modeling-service";
-import { evaluateDocumentVariableExpressions } from "@/domain/modeling/document-variable-expressions";
+import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
 import { createMemoryOperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
-import { getAutoHiddenSketchTargetKeys } from "@/domain/editor/visibility";
+import { getAutoHiddenSketchTargetKeys } from "@/core/editor/visibility";
 
 test("src/domain/modeling/modeling-history-persistence.spec.ts", async () => {
   type ExtrudeFeatureDefinition = Extract<

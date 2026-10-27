@@ -1,7 +1,7 @@
 import type { SketchEntityId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { type PrimitiveRef, getPrimitiveRefKey } from "@/core/editor/schema";
-import { getSketchEntityDefiningPointIds } from "@/domain/editor/sketch-session";
+import { getSketchEntityDefiningPointIds } from "@/core/editor/sketch-session/drag-intent";
 import type {
   SketchConstraintRef,
   SketchDimensionRef,

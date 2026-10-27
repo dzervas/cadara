@@ -17,7 +17,7 @@ import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
   type SketchDragIntent,
-} from "./drag-intent";
+} from "../../../core/editor/sketch-session/drag-intent";
 import { prepareSketchPointMerge } from "./point-merge";
 import { prepareSketchTangentEditDefinition } from "./geometry-drag";
 import { solveDragEdit } from "./drag-solve";

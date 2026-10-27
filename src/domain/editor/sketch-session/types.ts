@@ -47,7 +47,7 @@ import type {
 } from "@/core/sketch-tools/editor-schema";
 import type { PlacementInference } from "@/domain/sketch-inference/placement-inference";
 import type { SketchStyleFocus } from "@/core/sketch-styles/definition";
-import type { OffsetSide } from "@/domain/sketch-editing/operations";
+import type { OffsetSide } from "@/core/sketch-editing/operations";
 import type { SketchEditToolId } from "@/core/sketch-edit-tools/definition";
 import type { ActiveSketchSpecialModeSession } from "@/core/sketch-special-modes/schema";
 import type {
@@ -253,8 +253,8 @@ export interface SketchDragFeedback {
 export interface SketchGeometryDragState {
   /** The original PrimitiveRef that was grabbed. */
   target: import("@/core/editor/schema").PrimitiveRef;
-  handle: import("@/domain/editor/sketch-session/drag-intent").SketchDragHandle;
-  intent: import("@/domain/editor/sketch-session/drag-intent").SketchDragIntent;
+  handle: import("@/core/editor/sketch-session/drag-intent").SketchDragHandle;
+  intent: import("@/core/editor/sketch-session/drag-intent").SketchDragIntent;
   /** Pre-drag definition, for cancel restoration (incl. automatic tangent state). */
   preDragDefinition: import("@/contracts/sketch/schema").SketchDefinition;
   startPoint: SketchPoint;

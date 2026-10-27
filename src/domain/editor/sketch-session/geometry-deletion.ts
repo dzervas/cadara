@@ -13,7 +13,7 @@ import {
 } from "@/core/sketch-editing/definition-references";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import { cloneDefinition } from "./session-definition";
-import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
+import { collectActiveReferenceImageOperations } from "@/core/reference-image/operations";
 import { updateReferenceImageOperationStates } from "./references";
 
 /**

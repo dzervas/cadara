@@ -21,12 +21,12 @@ import {
   withSketchSnapScale,
 } from "@/domain/editor/sketch-session/test-snap-scale";
 import { querySketchSnapIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { emitPendingSketchSnapQuery } from "./effect-emitters";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";

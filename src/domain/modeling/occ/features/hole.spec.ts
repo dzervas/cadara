@@ -20,7 +20,7 @@ import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 type CustomOpenCascadeMainJSForTest = new (
   module: Record<string, unknown>,

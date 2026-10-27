@@ -2,12 +2,12 @@ import { test, expect } from "vitest";
 
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
-import type { EditorRuntimeTraceEntry } from "@/domain/debug/debug-platform";
+import type { EditorRuntimeTraceEntry } from "@/core/debug/debug-platform";
 import type {
   EditorEvent,
   EditorEffectRuntime,
 } from "@/domain/editor/state-machine";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
 

@@ -15,7 +15,7 @@ import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import type { NumericSketchDefinition as SketchDefinition } from "@/contracts/sketch/schema";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { expect } from "vitest";
 
 export async function testOffsetOutputRequirementDrivesSourceAuthority() {

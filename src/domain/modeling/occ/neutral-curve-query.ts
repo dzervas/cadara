@@ -15,8 +15,8 @@ import {
   type NeutralCurveQueryResult,
   type NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
-import { validateCertifiedCircleAngularDomain } from "@/domain/modeling/neutral-curve-certification/circle-angular-certification";
-import { certifyCubicPairExact } from "@/domain/modeling/neutral-curve-certification/cubic-pair-exact";
+import { validateCertifiedCircleAngularDomain } from "@/core/modeling/neutral-curve-certification/circle-angular-certification";
+import { certifyCubicPairExact } from "@/core/modeling/neutral-curve-certification/cubic-pair-exact";
 import {
   certifyCirclePairCandidates,
   certifyCubicSelfIntersection,
@@ -25,18 +25,18 @@ import {
   verifyCompleteLineCurveRootSet,
   type NativeCirclePairCandidate,
   type NativeLineCurveCandidate,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-exact";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-exact";
 import {
   certifyConstructiveCircleCubic,
   certifyConstructiveCirclePair,
   certifyConstructiveLineCircle,
   certifyConstructiveLineCubic,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-curve-roots";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-curve-roots";
 import {
   ExactProofBudget,
   type ExactProofBudgetSnapshot,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
-import { certifyNeutralCurveJoinOnBudget } from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-primitives";
+import { certifyNeutralCurveJoinOnBudget } from "@/core/modeling/neutral-curve-certification/query";
 import { parseNativeNeutralCurveQueryPayload } from "@/domain/modeling/occ/native-neutral-curve-query.runtime-schema";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 

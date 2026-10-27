@@ -4,9 +4,9 @@ import {
   requireDocumentExportRequest,
   getDefaultCadaraExportOptions,
 } from "@/contracts/modeling/export.runtime-schema";
-import { stlExportProvider } from "@/domain/export/providers/stl-export-provider";
-import { stepExportProvider } from "@/domain/export/providers/step-export-provider";
-import { threeMfExportProvider } from "@/domain/export/providers/threemf-export-provider";
+import { stlExportProvider } from "@/application/export/providers/stl-export-provider";
+import { stepExportProvider } from "@/application/export/providers/step-export-provider";
+import { threeMfExportProvider } from "@/application/export/providers/threemf-export-provider";
 
 test("src/contracts/modeling/export.runtime-schema.spec.ts", () => {
   const stlDefaults = stlExportProvider.getDefaultOptions();

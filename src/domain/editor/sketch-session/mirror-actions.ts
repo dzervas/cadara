@@ -17,7 +17,7 @@
  * (its diagnostic gates the sketch by severity) and is listed as broken too.
  */
 import { DERIVED_SHELL_SEED_UNSUPPORTED } from "@/contracts/sketch/derived-geometry";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import { sketchProfileGateFailures } from "@/contracts/sketch/derived-validity";
 import {
   isReferenceDimension,

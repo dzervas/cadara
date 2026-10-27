@@ -20,7 +20,7 @@ import {
   makeSketchFixture,
   type SketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type {
   ConstructionId,
   ProjectedGeometryId,

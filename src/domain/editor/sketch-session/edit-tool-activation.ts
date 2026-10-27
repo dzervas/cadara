@@ -19,7 +19,7 @@ import type {
 } from "@/core/sketch-edit-tools/definition";
 import { primitiveRefEquals } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { getSketchSelectedLineCorners } from "@/domain/sketch-editing/operations";
+import { getSketchSelectedLineCorners } from "@/core/sketch-editing/operations";
 import { getSketchEditOperatorResult } from "./edit-geometry-operations";
 import { selectSketchEditToolTarget } from "./edit-tool-interaction";
 import { resolveSketchConstraintTarget } from "@/core/sketch-constraints/registry";

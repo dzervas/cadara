@@ -33,7 +33,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { canonicalArcSupport } from "@/contracts/sketch/canonical-arc-support";
-import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
+import { assertAcceptedSketchFeatureInput } from "@/core/modeling/sketch-feature-input";
 import { buildConstructionPlaneFromPlanarFace as buildConstructionPlaneFromPlanarFaceFromPlaneUtility } from "@/domain/modeling/occ/planes";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import {

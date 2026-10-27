@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
 import { test, expect } from "vitest";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
@@ -40,7 +40,7 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { buildOccWorkspaceSnapshot } from "@/domain/modeling/occ/snapshot";
-import { getAutoHiddenSketchTargetKeys } from "@/domain/editor/visibility";
+import { getAutoHiddenSketchTargetKeys } from "@/core/editor/visibility";
 import {
   createOccAuthoringState,
   rebuildOccAuthoringState,
@@ -53,7 +53,7 @@ import {
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 const regionSolver = new SketchConstraintSolverAdapter({
   neutralCurveQueries: createCertifiedNeutralCurveQueryCapabilityForTest(),

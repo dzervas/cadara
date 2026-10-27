@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 import { readFile } from "node:fs/promises";
 
@@ -22,7 +22,7 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import {
   createMemoryGeometryAssetStore,

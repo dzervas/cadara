@@ -40,7 +40,7 @@ import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/defi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
 import { SketchAuthoredActions } from "./sketch-authored-actions";
 import type { SketchPointId } from "@/contracts/shared/ids";

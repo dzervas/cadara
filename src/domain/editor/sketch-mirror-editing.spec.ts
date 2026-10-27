@@ -12,12 +12,12 @@ import type {
   SketchDerivationDefinition,
 } from "@/contracts/sketch/schema";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
-import { evaluateAuthoredSketchDerivations } from "@/domain/modeling/sketch-dimension-expressions";
+import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { offsetArrangementInput } from "@/contracts/sketch/region-extraction";
 import {
   isOffsetPublicationSolveAccepted,
@@ -46,15 +46,15 @@ import {
   getEnterEvent,
   getEscapeEvent,
 } from "@/domain/editor/workbench-interactions";
-import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
+import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {
   nonAcceptedOffsetFeatureInputMessage,
   nonAcceptedOffsetFeaturePointMessage,
-} from "@/domain/modeling/sketch-feature-input";
-import { nonAcceptedOutputProjectionMessage } from "@/domain/modeling/sketch-reference-projection";
+} from "@/core/modeling/sketch-feature-input";
+import { nonAcceptedOutputProjectionMessage } from "@/core/modeling/sketch-reference-projection";
 import {
   appendDefinition,
   rebuildSessionForDefinition,
@@ -68,7 +68,7 @@ import { completeSketchEditQueriesForTest } from "@/domain/editor/state-machine-
 import { applyTangentAction } from "@/domain/editor/sketch-session/tangent-actions";
 import { toggleSketchConstructionTarget } from "@/domain/editor/sketch-session/reference-authoring";
 import { patchSketchStyleValue } from "@/domain/editor/sketch-session/styles";
-import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
+import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
 import {
   chainSession,
   eid,

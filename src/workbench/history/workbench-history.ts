@@ -2,7 +2,7 @@ import type { DocumentHistoryOrderEntry } from "@/contracts/modeling/schema";
 import {
   getDocumentHistoryOrderEntryKey,
   reorderDocumentHistoryOrder,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 
 export interface DocumentHistoryOrderRestoreMove {
   item: DocumentHistoryOrderEntry;

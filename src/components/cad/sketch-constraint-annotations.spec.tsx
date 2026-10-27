@@ -26,7 +26,7 @@ import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
 import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";

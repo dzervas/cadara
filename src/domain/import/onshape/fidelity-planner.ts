@@ -14,9 +14,9 @@
  */
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import type { SketchPlaneKey } from "@/contracts/shared/sketch-plane";
-import type { ImportProfileVerifier } from "@/domain/import/onshape/profile-resolver";
+import type { ImportProfileVerifier } from "@/application/import/onshape/profile-resolver";
 
-import type { OnshapeFeatureNode, StudioReadResult } from "@/domain/import/onshape/bundle-reader";
+import type { OnshapeFeatureNode, StudioReadResult } from "@/core/import/onshape/bundle-reader";
 import {
   planBakeSegments,
   unreachableFeatureDependencies,
@@ -33,8 +33,8 @@ import { extrudeFeatureTranslator } from "@/domain/import/onshape/extrude-featur
 import { fallbackFeatureTranslator, planeFeatureTranslator } from "@/domain/import/onshape/fallback-feature-translator";
 import { sketchFeatureTranslator } from "@/domain/import/onshape/sketch-feature-translator";
 import { variableFeatureTranslator } from "@/domain/import/onshape/variable-feature-translator";
-import type { PlannedExtrude } from "@/domain/import/onshape/extrude-planner";
-import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
+import type { PlannedExtrude } from "@/application/import/onshape/extrude-planner";
+import { createRollbackTopologyTimeline } from "@/core/import/onshape/rollback-topology-reader";
 import type {
   PlannedLoft,
   PlannedRevolve,

@@ -14,7 +14,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 // Lane: logic (docs/testing.md). Seam: the sketch session's tangent-handle
 // drag (`beginSketchGeometryDrag` → `updateSketchGeometryDrag` →

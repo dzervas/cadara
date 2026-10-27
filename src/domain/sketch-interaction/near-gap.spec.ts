@@ -25,7 +25,7 @@ import { updateSketchReferenceProjection } from "@/domain/editor/sketch-session/
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   FIXTURE_SKETCH_ID,
   FIXTURE_TOLERANCE,
@@ -33,7 +33,7 @@ import {
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { appendDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
-import { createSketchDerivedTransformContribution } from "@/domain/sketch-editing/operations";
+import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
 import {
   findNearGapEndpoints,
   findSketchNearGapAt,

@@ -3,13 +3,13 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import type { SketchDraftEntity } from "@/core/sketch-tools/definition";
-import type { SketchEditOperationResult } from "@/domain/sketch-editing/operations";
+import type { SketchEditOperationResult } from "@/core/sketch-editing/operations";
 import {
   createSketchMergePointsMutation,
   MERGE_POINTS_NON_LOCAL_MESSAGE,
   MERGE_POINTS_SAME_POINT_MESSAGE,
   getSketchMergePointRefusal,
-} from "@/domain/sketch-editing/merge-points";
+} from "@/core/sketch-editing/merge-points";
 import { refusedEditOperation } from "./offset-editing";
 import type { SketchToolPresentationSchema } from "@/core/sketch-tools/editor-schema";
 import { buildSketchEditToolPresentation } from "./edit-tool-activation";

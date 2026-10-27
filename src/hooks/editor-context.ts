@@ -7,7 +7,7 @@ import type {
   EditorState,
   EditorViewState,
 } from "@/domain/editor/state-machine";
-import type { EditorRuntimeTraceSnapshot } from "@/domain/debug/debug-platform";
+import type { EditorRuntimeTraceSnapshot } from "@/core/debug/debug-platform";
 import type { SketchDraftRecoveryController } from "@/application/sketch-draft-recovery/controller";
 
 export interface EditorContextValue {

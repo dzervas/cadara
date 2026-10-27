@@ -21,8 +21,8 @@ import {
   selectionFilterAllowsTarget,
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
-import { evaluateDocumentVariableExpressions } from "@/domain/modeling/document-variable-expressions";
-import { formatSidebarDiagnosticDetail } from "@/domain/modeling/diagnostic-formatting";
+import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
+import { formatSidebarDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
 import { useEditorState } from "@/hooks/use-editor-state";
 

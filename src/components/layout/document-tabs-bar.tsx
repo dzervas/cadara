@@ -22,7 +22,7 @@ import {
   type WorkbenchTab,
   type WorkbenchTabsState,
   type WorkbenchTabStorageKind,
-} from "@/domain/workspace/workbench-tabs";
+} from "@/core/workspace/workbench-tabs";
 
 /**
  * Document tab strip anchored at the bottom of the viewport. The strip itself does not float;

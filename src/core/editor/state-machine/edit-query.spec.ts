@@ -26,7 +26,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";

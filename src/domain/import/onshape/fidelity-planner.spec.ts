@@ -1,5 +1,5 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
@@ -9,15 +9,15 @@ import {
   assembleFixtureMountsBundle,
   FIXTURE_PART_STUDIO_ID,
 } from "@/cli/commands/onshape-capture/fixtures/capture-bundle-fixture";
-import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
-import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+import type { StudioReadResult } from "@/core/import/onshape/bundle-reader";
+import { readPartStudio } from "@/core/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
 import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
 import {
   projectPointToSketchPlaneFrame,
   translateSketch,
   verifySketchTranslationSolveConsistency,
-} from "@/domain/import/onshape/sketch-translator";
+} from "@/application/import/onshape/sketch-translator";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import {
   validateOnshapeCaptureBundle,
@@ -27,7 +27,7 @@ import {
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
-} from "@/domain/import/onshape/profile-resolver";
+} from "@/application/import/onshape/profile-resolver";
 
 const profileVerifier = {
   sketchSolver: new SketchConstraintSolverAdapter({

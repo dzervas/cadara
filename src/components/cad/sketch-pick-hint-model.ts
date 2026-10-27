@@ -6,7 +6,7 @@ import {
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
-import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
+import { createSketchMergePointsMutation } from "@/core/sketch-editing/merge-points";
 import {
   findSketchNearGapAt,
   type SketchNearGap,

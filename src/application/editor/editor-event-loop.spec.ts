@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type {
@@ -11,7 +11,7 @@ import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine"
 import { createSketchSpecialModeHandleRef } from "@/core/sketch-special-modes/presentation";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -26,14 +26,14 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { runEditorEffect } from "./effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
-import { getPreviousDocumentHistoryCursor } from "@/domain/modeling/document-history";
+import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
 import {
   createEditorEventLoop,
   getEditorInvocationFailureVisibility,

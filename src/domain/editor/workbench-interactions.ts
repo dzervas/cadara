@@ -10,7 +10,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   resolveHandleFromTarget,
   type SketchDragAcceptance,
-} from "@/domain/editor/sketch-session/drag-intent";
+} from "@/core/editor/sketch-session/drag-intent";
 import { getRegisteredFeatureAuthoringDefinitions } from "@/core/feature-authoring/registry";
 import {
   confirmSketchDrawing,

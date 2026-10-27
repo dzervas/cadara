@@ -9,7 +9,7 @@ import type {
   DimensionDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import type { SketchId } from "@/contracts/shared/ids";
 import { SKETCH_NOT_SOLVED_YET } from "./session-live-solve";
 import {
@@ -33,7 +33,7 @@ import {
   describeConstraint,
   describeDimension,
   formatDimensionVisibleLabel,
-} from "./annotation-labels";
+} from "../../../core/editor/sketch-session/annotation-labels";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { getSketchMirrorLinkedGeometryRefs } from "./annotation-selection";
 import { describeSketchSessionUnsatisfiedRequirements } from "./session-feedback";

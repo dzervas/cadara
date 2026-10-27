@@ -1,7 +1,7 @@
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import { describe, expect, test } from "vitest";
 
-import { deriveMeasurementViewModel } from "@/domain/measure/measurement";
+import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import {
   packWorkspaceSnapshotRenderMeshes,

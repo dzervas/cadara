@@ -1,4 +1,4 @@
-import { createBuiltinExportProviderRegistry } from "@/domain/export/builtin-provider-composition";
+import { createBuiltinExportProviderRegistry } from "@/application/export/builtin-provider-composition";
 import { createSketchPublicationReceipts } from "@/infrastructure/modeling/sketch-publication-receipts";
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
 import { fileURLToPath } from "node:url";

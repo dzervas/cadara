@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import {
   projectSketchFeedbackAnchor,
   resolveSketchFeedbackAnchorWorldPoint,

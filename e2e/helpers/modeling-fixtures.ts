@@ -11,9 +11,9 @@ import type {
 import { createSketchArrangementDeriver } from "../../src/contracts/sketch/region-extraction";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { createLiteralAuthoredValue } from "../../src/contracts/modeling/authored-values";
-import { resolveSketchDimensionValues } from "../../src/domain/modeling/sketch-dimension-expressions";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../../src/domain/modeling/neutral-curve-certification/query";
-import { OCC_KERNEL_SETTINGS } from "../../src/domain/modeling/opencascade-kernel-seed";
+import { resolveSketchDimensionValues } from "../../src/core/modeling/sketch-dimension-expressions";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../../src/core/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "../../src/core/modeling/opencascade-kernel-seed";
 import { SKETCH_SCHEMA_VERSION } from "../../src/contracts/sketch/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "../../src/contracts/shared/versioning";
 

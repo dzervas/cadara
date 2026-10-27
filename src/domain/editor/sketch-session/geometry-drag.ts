@@ -4,8 +4,8 @@ import type { SketchPoint } from "@/contracts/modeling/schema";
 import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
-} from "./drag-intent";
-import type { SketchDragHandle, SketchDragIntent } from "./drag-intent";
+} from "../../../core/editor/sketch-session/drag-intent";
+import type { SketchDragHandle, SketchDragIntent } from "../../../core/editor/sketch-session/drag-intent";
 import {
   isDrawingSketchTool,
   rebuildSessionCommitRequest,

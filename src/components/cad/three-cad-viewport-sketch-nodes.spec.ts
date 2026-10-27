@@ -24,7 +24,7 @@ import { getSketchSessionDisplayDefinition } from "@/domain/editor/sketch-sessio
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { resolveSketchPickStack } from "@/domain/sketch-interaction/pick-stack";
 import { toSketchPickStackCandidates } from "@/infrastructure/viewport/render-picking";
 import {

@@ -1,10 +1,10 @@
 import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
-import { getFeaturePrimarySelectionTarget } from "@/domain/editor/feature-editing";
+import { getFeaturePrimarySelectionTarget } from "@/core/editor/feature-editing";
 import {
   applyFeatureBooleanTargetPreselection,
   classifyPreviewBooleanTarget,
   featurePreviewSupportsAutomaticBooleanTargetPreselection,
-} from "@/domain/editor/feature-boolean-target-preselection";
+} from "@/core/editor/feature-boolean-target-preselection";
 import {
   completeSketchOffsetPreviewPublication,
   completeSketchEditQuery,
@@ -24,7 +24,7 @@ import {
   getSketchSpecialModeSelectionFilter,
 } from "@/core/sketch-special-modes/presentation";
 import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
-import { createTailDocumentCursor } from "@/domain/modeling/document-history";
+import { createTailDocumentCursor } from "@/core/modeling/document-history";
 import type {
   EditorEvent,
   EditorTransitionResult,

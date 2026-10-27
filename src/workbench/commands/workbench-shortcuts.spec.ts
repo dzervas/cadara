@@ -38,7 +38,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 test("src/workbench/commands/workbench-shortcuts.spec.ts", () => {
   const deleteFixture = createFixture({

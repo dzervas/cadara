@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
-import type { WorkbenchDebugState } from "@/domain/debug/debug-platform";
+import type { WorkbenchDebugState } from "@/core/debug/debug-platform";
 
 export type WorkbenchStateDebuggerModel = WorkbenchDebugState;
 

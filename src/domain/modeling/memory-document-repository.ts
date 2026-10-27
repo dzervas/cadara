@@ -24,8 +24,8 @@ import {
   type GeometryAssetStore,
 } from "@/domain/modeling/geometry-asset-store";
 
-import { AuthoredActionHistory } from "./authored-action-history";
-import { createRevisionId, parseRevisionSequence } from "./document-revision";
+import { AuthoredActionHistory } from "../../core/modeling/authored-action-history";
+import { createRevisionId, parseRevisionSequence } from "../../core/modeling/document-revision";
 import {
   createCollaborativeDocument,
   materializeCollaborativeDocument,
@@ -33,10 +33,10 @@ import {
   updateDocumentProvenance,
   DocumentProvenanceConflict,
   documentActionState,
-} from "./collaborative-document";
-import type { CollaborativeDocument } from "./collaborative-document";
+} from "../../core/modeling/collaborative-document";
+import type { CollaborativeDocument } from "../../core/modeling/collaborative-document";
 import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
-import { describeBlockedDocumentAction } from "./document-action-blocked";
+import { describeBlockedDocumentAction } from "../../core/modeling/document-action-blocked";
 
 export class MemoryDocumentRepository implements GeometryAssetDocumentRepository {
   private readonly actorId = crypto.randomUUID();

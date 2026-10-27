@@ -1,7 +1,7 @@
 import type { OnshapeResolvedReference } from "@/contracts/import/onshape-capture-bundle";
 import type { SketchPlaneFrame, SketchPlaneKey } from "@/contracts/shared/sketch-plane";
-import type { ImportProfileVerifier } from "@/domain/import/onshape/profile-resolver";
-import type { OnshapeFeatureNode, StudioReadResult } from "@/domain/import/onshape/bundle-reader";
+import type { ImportProfileVerifier } from "@/application/import/onshape/profile-resolver";
+import type { OnshapeFeatureNode, StudioReadResult } from "@/core/import/onshape/bundle-reader";
 import type { FeaturePlan, FidelityTier, PlanReasonCode } from "@/domain/import/onshape/fidelity-planner";
 
 export interface FidelityPlanningState {

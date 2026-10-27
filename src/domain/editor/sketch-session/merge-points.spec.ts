@@ -35,7 +35,7 @@ import {
   getSketchSelectionCycleContext,
   isSketchSelectionCycleTargetEligible,
 } from "@/domain/editor/sketch-session/selection";
-import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
+import { createSketchMergePointsMutation } from "@/core/sketch-editing/merge-points";
 import {
   getEnterEvent,
   getEscapeEvent,
@@ -50,7 +50,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 
 // Lane: logic (docs/testing.md). Seam: the sketch session's Merge Points

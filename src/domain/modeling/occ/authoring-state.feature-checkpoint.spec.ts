@@ -12,7 +12,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { BodyId, FeatureId, SketchId } from "@/contracts/shared/ids";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
-import type { DocumentHistoryOrderEntry } from "@/domain/modeling/document-history";
+import type { DocumentHistoryOrderEntry } from "@/core/modeling/document-history";
 import {
   checkpointOccFeatureStage,
   findReusableOccFeatureCheckpoint,

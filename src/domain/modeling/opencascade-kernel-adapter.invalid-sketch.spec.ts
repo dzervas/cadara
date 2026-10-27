@@ -1,4 +1,4 @@
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { assert, expect, test } from "vitest";
 import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
@@ -23,7 +23,7 @@ import {
   mirroredSession,
 } from "@/domain/editor/sketch-mirror.fixtures";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 async function loadOcc() {
   return (await loadFilesystemOpenCascadeFactory())();

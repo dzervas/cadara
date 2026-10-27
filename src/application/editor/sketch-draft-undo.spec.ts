@@ -4,7 +4,7 @@ import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
 
 for (const undo of [

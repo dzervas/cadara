@@ -1,4 +1,4 @@
-import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/core/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import {
@@ -14,11 +14,11 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   REFERENCE_IMAGE_CALIBRATION_MODE_ID,
   type ReferenceImageCalibrationModeState,
-} from "@/domain/reference-image-calibration/mode/shared";
+} from "@/core/reference-image-calibration/mode/shared";
 
 function createEditingSketchState(): SketchEditorState {
   const session = appendReferenceImageOperations(

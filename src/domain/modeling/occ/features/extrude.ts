@@ -18,7 +18,7 @@ import type {
 } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import { mapSketchPointToWorld, type Vec3 } from "@/domain/modeling/occ/math";
-import { assertAcceptedSketchFeaturePoint } from "@/domain/modeling/sketch-feature-input";
+import { assertAcceptedSketchFeaturePoint } from "@/core/modeling/sketch-feature-input";
 import {
   buildOpenSketchCurveWire,
   buildRegionProfileFace,

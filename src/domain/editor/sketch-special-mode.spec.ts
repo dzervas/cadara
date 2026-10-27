@@ -1,4 +1,4 @@
-import { createReferenceImageFixture as createReferenceImageOperation } from "@/domain/reference-image/operation-test-fixtures";
+import { createReferenceImageFixture as createReferenceImageOperation } from "@/core/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
 import {
@@ -12,7 +12,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   appendReferenceImageOperations,
   createNewSketchSession,

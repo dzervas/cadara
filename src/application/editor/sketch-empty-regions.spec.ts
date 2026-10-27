@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
 import { createNewSketchSessionFromSupport } from "@/domain/editor/sketch-session";
 import { SPEC_SKETCH_UNITS_PER_PIXEL } from "@/domain/editor/sketch-session/test-snap-scale";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 it("undo to empty with Rectangle armed removes the last fill and false unsolved warning", async () => {
   const f = await createSketchActionOwnerFixture(

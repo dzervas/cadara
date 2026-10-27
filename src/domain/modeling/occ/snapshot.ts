@@ -27,7 +27,7 @@ import {
   tessellateCubicSpans,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
-import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
+import { describeFeatureTreeNode } from "@/core/modeling/feature-description";
 import type {
   BodyId,
   EdgeId,
@@ -69,12 +69,12 @@ import type { OccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import {
   OCC_KERNEL_CAPABILITIES,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   createDocumentHistoryItems,
   getAppliedDocumentHistoryItemsForDocumentCursor,
   getAppliedSketchIdsForDocumentCursor,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import { extractPlanarFaceData } from "@/domain/modeling/occ/planes";
 import {
   buildRegionProfileFace,

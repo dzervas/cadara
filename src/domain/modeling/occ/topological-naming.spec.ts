@@ -36,7 +36,7 @@ import {
 import {
   OCC_KERNEL_CAPABILITIES,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   applyOccFeatureToAuthoringState,
   createOccAuthoringState,

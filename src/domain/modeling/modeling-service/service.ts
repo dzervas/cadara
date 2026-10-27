@@ -1,4 +1,4 @@
-import { enrichExtrudeRegionProfiles } from "@/domain/modeling/region-profile-selection";
+import { enrichExtrudeRegionProfiles } from "@/core/modeling/region-profile-selection";
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import { requireMeasureTopologyResponse } from "@/contracts/modeling/topology-measure.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
@@ -11,8 +11,8 @@ import type { DocumentExportResult } from "@/contracts/modeling/export";
 import type { OccNativeExactBrepPayload } from "@/domain/modeling/occ/native-topology-payload";
 import type { OccNativeTopologyWorkerResult } from "@/domain/modeling/occ/worker-protocol";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
-import { orchestrateGeometryExport } from "@/domain/export/export-orchestrator";
-import { createExportProviderRegistry } from "@/domain/export/provider-registry";
+import { orchestrateGeometryExport } from "@/application/export/export-orchestrator";
+import { createExportProviderRegistry } from "@/core/export/provider-registry";
 import type { PrimitiveRef, RevisionId } from "@/core/editor/schema";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type {
@@ -138,7 +138,7 @@ import {
   getAdapterReplayCursor,
   replayHistoryEntry,
 } from "./operation-history";
-import { createRevisionId, parseRevisionSequence } from "../document-revision";
+import { createRevisionId, parseRevisionSequence } from "../../../core/modeling/document-revision";
 
 /** A feature kind as a history label. */
 function featureKindLabel(kind: string) {

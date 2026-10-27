@@ -51,7 +51,7 @@ import {
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 test.each([
   { hotspot: { x: 500, y: 400 }, expected: { x: 538, y: 438 } },

@@ -15,7 +15,7 @@ import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
 } from "@/domain/editor/sketch-session";
-import type { MeasurementWitness } from "@/domain/measure/measurement";
+import type { MeasurementWitness } from "@/core/measure/measurement";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import { getSketchMergeOfferEvents } from "@/domain/editor/workbench-interactions";

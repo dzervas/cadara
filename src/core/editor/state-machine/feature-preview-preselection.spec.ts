@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import {
   createFeatureEditSession,
   patchFeatureEditSession,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   initialEditorState,
   transitionEditorState,

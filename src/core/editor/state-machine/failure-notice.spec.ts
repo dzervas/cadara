@@ -4,8 +4,8 @@ import { createNewSketchSession } from "@/domain/editor/sketch-session";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import { buildSelectionTargetCatalog } from "@/domain/modeling/document-snapshot-view";
+} from "@/core/modeling/opencascade-kernel-seed";
+import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";

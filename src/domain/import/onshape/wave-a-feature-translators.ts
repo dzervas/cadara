@@ -11,20 +11,20 @@ import type { SketchEntityId } from "@/contracts/shared/ids";
 import type {
   OnshapeFeatureNode,
   OnshapeSolvedSketch,
-} from "@/domain/import/onshape/bundle-reader";
+} from "@/core/import/onshape/bundle-reader";
 import {
   dependencyFeatureIds,
   type FeatureDependencyInput,
   type OnshapeFeatureTranslator,
 } from "@/domain/import/onshape/feature-translator-registry";
 import type { PlanReasonCode } from "@/domain/import/onshape/fidelity-planner";
-import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
+import { translateOnshapeExpression } from "@/core/import/onshape/expression-translator";
 import {
   referencedSketchFeatureIdsFromProfileParameter,
   resolveOnshapeSketchProfiles,
   type DeferredSketchProfile,
-} from "@/domain/import/onshape/profile-resolver";
-import { translateSolvedSketch } from "@/domain/import/onshape/solved-sketch-projection";
+} from "@/application/import/onshape/profile-resolver";
+import { translateSolvedSketch } from "@/application/import/onshape/solved-sketch-projection";
 
 export type PlannedRevolveBoolean =
   | { kind: "standalone" }

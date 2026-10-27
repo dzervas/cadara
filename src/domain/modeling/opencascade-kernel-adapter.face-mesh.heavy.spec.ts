@@ -5,7 +5,7 @@ import { expect, test } from "vitest";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { RenderPoint3D } from "@/contracts/render/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   parseNativeShimPayloadJson,
   type OccNativeShimPayload,

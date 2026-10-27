@@ -24,7 +24,7 @@ import {
   createPlacedParallelLineDistance,
   createPlacedLinePointDistance,
 } from "@/core/sketch-constraints/registry";
-import { dimensionOverlayValue } from "./annotation-labels";
+import { dimensionOverlayValue } from "../../../core/editor/sketch-session/annotation-labels";
 import type { SketchPoint } from "@/contracts/modeling/schema";
 
 export function buildCommittedDimensionOverlays(

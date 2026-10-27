@@ -2,7 +2,7 @@ import type {
   DeveloperDebugSession,
   EditorRuntimeTraceSnapshot,
   WorkbenchDebugState,
-} from "@/domain/debug/debug-platform";
+} from "@/core/debug/debug-platform";
 
 interface CadaraDebugLocationLike {
   origin?: string;

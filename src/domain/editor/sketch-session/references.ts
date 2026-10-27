@@ -6,10 +6,10 @@ import type {
   SketchPointDefinition,
 } from "@/contracts/sketch/schema";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
-import { stripReferenceImageRuntimeState, createDefaultReferenceImageCalibrationState, solveReferenceImageOperationState, replaceReferenceImagePayloadPreservingCalibration } from "@/domain/reference-image-calibration/state";
+import { stripReferenceImageRuntimeState, createDefaultReferenceImageCalibrationState, solveReferenceImageOperationState, replaceReferenceImagePayloadPreservingCalibration } from "@/core/reference-image-calibration/state";
 import { validateReferenceImageOperationState } from "@/contracts/reference-image/runtime-schema";
 import type { SketchSessionState } from "./types";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { getSessionSketchId } from "./tool-authoring";
 import { hasAcceptedLiveSolveOfDefinition } from "./session-live-solve";
 import { appendDefinition } from "./definition-authoring";

@@ -29,7 +29,7 @@ import { getSketchSessionDisplayRenderables } from "@/domain/editor/sketch-sessi
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 // T17p2 (F-2): the solver consumes the resolved definition; these fixtures
 // author literal values, resolved before each solve (`literalResolvedDefinition`).

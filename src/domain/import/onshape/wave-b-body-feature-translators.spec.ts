@@ -1,5 +1,5 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { describe, expect, test } from "vitest";
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
 import type { ResolvedImportSource } from "@/contracts/import/source";
@@ -12,11 +12,11 @@ import {
 import { validateFeatureDefinitionAuthoredValueInvariants } from "@/contracts/modeling/feature-authored-values";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 
-import type { OnshapeFeatureNode } from "@/domain/import/onshape/bundle-reader";
+import type { OnshapeFeatureNode } from "@/core/import/onshape/bundle-reader";
 import type { OnshapeFeatureTranslator } from "@/domain/import/onshape/feature-translator-registry";
-import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
-import { resolveTopologyReferences } from "@/domain/import/onshape/topology-reference-resolver";
-import { createRollbackTopologyTimeline } from "@/domain/import/onshape/rollback-topology-reader";
+import { readTopologyQueryRefs } from "@/core/import/onshape/topology-query-reader";
+import { resolveTopologyReferences } from "@/core/import/onshape/topology-reference-resolver";
+import { createRollbackTopologyTimeline } from "@/core/import/onshape/rollback-topology-reader";
 import {
   booleanBodiesFeatureTranslator,
   buildResolvedBodyConsumerDefinition,

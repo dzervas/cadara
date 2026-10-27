@@ -32,7 +32,7 @@ import {
   patchFeatureEditSession,
   buildFeatureDefinition,
   getFeatureEditorFormField,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   regionBoundaryBasisOfRecord,
   resolveRegionBoundaryCurve,
@@ -61,7 +61,7 @@ import { prepareTransformFeatureDefinition } from "@/core/feature-authoring/feat
 import { prepareLinearPatternFeatureDefinition } from "@/core/feature-authoring/features/linear-pattern";
 import { prepareCircularPatternFeatureDefinition } from "@/core/feature-authoring/features/circular-pattern";
 
-import { normalizeFeatureDefinition } from "@/domain/modeling/modeling-service/normalization";
+import { normalizeFeatureDefinition } from "@/core/modeling/modeling-service/normalization";
 import { FEATURE_REPLAY_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 
 // Feature families share exact production mutation, persistence and native

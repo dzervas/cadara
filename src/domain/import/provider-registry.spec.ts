@@ -1,10 +1,10 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
 import type { ImportProvider } from "@/contracts/import/provider";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { createScopedImportProviderRegistryForTest } from "@/domain/extensions/test-registry-composition";
 
 test("src/domain/import/provider-registry.spec.ts", async () => {

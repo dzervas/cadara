@@ -66,7 +66,7 @@ import type {
 import {
   listPartStudios,
   readPartStudio,
-} from "@/domain/import/onshape/bundle-reader";
+} from "@/core/import/onshape/bundle-reader";
 import { unreachableFeatureDependencies } from "@/domain/import/onshape/bake-segment-planner";
 import {
   extractSketchPlaneDeterministicId,
@@ -83,7 +83,7 @@ import {
   verificationPartial,
   verificationUnavailable,
   type GroundTruthVerification,
-} from "@/domain/import/onshape/ground-truth";
+} from "@/core/import/onshape/ground-truth";
 import {
   projectPointToPlane,
   projectPointToSketchPlane,
@@ -93,13 +93,13 @@ import {
   type SketchExternalReference,
   type SketchExternalReferenceVerificationGeometry,
   type SolvedSketchEntityGeometry,
-} from "@/domain/import/onshape/sketch-translator";
-import { translateOnshapeExpression } from "@/domain/import/onshape/expression-translator";
+} from "@/application/import/onshape/sketch-translator";
+import { translateOnshapeExpression } from "@/core/import/onshape/expression-translator";
 import {
   matchSignature,
   type TopologyMatchOutcome,
-} from "@/domain/import/onshape/signature-matcher";
-import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
+} from "@/core/import/onshape/signature-matcher";
+import { normalizeOnshapeTopologySignature } from "@/core/import/onshape/topology-signature-normalizer";
 import type {
   OnshapeGeometricSignature,
   OnshapeResolvedReference,
@@ -108,8 +108,8 @@ import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint
 import { encodeOnshapeTessellationAsBakedMeshBytes } from "@/domain/import/onshape/rollback-bake";
 import { probeTopologyConsumerPrefixes } from "@/domain/import/onshape/topology-resolution-planner";
 import { createMemoizedHistoryProbe } from "@/domain/import/kernel-history-probe";
-import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
-import { readTopologyQueryRefs } from "@/domain/import/onshape/topology-query-reader";
+import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
+import { readTopologyQueryRefs } from "@/core/import/onshape/topology-query-reader";
 import { captureSplitInterfaceOwnerWitness } from "@/domain/import/onshape/split-interface-owner-witness";
 import { readSplitInterfaceFaceQuery } from "@/domain/import/onshape/split-interface-face-query-reader";
 import {
@@ -120,26 +120,26 @@ import {
   scopeLiveSignaturesToCapturedBody,
   capturedBodyScopeEvidence,
   type TopologyResolutionResult,
-} from "@/domain/import/onshape/topology-reference-resolver";
+} from "@/core/import/onshape/topology-reference-resolver";
 import {
   composeCaptureFrameTransforms,
   computeCaptureFrameToWorld,
   computeParametricTransformReframe,
-} from "@/domain/import/onshape/capture-frame";
+} from "@/core/import/onshape/capture-frame";
 import {
   createRollbackTopologyTimeline,
   type RollbackTopologySnapshot,
-} from "@/domain/import/onshape/rollback-topology-reader";
-import { readCompressedQueryLiteralFields } from "@/domain/import/onshape/compressed-query-decoder";
+} from "@/core/import/onshape/rollback-topology-reader";
+import { readCompressedQueryLiteralFields } from "@/core/import/onshape/compressed-query-decoder";
 import {
   resolveExactBodyProducerBindings,
   type DeferredBodyOfSourceFeature,
-} from "@/domain/import/onshape/exact-body-producer-resolver";
+} from "@/core/import/onshape/exact-body-producer-resolver";
 import {
   LIVE_TOPOLOGY_MATCH_TOLERANCE,
   resolveHistoricalTopology,
   type HistoricalTopologyPlanSelector,
-} from "@/domain/import/historical-topology-selector";
+} from "@/core/import/historical-topology-selector";
 import { buildResolvedBodyConsumerDefinition } from "@/domain/import/onshape/wave-b-body-feature-translators";
 import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-bake";
 import {
@@ -149,13 +149,13 @@ import {
   resolvePlannedExtrudeTopology,
   resolvedExtrudeExtent,
   resolvedExtrudeStartExtent,
-} from "@/domain/import/onshape/extrude-planner";
+} from "@/application/import/onshape/extrude-planner";
 import { isTopologyApplyRematchError } from "@/domain/import/orchestrator";
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
   type ImportProfileVerifier,
-} from "@/domain/import/onshape/profile-resolver";
+} from "@/application/import/onshape/profile-resolver";
 
 const ACCEPTED_EXTENSION = ".onshape-capture.json";
 const profileVerifiers = new WeakMap<
@@ -233,7 +233,7 @@ export interface OnshapeStudioReview {
 export interface OnshapeSketchRelationshipReview {
   featureId: string;
   label: string;
-  summary: import("@/domain/import/onshape/sketch-translator").SketchRelationshipSummary;
+  summary: import("@/application/import/onshape/sketch-translator").SketchRelationshipSummary;
 }
 
 export interface OnshapeImportReview {
@@ -3398,7 +3398,7 @@ function rebaseHistoricalSelectorsInPreparedValue(input: {
 }
 
 function withHistoricalSourceFeatureIds(
-  steps: readonly import("@/domain/import/historical-topology-selector").HistoricalTopologySignatureStep[],
+  steps: readonly import("@/core/import/historical-topology-selector").HistoricalTopologySignatureStep[],
   featureIdToOrderedActionIndex: ReadonlyMap<string, number>,
 ) {
   const featureIdByActionIndex = new Map<number, string>();

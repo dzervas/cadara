@@ -10,7 +10,7 @@ import type {
   WorkspaceSnapshot,
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
-import type { EditorRuntimeTraceSnapshot } from "@/domain/debug/debug-platform";
+import type { EditorRuntimeTraceSnapshot } from "@/core/debug/debug-platform";
 import type { EditorViewState } from "@/domain/editor/state-machine";
 import {
   MODELING_OPERATION_HISTORY_STORAGE_KEY,

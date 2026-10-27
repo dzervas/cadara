@@ -56,10 +56,10 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createSketchMergePointsMutation } from "@/domain/sketch-editing/merge-points";
+import { createSketchMergePointsMutation } from "@/core/sketch-editing/merge-points";
 import {
   createSketchActionOwnerFixture,
   drawnMixedOutlineSession,

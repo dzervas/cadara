@@ -8,7 +8,7 @@ import {
 } from "@/domain/editor/sketch-session";
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import type { SketchSessionState } from "@/domain/editor/sketch-session/types";
-import type { OpenSketchMeasurementRecord } from "@/domain/measure/measurement";
+import type { OpenSketchMeasurementRecord } from "@/core/measure/measurement";
 
 /**
  * The open sketch as the readout measures it (cadara-h026.3): its live

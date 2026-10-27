@@ -10,7 +10,7 @@ import { shouldViewportStartSketchGeometryDrag } from "@/domain/editor/workbench
 import {
   resolveHandleFromTarget,
   type SketchDragAcceptance,
-} from "@/domain/editor/sketch-session/drag-intent";
+} from "@/core/editor/sketch-session/drag-intent";
 
 import { getSketchSessionDisplaySolvedSnapshot } from "@/domain/editor/sketch-session/solved-snapshot";
 import {

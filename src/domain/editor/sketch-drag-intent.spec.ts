@@ -4,7 +4,7 @@ import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {
   resolveHandleFromTarget,
   resolveSketchDragIntent,
-} from "@/domain/editor/sketch-session";
+} from "@/core/editor/sketch-session/drag-intent";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import { derivedTargetsDefinition, pid } from "./sketch-mirror.fixtures";
 

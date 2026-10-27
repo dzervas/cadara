@@ -10,7 +10,7 @@ import {
   resolveSketchConstraintTarget,
 } from "@/core/sketch-constraints/registry";
 import { isRegisteredSketchToolId } from "@/core/sketch-tools/registry";
-import { collectActiveReferenceImageOperations } from "@/domain/reference-image/operations";
+import { collectActiveReferenceImageOperations } from "@/core/reference-image/operations";
 import {
   canSketchConstraintSelectMoreTargets,
   isSketchConstraintReadyForValue,

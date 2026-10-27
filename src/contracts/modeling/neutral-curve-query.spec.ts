@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import {
   ExactProofBudget,
   compareFiniteAngleToQuarterTurnMultipleExact,
-} from "@/domain/modeling/neutral-curve-certification/fixed-degree-primitives";
+} from "@/core/modeling/neutral-curve-certification/fixed-degree-primitives";
 import {
   checkNeutralCurvePointConsistency,
   evaluateNeutralCurve,

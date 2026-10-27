@@ -19,7 +19,7 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 test("src/app/viewport-renderables.spec.ts", async () => {
   function assertEqual<T>(
@@ -487,7 +487,7 @@ test("T08b-g5c [TECH] G19: committed non-accepted offset outputs are marked for 
     selectSketchEditToolTarget,
   } = await import("@/domain/editor/sketch-session");
   const { createCertifiedNeutralCurveRequestQuery } =
-    await import("@/domain/modeling/neutral-curve-certification/query");
+    await import("@/core/modeling/neutral-curve-certification/query");
   const { createCertifiedCubicTubeChain } =
     await import("@/domain/modeling/neutral-curve-certification/cubic-tube-chain");
   let session = acceptSketchDraw(

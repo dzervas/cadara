@@ -8,10 +8,10 @@ import { AUTHORED_MODEL_DOCUMENT_SCHEMA_VERSION } from "@/contracts/shared/versi
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createBuiltinExportProviderRegistry } from "@/domain/export/builtin-provider-composition";
-import { stepExportProvider } from "@/domain/export/providers/step-export-provider";
-import { stlExportProvider } from "@/domain/export/providers/stl-export-provider";
-import { threeMfExportProvider } from "@/domain/export/providers/threemf-export-provider";
+import { createBuiltinExportProviderRegistry } from "@/application/export/builtin-provider-composition";
+import { stepExportProvider } from "@/application/export/providers/step-export-provider";
+import { stlExportProvider } from "@/application/export/providers/stl-export-provider";
+import { threeMfExportProvider } from "@/application/export/providers/threemf-export-provider";
 
 test("src/domain/modeling/modeling-export.spec.ts", async () => {
   async function testCadaraExportsDurableDocumentJson() {

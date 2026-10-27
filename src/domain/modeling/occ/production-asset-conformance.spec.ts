@@ -40,12 +40,12 @@ import {
   type SketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
-import { stlExportProvider } from "@/domain/export/providers/stl-export-provider";
-import { threeMfExportProvider } from "@/domain/export/providers/threemf-export-provider";
+import { stlExportProvider } from "@/application/export/providers/stl-export-provider";
+import { threeMfExportProvider } from "@/application/export/providers/threemf-export-provider";
 import { createOccAuthoringState } from "@/domain/modeling/occ/authoring-state";
 import { mapSketchPointToWorld } from "@/domain/modeling/occ/geometry";
 import { buildOccRenderExport } from "@/domain/modeling/occ/snapshot";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   executeOccFeature,
   type OccFeatureExecutionContext,
@@ -66,7 +66,7 @@ import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 // Curve-edge conformance uses the shared filesystem production runtime and
 // closed-form oracles, so missing shipped bindings fail without browser startup.

@@ -6,7 +6,7 @@ import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   beginSketchTool,
   createSketchSessionFromSnapshot,

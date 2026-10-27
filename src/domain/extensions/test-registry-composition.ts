@@ -5,8 +5,8 @@ import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/sc
 import {
   createBuiltinExportProviderRegistry,
   builtinExportProviders,
-} from "@/domain/export/builtin-provider-composition";
-import { createExportProviderRegistry } from "@/domain/export/provider-registry";
+} from "@/application/export/builtin-provider-composition";
+import { createExportProviderRegistry } from "@/core/export/provider-registry";
 import { createImportProviderRegistry } from "@/domain/import/provider-registry";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import { builtinSketchSpecialModeDefinitions } from "@/domain/sketch-special-modes/registry";

@@ -1,9 +1,9 @@
 import type { ImportSplitInterfaceOwnerWitness } from "@/contracts/import/actions";
 import type { CadaraBrepFaceRecord } from "@/contracts/modeling/geometry-assets";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { RollbackTopologySnapshot } from "./rollback-topology-reader";
-import { normalizeOnshapeTopologySignature } from "./topology-signature-normalizer";
-import { DEFAULT_MATCH_TOLERANCE, matchSignature } from "./signature-matcher";
+import type { RollbackTopologySnapshot } from "../../../core/import/onshape/rollback-topology-reader";
+import { normalizeOnshapeTopologySignature } from "../../../core/import/onshape/topology-signature-normalizer";
+import { DEFAULT_MATCH_TOLERANCE, matchSignature } from "../../../core/import/onshape/signature-matcher";
 
 type Point = readonly [number, number, number];
 type FaceRef = Extract<DurableRef, { kind: "face" }>;

@@ -10,7 +10,7 @@ import { CONTRACT_VERSION } from "../src/contracts/shared/versioning.ts";
 import {
   listPartStudios,
   readPartStudio,
-} from "../src/domain/import/onshape/bundle-reader.ts";
+} from "../src/core/import/onshape/bundle-reader.ts";
 import {
   planStudioFidelity,
   type FeaturePlan,
@@ -20,16 +20,16 @@ import { onshapeImportProvider } from "../src/domain/import/onshape/provider.ts"
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
-} from "../src/domain/import/onshape/profile-resolver.ts";
+} from "../src/application/import/onshape/profile-resolver.ts";
 import { SketchConstraintSolverAdapter } from "../src/domain/solver/sketch-constraint-solver-adapter.ts";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/domain/modeling/neutral-curve-certification/query.ts";
-import { OCC_KERNEL_SETTINGS } from "../src/domain/modeling/opencascade-kernel-seed.ts";
-import { normalizeOnshapeTopologySignature } from "../src/domain/import/onshape/topology-signature-normalizer.ts";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "../src/core/modeling/neutral-curve-certification/query.ts";
+import { OCC_KERNEL_SETTINGS } from "../src/core/modeling/opencascade-kernel-seed.ts";
+import { normalizeOnshapeTopologySignature } from "../src/core/import/onshape/topology-signature-normalizer.ts";
 import {
   computeCaptureFrameToWorld,
   reframeSignature,
-} from "../src/domain/import/onshape/capture-frame.ts";
-import type { OnshapeFeatureNode } from "../src/domain/import/onshape/bundle-reader.ts";
+} from "../src/core/import/onshape/capture-frame.ts";
+import type { OnshapeFeatureNode } from "../src/core/import/onshape/bundle-reader.ts";
 
 const USAGE =
   "Usage: bun run scripts/onshape-plan-dump.ts <bundle.onshape-capture.json> [elementId] [--review]";

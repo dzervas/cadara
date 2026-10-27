@@ -7,7 +7,7 @@ import {
   isLocalFileSyncDocumentRepository,
 } from "@/domain/modeling/document-repository";
 import { createLocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
-import type { WorkbenchTab } from "@/domain/workspace/workbench-tabs";
+import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import { downloadDocumentExportResult } from "@/lib/download-export";
 import {
   ensureLocalFileWritePermission,

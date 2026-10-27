@@ -22,7 +22,7 @@ import {
 } from "@/contracts/shared/versioning";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
 import type { AppResultAsync } from "@/contracts/errors";
-import { getDocumentHistoryCursorIndex } from "@/domain/modeling/document-history";
+import { getDocumentHistoryCursorIndex } from "@/core/modeling/document-history";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createMemoryOperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
 import {

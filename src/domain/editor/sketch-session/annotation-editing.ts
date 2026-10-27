@@ -28,9 +28,9 @@ import {
   createSketchDimensionRef,
 } from "./session-definition";
 import type { DimensionId, SketchEntityId } from "@/contracts/shared/ids";
-import { applySolvedSketchToDefinition } from "./definition-patches";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
-import type { AuthoredSketchDerivationSettings } from "@/domain/modeling/sketch-dimension-expressions";
+import { applySolvedSketchToDefinition } from "../../../core/editor/sketch-session/definition-patches";
+import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
+import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
 import {
   probeSketchDimensionRedundancy,
   solveSketchDefinitionCore,

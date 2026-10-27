@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { makeSketchFixture, addRectangle } from "./region-extraction.fixtures";
 import { createSketchArrangementDeriver } from "./region-extraction";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { deriveRegionBoundaryIdentity } from "./region-boundary-identity";
 import { resolveRegionProfile, type RegionSelector } from "./region-selector";
 

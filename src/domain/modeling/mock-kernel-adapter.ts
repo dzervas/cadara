@@ -55,18 +55,18 @@ import {
   isValidDocumentHistoryCursor,
   reorderDocumentHistoryOrder,
   type DocumentHistoryOrderEntry,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
-} from "@/domain/modeling/document-variable-expressions";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+} from "@/core/modeling/document-variable-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
 import {
   PROFILE_REGION_RESELECT_CODE,
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
   profileRegionSketchNotCurrentGuidance,
-} from "@/domain/modeling/feature-diagnostic-mapping";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+} from "@/core/modeling/feature-diagnostic-mapping";
+import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import {
   getExtrudeFeatureExtent,
   getRevolveFeatureExtent,
@@ -81,7 +81,7 @@ import type {
   NeutralCurveQueryRequest,
   NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
-import { createCertifiedNeutralCurveQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQuery } from "@/core/modeling/neutral-curve-certification/query";
 import type {
   ExportCapabilities,
   MeshExportAccuracy,
@@ -89,7 +89,7 @@ import type {
   StepWriterOptions,
 } from "@/contracts/export/capabilities";
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
-import { buildSketchVectorExportModelFromSnapshot } from "@/domain/export/sketch-vector-export-model";
+import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import { validateModelingDocumentRequestEnvelope } from "@/contracts/modeling/runtime-schema";
 import type {
@@ -177,14 +177,14 @@ import {
   DEFAULT_MOCK_SKETCH_PLANE_FRAME,
   MockSketchSolverAdapter,
 } from "@/domain/solver/mock-sketch-solver-adapter";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
-import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
+import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import {
   NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE,
   nonAcceptedOffsetFeatureInputMessage,
   nonAcceptedOffsetFeaturePointMessage,
-} from "@/domain/modeling/sketch-feature-input";
-import { describeFeatureTreeNode } from "@/domain/modeling/feature-description";
+} from "@/core/modeling/sketch-feature-input";
+import { describeFeatureTreeNode } from "@/core/modeling/feature-description";
 
 const CONTRACT_VERSION = "modeling-contract/v1alpha1" as const;
 const REVISION_ID = "rev_0001" as const;

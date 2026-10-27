@@ -47,14 +47,14 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { encodeAuthoredActionState } from "@/domain/modeling/authored-action-history";
+import { encodeAuthoredActionState } from "@/core/modeling/authored-action-history";
 import {
   appendReferenceImageOperations,
   updateReferenceImageOperationStates,
 } from "@/domain/editor/sketch-session/references";
-import { createReferenceImageOperation } from "@/domain/reference-image/operations";
+import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
 import { rebuildSessionForDefinition } from "@/domain/editor/sketch-session/definition-authoring";
 import type { PrimitiveRef } from "@/core/editor/schema";

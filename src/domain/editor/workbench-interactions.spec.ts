@@ -18,7 +18,7 @@ import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 
 import {
   getEnterEvent,

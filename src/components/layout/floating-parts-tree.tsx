@@ -40,7 +40,7 @@ import {
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
-import { getSketchErrorSummary } from "@/domain/modeling/document-snapshot-view";
+import { getSketchErrorSummary } from "@/core/modeling/document-snapshot-view";
 import { useEditorState } from "@/hooks/use-editor-state";
 import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
 import { createShellRowSelectRequest } from "@/core/editor/state-machine/selection-helpers";

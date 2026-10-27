@@ -3,7 +3,7 @@ import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repo
 import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
 import { createModelingService } from "./service";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 
 /** Fault only after the real repository accepted a publication, never during entry. */
 export function createSketchPublicationFailureFixture(appliedLive = false) {

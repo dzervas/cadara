@@ -38,12 +38,12 @@ import {
 } from "@/domain/modeling/occ/topology";
 import { createOccTopologyProvenanceIndex } from "@/domain/modeling/occ/topology-stage";
 import { createBooleanBuilder } from "@/domain/modeling/occ/features/boolean-operations";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   FILLET_FEATURE_SCHEMA_VERSION,

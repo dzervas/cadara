@@ -1,5 +1,5 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { expect, test } from "vitest";
 
 import type { ImportCapabilities } from "@/contracts/import/capabilities";
@@ -7,8 +7,8 @@ import type { ResolvedImportSource } from "@/contracts/import/source";
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 import { validateImportPreparedActions } from "@/contracts/import/validation";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import type { StudioReadResult } from "@/domain/import/onshape/bundle-reader";
-import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+import type { StudioReadResult } from "@/core/import/onshape/bundle-reader";
+import { readPartStudio } from "@/core/import/onshape/bundle-reader";
 import { planStudioFidelity } from "@/domain/import/onshape/fidelity-planner";
 import {
   loftFeatureTranslator,
@@ -30,7 +30,7 @@ import {
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,
-} from "@/domain/import/onshape/profile-resolver";
+} from "@/application/import/onshape/profile-resolver";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 
 const profileVerifier = {

@@ -18,7 +18,7 @@ import {
   SOLVER_SCHEMA_VERSION,
   type QuerySketchEditIntersectionsRequest,
 } from "@/contracts/solver/schema";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import {

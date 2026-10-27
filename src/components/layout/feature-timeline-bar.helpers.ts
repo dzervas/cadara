@@ -8,7 +8,7 @@ import {
   getDocumentHistoryCursorIndex,
   getDocumentHistoryOrderEntryKey,
   reorderDocumentHistoryOrder,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 
 export const TIMELINE_CURSOR_GLYPH = "↕";
 

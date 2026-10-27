@@ -11,7 +11,7 @@ import {
   OCC_CONTRACT_GAP_CODES,
 } from "@/domain/modeling/occ/implementation-policy";
 import type { Vec3 } from "@/domain/modeling/occ/math";
-import { assertAcceptedSketchFeatureInput } from "@/domain/modeling/sketch-feature-input";
+import { assertAcceptedSketchFeatureInput } from "@/core/modeling/sketch-feature-input";
 import {
   buildAxisFromLineEdge,
   buildOpenSketchCurveWire,

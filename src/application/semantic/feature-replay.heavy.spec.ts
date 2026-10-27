@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createLiteralAuthoredValue as literal } from "@/contracts/modeling/authored-values";
-import { normalizeFeatureDefinition } from "@/domain/modeling/modeling-service/normalization";
+import { normalizeFeatureDefinition } from "@/core/modeling/modeling-service/normalization";
 import { FEATURE_REPLAY_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import {
   createReplayWorkflow,

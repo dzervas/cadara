@@ -2,7 +2,7 @@ import {
   getFeaturePrimarySelectionTarget,
   getFeatureSessionPreviewLabel,
   type FeatureEditSessionState,
-} from "@/domain/editor/feature-editing";
+} from "@/core/editor/feature-editing";
 import {
   getPrimitiveRefKey,
   primitiveRefEquals,

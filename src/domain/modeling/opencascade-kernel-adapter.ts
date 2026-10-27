@@ -3,7 +3,7 @@ import {
   ProfileRegionSelectionError,
   requireRegion,
 } from "@/domain/modeling/occ/features/shared";
-import { createRevisionId, parseRevisionSequence } from "./document-revision";
+import { createRevisionId, parseRevisionSequence } from "../../core/modeling/document-revision";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -88,9 +88,9 @@ import {
   isBodyAppearance,
   withAutoBodyAppearances,
 } from "@/contracts/modeling/body-appearance";
-import { resolveSketchDimensionValues } from "@/domain/modeling/sketch-dimension-expressions";
+import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
-import { resolveFeatureDefinitionValues } from "@/domain/modeling/feature-value-expressions";
+import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -181,19 +181,19 @@ import {
 } from "@/domain/modeling/occ/snapshot";
 import type { OccTessellationTierId } from "@/domain/modeling/occ/tessellation";
 import type { OccWorkerSnapshotClient } from "@/domain/modeling/occ/worker-client";
-import { projectSketchExternalReferencesFromSnapshot } from "@/domain/modeling/sketch-reference-projection";
-import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/domain/modeling/sketch-feature-input";
+import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
+import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/core/modeling/sketch-feature-input";
 import {
   findDocumentHistoryOrderDependencyViolations,
   getDocumentHistoryOrderEntryKey,
   insertDocumentHistoryOrderEntryAfterCursor,
   reorderDocumentHistoryOrder,
   type DocumentHistoryOrderEntry,
-} from "@/domain/modeling/document-history";
+} from "@/core/modeling/document-history";
 import {
   createDocumentVariableExpressionDiagnostics,
   evaluateDocumentVariableExpressions,
-} from "@/domain/modeling/document-variable-expressions";
+} from "@/core/modeling/document-variable-expressions";
 import {
   createDependencyBlockedDiagnostic,
   createFeatureFieldDiagnostic,
@@ -202,7 +202,7 @@ import {
   PROFILE_REGION_RESELECT_CODE,
   PROFILE_REGION_SKETCH_NOT_CURRENT_CODE,
   SKETCH_PROFILE_BUILD_FAILURE_CODES,
-} from "@/domain/modeling/feature-diagnostic-mapping";
+} from "@/core/modeling/feature-diagnostic-mapping";
 import {
   advanceTopologyToken,
   buildNativeTopologyIdAliasesForTrackedBody,
@@ -244,7 +244,7 @@ import {
   OCC_KERNEL_DOCUMENT_NAME,
   OCC_KERNEL_INITIAL_REVISION_ID,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { getOccTessellationTier } from "@/domain/modeling/occ/tessellation";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 import {

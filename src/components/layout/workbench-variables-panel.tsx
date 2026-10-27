@@ -11,7 +11,7 @@ import type {
   DocumentVariableRecord,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
-import { evaluateDocumentVariableExpressions } from "@/domain/modeling/document-variable-expressions";
+import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
 
 interface WorkbenchVariablesPanelProps {
   snapshot: WorkspaceSnapshot | null;

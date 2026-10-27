@@ -19,7 +19,7 @@ import {
   applyStylePatchToDefinition,
   isFillStylePatch,
   sketchStyleRecordToDefinition,
-} from "./annotation-style";
+} from "../../../core/editor/sketch-session/annotation-style";
 
 export function focusSketchStyleTool(
   session: SketchSessionState,

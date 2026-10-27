@@ -37,7 +37,7 @@ import {
   createSketchFilletMutation,
   createSketchOffsetDerivationContribution,
   createSketchSlotContribution,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 import {
   bindPlacementInferences,
   inferPlacementFromCandidate,
@@ -45,7 +45,7 @@ import {
 import { createSessionCommitFactories } from "@/domain/editor/sketch-session/tool-authoring";
 import { createSketchPointRef } from "@/domain/editor/sketch-session/session-definition";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { extractDeclaredOffsetChainConnectivity } from "@/contracts/sketch/offset-chain-connectivity";
 import {
   ARCH_POINTS,
@@ -116,7 +116,7 @@ import {
   ownerSpanKey,
 } from "@/contracts/sketch/offset-derivation-outputs";
 import { createCertifiedCubicTubeChain } from "@/domain/modeling/neutral-curve-certification/cubic-tube-chain";
-import { createCertifiedNeutralCurveRequestQuery } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 
 /*
  * The native authoring seams below are the offset-chain topology spec's own

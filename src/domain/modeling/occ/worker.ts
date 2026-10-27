@@ -33,7 +33,7 @@ import {
 } from "@/domain/modeling/occ/worker-protocol";
 import {
   OCC_KERNEL_DOCUMENT_ID,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/domain/modeling/occ/neutral-curve-query";
 

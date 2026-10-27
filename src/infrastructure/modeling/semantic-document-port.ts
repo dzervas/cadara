@@ -1,4 +1,4 @@
-import { describeExportProviders, type ExportProviderRegistry } from "@/domain/export/provider-registry";
+import { describeExportProviders, type ExportProviderRegistry } from "@/core/export/provider-registry";
 import { createSemanticFeatureLifecyclePort } from "./semantic-feature-lifecycle-port";
 import { createSemanticVariablePort } from "./semantic-variable-port";
 import { createSemanticExportPort } from "./semantic-export-port";

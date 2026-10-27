@@ -34,7 +34,7 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
 import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";

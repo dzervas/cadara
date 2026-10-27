@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { expect, test } from "vitest";
 
 import { computeSketchUnitsPerPixel } from "@/components/cad/sketch-snap-scale";
-import { createStandardPlaneDefinition } from "@/domain/modeling/opencascade-kernel-seed";
+import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 
 // Lane: UI (docs/testing.md). Seam: `computeSketchUnitsPerPixel`, the pure
 // viewport helper that gives sketch pointer events their screen scale

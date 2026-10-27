@@ -19,7 +19,7 @@ import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;

@@ -15,7 +15,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   beginSketchTool,
   createNewSketchSession,
@@ -35,7 +35,7 @@ import {
   createSketchDerivedTransformContribution,
   createSketchOffsetDerivationContribution,
   type SketchEditOperationResult,
-} from "@/domain/sketch-editing/operations";
+} from "@/core/sketch-editing/operations";
 
 export type P = readonly [number, number];
 export const pid = (id: string) => `sketch_point_${id}` as SketchPointId;

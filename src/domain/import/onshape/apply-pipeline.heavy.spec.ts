@@ -1,6 +1,6 @@
 import { declaredCornerForTest } from "@/contracts/sketch/region-record.fixtures";
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
-import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/domain/modeling/neutral-curve-certification/query";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
+import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
@@ -52,12 +52,12 @@ import { prepareRollbackCheckpointBake } from "@/domain/import/onshape/rollback-
 import {
   readPartStudio,
   type OnshapeSketchConstraint,
-} from "@/domain/import/onshape/bundle-reader";
+} from "@/core/import/onshape/bundle-reader";
 import {
   projectPointToPlane,
   translateSketch,
   verifySketchTranslationSolveConsistency,
-} from "@/domain/import/onshape/sketch-translator";
+} from "@/application/import/onshape/sketch-translator";
 import { createModelingService } from "@/domain/modeling/modeling-service";
 import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";

@@ -1,8 +1,8 @@
-import { OCC_KERNEL_SETTINGS } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
   createCertifiedNeutralCurveQueryCapabilityForTest,
   createRecordingNeutralCurveQueryCapabilityForTest,
-} from "@/domain/modeling/neutral-curve-certification/query";
+} from "@/core/modeling/neutral-curve-certification/query";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test, expect } from "vitest";
@@ -32,7 +32,7 @@ import {
   rebaseExactBodyOwnerForPreparedActions,
   rebaseHistoricalTopologySelectorForPreparedActions,
 } from "@/domain/import/onshape/provider";
-import type { HistoricalTopologyPlanSelector } from "@/domain/import/historical-topology-selector";
+import type { HistoricalTopologyPlanSelector } from "@/core/import/historical-topology-selector";
 import type { FeaturePlan } from "@/domain/import/onshape/fidelity-planner";
 import { makeWaveARevolveCaptureBundle } from "@/domain/import/onshape/wave-a-capture-fixtures";
 import { makeWaveWPatternCaptureBundle } from "@/domain/import/onshape/wave-w-pattern-capture-fixtures";
@@ -53,7 +53,7 @@ import { createModelingService } from "@/domain/modeling/modeling-service";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/domain/modeling/occ/runtime";
-import { OCC_KERNEL_CAPABILITIES } from "@/domain/modeling/opencascade-kernel-seed";
+import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/domain/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
@@ -63,8 +63,8 @@ import {
   parseNativeShimPayloadJson,
 } from "@/domain/modeling/occ/native-topology-payload";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
-import { normalizeOnshapeTopologySignature } from "@/domain/import/onshape/topology-signature-normalizer";
-import { readPartStudio } from "@/domain/import/onshape/bundle-reader";
+import { normalizeOnshapeTopologySignature } from "@/core/import/onshape/topology-signature-normalizer";
+import { readPartStudio } from "@/core/import/onshape/bundle-reader";
 
 test("classifies external sketch IDs by authoritative provenance before body witnesses", () => {
   const sketchEntityQuery =

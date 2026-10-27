@@ -77,8 +77,8 @@ import {
   assertDocumentVariableId,
   assertRevisionId,
   assertDurableRef,
-} from "./validation";
-import { normalizeFeatureDefinition } from "./normalization";
+} from "../../../core/modeling/modeling-service/validation";
+import { normalizeFeatureDefinition } from "../../../core/modeling/modeling-service/normalization";
 
 export const CONTRACT_VERSION = "modeling-contract/v1alpha1" as const;
 export const SNAPSHOT_SCHEMA_VERSION = "document-snapshot/v1alpha2" as const;

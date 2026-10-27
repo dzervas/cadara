@@ -43,7 +43,7 @@ import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_INITIAL_REVISION_ID,
   createStandardPlaneDefinition,
-} from "@/domain/modeling/opencascade-kernel-seed";
+} from "@/core/modeling/opencascade-kernel-seed";
 import {
   SKETCH_SCHEMA_VERSION,
   SOLVED_SKETCH_SCHEMA_VERSION,
