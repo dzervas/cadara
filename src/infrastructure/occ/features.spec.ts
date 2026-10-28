@@ -2800,7 +2800,7 @@ describe("src/infrastructure/occ/features.spec.ts", () => {
   }
 
   // Lane: logic (per docs/testing.md — exported kernel behavior under
-  // src/domain/, real OCC, no UI or browser surface).
+  // src/infrastructure/occ, real OCC, no UI or browser surface).
   // Seam: resolveReplacementBodies through executeOccFeature — what a cut that
   // severs its target body replaces that body with.
   async function testExtrudeCutSeveringTargetMintsFreshBodyIdentities() {

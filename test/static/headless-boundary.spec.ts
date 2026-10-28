@@ -530,7 +530,6 @@ describe("headless transitive runtime boundary", () => {
       "contracts",
       "core",
       "application",
-      "domain",
       "infrastructure",
     ])
       walk(resolve(root, "src", layer));

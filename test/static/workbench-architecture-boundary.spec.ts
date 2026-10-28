@@ -8,7 +8,6 @@ const LAYER_ROOTS = [
   "src/components",
   "src/contracts",
   "src/core",
-  "src/domain",
   "src/hooks",
   "src/infrastructure",
   "src/workbench",

@@ -20,7 +20,7 @@ import type { OccAuthoringFeatureRecord } from "@/infrastructure/occ/authoring-s
 import { createFeatureRebuildFailureDiagnostic } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { tagRebuildSlot } from "@/infrastructure/occ/features/shared";
 
-// Lane: logic (docs/testing.md — src/domain/ non-UI behavioral coverage).
+// Lane: logic (docs/testing.md — src/infrastructure/occ non-UI behavioral coverage).
 // Seam: the kernel-adapter rebuild-failure attribution function
 // `createFeatureRebuildFailureDiagnostic`, which maps a slot-tagged throw plus
 // the extrude definition to the authored field that actually failed. Logic lane

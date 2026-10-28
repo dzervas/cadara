@@ -114,7 +114,7 @@ capture is added.
 
 ### Existing matcher and kernel limits
 
-`src/domain/import/onshape/signature-matcher.ts` currently:
+`src/core/import/onshape/signature-matcher.ts` currently:
 
 - requires exact entity-class and case-insensitive geometry-type equality;
 - scores only centroid and bounding-box distance;
@@ -130,7 +130,7 @@ for production topology selection. In particular:
 - `scaleCapturedSignatureToDocumentUnits` in `provider.ts` scales bbox and
   centroid only, not dimensional fields such as origins, centers, radii, or
   tessellation samples.
-- `src/domain/modeling/occ/topology-signatures.ts` emits face, edge, and vertex
+- `src/core/modeling/topology-signatures.ts` emits face, edge, and vertex
   signatures, but no body signature, although the probe contract permits one.
 - Kernel face centroids are bbox centers over mesh vertices, not mass
   centroids. Onshape capture currently also derives its `centroid` from its bbox.
@@ -140,7 +140,7 @@ for production topology selection. In particular:
 - capture currently does not populate `tessellationSample` or
   `owningFeatureId`.
 
-`src/domain/import/kernel-history-probe.ts` already returns all live topology
+`src/infrastructure/import/kernel-history-probe.ts` already returns all live topology
 signatures after every prepared action. However,
 `activateProbeBackedPlanning()` in `provider.ts` uses the last rebuilt step,
 not the step immediately before each consumer. That is sufficient only for its
@@ -149,13 +149,13 @@ narrow final-prefix face-sketch experiment.
 Finally, Cadara has the reference machinery needed for durable results:
 `DurableRef` in `src/contracts/shared/references.ts`, authored feature contracts
 in `src/contracts/modeling/schema.ts` and `advanced-solid.ts`, and topology
-reconciliation/invalidation in `src/domain/modeling/occ/topology.ts` and
+reconciliation/invalidation in `src/infrastructure/occ/topology.ts` and
 `topology-naming.ts`. Replacement operations preserve an old topology ID only
 for a unique successor and otherwise emit explicit deleted/missing/ambiguous
 invalidation. That is the required later-edit behavior.
 
 There is one release gate: `OCC_KERNEL_CAPABILITIES` in
-`src/domain/modeling/opencascade-kernel-seed.ts` currently advertises
+`src/core/modeling/opencascade-kernel-seed.ts` currently advertises
 `supportsDurableTopologyNaming: false`. The importer must not claim durable
 references while that capability is false. The existing naming implementation
 must be qualified by rebuild/edit tests and the capability enabled, or every
@@ -184,7 +184,7 @@ quarantined when they coincide with an invalidated prior ID but have no stage pr
 so an exact delete-and-recreate cannot resurrect a stale reference.
 
 Real-OCC logic qualification in
-`src/domain/modeling/occ/topological-naming.spec.ts` proves:
+`src/infrastructure/occ/topological-naming.spec.ts` proves:
 
 - dimension-only edits preserve moving edge references for downstream fillet and
   chamfer and a moving face reference for shell;
@@ -459,7 +459,7 @@ the durability behavior that cannot be proved by pure planning assertions.
 
 ### Logic-lane specs
 
-1. `src/domain/import/onshape/topology-query-reader.spec.ts`
+1. `src/core/import/onshape/topology-query-reader.spec.ts`
    - use exact parameter snippets from both bundles;
    - preserve query/deterministic-ID order;
    - ignore inactive Boolean 1 offset queries;
@@ -493,7 +493,7 @@ the durability behavior that cannot be proved by pure planning assertions.
 
 ### Apply-pipeline coverage
 
-Extend `src/domain/import/onshape/apply-pipeline.heavy.spec.ts` at the provider ->
+Extend `src/infrastructure/import/onshape/apply-pipeline.heavy.spec.ts` at the provider ->
 prepare -> `applyImportPreparedActions` seam:
 
 - a compact v2 fixture should commit an extrude followed by a matched fillet or
@@ -544,13 +544,13 @@ Tasks are ordered so a coding agent can land and verify each seam independently.
    evidence; keep the existing envelope. Verify edge consumers have history-point
    signatures and record any still-unresolved classes.
 2. **Read rollback topology evidence.** Add
-   `src/domain/import/onshape/rollback-topology-reader.ts` with narrow,
+   `src/core/import/onshape/rollback-topology-reader.ts` with narrow,
    surplus-tolerant readers for tessellation body/face IDs and facets. Expose
    `snapshotBeforeFeature(featureId)` and `snapshotAfterFeature(featureId)` using
    feature-list order. Add exact fixture snippets and diagnostics; do not parse
    STEP subshape order as identity.
 3. **Read declared query slots.** Add
-   `src/domain/import/onshape/topology-query-reader.ts` with the
+   `src/core/import/onshape/topology-query-reader.ts` with the
    `TopologyQuerySlot` / `OnshapeTopologyQueryRef` interfaces above. Keep active
    slot declaration in each feature translator, not in a global recursive
    heuristic.
@@ -558,9 +558,9 @@ Tasks are ordered so a coding agent can land and verify each seam independently.
    `topology-signature-normalizer.ts`; extend `signature-matcher.ts` with explicit
    tolerance input, analytic gates, alias handling, and rejection evidence.
    Preserve its `unique | ambiguous | noMatch` policy. Add body extraction to
-   `src/domain/modeling/occ/topology-signatures.ts`.
+   `src/core/modeling/topology-signatures.ts`.
 5. **Implement the pure resolver.** Add
-   `src/domain/import/onshape/topology-reference-resolver.ts` exporting roughly:
+   `src/core/import/onshape/topology-reference-resolver.ts` exporting roughly:
 
    ```ts
    resolveTopologyReferences(input: {
@@ -589,7 +589,7 @@ Tasks are ordered so a coding agent can land and verify each seam independently.
    pre-registered post-feature baked fallback.
 8. **Add per-feature checkpoint fallback.** Extract the existing tessellation
    encoder from `provider.ts` into
-   `src/domain/import/onshape/rollback-bake.ts`. Emit a baked replacement at the
+   `src/application/import/onshape/rollback-bake.ts`. Emit a baked replacement at the
    failed feature's history position; retain final-studio bake only for v1/no-
    snapshot cases. Add the reason codes above to the fidelity plan and review
    diagnostics.

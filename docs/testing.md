@@ -62,7 +62,6 @@ Use Vitest (`bun run test`, `*.spec.ts`) for non-UI behavior in:
 
 - `src/contracts/`
 - `src/core/`
-- `src/domain/`
 - `src/application/`
 - `src/infrastructure/import/`
 - `src/infrastructure/modeling/`
@@ -126,7 +125,7 @@ Test parse, validation, normalization, serialization, and versioned payload beha
 - Prefer schema entrypoints and exported contract helpers.
 - Do not test downstream domain behavior here.
 
-### Core and Domain
+### Core
 
 Test exported behavior, state transitions, reducers, registries, solvers, and operation builders.
 
@@ -154,7 +153,7 @@ Test adapter conformance.
 Test render-local behavior, visual state contracts, and event wiring.
 
 - Keep business rules in lower-layer tests whenever possible.
-- Avoid using UI tests to cover logic that should live in `contracts`, `core`, `domain`, `application`, or `infrastructure`.
+- Avoid using UI tests to cover logic that should live in `contracts`, `core`, `application`, or `infrastructure`.
 
 ## What Not To Do
 

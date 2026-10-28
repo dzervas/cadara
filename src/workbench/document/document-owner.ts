@@ -24,7 +24,7 @@ import { requireAcceptedModelingResult } from "@/lib/reported-action";
 import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
-import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
+import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
 import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
 
 type VariablePatch = Pick<DocumentVariableRecord, "name" | "valueText">;

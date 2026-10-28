@@ -182,7 +182,7 @@ import {
   WORKBENCH_STATUS_TOP_STYLE,
   getWorkbenchNotificationRightOffsetPx,
 } from "@/components/cad/viewport-overlay-layout";
-import { createBugReportPayload } from "@/domain/bug-reporting/report";
+import { createBugReportPayload } from "@/application/bug-reporting/report";
 import {
   downloadWorkbenchBugReportState,
   reportWorkbenchBug,

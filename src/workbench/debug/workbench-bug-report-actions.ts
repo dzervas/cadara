@@ -11,7 +11,7 @@ import {
   downloadBugReportDebugArtifact,
   type BugReportArtifactStatus,
   type BugReportPayloadResult,
-} from "@/domain/bug-reporting/report";
+} from "@/application/bug-reporting/report";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 
 interface WorkbenchBugReportActionContext {

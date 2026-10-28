@@ -35,7 +35,7 @@ New docs go in the matching row. Files live in the repo, so links point only at 
 - `src/application`: orchestration; the TEA-style editor event loop is `src/application/editor/editor-event-loop.ts`.
 - `src/infrastructure`: browser, worker, storage, OCC and rendering adapters.
 - `src/components`, `src/hooks`, `src/workbench`, `src/theme`: UI. Mantine theme lives in `src/theme/workbench-theme.ts`.
-- `src/domain`: legacy mix still being migrated out; put new code in the layers above.
+- `src/composition`: composition roots that wire the layers together (built-in registries, headless runtime).
 
 ## Rules
 

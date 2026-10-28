@@ -627,7 +627,7 @@ may assume earlier seams and tests are present.
 ### B.2 — Planner: segment-aware lineage
 
 1. **B.2.1 Add rollback body-delta primitives.**
-   - Files: `src/domain/import/onshape/rollback-topology-reader.ts` and
+   - Files: `src/core/import/onshape/rollback-topology-reader.ts` and
      `rollback-topology-reader.spec.ts`.
    - Add exact body shape keys and an exported before/after delta API returning
      introduced, changed, removed, and unchanged deterministic IDs. Preserve
@@ -635,7 +635,7 @@ may assume earlier seams and tests are present.
    - Verify: logic lane covers sparse snapshots, missing boundaries, body ID
      persistence, disappearance, and no-change features.
 2. **B.2.2 Add the pure segment and replacement-closure planner.**
-   - Files: new `src/domain/import/onshape/bake-segment-planner.ts` and
+   - Files: new `src/application/import/onshape/bake-segment-planner.ts` and
      `bake-segment-planner.spec.ts`; type exports in `fidelity-planner.ts` only as
      needed.
    - Produce `BakeSegmentPlan`, body producer ledger transitions, selective output

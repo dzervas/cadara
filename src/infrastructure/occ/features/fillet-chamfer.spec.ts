@@ -312,7 +312,7 @@ test("executeChamferFeature uses native transaction history for replacement topo
 });
 
 // Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
-// src/domain/modeling, proven through the real kernel with pure inputs).
+// src/infrastructure/occ, proven through the real kernel with pure inputs).
 // Seam: `executeChamferFeature`'s topology-stage lineage. `BRepFilletAPI`'s
 // `IsDeleted` answers `true` for prior edges/vertices the chamfer never touched
 // and that the result still contains as the IDENTICAL TopoDS shape. Taking that
@@ -374,7 +374,7 @@ test("executeChamferFeature keeps untouched topology in its stage lineage", asyn
 });
 
 // Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
-// src/domain/modeling, proven through the real kernel with pure inputs).
+// src/infrastructure/occ, proven through the real kernel with pure inputs).
 // Seam: `executeChamferFeature`'s topology-stage lineage for subtopology the
 // chamfer GENERATES, reconciled across a rebuild by
 // `classifySemanticStageTopology`. Exact-successor lineage can only name prior
@@ -522,7 +522,7 @@ test("executeChamferFeature claims producer identity for generated topology", as
 });
 
 // Lane: logic (per docs/testing.md — exported OCC feature-execution behavior in
-// src/domain/modeling, proven through the real kernel with pure inputs).
+// src/infrastructure/occ, proven through the real kernel with pure inputs).
 // Seam: `executeChamferFeature`'s topology-stage lineage on the NATIVE
 // equal-offset transaction path, whose `BRepFilletAPI` the shim destroys. Its
 // producer identity can therefore only arrive through the shim's own

@@ -9,7 +9,7 @@ import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-sche
 import type { ImportSessionState } from "@/core/editor/state-machine/types";
 import { EditorContext } from "@/hooks/editor-context";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
-import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
+import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/composition/test-registry-composition";
 import {
   getEditorViewState,
   initialEditorState,

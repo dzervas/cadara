@@ -65,7 +65,7 @@
     "src/core/editor/state-machine/form-traversal.spec.ts",
     "src/core/feature-authoring/features/pattern-authoring.spec.ts",
     "src/core/workspace/sketch-feedback-projection.spec.ts",
-    "src/domain/bug-reporting/report.spec.ts",
+    "src/application/bug-reporting/report.spec.ts",
     "src/core/editor/feature-boolean-target-preselection.spec.ts",
     "src/core/editor/history-undo-redo.spec.ts",
     "src/core/editor/reference-image-operations.spec.ts",

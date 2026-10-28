@@ -17,7 +17,7 @@ import {
   shouldEnablePerformanceTelemetry,
 } from "@/contracts/errors/sentry-client";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
-import { createBuiltinRuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
+import { createBuiltinRuntimeExtensionRegistryComposition } from "@/composition/runtime-extension-registry-composition";
 
 function App() {
   const runtimeExtensionRegistries = useMemo(

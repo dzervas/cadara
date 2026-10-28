@@ -17,7 +17,7 @@ import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabiliti
 import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
-// Lane: logic (docs/testing.md, src/domain adapter conformance). Seams: the
+// Lane: logic (docs/testing.md, src/infrastructure/occ adapter conformance). Seams: the
 // production OCC kernel adapter's feature replay diagnostics for the T10 plan
 // §2.9 reselection causes, the mock adapter's parity (review A9), and "one
 // sketch solver per kernel adapter" (A10) observed through the neutral-curve

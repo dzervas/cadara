@@ -18,7 +18,7 @@ import {
 } from "@/core/sketch-special-modes/presentation";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { sketchSpecialModeDefinitions } from "@/core/sketch-special-modes/builtin-definitions";
-import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
+import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/composition/test-registry-composition";
 
 test("src/contracts/editor/sketch-special-mode.spec.ts", async () => {
   const fixtureMode: SketchSpecialModeDefinition<{

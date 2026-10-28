@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 import { test, expect } from "vitest";
@@ -353,51 +353,9 @@ test("src/layer-architecture-boundary.spec.ts infrastructure stays outside UI co
   ).toBe(0);
 });
 
-test("src/layer-architecture-boundary.spec.ts migrated compatibility entrypoints stay deleted", () => {
-  const removedEntrypoints = [
-    "src/domain/tools/index.ts",
-    "src/domain/shortcuts/index.ts",
-    "src/domain/workspace/index.ts",
-    "src/domain/section-view/index.ts",
-    "src/domain/sketch-special-modes/index.ts",
-  ];
-  const offenders = removedEntrypoints.filter((filePath) => {
-    try {
-      statSync(join(ROOT, filePath));
-      return true;
-    } catch {
-      return false;
-    }
-  });
-
+test("src/layer-architecture-boundary.spec.ts the retired src/domain layer stays removed", () => {
   expect(
-    offenders.length,
-    `Migrated compatibility entrypoints must be deleted.\n${offenders.join("\n")}`,
-  ).toBe(0);
-});
-
-test("src/layer-architecture-boundary.spec.ts core domain dependency debt stays explicit", () => {
-  const allowedCoreDomainImports = new Set([
-    "src/core/editor/state-machine/dependencies.ts",
-  ]);
-  const offenders: string[] = [];
-
-  for (const filePath of getLayerFiles("src/core")) {
-    const relativePath = relative(ROOT, filePath);
-    const source = readFileSync(filePath, "utf8");
-    const importsDomain =
-      source.includes("from '@/domain/") ||
-      source.includes('from "@/domain/') ||
-      source.includes("import('@/domain/") ||
-      source.includes('import("@/domain/');
-
-    if (importsDomain && !allowedCoreDomainImports.has(relativePath)) {
-      offenders.push(relativePath);
-    }
-  }
-
-  expect(
-    offenders.length,
-    `New core modules must not depend on domain. Move the dependency to core/application, or explicitly retire existing debt first.\n${offenders.join("\n")}`,
-  ).toBe(0);
+    existsSync(join(ROOT, "src/domain")),
+    "src/domain was retired (docs/adr/0001-layered-runtime-boundaries.md); put code in contracts, core, application or infrastructure.",
+  ).toBe(false);
 });

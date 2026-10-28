@@ -21,7 +21,7 @@ import {
   createBugReportStateArchiveFilename,
   createGithubBugReportUrl,
   formatMarkdownJsonDisclosure,
-} from "@/domain/bug-reporting/report";
+} from "@/application/bug-reporting/report";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";

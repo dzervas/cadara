@@ -9,10 +9,10 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import { derivedTargetsDefinition, pid } from "@/core/editor/sketch-mirror.fixtures";
 
 // Lane: logic (docs/testing.md). Seam: the deterministic per-handle drag intent
-// contract in src/domain/editor/sketch-session/drag-intent.ts. These tests prove
+// contract in src/core/editor/sketch-session/drag-intent.ts. These tests prove
 // the sketch-drag-semantics guarantee that the drag intent is decided by the
 // grabbed handle (point vs entity body vs rim vs center), not by solver luck.
-test("src/domain/editor/sketch-drag-intent.spec.ts", () => {
+test("src/core/editor/sketch-drag-intent.spec.ts", () => {
   function point(pointId: string, x: number, y: number) {
     return {
       pointId: pointId as `sketch_point_${string}`,

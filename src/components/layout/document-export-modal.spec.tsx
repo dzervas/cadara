@@ -8,7 +8,7 @@ import { createTestErrorReporter } from "@/contracts/errors";
 import type { ObjectExportModalState } from "@/core/export/object-export-state";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
-import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
+import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/composition/test-registry-composition";
 import { stepExportProvider } from "@/application/export/providers/step-export-provider";
 
 test("src/components/layout/document-export-modal.spec.tsx", () => {

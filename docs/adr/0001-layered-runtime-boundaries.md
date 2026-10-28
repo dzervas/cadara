@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. Migration complete (2026-10-27): `src/domain` was emptied slice by slice and removed; `test/static/layer-architecture-boundary.spec.ts` keeps it removed. Composition roots live in `src/composition`.
 
 ## Context
 

@@ -8,7 +8,7 @@ import { expect, test } from "vitest";
 // `Value()` returns (`Handle_Geom_TrimmedCurve`, `Handle_Geom_Circle`), so every
 // call throws an embind UnboundTypeError in the browser (open problem 8) while
 // the stock Node package passes. Arcs are built by
-// `src/domain/modeling/occ/exact-edges.ts` instead; no `src` file may name
+// `src/infrastructure/occ/exact-edges.ts` instead; no `src` file may name
 // either producer.
 const FORBIDDEN = /^GC_Make(ArcOfCircle|Circle)(_\d+)?$/;
 const EXTENSIONS = new Set([".ts", ".tsx"]);

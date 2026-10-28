@@ -82,7 +82,7 @@ import { createReferenceImageOperation } from "@/core/reference-image/operations
 import {
   createScopedImportProviderRegistryForTest,
   createScopedSketchSpecialModeRegistryForTest,
-} from "@/domain/extensions/test-registry-composition";
+} from "@/composition/test-registry-composition";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

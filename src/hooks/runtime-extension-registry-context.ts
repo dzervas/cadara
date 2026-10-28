@@ -1,6 +1,6 @@
 import { createContext } from "react";
 
-import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
+import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
 
 export const RuntimeExtensionRegistryContext =
   createContext<RuntimeExtensionRegistryComposition | null>(null);

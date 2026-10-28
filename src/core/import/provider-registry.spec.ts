@@ -5,7 +5,7 @@ import { test, expect } from "vitest";
 import type { ImportProvider } from "@/contracts/import/provider";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
-import { createScopedImportProviderRegistryForTest } from "@/domain/extensions/test-registry-composition";
+import { createScopedImportProviderRegistryForTest } from "@/composition/test-registry-composition";
 
 test("src/domain/import/provider-registry.spec.ts", async () => {
   const pngProvider: ImportProvider<

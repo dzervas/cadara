@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import {
   createScopedExportProviderRegistryForTest,
   createScopedRuntimeExtensionRegistryCompositionForTest,
-} from "@/domain/extensions/test-registry-composition";
+} from "@/composition/test-registry-composition";
 import { dxfSketchExportProvider } from "@/application/export/providers/dxf-sketch-export-provider";
 import { svgSketchExportProvider } from "@/application/export/providers/svg-sketch-export-provider";
 import { stepExportProvider } from "@/application/export/providers/step-export-provider";

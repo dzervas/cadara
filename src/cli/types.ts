@@ -2,7 +2,7 @@
  * Shared contracts for the `cadara` CLI shell and its subcommands.
  *
  * These types are deliberately free of any browser-bound dependency: the CLI
- * runs under Bun/Node and shares only `src/contracts/` and `src/domain/` code
+ * runs under Bun/Node and shares only browser-free code from `src/contracts/`, `src/core/`, `src/application/` and `src/infrastructure/`
  * with the app.
  */
 

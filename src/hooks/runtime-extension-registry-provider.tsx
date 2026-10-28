@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { PropsWithChildren } from "react";
 
-import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
+import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
 import { RuntimeExtensionRegistryContext } from "@/hooks/runtime-extension-registry-context";
 
 interface RuntimeExtensionRegistryProviderProps extends PropsWithChildren {

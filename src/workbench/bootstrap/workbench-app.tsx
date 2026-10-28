@@ -12,7 +12,7 @@ import { createModelingService } from "@/application/modeling/modeling-service";
 import { createInstrumentedModelingService } from "@/application/modeling/modeling-service/instrumented-service";
 import { isLocalFileSyncDocumentRepository } from "@/core/modeling/document-repository";
 import { createInstrumentedDocumentRepository } from "@/application/modeling/instrumented-document-repository";
-import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
+import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { getBrowserSketchRegionDerivation } from "@/infrastructure/occ/sketch-derivation-worker-runtime";

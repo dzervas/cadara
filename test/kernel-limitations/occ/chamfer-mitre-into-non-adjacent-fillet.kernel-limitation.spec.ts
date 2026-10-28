@@ -5,7 +5,7 @@
  * EXPECTED TO FAIL against our production OCC build: it asserts what a correct
  * kernel does, and our kernel does not. When it starts passing, the limitation
  * is lifted. Revisit the refusal message in
- * src/domain/modeling/occ/features/fillet-chamfer.ts (it links here) and move
+ * src/infrastructure/occ/features/fillet-chamfer.ts (it links here) and move
  * this spec into a normal lane, or delete it.
  *
  * How we found it: the Onshape "Laptop Stand" import (cadara-1le, cadara-ybk).
