@@ -1230,3 +1230,97 @@ test("a restore that renames the body under a face sketch re-solves no sketch an
     session.adapter.dispose();
   }
 }, 900_000);
+
+/** Counts the sketch records a restore of `session` solves again. */
+const spyOnSketchRebuilds = (session: Session) =>
+  vi.spyOn(
+    session.adapter as unknown as {
+      rebuildAuthoredSketchRecord: (...args: never[]) => Promise<unknown>;
+    },
+    "rebuildAuthoredSketchRecord",
+  );
+
+/**
+ * Opens the landing enclosure and commits a copy of its footprint sketch on
+ * the highest horizontal face of the evaluated model, at the history tail
+ * (Finish Sketch of a new face sketch).
+ */
+async function enclosureSessionWithTailFaceSketch() {
+  const source = await loadLandingModel("enclosure");
+  const session = await open(source);
+  const faces = (await session.snapshot()).document.render.records.flatMap(
+    ({ binding, geometry }) => {
+      if (binding.target.kind !== "face" || geometry.kind !== "mesh") {
+        return [];
+      }
+      const z = geometry.vertexPositions[0]![2];
+      return geometry.vertexPositions.every(
+        (position) => Math.abs(position[2] - z) < 1e-9,
+      )
+        ? [{ support: binding.target, z }]
+        : [];
+    },
+  );
+  const top = faces.reduce((highest, face) =>
+    face.z > highest.z ? face : highest,
+  );
+  const footprint = source.sketches[0]!;
+  const sketchId = await session.commitSketch({
+    label: "On top",
+    plane: {
+      support: top.support as Extract<
+        AuthoredModelDocument["sketches"][number]["plane"]["support"],
+        { kind: "face" }
+      >,
+      frame: { ...footprint.plane.frame, origin: [0, 0, top.z] },
+      key: null,
+    },
+    definition: footprint.definition,
+  });
+  return { session, sketchId };
+}
+
+// Finish Sketch of a face sketch publishes it and restores the committed
+// document. The commit registers its record with the inputs that restore
+// reads, so the restore neither re-solves it nor evaluates the history the
+// re-solve projects against (on the enclosure, 11 s per Finish Sketch).
+test("a restore of the session's own export after a new face sketch at the tail evaluates, re-solves and meshes nothing (cadara-dx2k.5)", async () => {
+  const { session, sketchId } = await enclosureSessionWithTailFaceSketch();
+  try {
+    const exported = await session.exported();
+    const sketch = exported.sketches.find(
+      (entry) => entry.sketchId === sketchId,
+    )!;
+    expect(
+      [
+        sketch.plane.support.kind,
+        exported.historyOrder.at(-1),
+        exported.cursor,
+      ],
+      "premise: the face sketch is the history tail and the cursor",
+    ).toEqual([
+      "face",
+      { kind: "sketch", sketchId },
+      { kind: "sketch", sketchId },
+    ]);
+    expect(
+      (await session.snapshot()).document.sketches.find(
+        (entry) => entry.sketchId === sketchId,
+      )?.sketch.regions.length,
+      "premise: the committed sketch has regions to mesh",
+    ).toBeGreaterThan(0);
+
+    const sketchRebuilds = spyOnSketchRebuilds(session);
+    expect(
+      {
+        ...(await restoreAndSnapshot(session, exported)),
+        sketchRebuilds: sketchRebuilds.mock.calls.length,
+      },
+      "restoring the publication of a face sketch evaluates, re-solves and meshes nothing",
+    ).toEqual({ runs: 0, bodies: [], regionFaces: 0, sketchRebuilds: 0 });
+    sketchRebuilds.mockRestore();
+    await expectColdEquivalent(session, exported, "published sketch", "exact");
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);

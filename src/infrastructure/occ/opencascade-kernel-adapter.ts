@@ -1186,6 +1186,84 @@ function createRestoredSketchHistoryFeatureItem(
 }
 
 /**
+ * Reads the RestoredSketchInputs a restore of `document` solves each sketch
+ * from, walking its history in restore order: the document's body labels and
+ * assets, then one item per earlier sketch and feature. History items are
+ * built once, and only when a sketch that reads upstream geometry asks.
+ * A restore and a commit that registers its record (cadara-dx2k.5) both read
+ * the inputs here, so the keys of the same document are equal.
+ */
+function createRestoredSketchInputsReader(
+  document: AuthoredModelDocument,
+  deferredFeatureIds: ReadonlySet<FeatureId> | undefined,
+) {
+  const sketchById = new Map(
+    document.sketches.map((sketch) => [sketch.sketchId, sketch]),
+  );
+  const featureById = new Map(
+    document.features.map((feature) => [feature.featureId, feature]),
+  );
+  // A restore evaluates only the features featureOrder names.
+  const restoredFeatureIds = new Set(document.featureOrder);
+  const lineage = createOccFeatureTopologyLineageMap(document.topologyLineage);
+  const items: (() => string)[] = [
+    () =>
+      JSON.stringify(stableJsonValue([document.bodyLabels, document.assets])),
+  ];
+  const sketchPositions = new Map<
+    SketchId,
+    {
+      sketch: AuthoredModelDocument["sketches"][number];
+      key: () => string;
+      itemsBefore: number;
+    }
+  >();
+  for (const item of createAuthoredHistoryRestoreOrder(document)) {
+    if (item.kind === "sketch") {
+      const sketch = sketchById.get(item.sketchId);
+      if (!sketch) continue;
+      let key: string | undefined;
+      const sketchKey = () =>
+        (key ??= createRestoredSketchKey(document, sketch));
+      sketchPositions.set(sketch.sketchId, {
+        sketch,
+        key: sketchKey,
+        itemsBefore: items.length,
+      });
+      items.push(sketchKey);
+      continue;
+    }
+    const feature = featureById.get(item.featureId);
+    if (!feature || !restoredFeatureIds.has(feature.featureId)) continue;
+    const deferred = deferredFeatureIds?.has(feature.featureId) ?? false;
+    items.push(() =>
+      createRestoredSketchHistoryFeatureItem(
+        document,
+        feature,
+        deferred,
+        lineage,
+      ),
+    );
+  }
+
+  const history: string[] = [];
+  return (sketchId: SketchId): RestoredSketchInputs | undefined => {
+    const position = sketchPositions.get(sketchId);
+    if (!position) return undefined;
+    if (!sketchReadsUpstreamGeometry(position.sketch)) {
+      return { sketch: position.key(), history: null };
+    }
+    while (history.length < position.itemsBefore) {
+      history.push(items[history.length]!());
+    }
+    return {
+      sketch: position.key(),
+      history: history.slice(0, position.itemsBefore),
+    };
+  };
+}
+
+/**
  * Whether `stage`, evaluated by a live runtime, holds the outputs that
  * `lineage` persists for its feature, as a restore that keeps every persisted
  * output it reproduces exactly (cadara-797) mints them.
@@ -3104,6 +3182,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const previousFeatureTopologyLineage = createOccFeatureTopologyLineageMap(
       document.topologyLineage,
     );
+    // A live stage stands for the replay's only where a cold evaluation made
+    // it and the document persists exactly its outputs.
+    const isLiveStageReusable = (feature: OccAuthoringFeatureRecord) =>
+      this.isColdPersistedStage(
+        live?.featureTopologyStages.get(feature.featureId),
+        previousFeatureTopologyLineage,
+      );
     const sketchById = new Map(
       document.sketches.map((sketch) => [sketch.sketchId, sketch]),
     );
@@ -3168,20 +3253,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           cursor: { kind: "sketch", sketchId: sketch.sketchId },
         };
       };
-      // RestoredSketchInputs history items, built only once a sketch that
-      // reads upstream geometry needs them. Body labels are not one: face
-      // placement and reference projection read body and face ids, never
-      // labels, so a body rename keeps the sketch record.
-      const sketchHistory: string[] = [];
-      const pendingSketchHistory: (() => string)[] = [
-        () => JSON.stringify(stableJsonValue(document.assets)),
-      ];
-      const readSketchHistory = () => {
-        for (const item of pendingSketchHistory.splice(0)) {
-          sketchHistory.push(item());
-        }
-        return [...sketchHistory];
-      };
+      const readRestoredSketchInputs = createRestoredSketchInputsReader(
+        document,
+        options.deferredFeatureIds,
+      );
 
       for (const item of historyOrder) {
         if (item.kind === "sketch") {
@@ -3190,14 +3265,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             continue;
           }
 
-          const sketchKey = createRestoredSketchKey(document, authoredSketch);
-          const inputs: RestoredSketchInputs = {
-            sketch: sketchKey,
-            history: sketchReadsUpstreamGeometry(authoredSketch)
-              ? readSketchHistory()
-              : null,
-          };
-          pendingSketchHistory.push(() => sketchKey);
+          const inputs = readRestoredSketchInputs(authoredSketch.sketchId)!;
           const liveSketch = liveSketchById.get(authoredSketch.sketchId);
           if (
             liveSketch &&
@@ -3270,14 +3338,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         if (feature) {
           const deferred =
             options.deferredFeatureIds?.has(feature.featureId) ?? false;
-          pendingSketchHistory.push(() =>
-            createRestoredSketchHistoryFeatureItem(
-              document,
-              feature,
-              deferred,
-              previousFeatureTopologyLineage,
-            ),
-          );
           if (feature.suppressed) {
             failedProjectionFeatures.push(createFailedFeatureRecord(feature));
             continue;
@@ -3333,26 +3393,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           cursor: document.cursor,
           deferredFeatureIds: options.deferredFeatureIds,
           onProgress: options.onProgress,
-          // A live stage stands for the replay's only where a cold
-          // evaluation made it and the document persists exactly its outputs,
-          // which a cold restore then keeps.
           resumeFrom: live
-            ? {
-                state: live,
-                isReusable: (feature) => {
-                  const stage = live.featureTopologyStages.get(
-                    feature.featureId,
-                  );
-                  return (
-                    stage?.checkpoint !== undefined &&
-                    this.coldEvaluatedCheckpoints.has(stage.checkpoint) &&
-                    isStagePersistedInLineage(
-                      stage,
-                      previousFeatureTopologyLineage,
-                    )
-                  );
-                },
-              }
+            ? { state: live, isReusable: isLiveStageReusable }
             : undefined,
         },
       );
@@ -3405,6 +3447,76 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     for (const { checkpoint } of state.featureTopologyStages.values()) {
       if (checkpoint) this.coldEvaluatedCheckpoints.add(checkpoint);
     }
+  }
+
+  /**
+   * Whether a restore of a document persisting `lineage` takes `stage` as it
+   * is: a cold evaluation made its checkpoint and the document persists
+   * exactly its outputs, which a cold restore then keeps (cadara-jxe3).
+   */
+  private isColdPersistedStage(
+    stage: OccFeatureTopologyStage | undefined,
+    lineage: ReturnType<typeof createOccFeatureTopologyLineageMap>,
+  ) {
+    return (
+      stage?.checkpoint !== undefined &&
+      this.coldEvaluatedCheckpoints.has(stage.checkpoint) &&
+      isStagePersistedInLineage(stage, lineage)
+    );
+  }
+
+  /**
+   * The publication of a commit restores the document it produced
+   * (cadara-zs79). Registers `record` with the inputs that restore reads, so
+   * it reuses the record as one it solved itself. A sketch that reads no
+   * upstream geometry solves the same anywhere. Otherwise the commit solved
+   * against the restore's projection state only when the sketch is the
+   * cursor (so the applied features are exactly those before it), the
+   * restore resumes every one of them from this state's stages, and its face
+   * placement leaves the authored frame as it is.
+   */
+  private registerCommittedSketchInputs(
+    state: OccAuthoringState,
+    record: SketchSnapshotRecord,
+  ) {
+    const document = createAuthoredModelDocumentFromAuthoringState(state);
+    const inputs = createRestoredSketchInputsReader(
+      document,
+      undefined,
+    )(record.sketchId);
+    if (!inputs) return;
+    if (inputs.history !== null) {
+      if (
+        state.cursor.kind !== "sketch" ||
+        state.cursor.sketchId !== record.sketchId
+      ) {
+        return;
+      }
+      const lineage = createOccFeatureTopologyLineageMap(
+        document.topologyLineage,
+      );
+      const resumable = getAppliedFeatures(
+        state.features,
+        state.cursor,
+        state.historyOrder,
+      ).every((feature) =>
+        this.isColdPersistedStage(
+          state.featureTopologyStages.get(feature.featureId),
+          lineage,
+        ),
+      );
+      if (!resumable) return;
+      const authored = document.sketches.find(
+        (sketch) => sketch.sketchId === record.sketchId,
+      )!;
+      const placed = this.resolveRebuiltSketchPlane(
+        document,
+        authored.plane,
+        state,
+      );
+      if (JSON.stringify(placed) !== JSON.stringify(authored.plane)) return;
+    }
+    this.restoredSketchInputs.set(record, inputs);
   }
 
   async exportAuthoredModelDocument(
@@ -5198,29 +5310,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       derivedValidity,
       projectedReferences,
     );
-    // The publication of this commit restores the document it produced
-    // (cadara-zs79). Let that restore reuse this record as one it solved
-    // itself when no upstream geometry feeds the sketch; a face sketch's key
-    // needs the restore's own history items and is re-solved there.
-    const authoredRecord = createAuthoredSketch(snapshotRecord);
-    if (!sketchReadsUpstreamGeometry(authoredRecord)) {
-      this.restoredSketchInputs.set(snapshotRecord, {
-        sketch: createRestoredSketchKey(
-          {
-            documentId: this.documentId,
-            settings: {
-              linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
-              modelingTolerance: runtimeState.authoringState.modelingTolerance,
-              angularToleranceRadians:
-                runtimeState.authoringState.angularToleranceRadians,
-            },
-            variables: [...runtimeState.authoringState.variables],
-          },
-          authoredRecord,
-        ),
-        history: null,
-      });
-    }
     const isNewSketch = !runtimeState.authoringState.sketches.some(
       (entry) => entry.sketchId === sketchId,
     );
@@ -5260,6 +5349,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             historyOrder: nextHistoryOrder,
             cursor: nextCursor,
           });
+    this.registerCommittedSketchInputs(
+      nextAuthoringState.state,
+      snapshotRecord,
+    );
     this.replaceRuntimeState({
       authoringState: nextAuthoringState.state,
       revisionSequence: nextSequence,
