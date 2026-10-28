@@ -2872,23 +2872,33 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
     const solverAdapter = this.getSolverAdapter();
     const tolerances = createDocumentSolverTolerances(document.settings);
-    const projection = this.projectSketchReferencesFromSnapshot(
-      buildOccWorkspaceSnapshot(sourceState),
-      {
-        contractVersion: CONTRACT_VERSION,
-        solverSchemaVersion: SOLVER_SCHEMA_VERSION,
-        requestId: correlation.projectionRequestId,
-        documentId: document.documentId,
-        revisionId: document.revisionId,
-        sketchId,
-        plane: plane.frame,
-        tolerances,
-        references: definition.references.map((reference) => ({
-          referenceId: reference.referenceId,
-          reference,
-        })),
-      },
-    );
+    // A sketch without references projects nothing, so it skips the
+    // workspace snapshot, which meshes every body (~380 ms on the enclosure).
+    // A face sketch's placement reads its face from the state directly
+    // (resolveRebuiltSketchPlane above), not from the snapshot.
+    const projection: Pick<
+      ProjectSketchExternalReferencesResponse,
+      "projectedReferences" | "diagnostics"
+    > =
+      definition.references.length === 0
+        ? { projectedReferences: [], diagnostics: [] }
+        : this.projectSketchReferencesFromSnapshot(
+            buildOccWorkspaceSnapshot(sourceState),
+            {
+              contractVersion: CONTRACT_VERSION,
+              solverSchemaVersion: SOLVER_SCHEMA_VERSION,
+              requestId: correlation.projectionRequestId,
+              documentId: document.documentId,
+              revisionId: document.revisionId,
+              sketchId,
+              plane: plane.frame,
+              tolerances,
+              references: definition.references.map((reference) => ({
+                referenceId: reference.referenceId,
+                reference,
+              })),
+            },
+          );
     const validation = await solverAdapter.validateSketch({
       contractVersion: CONTRACT_VERSION,
       solverSchemaVersion: SOLVER_SCHEMA_VERSION,

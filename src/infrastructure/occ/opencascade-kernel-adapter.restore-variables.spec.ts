@@ -435,3 +435,47 @@ test("OCC restore/update rebuilds persisted expression-backed sketch and solid",
     "Variable update should keep the dependent solid feature rebuilt.",
   ).toBe(true);
 });
+
+// A restore that re-solves a sketch projects its references against a
+// workspace snapshot of the history before it, which meshes every body. A
+// sketch without references projects nothing and takes no snapshot.
+test("OCC restore re-solves a sketch without references without a reference projection (cadara-dx2k.5)", async () => {
+  const document = await new MockKernelAdapter().exportAuthoredModelDocument(
+    "doc_workspace",
+  );
+  document.features = [];
+  document.featureOrder = [];
+  document.historyOrder = document.historyOrder.filter(
+    (item) => item.kind === "sketch",
+  );
+  document.cursor = {
+    kind: "sketch",
+    sketchId: document.sketches[0]!.sketchId,
+  };
+  document.bodyLabels = [];
+  // The seed sketch's only reference is its own plane, which nothing reads.
+  for (const sketch of document.sketches) {
+    sketch.definition.referenceIds = [];
+    sketch.definition.references = [];
+  }
+  const solverAdapter = new CapturingToleranceSolverAdapter({
+    neutralCurveQueries:
+      createRecordingNeutralCurveQueryCapabilityForTest().capability,
+    revisionId: null,
+  });
+  const adapter = new CapturingProjectionOpenCascadeKernelAdapter({
+    createSolverAdapter: () => solverAdapter,
+    getOpenCascadeInstance: async () => createFakeOccWithoutKernel(),
+  });
+  try {
+    await adapter.restoreAuthoredModelDocument(document);
+    expect(
+      solverAdapter.requests.filter((request) => request.kind === "solve")
+        .length,
+      "premise: the restore re-solves every sketch",
+    ).toBe(document.sketches.length);
+    expect(adapter.projectionRequests).toEqual([]);
+  } finally {
+    adapter.dispose();
+  }
+});
