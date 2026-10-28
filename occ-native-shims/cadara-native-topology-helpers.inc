@@ -365,13 +365,29 @@ namespace {
     }
   }
 
+  // Mirrors NATIVE_TOPOLOGY_IDENTITY_* in src/infrastructure/occ/topology.ts:
+  // the mesh budget of a committed body's identity payload. A transaction's
+  // linear tolerance is its same-domain unification tolerance (the modelling
+  // tolerance, 0.001 mm), far too fine to mesh at: it was 4.4 s of a 6.4 s
+  // fillet transaction, for a mesh only used to prove every face renders.
+  const double kCadaraIdentityMeshLinearDeflection = 0.1;
+  const double kCadaraIdentityMeshAngularDeflection = 0.5;
+
+  /**
+   * `minSize` > 0 caps how short BRepMesh may make a segment. Without it the
+   * angular deflection subdivides a small-radius face (a fillet, an offset
+   * corner torus) far below the linear deflection: 2 degrees put 368k
+   * triangles on one 49 mm^2 fillet face and 64.8k on each shell torus.
+   * `minSize` <= 0 keeps OCCT's default (a tenth of the deflection).
+   */
   void CadaraAppendMeshPayload(
     std::ostringstream& out,
     const TopoDS_Shape& shape,
     const std::string& bodyId,
     const std::string& topologyToken,
     const double linearDeflection,
-    const double angularDeflection
+    const double angularDeflection,
+    const double minSize = 0.0
   ) {
     if (shape.IsNull()) {
       out
@@ -383,7 +399,15 @@ namespace {
       return;
     }
 
-    BRepMesh_IncrementalMesh mesher(shape, linearDeflection, false, angularDeflection, false);
+    IMeshTools_Parameters meshParameters;
+    meshParameters.Deflection = linearDeflection;
+    meshParameters.Angle = angularDeflection;
+    meshParameters.Relative = false;
+    meshParameters.InParallel = false;
+    if (minSize > 0.0) {
+      meshParameters.MinSize = minSize;
+    }
+    BRepMesh_IncrementalMesh mesher(shape, meshParameters);
     TopTools_IndexedMapOfShape faceMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
     const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(
@@ -696,7 +720,8 @@ namespace {
     const double linearDeflection,
     const double angularDeflection,
     const bool includeMesh,
-    const std::string& extraDiagnosticJson = ""
+    const std::string& extraDiagnosticJson = "",
+    const double meshMinSize = 0.0
   ) {
     std::ostringstream out;
     out
@@ -724,13 +749,40 @@ namespace {
 
     if (includeMesh) {
       out << ",";
-      CadaraAppendMeshPayload(out, shape, bodyId, topologyToken, linearDeflection, angularDeflection);
+      CadaraAppendMeshPayload(out, shape, bodyId, topologyToken, linearDeflection, angularDeflection, meshMinSize);
     }
 
     out << ",\"diagnostics\":";
     CadaraAppendValidationDiagnostics(out, shape, bodyId, extraDiagnosticJson);
     out << "}";
     return out.str();
+  }
+
+  /**
+   * The topology payload of a transaction's committed shape, meshed at the
+   * identity budget rather than the transaction's unification tolerance.
+   * Faces the operation kept are shared with its input and still carry the
+   * last display mesh; cleaning first keeps the payload independent of that
+   * history (BRepMesh reuses any triangulation at least as fine).
+   */
+  std::string CadaraBuildCommittedTopologyJson(
+    const TopoDS_Shape& shape,
+    const std::string& bodyId,
+    const std::string& topologyToken
+  ) {
+    if (!shape.IsNull()) {
+      BRepTools::Clean(shape, true);
+    }
+    return CadaraBuildTopologyJson(
+      shape,
+      bodyId,
+      topologyToken,
+      kCadaraIdentityMeshLinearDeflection,
+      kCadaraIdentityMeshAngularDeflection,
+      true,
+      "",
+      kCadaraIdentityMeshLinearDeflection
+    );
   }
 
   std::string CadaraBuildUnsupportedHistoryJson(
@@ -2156,7 +2208,7 @@ namespace {
     );
     return CadaraNativeFeatureTransactionResult(
       prepared.shape,
-      CadaraBuildTopologyJson(prepared.shape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildCommittedTopologyJson(prepared.shape, bodyId, topologyToken),
       CadaraBuildFeatureHistoryJson(
         builder,
         operation,
@@ -2215,7 +2267,7 @@ namespace {
     );
     return CadaraNativeFeatureTransactionResult(
       preparedShape,
-      CadaraBuildTopologyJson(preparedShape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildCommittedTopologyJson(preparedShape, bodyId, topologyToken),
       CadaraBuildFeatureHistoryJson(builder, operation, bodyId, previousTopologyToken, topologyToken, previousShape, preparedShape),
       true
     );

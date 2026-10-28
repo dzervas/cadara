@@ -10,5 +10,16 @@ public:
     const double linearDeflection,
     const double angularDeflection
   ) {
-    return CadaraBuildTopologyJson(shape, bodyId, topologyToken, linearDeflection, angularDeflection, true);
+    // Display tiers and the identity payload: no segment shorter than the
+    // linear deflection (see CadaraAppendMeshPayload).
+    return CadaraBuildTopologyJson(
+      shape,
+      bodyId,
+      topologyToken,
+      linearDeflection,
+      angularDeflection,
+      true,
+      "",
+      linearDeflection
+    );
   }

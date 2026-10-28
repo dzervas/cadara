@@ -660,6 +660,13 @@ function buildNativeTopologyPayloadForTrackedBody(
     );
   }
 
+  // Faces a feature kept are shared with the previous body and still carry
+  // whatever display tier meshed them last. BRepMesh reuses any triangulation
+  // at least as fine as the identity budget, so without this the identity
+  // payload would serialise the display mesh (10x the triangles at the fine
+  // tier) and depend on display history. Ids come from exact geometry; only
+  // the payload mesh changes. Snapshots clean and remesh before display.
+  oc.BRepTools.Clean(input.solid, true);
   const rawPayload = parseNativeShimPayloadJson(
     buildJson(
       input.solid,

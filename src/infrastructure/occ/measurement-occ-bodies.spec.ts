@@ -42,9 +42,17 @@ function exactVolume(oc: Oc, shape: Shape) {
 }
 
 function measuredVolume(oc: Oc, shape: Shape) {
-  // Native topology tracking also meshes the shape. Establish this row's fine
-  // tier before tracking, so OCC cannot reuse its coarser identity mesh.
+  const body = trackNewSolidBody(oc, {
+    bodyId: "body_measured",
+    label: "Measured body",
+    ownerFeatureId: null,
+    shape,
+  });
+  // Native topology tracking leaves its coarser identity mesh on the shape,
+  // which this snapshot's mesher would reuse. Replace it with the fine tier,
+  // as the display payload does (clean, then mesh at the tier).
   const fine = OCC_TESSELLATION_TIERS.fine;
+  oc.BRepTools.Clean(shape, true);
   const mesher = new oc.BRepMesh_IncrementalMesh_2(
     shape,
     fine.linearDeflectionModelUnits,
@@ -53,12 +61,6 @@ function measuredVolume(oc: Oc, shape: Shape) {
     false,
   );
   mesher.delete();
-  const body = trackNewSolidBody(oc, {
-    bodyId: "body_measured",
-    label: "Measured body",
-    ownerFeatureId: null,
-    shape,
-  });
   const snapshot = unpackWorkspaceSnapshotRenderMeshes(
     packWorkspaceSnapshotRenderMeshes(
       buildOccWorkspaceSnapshot(

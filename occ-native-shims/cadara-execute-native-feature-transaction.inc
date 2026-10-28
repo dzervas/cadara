@@ -15,7 +15,7 @@ public:
       linearDeflection,
       angularDeflection
     );
-    return CadaraBuildTopologyJson(preparedShape, bodyId, topologyToken, linearDeflection, angularDeflection, true);
+    return CadaraBuildCommittedTopologyJson(preparedShape, bodyId, topologyToken);
   }
 
   static std::string BuildBooleanCommittedShapePayload(
@@ -281,7 +281,7 @@ public:
 
     return CadaraNativeFeatureTransactionResult(
       prepared.shape,
-      CadaraBuildTopologyJson(prepared.shape, targetBodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildCommittedTopologyJson(prepared.shape, targetBodyId, topologyToken),
       CadaraBuildSplitFeatureHistoryJson(
         splitBuilder,
         splitBuilder,
@@ -354,7 +354,7 @@ public:
       // that single builder's history.
       return CadaraNativeFeatureTransactionResult(
         splitShape,
-        CadaraBuildTopologyJson(splitShape, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+        CadaraBuildCommittedTopologyJson(splitShape, bodyId, topologyToken),
         CadaraBuildSplitFeatureHistoryJson(
           splitBuilder,
           splitBuilder,
@@ -430,7 +430,7 @@ public:
 
     return CadaraNativeFeatureTransactionResult(
       preparedCompound,
-      CadaraBuildTopologyJson(preparedCompound, bodyId, topologyToken, linearDeflection, angularDeflection, true),
+      CadaraBuildCommittedTopologyJson(preparedCompound, bodyId, topologyToken),
       CadaraBuildSplitFeatureHistoryJson(
         cutBuilder,
         commonBuilder,

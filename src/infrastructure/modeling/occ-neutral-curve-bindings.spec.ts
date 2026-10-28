@@ -20,5 +20,13 @@ test("production custom OCC preserves neutral curve parameters, contacts and exa
   );
   expect(failures, JSON.stringify(failures, null, 2)).toEqual([]);
   expect(result.summary).toEqual({ pass: 13, error: 0 });
+  // The probe's exit status also covers the mesh budget
+  // (scripts/occ/topology-mesh-budget-conformance.mjs); its own messages say
+  // when the assets predate the shim.
+  expect(
+    result.topologyMeshBudget.cases
+      .filter((entry: { status: string }) => entry.status !== "pass")
+      .map((entry: { error: string }) => entry.error.split("\n")[0]),
+  ).toEqual([]);
   expect(probe.status, probe.stderr).toBe(0);
 }, 65_000);

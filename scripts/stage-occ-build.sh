@@ -18,6 +18,7 @@ cp \
   "$root/scripts/occ/neutral-curve-conformance.mjs" \
   "$root/scripts/occ/native-semantic-conformance.mjs" \
   "$root/scripts/occ/shape-set-checkpoint-conformance.mjs" \
+  "$root/scripts/occ/topology-mesh-budget-conformance.mjs" \
   "$root/scripts/occ/probe-custom-build.mjs" \
   "$root/scripts/occ/smoke-custom-build.mjs" \
   "$root/scripts/occ/native-lifetime-conformance.mjs" \

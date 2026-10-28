@@ -15,6 +15,8 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
 #include <BRepGProp.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <Geom_BezierCurve.hxx>
@@ -27,6 +29,7 @@
 #include <Geom2d_TrimmedCurve.hxx>
 #include <Geom2dAdaptor_Curve.hxx>
 #include <Geom2dInt_GInter.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <IntAna2d_AnaIntersection.hxx>
 #include <IntAna2d_IntPoint.hxx>
 #include <IntRes2d_IntersectionPoint.hxx>
