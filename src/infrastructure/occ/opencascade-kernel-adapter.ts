@@ -3169,13 +3169,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         };
       };
       // RestoredSketchInputs history items, built only once a sketch that
-      // reads upstream geometry needs them.
+      // reads upstream geometry needs them. Body labels are not one: face
+      // placement and reference projection read body and face ids, never
+      // labels, so a body rename keeps the sketch record.
       const sketchHistory: string[] = [];
       const pendingSketchHistory: (() => string)[] = [
-        () =>
-          JSON.stringify(
-            stableJsonValue([document.bodyLabels, document.assets]),
-          ),
+        () => JSON.stringify(stableJsonValue(document.assets)),
       ];
       const readSketchHistory = () => {
         for (const item of pendingSketchHistory.splice(0)) {

@@ -1178,3 +1178,55 @@ test.each(Object.keys(tailParameterEdits))(
   },
   900_000,
 );
+
+// A sketch on a face reads upstream geometry, so a restore re-solves it when
+// anything that geometry depends on changed. Body labels feed neither its
+// placement nor its projections: a peer's rename of the supporting body must
+// keep the sketch record, and with it every checkpoint after it.
+test("a restore that renames the body under a face sketch re-solves no sketch and runs no feature (cadara-dx2k.4)", async () => {
+  const { document, faceSketchId } = await enclosureWithTopFaceSketch();
+  const session = await open(document);
+  try {
+    await session.snapshot();
+    const opened = await session.exported();
+    const support = opened.sketches.find(
+      (sketch) => sketch.sketchId === faceSketchId,
+    )!.plane.support;
+    expect(support.kind, "premise: the sketch sits on a face").toBe("face");
+    const bodyId = (support as { bodyId: string }).bodyId;
+    expect(
+      opened.bodyLabels.some((label) => label.bodyId === bodyId),
+      "premise: the supporting body has a stored label",
+    ).toBe(true);
+    const peer: AuthoredModelDocument = {
+      ...opened,
+      bodyLabels: opened.bodyLabels.map((label) =>
+        label.bodyId === bodyId
+          ? { ...label, label: `${label.label} (peer)` }
+          : label,
+      ),
+    };
+    const sketchSolves = vi.spyOn(
+      session.adapter as unknown as {
+        rebuildAuthoredSketchRecord: (...args: unknown[]) => unknown;
+      },
+      "rebuildAuthoredSketchRecord",
+    );
+    const restored = await restoreAndSnapshot(session, peer);
+    expect
+      .soft(
+        { ...restored, sketchSolves: sketchSolves.mock.calls.length },
+        "a peer's rename of the supporting body re-solves and evaluates nothing",
+      )
+      .toEqual({ runs: 0, bodies: [], regionFaces: 0, sketchSolves: 0 });
+    sketchSolves.mockRestore();
+    await expectColdEquivalent(
+      session,
+      peer,
+      "peer rename of the supporting body",
+      "exact",
+    );
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
