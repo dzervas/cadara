@@ -293,16 +293,33 @@ test("a tolerance or earlier history-order change shortens the prefix or rejects
   ]);
 });
 
-test("a body rename rejects only the checkpoints holding that body", () => {
+test("a body rename keeps the prefix unless a checkpoint holding the body holds diagnostics, whose messages may name it (cadara-dx2k.4)", () => {
   const renamed = (bodyId: BodyId) =>
     new Map([...bodyLabels, [bodyId, "Renamed"]]);
+  const all = ["feature_1", "feature_2", "feature_3"];
   expect(
-    reusedFeatureIds(createBase({ bodyLabels: renamed("body_3") })),
-  ).toEqual(["feature_1", "feature_2"]);
+    reusedFeatureIds(createBase({ bodyLabels: renamed("body_1") })),
+    "Every checkpoint holds body_1; resuming relabels it.",
+  ).toEqual(all);
   expect(
     reusedFeatureIds(createBase({ bodyLabels: renamed("body_later") })),
     "A label of a body no checkpoint holds keeps the whole prefix.",
-  ).toEqual(["feature_1", "feature_2", "feature_3"]);
+  ).toEqual(all);
+  // feature_2 and feature_3's checkpoints hold a diagnostic.
+  expect(
+    reusedFeatureIds(
+      createBase({ bodyLabels: renamed("body_1") }),
+      undefined,
+      features,
+      createStages(1),
+    ),
+  ).toEqual(["feature_1"]);
+  const unlabelled = new Map(bodyLabels);
+  unlabelled.delete("body_3");
+  expect(
+    reusedFeatureIds(createBase({ bodyLabels: unlabelled })),
+    "A held body without a label in the rebuild rejects the checkpoint.",
+  ).toEqual(["feature_1", "feature_2"]);
 });
 
 test("a feature or sketch relabel keeps the prefix unless a checkpoint holds diagnostics, whose messages name them (cadara-kv69)", () => {

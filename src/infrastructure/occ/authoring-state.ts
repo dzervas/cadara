@@ -337,9 +337,14 @@ function countUnchangedCheckpointFeatures(
 /**
  * Whether a rebuild from `base` evaluates the features before and including
  * `last` in the same document context as `checkpoint`: settings, history order
- * up to `last`, the label of every body it holds (renaming one rejects this
- * checkpoint; as for renameOccAuthoringStateBody, other labels cannot change
- * its result), an appearance for every body it knew, and asset records.
+ * up to `last`, a label for every body it holds, an appearance for every body
+ * it knew, and asset records.
+ *
+ * A body label differing from the one the checkpoint holds rejects it only
+ * when the checkpoint holds diagnostics, which may name the body. Otherwise a
+ * label feeds nothing else a feature evaluates: as for
+ * renameOccAuthoringStateBody, labels derived from it entered `bodyLabels`
+ * when first evaluated, and resuming relabels the bodies to `base`'s labels.
  */
 function isCheckpointContextUnchanged(
   checkpoint: OccFeatureStageCheckpoint,
@@ -361,9 +366,13 @@ function isCheckpointContextUnchanged(
           JSON.stringify(entry) ===
           JSON.stringify(checkpoint.historyOrder[index]),
       ) &&
-    checkpoint.bodies.every(
-      (body) => base.bodyLabels.get(body.bodyId) === body.label,
-    ) &&
+    checkpoint.bodies.every((body) => {
+      const label = base.bodyLabels.get(body.bodyId);
+      return (
+        label === body.label ||
+        (label !== undefined && checkpoint.featureDiagnostics.length === 0)
+      );
+    }) &&
     [...checkpoint.bodyAppearances.keys()].every((bodyId) =>
       base.bodyAppearances.has(bodyId),
     ) &&
@@ -468,9 +477,10 @@ export function getResumableUnappliedTail(
 /**
  * Continues the rebuild `base` after its first `prefixFeatures`, which
  * `checkpoint` evaluated and whose `stages` are reused as they are. The caller
- * proves the prefix unchanged against `base`, so its bodies, labels,
- * appearances and assets are those a replay from `base` would produce; each
- * feature record takes its label from `prefixFeatures`. The
+ * proves the prefix unchanged against `base`, so its bodies, appearances and
+ * assets are those a replay from `base` would produce; each feature record
+ * takes its label from `prefixFeatures`, and each body its label from `base`
+ * (renamed in place, as renameOccAuthoringStateBody does). The
  * references are re-evaluated at `base`'s revision against
  * `previousReferenceState`, as the replay's base state does: the prefix keeps
  * its live references, and references only the dropped suffix made live are
@@ -536,7 +546,7 @@ export function resumeOccAuthoringStateFromCheckpoint(
     return feature.label === label ? feature : { ...feature, label };
   });
 
-  return {
+  const resumed: OccAuthoringState = {
     ...base,
     bodies: checkpoint.bodies,
     constructions: checkpoint.constructions,
@@ -556,6 +566,16 @@ export function resumeOccAuthoringStateFromCheckpoint(
     }),
     featureTopologyStages,
   };
+  return checkpoint.bodies.reduce((state, { bodyId, label }) => {
+    const baseLabel = base.bodyLabels.get(bodyId) ?? label;
+    return baseLabel === label
+      ? state
+      : renameOccAuthoringStateBody(state, {
+          bodyId,
+          label: baseLabel,
+          revisionId: base.revisionId,
+        });
+  }, resumed);
 }
 
 function createTailCursor(

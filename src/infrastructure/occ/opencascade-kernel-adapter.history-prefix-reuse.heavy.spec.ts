@@ -1128,3 +1128,53 @@ test.each(Object.keys(midHistoryParameterEdits))(
   },
   900_000,
 );
+
+// A peer's body rename reaches this session as a restore of the peer's
+// document. Every checkpoint after the feature that made the body holds it, so
+// the restore must take the checkpoints with the new label rather than replay
+// the history (on the enclosure, 9 s per peer rename).
+test.each(Object.keys(tailParameterEdits))(
+  "a restore that renames a body on the landing %s runs no feature and equals a cold open (cadara-dx2k.4)",
+  async (model) => {
+    const session = await open(await loadLandingModel(model));
+    try {
+      await session.snapshot();
+      const opened = await session.exported();
+      const renamed = opened.bodyLabels[0]!;
+      expect(
+        appliedFeatureIds(opened).length,
+        "premise: features after the body's own hold it",
+      ).toBeGreaterThan(1);
+      const peer: AuthoredModelDocument = {
+        ...opened,
+        bodyLabels: opened.bodyLabels.map((label) =>
+          label.bodyId === renamed.bodyId
+            ? { ...label, label: `${label.label} (peer)` }
+            : label,
+        ),
+      };
+      const restored = await restoreAndSnapshot(session, peer);
+      expect
+        .soft(restored, "a peer's body rename evaluates and meshes nothing")
+        .toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+      await expectColdEquivalent(session, peer, "peer body rename", "exact");
+
+      const undone = await restoreAndSnapshot(session, opened);
+      expect
+        .soft(
+          undone,
+          "restoring the previous label evaluates and meshes nothing",
+        )
+        .toEqual({ runs: 0, bodies: [], regionFaces: 0 });
+      await expectColdEquivalent(
+        session,
+        opened,
+        "undo of the rename",
+        "exact",
+      );
+    } finally {
+      session.adapter.dispose();
+    }
+  },
+  900_000,
+);
