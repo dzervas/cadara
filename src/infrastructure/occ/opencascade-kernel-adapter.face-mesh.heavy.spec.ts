@@ -12,6 +12,10 @@ import {
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/infrastructure/occ/native-topology-payload";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
+import {
+  buildNativeShimPayloadFromMeshBuffers,
+  type OpenCascadeNativeTopologyMeshBuffersHost,
+} from "@/infrastructure/occ/native-topology-mesh-buffers";
 import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
@@ -19,7 +23,11 @@ async function loadFixture() {
   const module = (await import("../../../public/cadara-occ.js")) as unknown as {
     default: new (
       options: Record<string, unknown>,
-    ) => Promise<OpenCascadeInstance & OpenCascadeNativeTopologyKernelHost>;
+    ) => Promise<
+      OpenCascadeInstance &
+        OpenCascadeNativeTopologyKernelHost &
+        OpenCascadeNativeTopologyMeshBuffersHost
+    >;
   };
   const oc = await new module.default({
     wasmBinary: new Uint8Array(
@@ -66,13 +74,38 @@ function triangleCoordinates(
 
 test("history-preserved landing wheel retains every face-bound triangle at startup, normal and fine", async () => {
   const { oc, adapter, request } = await loadFixture();
-  const builder = oc.CadaraBuildNativeTopologyPayload!;
-  const original = builder.BuildJson!;
+  // The display builder: read each native result as the raw payload before
+  // the adapter reads (and frees) it.
+  const builder = oc.CadaraNativeTopologyMeshBuffers!;
+  const original = builder.Build!;
   const rawByBody = new Map<string, OccNativeShimPayload>();
-  builder.BuildJson = (...args) => {
-    const json = original(...args);
-    rawByBody.set(args[1], parseNativeShimPayloadJson(json));
-    return json;
+  builder.Build = (...args) => {
+    const result = original(...args);
+    const unowned = {
+      TopologyJson: () => result.TopologyJson(),
+      NodeCount: () => result.NodeCount(),
+      TriangleCount: () => result.TriangleCount(),
+      PositionsAddress: () => result.PositionsAddress(),
+      TriangleIndicesAddress: () => result.TriangleIndicesAddress(),
+      TriangleFaceIndicesAddress: () => result.TriangleFaceIndicesAddress(),
+      delete: () => {},
+    };
+    rawByBody.set(
+      args[1],
+      buildNativeShimPayloadFromMeshBuffers(
+        {
+          CadaraNativeTopologyMeshBuffers: { Build: () => unowned },
+          get HEAPF32() {
+            return oc.HEAPF32;
+          },
+          get HEAPU32() {
+            return oc.HEAPU32;
+          },
+        },
+        ...args,
+      ),
+    );
+    return result;
   };
   try {
     for (const tier of ["startup", "normal", "fine"] as const) {
@@ -137,13 +170,38 @@ test("history-preserved landing wheel retains every face-bound triangle at start
       ).toBeGreaterThan(0);
     }
   } finally {
-    builder.BuildJson = original;
+    builder.Build = original;
+    adapter.dispose();
+  }
+}, 30_000);
+
+test("adapter snapshot rejects a mesh-buffer triangle bound to a face record the topology lacks", async () => {
+  const { oc, adapter, request } = await loadFixture();
+  const builder = oc.CadaraNativeTopologyMeshBuffers!;
+  const original = builder.Build!;
+  builder.Build = (...args) => {
+    const result = original(...args);
+    oc.HEAPU32[result.TriangleFaceIndicesAddress() / 4] = 65_535;
+    return result;
+  };
+  try {
+    adapter.setSnapshotLodTier("normal");
+    await expect(adapter.getDocumentSnapshot(request)).rejects.toThrow(
+      /references face record index 65535/,
+    );
+  } finally {
+    builder.Build = original;
     adapter.dispose();
   }
 }, 30_000);
 
 test("adapter snapshot rejects an unmatched face binding instead of dropping its triangle", async () => {
   const { oc, adapter, request } = await loadFixture();
+  // The JSON fallback carries face ids, so a binding can name an id the
+  // topology lacks; hide the mesh-buffer builder to take that path.
+  const meshBuffers = oc.CadaraNativeTopologyMeshBuffers!;
+  const meshBuffersBuild = meshBuffers.Build;
+  meshBuffers.Build = undefined;
   const builder = oc.CadaraBuildNativeTopologyPayload!;
   const original = builder.BuildJson!;
   builder.BuildJson = (...args) => {
@@ -169,6 +227,7 @@ test("adapter snapshot rejects an unmatched face binding instead of dropping its
     ).rejects.toThrow(/face_unmatched_regression/);
   } finally {
     builder.BuildJson = original;
+    meshBuffers.Build = meshBuffersBuild;
     adapter.dispose();
   }
 }, 30_000);

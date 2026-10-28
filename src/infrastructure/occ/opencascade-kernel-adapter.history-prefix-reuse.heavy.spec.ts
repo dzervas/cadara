@@ -588,19 +588,20 @@ test("snapshots after a cursor rollback it already showed, the Roll To End back,
     ),
   ) as AuthoredModelDocument;
   const session = await open(source);
-  // Bodies whose native topology payload (triangles + ids) the snapshot built.
+  // Bodies whose native topology payload (triangles + ids) the snapshot built
+  // through the display builder.
   const native = (
     (await occInstance()) as unknown as {
-      CadaraBuildNativeTopologyPayload: {
-        BuildJson: (...args: unknown[]) => string;
+      CadaraNativeTopologyMeshBuffers: {
+        Build: (...args: unknown[]) => unknown;
       };
     }
-  ).CadaraBuildNativeTopologyPayload;
-  const buildJson = native.BuildJson;
+  ).CadaraNativeTopologyMeshBuffers;
+  const build = native.Build;
   let builtBodies: string[] = [];
-  native.BuildJson = (...args: unknown[]) => {
+  native.Build = (...args: unknown[]) => {
     builtBodies.push(String(args[1]));
-    return buildJson(...args);
+    return build(...args);
   };
   let lastSnapshot: WorkspaceSnapshot | null = null;
   const snapshotBuilds = async () => {
@@ -687,7 +688,7 @@ test("snapshots after a cursor rollback it already showed, the Roll To End back,
       "deleting the tail plane resumes from the unchanged checkpoint",
     ).toEqual([]);
   } finally {
-    native.BuildJson = buildJson;
+    native.Build = build;
     session.adapter.dispose();
   }
 }, 900_000);
@@ -794,27 +795,29 @@ async function restoreAndSnapshot(
   session: Session,
   document: AuthoredModelDocument,
 ) {
+  // The snapshot's display builder (opencascade-kernel-adapter
+  // buildNativeTopologyBodyPayload).
   const native = (
     (await occInstance()) as unknown as {
-      CadaraBuildNativeTopologyPayload: {
-        BuildJson: (...args: unknown[]) => string;
+      CadaraNativeTopologyMeshBuffers: {
+        Build: (...args: unknown[]) => unknown;
       };
     }
-  ).CadaraBuildNativeTopologyPayload;
+  ).CadaraNativeTopologyMeshBuffers;
   featureRuns.count = 0;
   await session.restore(document);
   const runs = featureRuns.count;
-  const buildJson = native.BuildJson;
+  const build = native.Build;
   const bodies: string[] = [];
-  native.BuildJson = (...args: unknown[]) => {
+  native.Build = (...args: unknown[]) => {
     bodies.push(String(args[1]));
-    return buildJson(...args);
+    return build(...args);
   };
   regionFaces.count = 0;
   try {
     await session.snapshot();
   } finally {
-    native.BuildJson = buildJson;
+    native.Build = build;
   }
   return { runs, bodies: bodies.sort(), regionFaces: regionFaces.count };
 }

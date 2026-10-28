@@ -358,17 +358,24 @@ test("lifetime policy rejects a partial or altered shape-set checkpoint registry
 const meshBuffersExtension = JSON.parse(
   readFileSync("scripts/occ/topology-mesh-buffers-extension.json", "utf8"),
 ) as { abi: string[]; declaration: string; instanceEntry: string };
+const withoutMeshBuffers = declarations
+  .replace(meshBuffersExtension.declaration + "\n\n", "")
+  .replace("  " + meshBuffersExtension.instanceEntry + "\n", "");
 const withMeshBuffers =
   meshBuffersExtension.declaration +
   "\n\n" +
-  declarations.replace(
+  withoutMeshBuffers.replace(
     "export type OpenCascadeInstance = {FS: typeof FS} & {",
     "export type OpenCascadeInstance = {FS: typeof FS} & {\n  " +
       meshBuffersExtension.instanceEntry,
   );
 
 test("lifetime policy accepts declarations with or without the approved topology mesh-buffer builder", () => {
-  for (const candidate of [declarations, withMeshBuffers]) {
+  expect(
+    withoutMeshBuffers,
+    "premise: the production declarations carry the class",
+  ).not.toBe(declarations);
+  for (const candidate of [withoutMeshBuffers, withMeshBuffers]) {
     const result = checkDeclarations(candidate);
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
