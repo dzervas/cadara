@@ -16,6 +16,10 @@ import {
   type OccDisposable,
 } from "@/infrastructure/occ/memory";
 import type { OccTopologyStageOutput } from "@/infrastructure/occ/topology-stage";
+import {
+  type OccSubshapeMembership,
+  withOccSubshapeMembership,
+} from "@/infrastructure/occ/subshape-membership";
 import type {
   OccReferenceInvalidationRecord,
   OccTrackedBody,
@@ -911,26 +915,6 @@ export function isOccTopologyHistoryDeleted(
   );
 }
 
-function isExactSubshapeOfResult(
-  oc: OpenCascadeInstance,
-  result: OccShape,
-  candidate: OccShape,
-) {
-  const subshapes = new oc.TopTools_IndexedMapOfShape_1();
-  try {
-    oc.TopExp.MapShapes_1(result, candidate.ShapeType() as never, subshapes);
-    for (let index = 1; index <= subshapes.Size(); index += 1) {
-      if (subshapes.FindKey(index).IsSame(candidate)) {
-        return true;
-      }
-    }
-    return false;
-  } finally {
-    subshapes.delete();
-  }
-}
-
-
 function resolveFinalSuccessors(
   oc: OpenCascadeInstance,
   previousShape: OccShape,
@@ -938,6 +922,7 @@ function resolveFinalSuccessors(
     OpenCascadeInstance["TopTools_IndexedMapOfShape"]
   >,
   historySources: readonly OccTopologyHistorySource[],
+  membership: OccSubshapeMembership,
   includeGenerated = false,
 ) {
   // previousShape and indexed result subshapes are borrowed; only history
@@ -984,7 +969,11 @@ function resolveFinalSuccessors(
           // TopoDS_Shape.IsSame check, never a geometric match.
           if (
             historySource.resultShape &&
-            !isExactSubshapeOfResult(oc, historySource.resultShape, candidate)
+            !membership.contains(
+              historySource.resultShape,
+              candidate.ShapeType(),
+              candidate,
+            )
           ) {
             continue;
           }
@@ -1114,6 +1103,7 @@ function reconcileKind<
       OpenCascadeInstance["TopTools_IndexedMapOfShape"]
     >;
     historySources: readonly OccTopologyHistorySource[];
+    membership: OccSubshapeMembership;
     previousContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>;
     ownerFeatureId: FeatureId | null;
     previousLabelsByKey: ReadonlyMap<string, OccLabel>;
@@ -1161,6 +1151,7 @@ function reconcileKind<
       previousShape,
       input.finalShapeMap,
       input.historySources,
+      input.membership,
     );
     const selectorFinalIndexes =
       inheritedResolution.finalIndexes.length === 1 || inheritedResolution.ambiguous
@@ -1333,6 +1324,7 @@ function deriveGeneratedKindContributorIds<
       OpenCascadeInstance["TopTools_IndexedMapOfShape"]
     >;
     historySources: readonly OccTopologyHistorySource[];
+    membership: OccSubshapeMembership;
     ownerFeatureId: FeatureId | null;
     validLabels: OccLabelMap;
   },
@@ -1359,6 +1351,7 @@ function deriveGeneratedKindContributorIds<
       previousShape,
       input.finalShapeMap,
       input.historySources,
+      input.membership,
     );
     const selectorFinalIndexes =
       inheritedResolution.finalIndexes.length === 1 || inheritedResolution.ambiguous
@@ -1391,6 +1384,7 @@ function deriveGeneratedKindContributorIds<
       previousShape,
       input.finalShapeMap,
       input.historySources,
+      input.membership,
       true,
     );
     for (const index of contributorResolution.finalIndexes) {
@@ -1483,7 +1477,16 @@ function deriveGeneratedTopologyContributorsWithNaming(
 ): OccGeneratedTopologyContributorResult {
   const temporaries: OccDisposable[] = [];
   return releaseAfter(
-    () => deriveWithTemporaries(oc, input, previousNaming, temporaries),
+    () =>
+      withOccSubshapeMembership(oc, (membership) =>
+        deriveWithTemporaries(
+          oc,
+          input,
+          previousNaming,
+          temporaries,
+          membership,
+        ),
+      ),
     () => temporaries,
   );
 }
@@ -1497,6 +1500,7 @@ function deriveWithTemporaries(
   },
   previousNaming: OccTopologyNamingBodyState,
   temporaries: OccDisposable[],
+  membership: OccSubshapeMembership,
 ): OccGeneratedTopologyContributorResult {
   const validLabels = createValidLabelMap(oc, previousNaming);
   temporaries.push(validLabels);
@@ -1518,6 +1522,7 @@ function deriveWithTemporaries(
     freshShapesById: input.generated.facesById,
     finalShapeMap: faceShapeMap,
     historySources: input.historySources,
+    membership,
     ownerFeatureId: input.generated.ownerFeatureId,
     validLabels,
   });
@@ -1532,6 +1537,7 @@ function deriveWithTemporaries(
     freshShapesById: input.generated.edgesById,
     finalShapeMap: edgeShapeMap,
     historySources: input.historySources,
+    membership,
     ownerFeatureId: input.generated.ownerFeatureId,
     validLabels,
   });
@@ -1548,6 +1554,7 @@ function deriveWithTemporaries(
       freshShapesById: input.generated.verticesById,
       finalShapeMap: vertexShapeMap,
       historySources: input.historySources,
+      membership,
       ownerFeatureId: input.generated.ownerFeatureId,
       validLabels,
     },
@@ -1604,7 +1611,17 @@ export function reconcileReplacementTopology(
   let result: OccTopologyReconciliationResult;
   try {
     result = releaseAfter(
-      () => reconcileWithNaming(oc, input, previousNaming, next, temporaries),
+      () =>
+        withOccSubshapeMembership(oc, (membership) =>
+          reconcileWithNaming(
+            oc,
+            input,
+            previousNaming,
+            next,
+            temporaries,
+            membership,
+          ),
+        ),
       () => temporaries,
     );
   } catch (error) {
@@ -1658,6 +1675,7 @@ function reconcileWithNaming(
     selectorLabelsByKey: Map<string, OccLabel>;
   },
   temporaries: OccDisposable[],
+  membership: OccSubshapeMembership,
 ): OccTopologyReconciliationResult {
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
   const bodyLabel = previousNaming.bodyLabel;
@@ -1683,6 +1701,7 @@ function reconcileWithNaming(
     freshShapesById: input.replacement.facesById,
     finalShapeMap: faceShapeMap,
     historySources: input.historySources,
+    membership,
     previousContributingFeatureIdsById:
       input.previous.faceContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,
@@ -1704,6 +1723,7 @@ function reconcileWithNaming(
     freshShapesById: input.replacement.edgesById,
     finalShapeMap: edgeShapeMap,
     historySources: input.historySources,
+    membership,
     previousContributingFeatureIdsById:
       input.previous.edgeContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,
@@ -1725,6 +1745,7 @@ function reconcileWithNaming(
     freshShapesById: input.replacement.verticesById,
     finalShapeMap: vertexShapeMap,
     historySources: input.historySources,
+    membership,
     previousContributingFeatureIdsById:
       input.previous.vertexContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,

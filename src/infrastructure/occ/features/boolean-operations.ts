@@ -47,6 +47,10 @@ import {
 import { formatGeneratedProducerTopologySourceKey } from "@/infrastructure/occ/topology-stage";
 import { releaseOccObjects } from "@/infrastructure/occ/memory";
 import {
+  type OccSubshapeMembership,
+  withOccSubshapeMembership,
+} from "@/infrastructure/occ/subshape-membership";
+import {
   requireSolidBody,
   trackNewBodyResults,
   type OccFeatureExecutionContext,
@@ -404,55 +408,6 @@ function shapeTypeFor(oc: OpenCascadeInstance, kind: OccSubshapeKind) {
       : oc.TopAbs_ShapeEnum.TopAbs_VERTEX;
 }
 
-/**
- * Whether `source` is a `kind` subshape of a shape, from one indexed subshape
- * map per shape and kind, built on first use and kept until `release`. The map
- * keys by IsSame, so a subshape is in it at most once: membership is exactly
- * "one IsSame match". Mapping the whole result once per lookup made the
- * history checks of a Boolean against a many-faced body quadratic.
- */
-function createSubshapeMembership(oc: OpenCascadeInstance) {
-  type SubshapeMap = InstanceType<
-    OpenCascadeInstance["TopTools_IndexedMapOfShape"]
-  >;
-  const maps = new Map<OccShape, Map<OccSubshapeKind, SubshapeMap>>();
-  return {
-    contains(shape: OccShape, kind: OccSubshapeKind, source: OccShape) {
-      const byKind = maps.get(shape) ?? new Map<OccSubshapeKind, SubshapeMap>();
-      maps.set(shape, byKind);
-      let subshapes = byKind.get(kind);
-      if (!subshapes) {
-        subshapes = new oc.TopTools_IndexedMapOfShape_1();
-        byKind.set(kind, subshapes);
-        oc.TopExp.MapShapes_1(
-          shape,
-          shapeTypeFor(oc, kind) as never,
-          subshapes,
-        );
-      }
-      return subshapes.FindIndex(source) > 0;
-    },
-    release() {
-      releaseOccObjects(
-        [...maps.values()].flatMap((byKind) => [...byKind.values()]),
-      );
-    },
-  };
-}
-
-type OccSubshapeMembership = ReturnType<typeof createSubshapeMembership>;
-
-function releasingMembership<T>(
-  membership: OccSubshapeMembership,
-  run: () => T,
-) {
-  try {
-    return run();
-  } finally {
-    membership.release();
-  }
-}
-
 function uniqueModifiedSuccessor(
   oc: OpenCascadeInstance,
   history: OccTopologyHistorySource,
@@ -481,7 +436,7 @@ function exactStageSuccessor(input: {
   if (modified.length === 1) {
     return input.membership.contains(
       input.history.resultShape!,
-      input.kind,
+      shapeTypeFor(input.oc, input.kind),
       modified[0]!,
     )
       ? { kind: "successor" as const, shape: modified[0]! }
@@ -492,7 +447,7 @@ function exactStageSuccessor(input: {
   if (
     input.membership.contains(
       input.history.resultShape!,
-      input.kind,
+      shapeTypeFor(input.oc, input.kind),
       input.source,
     )
   ) {
@@ -547,8 +502,7 @@ export function selectBooleanResultWithCompleteHistory<
   unifiedShape: OccShape;
   unifyHistorySource: TUnifyHistory;
 }) {
-  const membership = createSubshapeMembership(input.oc);
-  const complete = releasingMembership(membership, () =>
+  const complete = withOccSubshapeMembership(input.oc, (membership) =>
     everyOperandSubshape(input.oc, input.operands, (kind, source) => {
       const raw = exactStageSuccessor({
         oc: input.oc,
@@ -567,7 +521,13 @@ export function selectBooleanResultWithCompleteHistory<
 
       const finalSuccessors: OccShape[] = [];
       for (const successor of rawSuccessors) {
-        if (!membership.contains(input.rawShape, kind, successor)) {
+        if (
+          !membership.contains(
+            input.rawShape,
+            shapeTypeFor(input.oc, kind),
+            successor,
+          )
+        ) {
           return false;
         }
         const unified = exactStageSuccessor({
@@ -648,8 +608,7 @@ function collectExactTargetSuccessors(input: {
       shape as OccShape,
     ] as [DurableRef, OccSubshapeKind, OccShape]),
   ];
-  const membership = createSubshapeMembership(input.oc);
-  return releasingMembership(membership, () => {
+  return withOccSubshapeMembership(input.oc, (membership) => {
     for (const [source, kind, initial] of sources) {
       let candidate = initial;
       let complete = true;
