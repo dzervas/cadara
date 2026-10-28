@@ -8,8 +8,8 @@ import type { Page } from "@playwright/test";
 import {
   activateTool,
   debugStateContains,
-  debugStateField,
   deleteTimelineItemsAfter,
+  finalRevisionSignal,
   findHoverPoint,
   glideOnto,
   glideToHover,
@@ -403,24 +403,11 @@ export async function prepareFeatureRow(
           await waitForInspectorClosed(page, "extrude-depth");
         });
         await waitForOccQuiet(page);
-        const revision = await debugStateField(page, "revision");
         // Reflected: the document revision the undo restores is shown.
         return timedSample(
           session,
           () => undoButton(page).click(),
-          () =>
-            waitInPage(
-              page,
-              (revision: string) =>
-                (
-                  window as unknown as {
-                    __cadaraDebug?: {
-                      getState(): { revision: string } | null;
-                    };
-                  }
-                ).__cadaraDebug?.getState()?.revision !== revision,
-              revision,
-            ),
+          await finalRevisionSignal(page),
         );
       };
     }
@@ -494,26 +481,35 @@ export async function prepareFeatureRow(
       // the model, and the viewport point where its region is hovered. A
       // body above the rectangle owns the hover, so candidate placements
       // are tried in turn (each failed sketch is deleted again), then the
-      // same after hiding the bodies that took the hover.
+      // same after hiding the bodies that took the hover. When no region
+      // is ever hovered (the large fixture's sheet bodies cover all three
+      // placements), the region is picked through the debug selection
+      // (metric `viaDebugSelect` = 1).
       const countBefore = await page.evaluate(timelineCount);
       const seen = new Map<string, number>();
+      const drawRegionSketch = async (
+        corners: (typeof AWAY_RECTANGLES)[number],
+      ) => {
+        await enterTopSketch(session, false);
+        await drawRectangle(session, false, corners);
+        await exitSketch(session);
+        await waitForOccQuiet(page);
+        const sketchId = (await page
+          .locator("button[data-history-sketch-id]")
+          .last()
+          .getAttribute("data-history-sketch-id"))!;
+        await activateTool(page, EXTRUDE_TOOL);
+        const regions = await selectableTargets(
+          page,
+          new RegExp(
+            `^${sketchId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.region_`,
+          ),
+        );
+        return regions;
+      };
       const findRegion = async () => {
         for (const corners of AWAY_RECTANGLES) {
-          await enterTopSketch(session, false);
-          await drawRectangle(session, false, corners);
-          await exitSketch(session);
-          await waitForOccQuiet(page);
-          const sketchId = (await page
-            .locator("button[data-history-sketch-id]")
-            .last()
-            .getAttribute("data-history-sketch-id"))!;
-          await activateTool(page, EXTRUDE_TOOL);
-          const regions = await selectableTargets(
-            page,
-            new RegExp(
-              `^${sketchId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.region_`,
-            ),
-          );
+          const regions = await drawRegionSketch(corners);
           const found = await findHoverPoint(
             page,
             regions,
@@ -542,18 +538,29 @@ export async function prepareFeatureRow(
         for (const body of occluding) await hideBody(page, body);
         found = await findRegion();
       }
-      if (!found)
-        return `no region of a new rectangle sketch (${AWAY_RECTANGLES.length} placements, ${occluding.length} occluding bodies hidden) is ever the hover target; hover targets seen: ${[...seen.keys()].slice(0, 6).join(", ")}`;
-      const pickAt = found;
-      const pickRegion = async () => {
-        await page.mouse.down();
-        await page.mouse.up();
-      };
+      let pickRegion: () => Promise<void>;
+      let aim: () => Promise<void>;
+      if (found) {
+        const pickAt = found;
+        aim = () => glideToHover(page, pickAt.at, pickAt.hovered);
+        pickRegion = async () => {
+          await page.mouse.down();
+          await page.mouse.up();
+        };
+      } else {
+        const [region] = await drawRegionSketch(AWAY_RECTANGLES[0]);
+        await cancelFeature(page);
+        await waitForOccQuiet(page);
+        if (!region) return "the new rectangle sketch has no selectable region";
+        aim = async () => {};
+        pickRegion = async () => void (await selectTarget(page, region));
+      }
+      const viaDebugSelect = found ? 0 : 1;
       const preview = () =>
         featureSessionContains(page, "create:extrude:previewReady");
       return async () => {
         await activateTool(page, EXTRUDE_TOOL);
-        await glideToHover(page, pickAt.at, pickAt.hovered);
+        await aim();
         if (kind === "extrudePreview") {
           const timing = await timedSample(
             session,
@@ -561,6 +568,7 @@ export async function prepareFeatureRow(
             preview,
             "none",
           );
+          timing.metrics = { viaDebugSelect };
           await assertPreviewOk(page, "extrude");
           await settleBeforeCleanup(page, timing, false);
           await cancelFeature(page);
@@ -569,7 +577,9 @@ export async function prepareFeatureRow(
         await pickRegion();
         await preview();
         await assertPreviewOk(page, "extrude");
-        return commitAndUndo(session, true);
+        const timing = await commitAndUndo(session, true);
+        timing.metrics = { viaDebugSelect };
+        return timing;
       };
     }
     case "shellPreview": {

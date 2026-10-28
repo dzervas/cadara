@@ -13,15 +13,29 @@ import {
   type CpuProfile,
 } from "../../scripts/mutation-latency-benchmark-summary.ts";
 
+const ENVELOPE_HEADER = JSON.stringify({
+  event_id: "e",
+  sent_at: "2026-10-24T00:00:00.000Z",
+});
+
 function envelope(...items: [object, object][]) {
-  return [
-    JSON.stringify({ event_id: "e", sent_at: "2026-10-24T00:00:00.000Z" }),
-    ...items.flatMap(([header, payload]) => [
-      JSON.stringify(header),
-      JSON.stringify(payload),
-    ]),
-  ].join("\n");
+  return new TextEncoder().encode(
+    [
+      ENVELOPE_HEADER,
+      ...items.flatMap(([header, payload]) => [
+        JSON.stringify(header),
+        JSON.stringify(payload),
+      ]),
+    ].join("\n"),
+  );
 }
+
+const TRANSACTION = {
+  transaction: "OCC worker renameBody",
+  start_timestamp: 1000.5,
+  timestamp: 1000.75,
+  contexts: { trace: { op: "cad.occ.worker" } },
+};
 
 describe("bench:mutation result shaping", () => {
   it("reads every transaction span of a Sentry envelope in epoch milliseconds", () => {
@@ -55,6 +69,51 @@ describe("bench:mutation result shaping", () => {
       },
       { name: "child", op: "x", startMs: 1_000_600, endMs: 1_000_700 },
     ]);
+  });
+
+  it("skips length-delimited binary items holding newlines and reads the transactions around them", () => {
+    const encoder = new TextEncoder();
+    // A replay recording: a JSON line, then zlib data (starts with "x").
+    const recording = new Uint8Array([
+      ...encoder.encode('{"segment_id":0}\n'),
+      0x78,
+      0x9c,
+      0x0a,
+      0xff,
+      0x00,
+      0x0a,
+      0x7b,
+    ]);
+    const body = new Uint8Array([
+      ...encoder.encode(`${ENVELOPE_HEADER}\n`),
+      ...encoder.encode(`${JSON.stringify({ type: "replay_event" })}\n`),
+      ...encoder.encode(`${JSON.stringify({ replay_id: "r" })}\n`),
+      ...encoder.encode(
+        `${JSON.stringify({ type: "replay_recording", length: recording.length })}\n`,
+      ),
+      ...recording,
+      ...encoder.encode("\n"),
+      ...encoder.encode(`${JSON.stringify({ type: "transaction" })}\n`),
+      ...encoder.encode(JSON.stringify(TRANSACTION)),
+    ]);
+
+    expect(parseSentryEnvelopeSpans(body)).toEqual([
+      {
+        name: "OCC worker renameBody",
+        op: "cad.occ.worker",
+        startMs: 1_000_500,
+        endMs: 1_000_750,
+      },
+    ]);
+  });
+
+  it("reads a length-delimited transaction payload", () => {
+    const payload = new TextEncoder().encode(JSON.stringify(TRANSACTION));
+    const body = new TextEncoder().encode(
+      `${ENVELOPE_HEADER}\n${JSON.stringify({ type: "transaction", length: payload.length })}\n${JSON.stringify(TRANSACTION)}`,
+    );
+
+    expect(parseSentryEnvelopeSpans(body)).toHaveLength(1);
   });
 
   it("attributes the spans overlapping a sample window, clipped to it and grouped by name", () => {

@@ -452,6 +452,50 @@ export function debugStateField(page: Page, field: string) {
   );
 }
 
+/** The machine is idle on a document revision other than `revision`. */
+const idleOnOtherRevision = (revision: string) => {
+  const state = (
+    window as unknown as {
+      __cadaraDebug?: {
+        getState(): { machineState: string; revision: string } | null;
+      };
+    }
+  ).__cadaraDebug?.getState();
+  return (
+    !!state &&
+    state.machineState.includes("idle") &&
+    state.revision !== revision
+  );
+};
+
+const revisionValue = () =>
+  String(
+    (
+      window as unknown as {
+        __cadaraDebug?: { getState(): { revision: string } | null };
+      }
+    ).__cadaraDebug?.getState()?.revision ?? "",
+  );
+
+/**
+ * Reflected signal of an act that publishes a new document revision, to be
+ * created before the act: resolves (epoch ms) to the LAST revision change
+ * once the editor is idle on a new revision and OCC has been quiet. A
+ * sketch publish lands in two revisions (the first lists no bodies, the
+ * downstream rebuild arrives seconds later), so the first new revision
+ * would end the sample early.
+ */
+export async function finalRevisionSignal(page: Page) {
+  const before = await debugStateField(page, "revision");
+  await startFrameProbe(page, revisionValue);
+  return async () => {
+    await waitInPage(page, idleOnOtherRevision, before);
+    await waitForOccQuiet(page);
+    const { changes } = await stopFrameProbe(page);
+    return changes.at(-1)!.atMs;
+  };
+}
+
 export function waitForMachine(page: Page, text: string) {
   return waitInPage(page, debugStateContains, { field: "machineState", text });
 }

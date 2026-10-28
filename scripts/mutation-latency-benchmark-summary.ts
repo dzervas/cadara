@@ -75,14 +75,38 @@ export interface CpuProfile {
  * The spans of every `transaction` item in a Sentry envelope body. The
  * product's performance telemetry starts inactive root spans, so each one
  * arrives as its own transaction (child spans are flattened in as well).
+ * Items are walked by their headers: an item header with `length` is
+ * followed by exactly that many payload bytes, which may be binary or hold
+ * newlines (a replay recording is a JSON line plus zlib data), so the body
+ * is read as bytes and only transaction payloads are parsed.
  */
-export function parseSentryEnvelopeSpans(body: string): BenchmarkSpan[] {
-  const lines = body.split("\n").filter((line) => line.trim() !== "");
+export function parseSentryEnvelopeSpans(body: Uint8Array): BenchmarkSpan[] {
+  const decoder = new TextDecoder();
+  let offset = 0;
+  const readLine = () => {
+    const end = body.indexOf(0x0a, offset);
+    const line = body.subarray(offset, end === -1 ? body.length : end);
+    offset = end === -1 ? body.length : end + 1;
+    return line;
+  };
+  // The envelope header.
+  readLine();
   const spans: BenchmarkSpan[] = [];
-  for (let index = 1; index < lines.length - 1; index += 2) {
-    const header = JSON.parse(lines[index]!) as { type?: string };
+  while (offset < body.length) {
+    const headerLine = decoder.decode(readLine());
+    if (headerLine.trim() === "") continue;
+    const header = JSON.parse(headerLine) as { type?: string; length?: number };
+    let payload: Uint8Array;
+    if (header.length === undefined) {
+      payload = readLine();
+    } else {
+      payload = body.subarray(offset, offset + header.length);
+      offset += header.length;
+      // The newline after a length-delimited payload is optional.
+      if (body[offset] === 0x0a) offset += 1;
+    }
     if (header.type !== "transaction") continue;
-    const event = JSON.parse(lines[index + 1]!) as SentryTransactionEvent;
+    const event = JSON.parse(decoder.decode(payload)) as SentryTransactionEvent;
     spans.push({
       name: event.transaction ?? "(unnamed)",
       op: event.contexts?.trace?.op ?? "",

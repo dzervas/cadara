@@ -11,6 +11,7 @@ import {
   debugStateContains,
   debugStateField,
   deleteTimelineItemsAfter,
+  finalRevisionSignal,
   findHoverPoint,
   glideClickCanvas,
   glideOnto,
@@ -18,6 +19,7 @@ import {
   historySignature,
   medianAndP95,
   now,
+  openFixture,
   partsTree,
   selectableTargets,
   settleBeforeCleanup,
@@ -214,7 +216,7 @@ export async function enterFaceSketch(
   return null;
 }
 
-/** A finished face sketch holding one rectangle; its timeline aria label. */
+/** A finished face sketch holding one rectangle; its sketch id. */
 export async function createFaceSketch(session: Session, face: string) {
   const { page } = session;
   await enterFaceSketch(session, face, false);
@@ -224,17 +226,17 @@ export async function createFaceSketch(session: Session, face: string) {
   return (await page
     .locator("button[data-history-sketch-id]")
     .last()
-    .getAttribute("aria-label"))!;
+    .getAttribute("data-history-sketch-id"))!;
 }
 
-/** Double-clicks a timeline sketch (gliding onto it first) until editing. */
-async function reopenSketch(
-  session: Session,
-  ariaLabel: string,
-  timed = false,
-) {
+/**
+ * Double-clicks a timeline sketch (gliding onto it first) until editing.
+ * Picked by sketch id: aria labels repeat (the wheel's timeline lists 22
+ * "Sketch Draft" sketches).
+ */
+async function reopenSketch(session: Session, sketchId: string, timed = false) {
   const { page } = session;
-  const entry = page.locator(`button[aria-label="${ariaLabel}"]`);
+  const entry = page.locator(`button[data-history-sketch-id="${sketchId}"]`);
   await glideOnto(page, entry);
   const act = () => entry.dblclick();
   const reflected = () => waitForMachine(page, "editingSketch");
@@ -245,11 +247,10 @@ async function reopenSketch(
   return null;
 }
 
-async function firstSketchLabel(page: Page) {
-  return page
-    .locator("button[data-history-sketch-id]")
-    .first()
-    .getAttribute("aria-label");
+async function firstSketchId(page: Page) {
+  const entries = page.locator("button[data-history-sketch-id]");
+  if ((await entries.count()) === 0) return null;
+  return entries.first().getAttribute("data-history-sketch-id");
 }
 
 /** The serialized dimensions of the open sketch's authored definition. */
@@ -268,10 +269,10 @@ const sketchDimensionsJson = () =>
 
 /**
  * The first visible dimension chip of the open sketch and a value editor:
- * `edit(deeper)` double-clicks the chip (gliding onto it) and fills its
- * value input with 10% more than the opened value (`deeper`) or the
- * opened text (an expression stays an expression), and resolves to the
- * input; Enter commits. Null when the sketch shows no dimension chip.
+ * `edit(factor)` double-clicks the chip (gliding onto it) and fills its
+ * value input with the opened value times `factor`, or the opened text
+ * for a null factor (an expression stays an expression), and resolves to
+ * the input; Enter commits. Null when the sketch shows no dimension chip.
  */
 async function prepareDimensionEdit(page: Page) {
   const chips = page.locator(DIMENSION_CHIP);
@@ -286,7 +287,7 @@ async function prepareDimensionEdit(page: Page) {
     `button[data-sketch-annotation-id="${id}"][data-sketch-annotation-kind="dimension"]`,
   );
   let original: { text: string; value: number } | null = null;
-  return async (deeper: boolean) => {
+  return async (factor: number | null) => {
     await glideOnto(page, chip);
     // The chip is replaced by the value input once double-clicked.
     const chipText = original ? "" : await chip.innerText();
@@ -308,12 +309,132 @@ async function prepareDimensionEdit(page: Page) {
       original = { text, value };
     }
     await input.fill(
-      deeper
-        ? String(Number((original.value * 1.1).toFixed(4)))
-        : original.text,
+      factor === null
+        ? original.text
+        : String(Number((original.value * factor).toFixed(4))),
     );
     return input;
   };
+}
+
+type DimensionEdit = NonNullable<
+  Awaited<ReturnType<typeof prepareDimensionEdit>>
+>;
+
+const REFRESH_FAILED = "Document refresh failed";
+
+/**
+ * The machine is idle on a document revision other than `revision`, or the
+ * document refresh failed (the revision then stays).
+ */
+const publishSettled = (revision: string) => {
+  const state = (
+    window as unknown as {
+      __cadaraDebug?: {
+        getState(): { machineState: string; revision: string } | null;
+      };
+    }
+  ).__cadaraDebug?.getState();
+  return (
+    !!state &&
+    state.machineState.includes("idle") &&
+    (state.revision !== revision ||
+      (document.body.textContent ?? "").includes("Document refresh failed"))
+  );
+};
+
+const bodyRowCount = (page: Page) =>
+  partsTree(page)
+    .locator('[role="treeitem"][data-parts-tree-target^="body:"]')
+    .count();
+
+/**
+ * Reopens the sketch, commits `edit(factor)` with Enter and publishes it
+ * (untimed); whether the rebuild kept all `bodies` without a refresh
+ * failure.
+ */
+async function publishDimensionEdit(
+  session: Session,
+  sketchId: string,
+  edit: DimensionEdit,
+  factor: number | null,
+  bodies: number,
+) {
+  const { page } = session;
+  await reopenSketch(session, sketchId);
+  const input = await edit(factor);
+  await untimedHistoryAction(page, () => input.press("Enter"));
+  await waitForOccQuiet(page);
+  const revision = await debugStateField(page, "revision");
+  await exitSketch(session);
+  await waitInPage(page, publishSettled, revision);
+  await waitForOccQuiet(page);
+  return (
+    (await bodyRowCount(page)) === bodies &&
+    (await page.getByText(REFRESH_FAILED).count()) === 0
+  );
+}
+
+/**
+ * The scale the dimension rows apply on alternate samples: x1.1, else
+ * x0.9. Each is trialled once (published, then the opened value restored)
+ * and rejected when the rebuild loses bodies or fails the document
+ * refresh. A failed refresh sticks (publishing again keeps the old
+ * revision), so the fixture is opened afresh after one. A skip reason when
+ * no scale rebuilds cleanly or the restoring second publish fails (on the
+ * large fixture every second publish of Sketch 1 does).
+ */
+async function chooseDimensionFactor(
+  session: Session,
+  sketchId: string,
+  edit: DimensionEdit,
+) {
+  const { page } = session;
+  const reopenFixture = async () => {
+    await openFixture(
+      page,
+      session.baseUrl,
+      session.fixture.name,
+      session.document,
+    );
+    await waitForOccQuiet(page);
+  };
+  const bodies = await bodyRowCount(page);
+  for (const factor of [1.1, 0.9]) {
+    if (await publishDimensionEdit(session, sketchId, edit, factor, bodies)) {
+      if (await publishDimensionEdit(session, sketchId, edit, null, bodies))
+        return factor;
+      return `a second publish of sketch ${sketchId} (restoring its dimension after x${factor}) loses bodies or fails the document refresh (cadara-b4np)`;
+    }
+    await reopenFixture();
+  }
+  return `publishing sketch ${sketchId} with its first dimension scaled by 1.1 or 0.9 loses bodies or fails the document refresh`;
+}
+
+/**
+ * Shared setup of the dimension rows: the first timeline sketch that shows
+ * a dimension chip, its first visible chip's editor and the scale that
+ * rebuilds cleanly, or a skip reason.
+ */
+async function prepareSketchDimension(session: Session) {
+  const { page } = session;
+  const sketchIds = await page
+    .locator("button[data-history-sketch-id]")
+    .evaluateAll((entries) =>
+      entries.map((entry) => entry.getAttribute("data-history-sketch-id")!),
+    );
+  if (sketchIds.length === 0) return "the timeline has no sketch";
+  for (const sketchId of sketchIds) {
+    await reopenSketch(session, sketchId);
+    const edit = await prepareDimensionEdit(page);
+    await exitSketch(session);
+    await waitForOccQuiet(page);
+    if (!edit) continue;
+    const factor = await chooseDimensionFactor(session, sketchId, edit);
+    if (typeof factor === "string") return factor;
+    return { sketchId, edit, factor };
+  }
+  return `none of the ${sketchIds.length} timeline sketches shows a dimension chip`;
 }
 
 /**
@@ -417,76 +538,50 @@ export async function prepareSketchRow(
     }
     case "sketchExitUnchanged":
     case "sketchExitUnchangedFace": {
-      let label: string | null;
+      let sketchId: string | null;
       if (kind === "sketchExitUnchanged") {
-        label = await firstSketchLabel(page);
-        if (!label) return "the timeline has no sketch";
+        sketchId = await firstSketchId(page);
+        if (!sketchId) return "the timeline has no sketch";
       } else {
         const face = await findSketchFacePoint(session);
         if (!face)
           return "no body face is hoverable with the Sketch tool armed";
-        label = await createFaceSketch(session, face);
+        sketchId = await createFaceSketch(session, face);
       }
       return async () => {
-        await reopenSketch(session, label);
+        await reopenSketch(session, sketchId);
         return (await exitSketch(session, true))!;
       };
     }
+    // The in-session Enter only re-solves the sketch (one OCC request, the
+    // revision is unchanged); finishing the sketch publishes it and
+    // rebuilds the features downstream, so the clock runs from Exit to the
+    // last new revision of that publish (settled: render-idle after it).
     case "sketchEditUpstream": {
-      const label = await firstSketchLabel(page);
-      if (!label) return "the timeline has no sketch";
-      await reopenSketch(session, label);
-      const edit = await prepareDimensionEdit(page);
-      await exitSketch(session);
-      await waitForOccQuiet(page);
-      if (!edit) return "the first sketch shows no dimension chip";
+      const dimension = await prepareSketchDimension(session);
+      if (typeof dimension === "string") return dimension;
+      const { sketchId, edit, factor } = dimension;
       return async (_session, index) => {
-        await reopenSketch(session, label);
+        await reopenSketch(session, sketchId);
         // Every other sample restores the opened value (as extrudeDepth).
-        const input = await edit(index % 2 === 0);
+        const input = await edit(index % 2 === 0 ? factor : null);
         await untimedHistoryAction(page, () => input.press("Enter"));
         await waitForOccQuiet(page);
-        const revision = await debugStateField(page, "revision");
         return timedSample(
           session,
           () => activateTool(page, EXIT_SKETCH_TOOL),
-          () =>
-            waitInPage(
-              page,
-              (revision: string) => {
-                const state = (
-                  window as unknown as {
-                    __cadaraDebug?: {
-                      getState(): {
-                        machineState: string;
-                        revision: string;
-                      } | null;
-                    };
-                  }
-                ).__cadaraDebug?.getState();
-                return (
-                  !!state &&
-                  state.machineState.includes("idle") &&
-                  state.revision !== revision
-                );
-              },
-              revision,
-            ),
+          await finalRevisionSignal(page),
         );
       };
     }
     case "sketchDimensionEdit": {
-      const label = await firstSketchLabel(page);
-      if (!label) return "the timeline has no sketch";
-      await reopenSketch(session, label);
-      const edit = await prepareDimensionEdit(page);
-      await exitSketch(session);
-      await waitForOccQuiet(page);
-      if (!edit) return "the first sketch shows no dimension chip";
+      const dimension = await prepareSketchDimension(session);
+      if (typeof dimension === "string") return dimension;
+      const { sketchId, edit, factor } = dimension;
       return async (_session, index) => {
-        await reopenSketch(session, label);
+        await reopenSketch(session, sketchId);
         // Every other sample restores the opened value (as extrudeDepth).
-        const input = await edit(index % 2 === 0);
+        const input = await edit(index % 2 === 0 ? factor : null);
         const before = await page.evaluate(sketchDimensionsJson);
         const timing = await timedSample(
           session,

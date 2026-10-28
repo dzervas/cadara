@@ -45,7 +45,8 @@
 //   Feature: extrudeDepth, depthUndo/depthRedo, featureAdd/featureDelete (a
 //   plane), cursorMove, chamfer/fillet Preview/Commit (first edge with a
 //   clean preview), extrudePreview/extrudeCommit (region of a new rectangle
-//   sketch right of the model, picked in the viewport), shellPreview,
+//   sketch right of the model, picked in the viewport, else through the
+//   debug selection: metric viaDebugSelect), shellPreview,
 //   featureReopen/featureReopenCancel/featureSuppress/featureUnsuppress/
 //   featureDeleteMid (the middle timeline feature), featureEditUndo (undo
 //   of a committed literal-depth edit; FaceSketch variant with a face
@@ -53,8 +54,11 @@
 //   Sketch: sketchCreate/sketchDraw/sketchExit (Top plane),
 //   sketchCreateOnFace/sketchExitFace (face picked in the viewport),
 //   sketchExitUnchanged (first timeline sketch reopened; Face variant),
-//   sketchEditUpstream/sketchDimensionEdit (first sketch's first visible
-//   dimension chip, +10% then restored on alternate samples),
+//   sketchEditUpstream (Exit after an untimed dimension edit: the publish
+//   rebuilds the downstream features; until idle on a new revision) and
+//   sketchDimensionEdit (the in-session Enter), both on the first visible
+//   dimension chip of the first of 4 timeline sketches that shows one,
+//   x1.1 (x0.9 when x1.1 loses bodies) then restored on alternate samples,
 //   sketchConstraintAdd (Horizontal on a sloped line), sketchEntityDelete,
 //   sketchUndo/sketchRedo (of a rectangle), sketchDragPoint (24-step drag
 //   of a rectangle corner; per-move latency in metrics).
@@ -445,9 +449,11 @@ async function createInstrumentedContext(browser: Browser): Promise<{
   });
   const telemetry: TelemetrySink = { spans: [], release: null };
   await context.route(/sentry\.io\//, async (route) => {
-    const body = route.request().postData();
+    // Bytes: length-delimited envelope items can be binary (replay).
+    const body = route.request().postDataBuffer();
     if (body) {
-      telemetry.release ??= /"release":"([^"]+)"/.exec(body)?.[1] ?? null;
+      telemetry.release ??=
+        /"release":"([^"]+)"/.exec(body.toString("utf8"))?.[1] ?? null;
       telemetry.spans.push(...parseSentryEnvelopeSpans(body));
     }
     await route.fulfill({
