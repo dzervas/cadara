@@ -1,7 +1,8 @@
 // Lane: logic (docs/testing.md).
 // Seam: the exported OpenCascadeKernelAdapter lifecycle (commitSketch, tail-append
 // createFeature join, updateFeature owner replacement, rejected createFeature and
-// evaluatePreview candidates, repeated dispose) on a real OCC instance. Runtime
+// evaluatePreview candidates, the tail preview candidate a create adopts,
+// repeated dispose) on a real OCC instance. Runtime
 // binding patches make Handle_TNaming_NamedShape deletes throw before deleting, and
 // an independent ledger records, at every TDocStd_Document delete, whether a failed
 // attribute handle of that document is still live.
@@ -19,6 +20,7 @@ import type {
 } from "@/contracts/shared/ids";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { enrichExtrudeRegionProfiles } from "@/core/modeling/region-profile-selection";
 import {
   collectOccCleanupErrors,
   OccCleanupError,
@@ -282,12 +284,35 @@ async function makeAdapterWithNamedBody() {
         definition: extrude(sketch.sketchId, regionId, 0),
       });
     },
+    /** A preview of the base extrude edited: its candidate is discarded. */
     preview() {
       return adapter.evaluatePreview({
         ...req,
         baseRevisionId: runtime().revisionId,
         previewId: "preview_gate",
+        replacesFeatureId: featureId,
         definition: extrude(sketch.sketchId, regionId, 5),
+      });
+    },
+    /** A preview of a new tail extrude: its candidate is kept for the create. */
+    tailPreview(distance: number) {
+      return adapter.evaluatePreview({
+        ...req,
+        baseRevisionId: runtime().revisionId,
+        previewId: "preview_gate_tail",
+        definition: extrude(sketch.sketchId, regionId, distance),
+      });
+    },
+    /** Enriched from the snapshot's sketches, as the modeling service does. */
+    async createTail(distance: number) {
+      const { snapshot } = await adapter.getDocumentSnapshot(req);
+      return adapter.createFeature({
+        ...req,
+        baseRevisionId: runtime().revisionId,
+        definition: enrichExtrudeRegionProfiles(
+          extrude(sketch.sketchId, regionId, distance),
+          snapshot.document.sketches,
+        ),
       });
     },
     dispose() {
@@ -619,6 +644,50 @@ test("rejected and preview candidates behind a retry that keeps surfacing new re
   expect(s.ledger.unsafeDeletes([s.borrowed, ...candidateDocuments])).toEqual(
     [],
   );
+  expect(s.ledger.liveDocuments()).toEqual([]);
+  expect([...s.ledger.documentDeletes.values()].every((n) => n === 1)).toBe(
+    true,
+  );
+});
+
+// A tail preview keeps its candidate for the create of the same feature, so it
+// discards nothing; the next preview, a create of anything else and dispose
+// release it without touching the owners it shares with the runtime.
+test("a kept tail preview candidate is released by the next preview and a create of another feature, adopted by the create it previewed, and released by dispose", async () => {
+  const s = await makeAdapterWithNamedBody();
+  const keptDocuments = async (distance: number) => {
+    const before = s.ledger.documents.length;
+    const preview = await s.tailPreview(distance);
+    expect(preview.render.records.length).toBeGreaterThan(0);
+    return s.ledger.documents.slice(before).filter((d) => !d.isDeleted());
+  };
+
+  const first = await keptDocuments(5);
+  expect(first.length, "the kept candidate owns a naming document").toBe(1);
+  const second = await keptDocuments(6);
+  expect(
+    first.filter((d) => !d.isDeleted()),
+    "the next preview releases the earlier candidate",
+  ).toEqual([]);
+  const adopted = await s.createTail(6);
+  expect(adopted.revisionState.kind).toBe("accepted");
+  expect(
+    s.runtime().bodies.map((body) => body.naming?.document),
+    "the create adopts the previewed candidate's owners",
+  ).toContain(second[0]);
+
+  const third = await keptDocuments(7);
+  const other = await s.createTail(8);
+  expect(other.revisionState.kind).toBe("accepted");
+  expect(
+    third.filter((d) => !d.isDeleted()),
+    "a create of another definition releases the candidate",
+  ).toEqual([]);
+  const last = await keptDocuments(9);
+  expect(last.length).toBe(1);
+
+  expect(s.dispose()).toBeUndefined();
+  expect(s.ledger.unsafeDeletes([s.borrowed])).toEqual([]);
   expect(s.ledger.liveDocuments()).toEqual([]);
   expect([...s.ledger.documentDeletes.values()].every((n) => n === 1)).toBe(
     true,

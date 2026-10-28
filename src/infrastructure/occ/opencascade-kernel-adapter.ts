@@ -91,6 +91,7 @@ import {
 import { resolveSketchDimensionValues } from "@/core/modeling/sketch-dimension-expressions";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import { resolveFeatureDefinitionValues } from "@/core/modeling/feature-value-expressions";
+import { enrichExtrudeRegionProfiles } from "@/core/modeling/region-profile-selection";
 import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
@@ -1416,6 +1417,30 @@ function allocateFeatureId(
   return `feature_${kind}-${maxOrdinal + 1}` as FeatureId;
 }
 
+/** The record a create of `definition` adds to `state`. */
+function createNewFeatureRecord(
+  state: OccAuthoringState,
+  definition: FeatureDefinition,
+  label?: string,
+): OccAuthoringFeatureRecord {
+  return {
+    featureId: allocateFeatureId(state, definition.kind),
+    label:
+      label ??
+      `${capitalizeFeatureKind(definition.kind)} ${featureOrdinalForLabel(state, definition.kind)}`,
+    suppressed: false,
+    definition,
+  };
+}
+
+/** Whether a feature inserted at `insertionIndex` becomes the history tail. */
+function isTailAppend(state: OccAuthoringState, insertionIndex: number) {
+  return (
+    insertionIndex === state.features.length &&
+    isCursorAtDocumentHistoryTail(state)
+  );
+}
+
 function allocateDocumentVariableId(state: OccAuthoringState) {
   let maxOrdinal = 0;
 
@@ -2246,6 +2271,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly completedCleanupRetries = new WeakSet<() => void>();
   /** Discarded owner graphs waiting for a fully successful retry pass, oldest first. */
   private readonly parkedOwnerGraphs: OccOwnerGraph[] = [];
+  /**
+   * The state the last preview of a new feature at the history tail
+   * evaluated, under the record a create of it commits (appendTailFeature).
+   * A create of that same record on the same runtime adopts it instead of
+   * running the feature again. It shares the runtime's owners, so it is
+   * released before the runtime it was built on is replaced.
+   */
+  private tailPreviewHandoff: {
+    runtimeState: OccKernelRuntimeState;
+    feature: OccAuthoringFeatureRecord;
+    state: OccAuthoringState;
+  } | null = null;
   private workerRestoredDocument: WorkerRestoredAuthoredDocument | null = null;
   private snapshotLodTierId: OccTessellationTierId = "startup";
   /** The latest `refineSnapshotLod` call; older ones are superseded. */
@@ -2387,6 +2424,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
   }
 
+  /**
+   * Drops the kept tail preview, releasing its owners unless it is `adopted`
+   * (the state a commit takes over). It shares owners with the runtime it was
+   * built on, which is still the current runtime: every runtime replacement
+   * drops it first.
+   */
+  private releaseTailPreviewHandoff(adopted?: OccAuthoringState) {
+    const handoff = this.tailPreviewHandoff;
+    this.tailPreviewHandoff = null;
+    if (!handoff || handoff.state === adopted) return;
+    this.releaseDiscardedState(handoff.state, [
+      handoff.runtimeState.authoringState,
+      ...(adopted ? [adopted] : []),
+    ]);
+  }
+
   /** Runs every retry pending at call time once; retries they surface wait for the next pass. */
   private runCleanupRetryPass() {
     const errors: unknown[] = [];
@@ -2440,6 +2493,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   private releaseDisposedOwnership() {
     const runtimeState = this.runtimeState;
+    // Parked ahead of the runtime, so its release still protects the owners
+    // it shares with that runtime.
+    if (this.tailPreviewHandoff) {
+      this.parkedOwnerGraphs.push(this.tailPreviewHandoff.state);
+      this.tailPreviewHandoff = null;
+    }
     this.runtimeState = null;
     this.initializationPromise = null;
     let errors: unknown[];
@@ -3691,6 +3750,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   }
 
   private replaceRuntimeState(runtimeState: OccKernelRuntimeState) {
+    this.releaseTailPreviewHandoff(runtimeState.authoringState);
     if (this.disposed) {
       try {
         this.releaseDiscardedState(runtimeState.authoringState, []);
@@ -3747,15 +3807,21 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       topologies.add(body.topology);
       heldTopologiesByShape.set(body.shape, topologies);
     };
-    state.bodies.forEach(hold);
-    state.baseBodies.forEach(hold);
-    for (const stages of [
-      state.featureTopologyStages,
-      state.previousFeatureTopologyStages,
-    ]) {
-      for (const stage of stages.values()) {
-        for (const output of stage.outputs.values()) hold(output.body);
-        stage.checkpoint?.bodies.forEach(hold);
+    // A kept tail preview's bodies are those its commit shows.
+    const heldStates = this.tailPreviewHandoff
+      ? [state, this.tailPreviewHandoff.state]
+      : [state];
+    for (const held of heldStates) {
+      held.bodies.forEach(hold);
+      held.baseBodies.forEach(hold);
+      for (const stages of [
+        held.featureTopologyStages,
+        held.previousFeatureTopologyStages,
+      ]) {
+        for (const stage of stages.values()) {
+          for (const output of stage.outputs.values()) hold(output.body);
+          stage.checkpoint?.bodies.forEach(hold);
+        }
       }
     }
 
@@ -3772,6 +3838,32 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   private getCurrentRevisionId(runtimeState: OccKernelRuntimeState) {
     return runtimeState.authoringState.revisionId;
+  }
+
+  /**
+   * The state a create of `feature` at the history tail (isTailAppend)
+   * commits at the next revision: the feature runs once on the runtime state,
+   * nothing before it is rebuilt. Throws what the feature throws.
+   */
+  private appendTailFeature(
+    runtimeState: OccKernelRuntimeState,
+    feature: OccAuthoringFeatureRecord,
+  ): OccAuthoringState {
+    const cursor = { kind: "feature", featureId: feature.featureId } as const;
+    const appended = applyOccFeatureToAuthoringState(
+      {
+        ...runtimeState.authoringState,
+        revisionId: createRevisionId(runtimeState.revisionSequence + 1),
+        historyOrder: insertDocumentHistoryOrderEntryIntoOrder(
+          runtimeState.authoringState.historyOrder,
+          runtimeState.authoringState.cursor,
+          cursor,
+        ),
+        cursor,
+      },
+      feature,
+    );
+    return { ...appended, cursor };
   }
 
   private buildNextAuthoringState(
@@ -5530,14 +5622,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       };
     }
 
-    const feature: OccAuthoringFeatureRecord = {
-      featureId,
-      label:
-        request.featureLabel ??
-        `${capitalizeFeatureKind(request.definition.kind)} ${featureOrdinalForLabel(runtimeState.authoringState, request.definition.kind)}`,
-      suppressed: false,
-      definition: request.definition,
-    };
+    const feature = createNewFeatureRecord(
+      runtimeState.authoringState,
+      request.definition,
+      request.featureLabel,
+    );
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
     const insertionIndex = getCursorInsertionIndex(
@@ -5558,24 +5647,29 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       { kind: "feature", featureId },
     );
     const nextCursor = { kind: "feature", featureId } as const;
+    const handoff = this.tailPreviewHandoff;
+    const previewed =
+      handoff?.runtimeState === runtimeState &&
+      handoff.feature.featureId === feature.featureId &&
+      handoff.feature.label === feature.label &&
+      JSON.stringify(handoff.feature.definition) ===
+        JSON.stringify(feature.definition)
+        ? handoff.state
+        : undefined;
+    this.releaseTailPreviewHandoff(previewed);
     let nextAuthoringState: RebuildAttempt;
-    if (
-      insertionIndex === runtimeState.authoringState.features.length &&
-      isCursorAtDocumentHistoryTail(runtimeState.authoringState)
-    ) {
+    if (previewed) {
+      nextAuthoringState = {
+        ok: true,
+        state: previewed,
+        partial: false,
+        diagnostics: [],
+      };
+    } else if (isTailAppend(runtimeState.authoringState, insertionIndex)) {
       try {
-        const appended = applyOccFeatureToAuthoringState(
-          {
-            ...runtimeState.authoringState,
-            revisionId: nextRevisionId,
-            historyOrder: nextHistoryOrder,
-            cursor: nextCursor,
-          },
-          feature,
-        );
         nextAuthoringState = {
           ok: true,
-          state: { ...appended, cursor: nextCursor },
+          state: this.appendTailFeature(runtimeState, feature),
           partial: false,
           diagnostics: [],
         };
@@ -7241,25 +7335,34 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             runtimeState.authoringState.features,
             runtimeState.authoringState.historyOrder,
           );
+    this.releaseTailPreviewHandoff();
+    // A new feature at the history tail is evaluated as the record its create
+    // commits, with the region profiles that create stores (the modeling
+    // service enriches them), the way that create evaluates it, so the create
+    // adopts this state instead of running the feature again. A sweep is
+    // still previewed under the preview id: native payload validation is
+    // skipped for bodies named body_feature_sweep-* (defersPre8Validation in
+    // topology.ts), so under the create's record an invalid sweep would
+    // preview as accepted (cadara-rk64).
+    const tailFeature =
+      !replacedFeature &&
+      request.definition.kind !== "sweep" &&
+      isTailAppend(runtimeState.authoringState, previewInsertionIndex)
+        ? createNewFeatureRecord(
+            runtimeState.authoringState,
+            enrichExtrudeRegionProfiles(
+              request.definition,
+              runtimeState.authoringState.sketches,
+            ),
+          )
+        : null;
+    const evaluatedFeatureId = tailFeature?.featureId ?? previewFeatureId;
     const previewFeatures = [...runtimeState.authoringState.features];
     previewFeatures.splice(
       previewInsertionIndex,
       replacedFeature ? 1 : 0,
-      previewFeature,
+      tailFeature ?? previewFeature,
     );
-    const previewHistoryOrder = replacedFeature
-      ? runtimeState.authoringState.historyOrder.map((item) =>
-          item.kind === "feature" &&
-          item.featureId === replacedFeature.featureId
-            ? { kind: "feature" as const, featureId: previewFeatureId }
-            : item,
-        )
-      : insertDocumentHistoryOrderEntryAfterCursor(
-          buildOccWorkspaceSnapshot(runtimeState.authoringState).presentation
-            .documentHistory,
-          runtimeState.authoringState.cursor,
-          { kind: "feature", featureId: previewFeatureId },
-        );
 
     await this.preResolveBakedBodyAssets(
       runtimeState.authoringState,
@@ -7267,13 +7370,28 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
 
     let previewState: OccAuthoringState | null = null;
+    let keptForCommit = false;
     try {
-      previewState = this.buildNextAuthoringState(runtimeState, {
-        revisionId: currentRevisionId,
-        features: previewFeatures,
-        historyOrder: previewHistoryOrder,
-        cursor: { kind: "feature", featureId: previewFeatureId },
-      });
+      previewState = tailFeature
+        ? this.appendTailFeature(runtimeState, tailFeature)
+        : this.buildNextAuthoringState(runtimeState, {
+            revisionId: currentRevisionId,
+            features: previewFeatures,
+            historyOrder: replacedFeature
+              ? runtimeState.authoringState.historyOrder.map((item) =>
+                  item.kind === "feature" &&
+                  item.featureId === replacedFeature.featureId
+                    ? { kind: "feature" as const, featureId: previewFeatureId }
+                    : item,
+                )
+              : insertDocumentHistoryOrderEntryAfterCursor(
+                  buildOccWorkspaceSnapshot(runtimeState.authoringState)
+                    .presentation.documentHistory,
+                  runtimeState.authoringState.cursor,
+                  { kind: "feature", featureId: previewFeatureId },
+                ),
+            cursor: { kind: "feature", featureId: previewFeatureId },
+          });
       // Use the display-read builder: it clears inherited OCC triangulations
       // before meshing at the viewport tier, including tighter angular budgets.
       const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
@@ -7311,6 +7429,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
               ),
               ...previewDiagnostics,
             ];
+      const records = buildPreviewRenderRecords(
+        snapshot.document.render.records,
+        evaluatedFeatureId,
+      );
+      keptForCommit = tailFeature !== null;
 
       return {
         contractVersion: CONTRACT_VERSION,
@@ -7330,10 +7453,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
               },
         render: {
           schemaVersion: snapshot.document.render.schemaVersion,
-          records: buildPreviewRenderRecords(
-            snapshot.document.render.records,
-            previewFeatureId,
-          ),
+          records,
         },
         diagnostics,
       };
@@ -7408,8 +7528,15 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     } finally {
+      if (keptForCommit) {
+        this.tailPreviewHandoff = {
+          runtimeState,
+          feature: tailFeature!,
+          state: previewState!,
+        };
+      }
       this.pruneNativeTopologyBodyPayloadCache(runtimeState.authoringState);
-      if (previewState) {
+      if (previewState && !keptForCommit) {
         this.releaseDiscardedState(previewState, [runtimeState.authoringState]);
       }
     }

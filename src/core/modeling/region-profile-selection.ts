@@ -99,7 +99,10 @@ export function enrichRegionProfile(
     : ref;
 }
 
-/** Called only for authored create/update mutations, never read or rebuild. */
+/**
+ * Called for authored create/update mutations, and for the tail preview whose
+ * evaluation a create adopts; never on read or rebuild.
+ */
 export function enrichExtrudeRegionProfiles(
   definition: FeatureDefinition,
   sketches: readonly SketchSnapshotRecord[],
