@@ -261,8 +261,15 @@ interface OpenCascadeKernelAdapterOptions {
   assetResolver?: GeometryAssetResolver;
   documentId?: DocumentId;
   tolerances?: SolverTolerancePolicy;
-  /** cadara-3sq.6: evaluated checkpoints for complete document opens (main thread only). */
+  /** cadara-3sq.6: evaluated checkpoints for complete document opens (the evaluating adapter, never a worker client's). */
   modelCheckpoints?: ModelCheckpointStore;
+  /**
+   * When a cold open's checkpoint is encoded and written. "inline" (the
+   * default) publishes before the open returns; "deferred" holds it until
+   * publishPendingModelCheckpoint, so a caller that renders the open first
+   * (the browser worker) keeps that work off the open's critical path.
+   */
+  modelCheckpointPublication?: "inline" | "deferred";
 }
 
 interface OccKernelRuntimeState {
@@ -2217,6 +2224,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
   private readonly initialDocumentSettings: AuthoredModelDocument["settings"];
   private readonly neutralCurveQueries: NeutralCurveQueryCapability;
   private readonly modelCheckpoints: ModelCheckpointStore | null;
+  private readonly modelCheckpointPublication: "inline" | "deferred";
+  /** A deferred cold open's checkpoint, publishable while its state is the runtime's. */
+  private pendingModelCheckpoint: {
+    key: string;
+    state: OccAuthoringState;
+    partial: boolean;
+  } | null = null;
 
   private initializationPromise: Promise<OccKernelRuntimeState> | null = null;
   private runtimeState: OccKernelRuntimeState | null = null;
@@ -2267,6 +2281,8 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     this.assetResolver = options.assetResolver;
     this.documentId = options.documentId ?? OCC_KERNEL_DOCUMENT_ID;
     this.modelCheckpoints = options.modelCheckpoints ?? null;
+    this.modelCheckpointPublication =
+      options.modelCheckpointPublication ?? "inline";
     const initialTolerances = options.tolerances ?? DEFAULT_SOLVER_TOLERANCES;
     this.initialDocumentSettings = {
       linearUnit: OCC_KERNEL_SETTINGS.linearUnit,
@@ -2492,6 +2508,31 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         options,
       ),
     );
+  }
+
+  /**
+   * cadara-dx2k.6: publishes the checkpoint a deferred cold open left, if its
+   * state is still the runtime's (a later change released or replaced it,
+   * and only the open's own evaluation may be cached).
+   */
+  publishPendingModelCheckpoint() {
+    return this.runSerializedOperation(async () => {
+      const pending = this.pendingModelCheckpoint;
+      this.pendingModelCheckpoint = null;
+      const store = this.modelCheckpoints;
+      if (!pending || !store) return;
+      if (this.runtimeState?.authoringState !== pending.state) {
+        store.report({ kind: "bypass", reason: "superseded-before-publication" });
+        return;
+      }
+      await publishModelCheckpoint({
+        store,
+        key: pending.key,
+        state: pending.state,
+        partial: pending.partial,
+        exportDocument: createAuthoredModelDocumentFromAuthoringState,
+      });
+    });
   }
 
   validateAuthoredModelDocument(
@@ -3025,10 +3066,21 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
     this.workerRestoredDocument = null;
 
+    const restoreAssetResolver =
+      assetResolver ?? createInMemoryGeometryAssetResolver(assets);
+    if (options.openStoredDocument) {
+      await this.restoreCheckpointedAuthoredModelDocument(
+        validatedDocument,
+        diagnostics,
+        restoreAssetResolver,
+        options.onProgress,
+      );
+      return;
+    }
     await this.restoreAuthoredModelDocumentOnMainThread(
       validatedDocument,
       diagnostics,
-      assetResolver ?? createInMemoryGeometryAssetResolver(assets),
+      restoreAssetResolver,
       { onProgress: options.onProgress },
     );
   }
@@ -3074,21 +3126,25 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
 
   /**
    * cadara-3sq.6: validation is the complete open of an imported document (the
-   * service persists its export as the accepted basis). It adopts a verified
-   * model checkpoint instead of replaying the history, and a complete cold
-   * restore publishes one.
+   * service persists its export as the accepted basis), and so is a stored
+   * document's first restore in a session (cadara-dx2k.6). It adopts a
+   * verified model checkpoint instead of replaying the history, and a
+   * complete cold restore publishes one.
    */
   private async restoreCheckpointedAuthoredModelDocument(
     document: AuthoredModelDocument,
     diagnostics: readonly ModelingDiagnostic[],
     assetResolver: GeometryAssetResolver | undefined,
+    onProgress?: AuthoredDocumentRestoreOptions["onProgress"],
   ) {
+    this.pendingModelCheckpoint = null;
     const store = this.modelCheckpoints;
     if (!store) {
       await this.restoreAuthoredModelDocumentOnMainThread(
         document,
         diagnostics,
         assetResolver,
+        { onProgress },
       );
       return;
     }
@@ -3107,6 +3163,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         document,
         diagnostics,
         assetResolver,
+        { onProgress },
       );
       return;
     }
@@ -3148,9 +3205,18 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         onRebuilt: (rebuild) => {
           partial = rebuild.partial;
         },
+        onProgress,
         resumeRuntimePrefix: false,
       },
     );
+    if (this.modelCheckpointPublication === "deferred") {
+      this.pendingModelCheckpoint = {
+        key: checkpointKey.key,
+        state: restored.authoringState,
+        partial,
+      };
+      return;
+    }
     await publishModelCheckpoint({
       store,
       key: checkpointKey.key,

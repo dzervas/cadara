@@ -1553,7 +1553,9 @@ export function createModelingService(
       await restoreAuthoredRepositoryDocument(
         loadResult.document,
         loadResult.diagnostics,
-        [], { onProgress: initialLoadingStatus.setProgress }, loadResult.metadata,
+        [],
+        { onProgress: initialLoadingStatus.setProgress, openStoredDocument: true },
+        loadResult.metadata,
       );
       // Snapshot and mesh preparation follow without a measured total.
       initialLoadingStatus.setProgress(null);

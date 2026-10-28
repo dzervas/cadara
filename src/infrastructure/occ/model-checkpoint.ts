@@ -123,14 +123,35 @@ const AUTHORED_INPUT_FIELDS = [
   "embeddedBinaryAssets",
 ] as const satisfies readonly (keyof AuthoredModelDocument)[];
 
+/**
+ * A state keeps its features in featureOrder, and the open evaluates them by
+ * id in that order, while the document repository stores them as a map keyed
+ * by featureId whose order is not durable (authored-action-history.ts): a
+ * reloaded document lists them in key order. Only which features exist is an
+ * authored input, not their position in the list.
+ */
+function authoredInputValue(
+  document: AuthoredModelDocument,
+  field: (typeof AUTHORED_INPUT_FIELDS)[number],
+) {
+  if (field !== "features") return document[field];
+  return [...document.features].sort((left, right) =>
+    left.featureId < right.featureId
+      ? -1
+      : left.featureId > right.featureId
+        ? 1
+        : 0,
+  );
+}
+
 function differingAuthoredInputs(
   exported: AuthoredModelDocument,
   document: AuthoredModelDocument,
 ) {
   return AUTHORED_INPUT_FIELDS.filter(
     (field) =>
-      JSON.stringify(stableJsonValue(exported[field])) !==
-      JSON.stringify(stableJsonValue(document[field])),
+      JSON.stringify(stableJsonValue(authoredInputValue(exported, field))) !==
+      JSON.stringify(stableJsonValue(authoredInputValue(document, field))),
   );
 }
 

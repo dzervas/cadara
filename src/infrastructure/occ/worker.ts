@@ -36,6 +36,11 @@ import {
 } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createOpenCascadeNeutralCurveQueryCapability } from "@/infrastructure/occ/neutral-curve-query";
+import {
+  createIndexedDbModelCheckpointStore,
+  fingerprintBrowserModelCheckpointRuntime,
+} from "@/infrastructure/persistence/indexeddb-model-checkpoint-store";
+import type { ModelCheckpointEvent } from "@/infrastructure/persistence/model-checkpoint-store";
 
 let openCascadePromise: Promise<OpenCascadeInstance> | null = null;
 let lastAssets: OccWorkerAssetConfig | undefined;
@@ -120,6 +125,59 @@ async function probeWorkerNativeTopologyKernelCapabilities(
   return probeOpenCascadeNativeTopologyKernelCapabilities(oc);
 }
 
+function reportModelCheckpointEvent(event: ModelCheckpointEvent) {
+  // The cache only ever falls back to the cold open; a failing cache is a
+  // warning for whoever debugs a slow reload, never a modelling failure.
+  if (event.kind === "degraded") console.warn("[model-checkpoint]", event);
+  else console.debug("[model-checkpoint]", event);
+}
+
+/**
+ * cadara-dx2k.6: evaluated checkpoints of stored-document opens, shared by
+ * every document of this worker. A dev server's worker is no content-named
+ * bundle (its modules change under the same URL), so it never caches.
+ */
+const modelCheckpoints = createIndexedDbModelCheckpointStore({
+  fingerprint: () =>
+    import.meta.env.DEV
+      ? Promise.resolve(null)
+      : fingerprintBrowserModelCheckpointRuntime({
+          workerScriptPath: self.location.pathname,
+          userAgent: navigator.userAgent,
+        }),
+  report: reportModelCheckpointEvent,
+});
+
+/**
+ * A cold open's checkpoint is encoded and stored once the open's snapshot was
+ * answered, as its own entry at the tail of the serial queue (after the
+ * requests already delivered), so neither the open nor its first render waits
+ * for it.
+ */
+function publishPendingModelCheckpointAfterSnapshot(documentId: DocumentId) {
+  setTimeout(() => {
+    requestQueue = requestQueue
+      .then(() => {
+        const adapter = adapters.get(documentId);
+        return runtimeAborted || !adapter
+          ? undefined
+          : adapter.publishPendingModelCheckpoint();
+      })
+      .catch((error: unknown) => {
+        if (isOccRuntimeAbort(error)) {
+          reportRuntimeAbort(error);
+          return;
+        }
+        // The open already succeeded; only its cache entry is lost.
+        modelCheckpoints.report({
+          kind: "degraded",
+          key: null,
+          reason: `publication-failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
+  }, 0);
+}
+
 /** The worker's own OCC query capability, answering main-thread query requests. */
 const workerNeutralCurveQueries = createOpenCascadeNeutralCurveQueryCapability(
   () => getWorkerOpenCascadeInstance(),
@@ -142,6 +200,8 @@ function getWorkerAdapter(documentId: DocumentId) {
     getOpenCascadeInstance: () => getWorkerOpenCascadeInstance(),
     initialSnapshotRequiresRuntime: true,
     assetResolver: createWorkerAssetResolver(undefined),
+    modelCheckpoints,
+    modelCheckpointPublication: "deferred",
   });
   adapters.set(documentId, adapter);
 
@@ -493,6 +553,9 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
             },
           },
           snapshotResult.transferList,
+        );
+        publishPendingModelCheckpointAfterSnapshot(
+          request.operation.request.documentId,
         );
         return;
       }

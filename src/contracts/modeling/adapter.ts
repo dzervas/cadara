@@ -108,6 +108,15 @@ export interface AuthoredDocumentRestoreOptions {
    */
   newRevision?: boolean;
   /**
+   * The restore opens a stored document in a session that has not evaluated
+   * it yet (the repository's initial load), rather than changing the open
+   * one. Such an open is a complete evaluation of exactly this content, so a
+   * kernel with a model checkpoint store may adopt a verified checkpoint of it
+   * instead of replaying the history, and caches its cold evaluation for the
+   * next open.
+   */
+  openStoredDocument?: boolean;
+  /**
    * Receives the feature rebuild's progress while this restore runs. Stays on
    * the caller's side of a worker boundary; never posted to the worker.
    */

@@ -63,11 +63,21 @@ function memoryStore(compatibility = "test-build") {
   return { store, entries, events };
 }
 
+/**
+ * How a session opens the document: an import's validation (CLI), the
+ * repository's initial load in the browser worker (a stored-document restore
+ * whose checkpoint is published after its first snapshot), or an ordinary
+ * restore without a store (the open before cadara-dx2k.6).
+ */
+type OpenEntry = "validate" | "openStoredDocument" | "plainRestore";
+
 let occ: Promise<OpenCascadeInstance> | null = null;
 async function open(
   source: AuthoredModelDocument,
   documentId: string,
   store: ModelCheckpointStore,
+  entry: OpenEntry = "validate",
+  { publishAfterSnapshot = true } = {},
 ) {
   occ ??= (async () => {
     const module =
@@ -91,7 +101,9 @@ async function open(
   const adapter = new OpenCascadeKernelAdapter({
     documentId: document.documentId,
     getOpenCascadeInstance: () => instance,
-    modelCheckpoints: store,
+    modelCheckpoints: entry === "plainRestore" ? undefined : store,
+    modelCheckpointPublication:
+      entry === "openStoredDocument" ? "deferred" : "inline",
     createSolverAdapter: (revisionId) =>
       new SketchConstraintSolverAdapter({
         revisionId,
@@ -100,13 +112,25 @@ async function open(
           createCertifiedNeutralCurveQueryCapabilityForTest(),
       }),
   });
-  featureRuns.count = 0;
-  await adapter.validateAuthoredModelDocument(document);
-  const runs = featureRuns.count;
   const request = {
     contractVersion: CONTRACT_VERSION,
     documentId: document.documentId,
   } as const;
+  featureRuns.count = 0;
+  if (entry === "validate") {
+    await adapter.validateAuthoredModelDocument(document);
+  } else {
+    await adapter.restoreAuthoredModelDocument(document, [], undefined, {
+      openStoredDocument: entry === "openStoredDocument",
+    });
+  }
+  const runs = featureRuns.count;
+  if (entry === "openStoredDocument" && publishAfterSnapshot) {
+    // The worker's order: the open's snapshot is answered, then the
+    // checkpoint is published.
+    await adapter.getDocumentSnapshot(request);
+    await adapter.publishPendingModelCheckpoint();
+  }
   const snapshot = async () =>
     (await adapter.getDocumentSnapshot(request)).snapshot;
   const base = async () => ({
@@ -199,22 +223,43 @@ async function expectSame(
   );
 }
 
-for (const name of ["bracket", "wheel", "enclosure"]) {
-  test(`a hydrated ${name} checkpoint runs no feature and edits exactly like the cold open`, async () => {
+const OPEN_ROWS = (["validate", "openStoredDocument"] as const).flatMap(
+  (entry) =>
+    ["bracket", "wheel", "enclosure"].map((name) => ({
+      entry,
+      name,
+      // cadara-dx2k.6: openStoredDocument is the browser's reload of a
+      // repository document.
+      title:
+        entry === "validate"
+          ? "checkpoint"
+          : "stored-document open's checkpoint",
+    })),
+);
+
+for (const { entry, name, title } of OPEN_ROWS) {
+  test(`a hydrated ${name} ${title} runs no feature and edits exactly like the cold open`, async () => {
     const source = await load(name);
     const { store, entries, events } = memoryStore();
     const coldStart = performance.now();
-    const cold = await open(source, "doc_cold", store);
+    const cold = await open(source, "doc_cold", store, entry);
     evidence.push({
       name,
+      entry,
       coldOpenPlusPublishMs: performance.now() - coldStart,
     });
     expect(cold.runs, "premise: a cold open runs features").toBeGreaterThan(0);
     expect(events.map((event) => event.kind)).toEqual(["miss", "published"]);
     expect(entries.size).toBe(1);
+    if (entry === "openStoredDocument") {
+      // Caching changes nothing about the first open.
+      const plain = await open(source, "doc_warm", store, "plainRestore");
+      await expectSame(cold, plain, "first open");
+      plain.adapter.dispose();
+    }
 
     const warmStart = performance.now();
-    const warm = await open(source, "doc_warm", store);
+    const warm = await open(source, "doc_warm", store, entry);
     evidence.push({
       name,
       warmOpenMs: performance.now() - warmStart,
@@ -387,4 +432,43 @@ test("a corrupt entry and an edited document are cold opens, never cached geomet
   expect(otherBuild.runs).toBeGreaterThan(0);
   otherBuild.adapter.dispose();
   cold.adapter.dispose();
+}, 1_800_000);
+
+test("a stored-document open's checkpoint is not published once a change replaced its state", async () => {
+  const source = await load("bracket");
+  const { store, entries, events } = memoryStore();
+  const cold = await open(source, "doc_cold", store, "openStoredDocument", {
+    publishAfterSnapshot: false,
+  });
+  const body = (await cold.snapshot()).document.bodies[0]!;
+  expect(await cold.rename(body.bodyId, "Renamed")).toBe("accepted");
+  await cold.adapter.publishPendingModelCheckpoint();
+  expect(entries.size, "only the open's own evaluation is cached").toBe(0);
+  expect(events.at(-1)).toEqual({
+    kind: "bypass",
+    reason: "superseded-before-publication",
+  });
+  cold.adapter.dispose();
+}, 1_800_000);
+
+test("a reloaded document whose features are listed in repository key order adopts its checkpoint", async () => {
+  // The repository stores features as a map keyed by featureId: a reloaded
+  // document lists them in key order, not in featureOrder.
+  const source = await load("bracket");
+  source.features.sort((left, right) =>
+    left.featureId < right.featureId ? -1 : 1,
+  );
+  expect(
+    source.features.map((feature) => feature.featureId),
+    "premise: key order differs from featureOrder",
+  ).not.toEqual(source.featureOrder);
+  const { store, events } = memoryStore();
+  const cold = await open(source, "doc_cold", store, "openStoredDocument");
+  expect(events.map((event) => event.kind)).toEqual(["miss", "published"]);
+  const warm = await open(source, "doc_warm", store, "openStoredDocument");
+  expect(events.slice(2).map((event) => event.kind)).toEqual(["hit"]);
+  expect(warm.runs, "a hit replays no feature history").toBe(0);
+  await expectSame(cold, warm, "open");
+  cold.adapter.dispose();
+  warm.adapter.dispose();
 }, 1_800_000);
