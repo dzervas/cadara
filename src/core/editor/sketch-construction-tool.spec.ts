@@ -1,0 +1,400 @@
+import { test, expect } from "vitest";
+
+import type { SketchDefinition } from "@/contracts/sketch/schema";
+import {
+  acceptSketchDraw,
+  beginSketchGeometryDrag,
+  beginSketchTool,
+  clearActiveSketchTool,
+  createSketchSessionFromSnapshot,
+  startSketchDraw,
+  toggleSketchConstructionTarget
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/core/modeling/opencascade-kernel-seed";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/core/sketch-solver";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
+import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import {
+  SPEC_SKETCH_UNITS_PER_PIXEL,
+  withSketchSnapScale,
+} from "@/core/editor/sketch-session/test-snap-scale";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
+
+test("src/domain/editor/sketch-construction-tool.spec.ts", () => {
+  function makePoint(
+    pointId: string,
+    label: string,
+    x: number,
+    y: number,
+    isConstruction = false,
+  ) {
+    return {
+      pointId: pointId as `sketch_point_${string}`,
+      label,
+      target: {
+        kind: "sketchPoint",
+        sketchId: "sketch_primary",
+        pointId: pointId as `sketch_point_${string}`,
+      } as const,
+      position: [x, y] as const,
+      isConstruction,
+    };
+  }
+
+  function makeLine(
+    entityId: string,
+    label: string,
+    startPointId: string,
+    endPointId: string,
+    isConstruction = false,
+  ) {
+    return {
+      kind: "lineSegment" as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_primary",
+        entityId: entityId as `sketch_entity_${string}`,
+      } as const,
+      isConstruction,
+      startPointId: startPointId as `sketch_point_${string}`,
+      endPointId: endPointId as `sketch_point_${string}`,
+    };
+  }
+
+  function makePointEntity(
+    entityId: string,
+    label: string,
+    pointId: string,
+    isConstruction = false,
+  ) {
+    return {
+      kind: "point" as const,
+      entityId: entityId as `sketch_entity_${string}`,
+      label,
+      target: {
+        kind: "sketchEntity",
+        sketchId: "sketch_primary",
+        entityId: entityId as `sketch_entity_${string}`,
+      } as const,
+      isConstruction,
+      pointId: pointId as `sketch_point_${string}`,
+    };
+  }
+
+  function createDefinition(): SketchDefinition {
+    return {
+      schemaVersion: "sketch-definition/v1alpha2",
+      referenceIds: [],
+      references: [],
+      pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
+      points: [
+        makePoint("sketch_point_a", "A", 0, 0),
+        makePoint("sketch_point_b", "B", 1, 0),
+        makePoint("sketch_point_c", "C", 2, 0),
+      ],
+      entityIds: ["sketch_entity_ab", "sketch_entity_bc", "sketch_entity_c"],
+      entities: [
+        makeLine("sketch_entity_ab", "AB", "sketch_point_a", "sketch_point_b"),
+        makeLine("sketch_entity_bc", "BC", "sketch_point_b", "sketch_point_c"),
+        makePointEntity("sketch_entity_c", "C point", "sketch_point_c"),
+      ],
+      constraintIds: [],
+      constraints: [],
+      dimensionIds: [],
+      dimensions: [],
+    };
+  }
+
+  function createSession(definition: SketchDefinition = createDefinition()) {
+    const plane = createStandardPlaneDefinition("xy");
+    const solved = solveSketchDefinitionCore({
+      definition,
+      tolerances: {
+        coincidence: 1e-6,
+        angleRadians: 1e-6,
+        minimumSegmentLength: 1e-6,
+      },
+      modelingTolerance: 1e-3,
+      partialSolvePolicy: "bestEffort",
+    });
+
+    return withSketchSnapScale(
+      enterSketchSession(
+        createSketchSessionFromSnapshot(
+          {
+            ownerDocumentId: "doc_workspace",
+            ownerRevisionId: "rev_0001",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_primary",
+            ownerBodyId: null,
+            sketchId: "sketch_primary",
+            label: "Sketch",
+            plane,
+            sketch: {
+              ownerDocumentId: "doc_workspace",
+              ownerRevisionId: "rev_0001",
+              ownerFeatureId: null,
+              ownerSketchId: "sketch_primary",
+              ownerBodyId: null,
+              sketchId: "sketch_primary",
+              label: "Sketch",
+              planeSupport: plane.support,
+              definition,
+              solvedSnapshot: solved.solvedSnapshot,
+              derivedValidity: { state: "current", diagnostics: [] },
+              regions: [],
+            },
+          } satisfies SketchSnapshotRecord,
+          OCC_KERNEL_SETTINGS,
+        ),
+      ),
+      SPEC_SKETCH_UNITS_PER_PIXEL,
+    );
+  }
+
+  function testConstructionActivationModes() {
+    let session = beginSketchTool(createSession(), "construction");
+    expect(
+      session.activeTool,
+      "Construction activation should arm target-picking.",
+    ).toBe("construction");
+    expect(
+      session.constructionTargetPicking,
+      "Construction target-picking should be explicit editor state.",
+    ).toBeTruthy();
+    expect(
+      session.constructionModifierActive,
+      "First construction activation should not immediately set the modifier.",
+    ).toBeFalsy();
+
+    session = beginSketchTool(session, "line");
+    expect(
+      session.activeTool,
+      "Drawing tool activation should become the active geometry tool.",
+    ).toBe("line");
+    expect(
+      session.constructionTargetPicking,
+      "Drawing tool activation should leave target-picking mode.",
+    ).toBeFalsy();
+    expect(
+      session.constructionModifierActive,
+      "Drawing tool activation after Construction should set persistent construction context.",
+    ).toBeTruthy();
+
+    session = beginSketchTool(session, "construction");
+    expect(
+      session.activeTool,
+      "Second Construction activation should clear active construction state.",
+    ).toBe(null);
+    expect(
+      session.constructionModifierActive,
+      "Second Construction activation should turn off construction authoring.",
+    ).toBeFalsy();
+  }
+
+  function testConstructionStateCleanup() {
+    let session = beginSketchTool(createSession(), "construction");
+    session = clearActiveSketchTool(session);
+
+    expect(
+      session.activeTool,
+      "Clearing the active sketch tool should clear Construction target-picking.",
+    ).toBe(null);
+    expect(
+      session.constructionTargetPicking,
+      "Clearing the active sketch tool should clear target-picking state.",
+    ).toBeFalsy();
+
+    session = beginSketchTool(beginSketchTool(session, "construction"), "line");
+    session = clearActiveSketchTool(session);
+
+    expect(
+      session.constructionModifierActive,
+      "Clearing the active sketch tool should clear persistent construction context.",
+    ).toBeFalsy();
+  }
+
+  function testConstructionToggleMutatesOnlySelectedEntity() {
+    let session = beginSketchTool(createSession(), "construction");
+    session = toggleSketchConstructionTarget(session, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_ab",
+    });
+
+    expect(
+      session.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_ab",
+      )?.isConstruction,
+      "Selected edge should toggle to construction.",
+    ).toBeTruthy();
+    expect(
+      session.definition.points.every((point) => !point.isConstruction),
+      "Edge toggles must not mutate shared endpoint point records.",
+    ).toBeTruthy();
+    expect(
+      session.commitRequest?.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_ab",
+      )?.isConstruction,
+      "Construction edge toggles should prepare an authored sketch commit mutation.",
+    ).toBeTruthy();
+
+    session = beginSketchTool(session, "construction");
+    session = toggleSketchConstructionTarget(session, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_ab",
+    });
+    expect(
+      session.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_ab",
+      )?.isConstruction,
+      "Selecting a construction edge again should toggle it back to normal.",
+    ).toBeFalsy();
+  }
+
+  function testConstructionVertexToggleIncludesPointEntity() {
+    let session = beginSketchTool(createSession(), "construction");
+    session = toggleSketchConstructionTarget(session, {
+      kind: "sketchPoint",
+      sketchId: "sketch_primary",
+      pointId: "sketch_point_c",
+    });
+
+    expect(
+      session.definition.points.find(
+        (point) => point.pointId === "sketch_point_c",
+      )?.isConstruction,
+      "Selected point should toggle to construction.",
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_c",
+      )?.isConstruction,
+      "Point-entity records associated with the selected point should toggle too.",
+    ).toBeTruthy();
+    expect(
+      session.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_bc",
+      )?.isConstruction,
+      "Non-point entities sharing that vertex should not be implicitly toggled.",
+    ).toBeFalsy();
+
+    session = beginSketchTool(session, "construction");
+    session = toggleSketchConstructionTarget(session, {
+      kind: "sketchEntity",
+      sketchId: "sketch_primary",
+      entityId: "sketch_entity_c",
+    });
+
+    expect(
+      session.definition.points.find(
+        (point) => point.pointId === "sketch_point_c",
+      )?.isConstruction,
+      "Selecting a construction point-entity should toggle its point record back to normal.",
+    ).toBeFalsy();
+    expect(
+      session.definition.entities.find(
+        (entity) => entity.entityId === "sketch_entity_c",
+      )?.isConstruction,
+      "Selecting a construction point-entity should toggle that entity back to normal.",
+    ).toBeFalsy();
+  }
+
+  function testConstructionModifierAuthorsNewGeometry() {
+    let session = beginSketchTool(createSession(), "construction");
+    session = beginSketchTool(session, "rectangle");
+    session = startSketchDraw(session, [0, 0]);
+    session = acceptSketchDraw(session, [4, 3]);
+
+    expect(
+      session.definition.points
+        .slice(-4)
+        .every((point) => point.isConstruction),
+      "Construction context should author new rectangle points as construction.",
+    ).toBeTruthy();
+    expect(
+      session.definition.entities
+        .slice(-4)
+        .every((entity) => entity.isConstruction),
+      "Construction context should author new rectangle entities as construction.",
+    ).toBeTruthy();
+
+    session = beginSketchTool(session, "construction");
+    session = beginSketchTool(session, "line");
+    session = startSketchDraw(session, [0, 4]);
+    session = acceptSketchDraw(session, [1, 4]);
+
+    expect(
+      session.definition.entities.at(-1)?.isConstruction,
+      "Toggling Construction off should restore normal geometry authoring.",
+    ).toBeFalsy();
+  }
+
+  function testConstructionRenderableFeedbackIsDashDotAndPickable() {
+    const definition = createDefinition();
+    definition.entities[0] = {
+      ...definition.entities[0]!,
+      isConstruction: true,
+    };
+    let session = createSession(definition);
+    const target = {
+      kind: "sketchEntity" as const,
+      sketchId: "sketch_primary" as const,
+      entityId: "sketch_entity_ab" as const,
+    };
+    const constructionRenderable = getSketchSessionDisplayRenderables(
+      session,
+    ).find(
+      (renderable) =>
+        renderable.target?.kind === "sketchEntity" &&
+        renderable.target.entityId === "sketch_entity_ab",
+    );
+
+    expect(
+      constructionRenderable?.linePattern,
+      "O1: construction sketch edges should use dash-dot edit feedback.",
+    ).toBe("dash-dot");
+    expect(constructionRenderable).toBeDefined();
+    if (!constructionRenderable) throw new Error("Expected construction edge.");
+    expect(
+      constructionRenderable.target?.kind,
+      "Construction sketch edges should remain bound for picking.",
+    ).toBe("sketchEntity");
+
+    session = beginSketchTool(session, "construction");
+    session = beginSketchGeometryDrag(session, target, [0, 0]);
+    expect(
+      session.activeDrag,
+      "Construction target-picking should not start direct geometry drag.",
+    ).toBe(null);
+  }
+
+  testConstructionActivationModes();
+  testConstructionStateCleanup();
+  testConstructionToggleMutatesOnlySelectedEntity();
+  testConstructionVertexToggleIncludesPointEntity();
+  testConstructionModifierAuthorsNewGeometry();
+  testConstructionRenderableFeedbackIsDashDotAndPickable();
+});

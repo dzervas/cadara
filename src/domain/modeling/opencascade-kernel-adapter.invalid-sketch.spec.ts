@@ -21,7 +21,7 @@ import {
   eid,
   entityRef,
   mirroredSession,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 

@@ -9,8 +9,8 @@
 import { expect, test } from "vitest";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { getSketchDisplayPolylineMaterialConfig } from "@/components/cad/sketch-display-style";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { pointRef } from "@/domain/editor/sketch-mirror.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { pointRef } from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
   beginSketchGeometryDrag,

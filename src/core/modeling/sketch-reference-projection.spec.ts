@@ -10,7 +10,7 @@ import {
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { projectSketchExternalReferencesFromSnapshot } from "./sketch-reference-projection";
 import { MockKernelAdapter } from "../../domain/modeling/mock-kernel-adapter";
-import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
+import { mirroredSession } from "@/core/editor/sketch-mirror.fixtures";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 
 function createSnapshotWithEdge(

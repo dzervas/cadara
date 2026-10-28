@@ -6,7 +6,7 @@ import {
   type EditorEffectRuntime,
   type EditorEvent,
   type EditorExtensionDependencies,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type { EditorEventLoopTraceListener } from "@/application/editor/editor-debug-trace";
 import {
   cancelEditorAnimationFrame,

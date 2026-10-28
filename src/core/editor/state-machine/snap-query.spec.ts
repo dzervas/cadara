@@ -15,12 +15,12 @@ import {
   updateSketchPointer,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
 } from "@/core/editor/sketch-session/test-snap-scale";
-import { querySketchSnapIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
+import { querySketchSnapIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {

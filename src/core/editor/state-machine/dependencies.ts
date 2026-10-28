@@ -1,6 +1,6 @@
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import { createBuiltinImportProviderRegistry } from "@/domain/import/builtin-provider-composition";
-import { createBuiltinSketchSpecialModeRegistry } from "@/domain/sketch-special-modes/builtin-registry-composition";
+import { createBuiltinSketchSpecialModeRegistry } from "@/core/sketch-special-modes/builtin-registry-composition";
 
 export type EditorExtensionDependencies = Pick<
   RuntimeExtensionRegistryComposition,

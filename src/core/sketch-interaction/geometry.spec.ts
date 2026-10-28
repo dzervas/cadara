@@ -29,7 +29,7 @@ import {
   createSplineEntityDefinition,
 } from "@/core/editor/sketch-session/definition-authoring";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { updateSketchReferenceProjection } from "@/core/editor/sketch-session/references";
 import {
   closestPointOnSketchInteractionCurve,

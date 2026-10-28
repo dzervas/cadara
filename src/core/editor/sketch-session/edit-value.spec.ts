@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
-import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+import { offsetSession } from "@/core/editor/sketch-offset.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

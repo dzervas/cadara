@@ -25,7 +25,7 @@ import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import * as mirror from "@/domain/editor/sketch-mirror.fixtures";
+import * as mirror from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
   beginSketchGeometryDrag,
@@ -57,7 +57,7 @@ import {
   reconstructSplineAggregate,
   orderedSplineOccurrences,
 } from "@/contracts/sketch/spline-geometry";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { withLiveSolveBasis } from "../../../core/editor/sketch-session/session-live-solve";
 import { mapSketchPointToWorld } from "@/core/editor/sketch-session/state";
 import { collectSketchInteractionGeometry } from "@/core/sketch-interaction/geometry";

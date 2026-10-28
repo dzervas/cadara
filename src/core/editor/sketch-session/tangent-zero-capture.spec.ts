@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   beginSketchGeometryDrag,
   createSketchSessionFromSnapshot,

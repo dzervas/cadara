@@ -28,8 +28,8 @@ import {
   pid as mirrorPid,
   pointRef,
   seedDefinition as mirrorSeedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,

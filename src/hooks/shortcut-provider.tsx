@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import {
   useCallback,
   useEffect,
@@ -128,6 +129,7 @@ export function ShortcutProvider({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       resolver.handleKeyDown(event, {
+        platform: getCurrentPlatform(),
         activeScopes,
         executeCommand: (command) => commandHandlers[command.id]?.execute(),
         isCommandEnabled: (command, target) =>

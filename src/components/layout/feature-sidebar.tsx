@@ -23,7 +23,7 @@ import {
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
 import { formatSidebarDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
-import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
+import { canReassignCommittedSketchPlane } from "@/core/editor/sketch-plane-editing";
 import { useEditorState } from "@/hooks/use-editor-state";
 
 interface FeatureSidebarProps {

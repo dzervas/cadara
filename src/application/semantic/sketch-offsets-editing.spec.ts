@@ -7,7 +7,7 @@ import {
   labels,
 } from "../../../test/helpers/semantic-sketch-workflow";
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
-import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+import { offsetSession } from "@/core/editor/sketch-offset.fixtures";
 import { OFFSET_DIAGNOSTIC_CODES } from "@/contracts/sketch/offset-geometry";
 
 test("offset distance edits preserve expression bindings, stable copies, one-action history and native save/reopen", async () => {

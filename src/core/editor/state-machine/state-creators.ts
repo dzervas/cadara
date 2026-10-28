@@ -20,7 +20,7 @@ import {
 import {
   SKETCH_PLANE_SUPPORT_FIELD_ID,
   type SketchPlaneEditSessionState,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import type { EditorExtensionDependencies } from "./dependencies";
 import { getDefaultImportSelectionField } from "./form-traversal";
 import { advanceCursorPhase } from "./cursor-lifecycle";

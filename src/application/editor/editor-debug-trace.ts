@@ -4,7 +4,7 @@ import {
   type EditorEffect,
   type EditorEvent,
   type EditorState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type {
   EditorRuntimeEffectCompletedTraceEntry,
   EditorRuntimeEffectFailedTraceEntry,

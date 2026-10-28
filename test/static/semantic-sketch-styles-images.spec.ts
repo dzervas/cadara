@@ -17,7 +17,7 @@ it("browser and explicit style/image authoring retain shared authored owners", (
     "appendReferenceImageOperations(",
   );
   expect(
-    read("src/domain/reference-image-calibration/mode/definition.ts"),
+    read("src/core/reference-image-calibration/mode/definition.ts"),
   ).toContain("updateReferenceImageOperationStates(");
   const reducer = read("src/core/editor/state-machine/reducer-sketch.ts");
   expect(reducer).toContain(

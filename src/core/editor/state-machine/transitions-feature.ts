@@ -7,7 +7,7 @@ import {
   getSketchPlaneEditFormField,
   getSketchPlaneEditPreviewLabel,
   getSketchPlaneEditSelectionTarget,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
 import type { EditorEvent, EditorTransitionResult, EditorState } from "./types";
 import type { EditorExtensionDependencies } from "./dependencies";

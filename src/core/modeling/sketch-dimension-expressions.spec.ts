@@ -31,8 +31,8 @@ import { applyOffsetPublications } from "@/contracts/sketch/offset-publication";
 import {
   offsetSeedSession,
   withOffset,
-} from "@/domain/editor/sketch-offset.fixtures";
-import { eid } from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-offset.fixtures";
+import { eid } from "@/core/editor/sketch-mirror.fixtures";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import {
   makeReferenceDimensionCases,

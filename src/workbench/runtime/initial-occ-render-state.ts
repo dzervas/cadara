@@ -1,4 +1,4 @@
-import type { EditorState } from "@/domain/editor/state-machine";
+import type { EditorState } from "@/core/editor/state-machine";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
 export function isInitialOccRenderPending(

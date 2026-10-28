@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import type {
   EditorEvent,
   EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type {
   ModelingDiagnostic,
   WorkspaceSnapshot,

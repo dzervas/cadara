@@ -188,7 +188,7 @@ export function shortcutFromKeyboardEvent(
     return null;
   }
 
-  const platform = options.platform ?? getCurrentPlatform();
+  const platform = options.platform ?? "windows";
   const key = normalizeKey(eventKey);
   const modifiers: ShortcutModifier[] = [];
 
@@ -247,7 +247,7 @@ export function formatChord(
   chord: ShortcutChord,
   options: ShortcutFormatOptions = {},
 ) {
-  const platform = options.platform ?? getCurrentPlatform();
+  const platform = options.platform ?? "windows";
   const parts: string[] = chord.modifiers.map((modifier) =>
     formatModifier(modifier, platform),
   );
@@ -316,12 +316,4 @@ function formatKey(key: string) {
   }
 
   return key.charAt(0).toUpperCase() + key.slice(1);
-}
-
-export function getCurrentPlatform(): "mac" | "windows" | "linux" {
-  if (typeof navigator === "undefined") {
-    return "windows";
-  }
-
-  return /mac/i.test(navigator.platform) ? "mac" : "windows";
 }

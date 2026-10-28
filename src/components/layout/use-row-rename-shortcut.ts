@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import { useMemo, type KeyboardEvent } from "react";
 
 import { createShortcutCommandRegistry } from "@/core/shortcuts/commands";
@@ -20,6 +21,7 @@ export function useRowRenameShortcut() {
   );
   return (event: KeyboardEvent<HTMLElement>, onRename: () => void) => {
     resolver.handleKeyDown(event, {
+      platform: getCurrentPlatform(),
       activeScopes: ["focused-panel"],
       executeCommand: onRename,
       isTextEditingTarget,

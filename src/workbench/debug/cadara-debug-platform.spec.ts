@@ -12,7 +12,7 @@ import {
 import { createCadaraDebugSession } from "@/workbench/debug/cadara-debug-session";
 import { defaultSelectionFilter } from "@/core/editor/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
-import type { EditorEvent } from "@/domain/editor/state-machine";
+import type { EditorEvent } from "@/core/editor/state-machine";
 import type {
   EditorRuntimeTraceSnapshot,
   WorkbenchDebugState,

@@ -4,7 +4,7 @@ import { defaultSelectionFilter } from "@/core/editor/schema";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { initialEditorState } from "./state-creators";
 import type {

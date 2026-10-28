@@ -64,7 +64,7 @@ import {
 import { isSketchStyleToolId } from "@/core/sketch-styles/definition";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
-import type { EditorHistoryAvailability } from "@/domain/editor/state-machine";
+import type { EditorHistoryAvailability } from "@/core/editor/state-machine";
 import {
   getToolbarActionIconStyle,
   getToolbarDropdownTriggerStyle,

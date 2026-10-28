@@ -1,5 +1,5 @@
 import { createMemoryOperationHistoryStore } from "@/domain/modeling/modeling-history-persistence";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { expect, it } from "vitest";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";

@@ -13,7 +13,7 @@ import {
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
 import { getSketchEditOperatorResult } from "@/core/editor/sketch-session/edit-geometry-operations";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { createTestErrorReporter, ok } from "@/contracts/errors";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";
-import type { EditorEvent, EditorState } from "@/domain/editor/state-machine";
+import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { addWorkbenchVariable } from "@/workbench/commands/object-actions";

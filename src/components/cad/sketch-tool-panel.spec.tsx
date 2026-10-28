@@ -18,7 +18,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import {
   PROJECTED_SPLINE_OFFSET_UNSUPPORTED_MESSAGE,

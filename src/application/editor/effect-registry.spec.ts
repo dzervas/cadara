@@ -36,8 +36,8 @@ import type {
   SketchEditorState,
 } from "@/core/editor/state-machine/types";
 import { withLiveSolveBasis } from "@/core/editor/sketch-session";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,

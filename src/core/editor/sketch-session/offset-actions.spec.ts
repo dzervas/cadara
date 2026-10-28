@@ -39,11 +39,11 @@ import {
   pid,
   pointRef,
   withDerived,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   offsetSession,
   withOffset,
-} from "@/domain/editor/sketch-offset.fixtures";
+} from "@/core/editor/sketch-offset.fixtures";
 import {
   applySketchOffsetRemoval,
   computeSketchOffsetActionState,

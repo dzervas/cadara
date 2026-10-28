@@ -11,7 +11,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import type { EditorEvent, EditorState } from "@/domain/editor/state-machine";
+import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";

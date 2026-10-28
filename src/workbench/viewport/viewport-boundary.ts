@@ -9,7 +9,7 @@ import type {
 import type {
   EditorViewState,
   SelectionRequestMode,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,

@@ -65,7 +65,7 @@ import {
   resolveSketchSpecialModeOpenRequest,
   sketchSessionHasActiveSpecialMode,
 } from "@/core/sketch-special-modes/presentation";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
 import type {
   EditorEvent,

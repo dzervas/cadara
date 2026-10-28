@@ -8,7 +8,7 @@ import {
   getEditorViewState,
   initialEditorState,
   type EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -17,7 +17,7 @@ import {
   startSketchDraw,
   toggleSketchSvgRendering,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession, enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession, enterSketchSessionState } from "@/core/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

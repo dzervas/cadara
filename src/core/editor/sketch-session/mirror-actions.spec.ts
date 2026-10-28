@@ -40,9 +40,9 @@ import {
 import {
   getEnterEvent,
   getEscapeEvent,
-} from "@/domain/editor/workbench-interactions";
+} from "@/core/editor/workbench-interactions";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import {
   chainSession,
@@ -53,7 +53,7 @@ import {
   pid,
   pointRef,
   withDerived,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   applySketchMirrorRemoval,
   applySketchMirrorRepair,

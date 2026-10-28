@@ -8,7 +8,7 @@ import { getPrimitiveRefKey } from "@/core/editor/schema";
 import {
   getEditorViewState,
   initialEditorState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";

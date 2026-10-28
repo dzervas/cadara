@@ -8,7 +8,7 @@ import {
   getSketchPlaneEditPreviewLabel,
   SKETCH_PLANE_SUPPORT_FIELD_ID,
   hydrateSketchPlaneEditSession,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 
 import { emitSketchPlaneCommit } from "./effect-emitters";
 import { initialEditorState } from "./state-creators";

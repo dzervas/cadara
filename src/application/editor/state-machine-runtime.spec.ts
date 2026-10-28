@@ -23,8 +23,8 @@ import {
 import {
   applySelectionToSketchPlaneEditSession,
   hydrateSketchPlaneEditSession,
-} from "@/domain/editor/sketch-plane-editing";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+} from "@/core/editor/sketch-plane-editing";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 
 const unusedRuntime: EditorEffectRuntime = {

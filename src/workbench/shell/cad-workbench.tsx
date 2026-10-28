@@ -144,7 +144,7 @@ import {
   getMeasurementReadoutSource,
   type MeasurementDistanceMode,
 } from "@/core/measure/measurement";
-import { openSketchMeasurementRecord } from "@/domain/measure/open-sketch-measurement";
+import { openSketchMeasurementRecord } from "@/core/measure/open-sketch-measurement";
 import { createTopologyDebugSummary } from "@/core/modeling/topology-debug";
 import { useCadaraDebugPlatform } from "@/workbench/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";

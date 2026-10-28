@@ -7,7 +7,7 @@ import {
   getSketchConstraintDisplaySummary,
 } from "@/core/editor/sketch-session";
 
-import { mergeSketchRenderables, type MergedSketchRenderables } from "@/domain/editor/sketch-session-renderables";
+import { mergeSketchRenderables, type MergedSketchRenderables } from "@/infrastructure/editor/sketch-session-renderables";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";

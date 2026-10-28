@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import { Text } from "@mantine/core";
 
 import type { ShortcutCommandId } from "@/core/shortcuts/commands";
@@ -31,7 +32,7 @@ export function ShortcutHint({ commandId, shortcut }: ShortcutHintProps) {
         whiteSpace: "nowrap",
       }}
     >
-      {formatShortcut(displayShortcut)}
+      {formatShortcut(displayShortcut, { platform: getCurrentPlatform() })}
     </Text>
   );
 }

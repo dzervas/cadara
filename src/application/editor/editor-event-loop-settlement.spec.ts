@@ -15,7 +15,7 @@ import {
   selectSketchEditToolTarget,
   startSketchDraw,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

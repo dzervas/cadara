@@ -18,7 +18,7 @@ import type {
   SketchDefinition,
   SketchEntityDefinition,
 } from "@/contracts/sketch/schema";
-import { pointRef } from "@/domain/editor/sketch-mirror.fixtures";
+import { pointRef } from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,

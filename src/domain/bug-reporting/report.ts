@@ -11,7 +11,7 @@ import type {
   ModelingDiagnostic,
 } from "@/contracts/modeling/schema";
 import type { EditorRuntimeTraceSnapshot } from "@/core/debug/debug-platform";
-import type { EditorViewState } from "@/domain/editor/state-machine";
+import type { EditorViewState } from "@/core/editor/state-machine";
 import {
   MODELING_OPERATION_HISTORY_STORAGE_KEY,
   type StorageLike,

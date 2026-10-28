@@ -14,7 +14,7 @@ import {
 import {
   enterSketchSession,
   enterSketchSessionState,
-} from "@/domain/editor/sketch-entry.fixtures";
+} from "@/core/editor/sketch-entry.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,

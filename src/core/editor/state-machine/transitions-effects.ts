@@ -18,7 +18,7 @@ import {
   updateSketchReferenceProjection,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { getSketchPlaneEditSelectionTarget } from "@/domain/editor/sketch-plane-editing";
+import { getSketchPlaneEditSelectionTarget } from "@/core/editor/sketch-plane-editing";
 import {
   applySketchSpecialModeEffectResult,
   getSketchSpecialModeSelectionFilter,

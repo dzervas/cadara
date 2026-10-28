@@ -8,9 +8,9 @@ import { workbenchTheme } from "@/theme/workbench-theme";
 import {
   initialEditorState,
   type EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { hydrateSketchPlaneEditSession } from "@/domain/editor/sketch-plane-editing";
+import { hydrateSketchPlaneEditSession } from "@/core/editor/sketch-plane-editing";
 import { SketchPlaneInspector } from "./sketch-plane-inspector";
 
 function InspectorHarness() {

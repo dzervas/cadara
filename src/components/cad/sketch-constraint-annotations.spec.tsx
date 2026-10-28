@@ -28,8 +28,8 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
 import { makeCircleWithDiameterSession } from "@/components/cad/sketch-reference-dimension.fixtures";
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   DimensionAnnotationLabelDrag,
   getDimensionLabelDragPoint,

@@ -34,7 +34,7 @@ import {
 import { createPlacedPointDimensionLine } from "./annotation-geometry";
 import { updateSketchReferenceProjection } from "@/core/editor/sketch-session/references";
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { makeSketchFixture } from "@/contracts/sketch/region-extraction.fixtures";
 import { sketchSnapshotRecordForTest } from "@/contracts/sketch/region-record.fixtures";
 import {

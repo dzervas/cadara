@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import type {
   EditorEvent,
   EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   createWorkbenchShortcutCommandHandlers,
@@ -29,8 +29,8 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { entityRef } from "@/domain/editor/sketch-mirror.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { entityRef } from "@/core/editor/sketch-mirror.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

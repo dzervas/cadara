@@ -23,7 +23,7 @@ import {
   handleSketchSpecialModeHover,
   sketchSessionHasActiveSpecialMode,
 } from "@/core/sketch-special-modes/presentation";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import {
   getSketchSelectionCycleContext,
   hasSketchSelectionCycleDeselectEntry,
@@ -60,7 +60,7 @@ import {
   getSketchPlaneEditSelectionTarget,
   getSketchPlaneEditPreviewLabel,
   hydrateSketchPlaneEditSession,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import type {
   EditorEvent,
   EditorTransitionResult,

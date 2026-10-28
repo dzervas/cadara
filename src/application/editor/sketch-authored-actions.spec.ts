@@ -18,13 +18,13 @@ import {
   type EditorState,
   type SketchEditorState,
 } from "@/core/editor/state-machine";
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
 import {
   runEditorEffect,
   createModelingServiceEditorEffectRuntime,
 } from "./effect-registry";
 import { createSketchPublicationFailureFixture } from "@/domain/modeling/modeling-service/sketch-publication.fixtures";
-import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
+import { querySketchEditIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import {
   acceptSketchDraw,
   beginSketchAnnotationEdit,
@@ -43,7 +43,7 @@ import {
   clearActiveSketchTool,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -61,7 +61,7 @@ import type { PrimitiveRef } from "@/core/editor/schema";
 import {
   getEnterEvent,
   getEscapeEvent,
-} from "@/domain/editor/workbench-interactions";
+} from "@/core/editor/workbench-interactions";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
@@ -74,8 +74,8 @@ import {
   pid,
   pointRef,
   seedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
-import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
+import { offsetSession } from "@/core/editor/sketch-offset.fixtures";
 import { validateSketchDefinition } from "@/contracts/sketch/runtime-schema";
 
 function line(session: SketchSessionState) {

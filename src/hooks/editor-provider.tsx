@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 
-import { getEditorViewState } from "@/domain/editor/state-machine";
+import { getEditorViewState } from "@/core/editor/state-machine";
 import { createAppEditorEffectRuntime } from "@/application/editor/create-app-editor-effect-runtime";
 import {
   clearActiveDocumentTelemetryContext,
@@ -9,7 +9,7 @@ import {
   publishActiveDocumentTelemetryContext,
 } from "@/contracts/errors/telemetry-context";
 import { useEditorEventLoop } from "@/hooks/use-editor-event-loop";
-import type { EditorExtensionDependencies } from "@/domain/editor/state-machine";
+import type { EditorExtensionDependencies } from "@/core/editor/state-machine";
 import type { ModelingService } from "@/domain/modeling/modeling-service";
 import { EditorContext } from "@/hooks/editor-context";
 import { useErrorReporter } from "@/hooks/use-error-reporter";

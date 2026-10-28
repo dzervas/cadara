@@ -6,7 +6,7 @@ import type { EditorRuntimeTraceEntry } from "@/core/debug/debug-platform";
 import type {
   EditorEvent,
   EditorEffectRuntime,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";

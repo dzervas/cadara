@@ -12,7 +12,7 @@ import {
   startSketchDraw,
   updateSketchGeometryDrag,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 

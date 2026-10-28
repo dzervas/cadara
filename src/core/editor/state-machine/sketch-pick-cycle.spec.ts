@@ -11,7 +11,7 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   getSketchSelectionCycleContext,
   isSketchSelectionCyclePickRetained,

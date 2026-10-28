@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { createSketchPointerPreviewScheduler } from "@/application/editor/sketch-pointer-preview-scheduler";
-import type { EditorEvent } from "@/domain/editor/state-machine";
+import type { EditorEvent } from "@/core/editor/state-machine";
 
 test("src/application/editor/sketch-pointer-preview-scheduler.spec.ts coalesces pointer previews to the latest frame event", () => {
   const dispatched: EditorEvent[] = [];

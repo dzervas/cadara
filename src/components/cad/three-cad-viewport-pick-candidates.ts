@@ -16,7 +16,7 @@ import {
   type SketchSelectionCycleContext,
 } from "@/core/editor/sketch-session/selection";
 import { getSketchMirrorLinkedGeometryRefs } from "@/core/editor/sketch-session";
-import { shouldViewportClickRequestSelection } from "@/domain/editor/workbench-interactions";
+import { shouldViewportClickRequestSelection } from "@/core/editor/workbench-interactions";
 import {
   getArmedSketchPickCycleIndex,
   getSketchPickPreviewIndex,

@@ -20,7 +20,7 @@ import type {
   SketchLiveRegionBasis,
   SketchSessionState,
 } from "@/core/editor/sketch-session";
-import type { SketchPlaneEditSessionState } from "@/domain/editor/sketch-plane-editing";
+import type { SketchPlaneEditSessionState } from "@/core/editor/sketch-plane-editing";
 import type {
   DocumentFeatureCursor,
   WorkspaceSnapshot,

@@ -1,5 +1,5 @@
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
-import type { EditorState } from "@/domain/editor/state-machine";
+import type { EditorState } from "@/core/editor/state-machine";
 
 /**
  * T17o (T17c3 route; specification "Minimum failure feedback"): a failed

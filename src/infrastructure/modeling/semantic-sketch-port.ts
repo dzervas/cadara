@@ -23,8 +23,8 @@ import {
 } from "@/core/editor/sketch-session";
 import { sketchPrimitiveContributionInput, validateSketchPrimitive } from "@/core/sketch-tools/semantic-primitive";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
-import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
-import { canStartSketchFromTarget } from "@/domain/editor/sketch-session-controller";
+import { canReassignCommittedSketchPlane } from "@/core/editor/sketch-plane-editing";
+import { canStartSketchFromTarget } from "@/core/editor/sketch-session-controller";
 import { canUseTangentArcSourceAtPoint } from "@/core/sketch-inference/placement-inference";
 import {
   regionBoundaryBasisOfRecord,

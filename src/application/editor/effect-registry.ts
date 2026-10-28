@@ -7,11 +7,11 @@ import {
   getSketchSessionDerivationSettings,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import {
   buildSketchPlaneCommitRequest,
   getSketchPlaneEditSelectionTarget,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import type {
   DocumentFeatureCursor,

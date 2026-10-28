@@ -3,8 +3,8 @@ import {
   getDocumentHistoryCursorBeforeTarget,
   type DocumentHistoryOrderEntry,
 } from "@/core/modeling/document-history";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
-import { hydrateSketchPlaneEditSession } from "@/domain/editor/sketch-plane-editing";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
+import { hydrateSketchPlaneEditSession } from "@/core/editor/sketch-plane-editing";
 import { isFeatureScopedModelingDiagnostic } from "@/contracts/modeling/diagnostics";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";

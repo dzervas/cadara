@@ -24,12 +24,12 @@ import {
   scheduleCoalescedSketchGeometryDragMove,
   type SketchDragGesturePhase,
 } from "@/components/cad/three-cad-viewport-helpers";
-import { resolveSketchDragTarget } from "@/domain/editor/workbench-interactions";
+import { resolveSketchDragTarget } from "@/core/editor/workbench-interactions";
 import { resolveHandleFromTarget } from "@/core/editor/sketch-session/drag-intent";
 import {
   derivedTargetsDefinition,
   mirroredSession,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { getSketchSessionDisplayDefinition } from "@/core/editor/sketch-session/session-definition";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import type { PrimitiveRef } from "@/core/editor/schema";

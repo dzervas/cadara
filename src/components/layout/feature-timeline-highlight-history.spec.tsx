@@ -7,7 +7,7 @@ import { FeatureTimelineBar } from "@/components/layout/feature-timeline-bar";
 import {
   getEditorViewState,
   initialEditorState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type {
   FeatureDefinition,
   SketchSnapshotRecord,

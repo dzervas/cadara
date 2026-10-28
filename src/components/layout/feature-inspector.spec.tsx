@@ -9,7 +9,7 @@ import {
 import {
   initialEditorState,
   type EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import { createExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import {

@@ -13,7 +13,7 @@ import {
   eid,
   entityRef,
   seedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {

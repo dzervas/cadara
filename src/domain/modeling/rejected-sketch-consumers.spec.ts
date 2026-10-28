@@ -41,12 +41,12 @@ import {
 } from "@/core/editor/sketch-session";
 import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   eid,
   entityRef,
   mirroredSession,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

@@ -28,8 +28,8 @@ import {
   startSketchDraw,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

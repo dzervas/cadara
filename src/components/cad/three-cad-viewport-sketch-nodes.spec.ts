@@ -19,7 +19,7 @@ import {
   getSketchRevealedPointIds,
   type SketchPointMarkerContext,
 } from "@/infrastructure/editor/sketch-session/display";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { getSketchSessionDisplayDefinition } from "@/core/editor/sketch-session/session-definition";
 import {
   createStandardPlaneDefinition,

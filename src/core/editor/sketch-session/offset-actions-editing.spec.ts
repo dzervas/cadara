@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+import { offsetSession } from "@/core/editor/sketch-offset.fixtures";
 import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,

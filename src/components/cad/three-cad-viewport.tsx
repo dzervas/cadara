@@ -182,7 +182,7 @@ import {
   shouldViewportClickEventRequestConnectedSketchSelection,
   shouldViewportDoubleClickRequestConnectedSketchSelection,
   shouldViewportStartSketchGeometryDrag,
-} from "@/domain/editor/workbench-interactions";
+} from "@/core/editor/workbench-interactions";
 import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
 import {
   DEFAULT_VIEWPORT_PROJECTION_MODE,

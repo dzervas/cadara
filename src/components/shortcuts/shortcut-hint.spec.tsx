@@ -1,6 +1,10 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
+
+import { getShortcutSettingsDisplayLabel } from "@/components/shortcuts/shortcut-settings-model";
+import { parseShortcut } from "@/core/shortcuts/shortcut-grammar";
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 
 import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
 import { getRecordedShortcutStep } from "@/components/shortcuts/shortcut-recording";
@@ -144,4 +148,38 @@ test("settings exposes the default Mouse and opt-in Touchpad navigation choices"
   expect(markup).toContain('value="mouse" selected=""');
   expect(markup).toContain('value="touchpad"');
   expect(markup).toContain("Middle-drag pans");
+});
+
+
+test("browser platform detection supplies shortcut recording and display", () => {
+  try {
+    for (const [platform, expected, label] of [
+      ["MacIntel", "mac", "Cmd+Z"],
+      ["Win32", "windows", "Ctrl+Z"],
+      ["Linux x86_64", "windows", "Ctrl+Z"],
+    ] as const) {
+      vi.stubGlobal("navigator", { platform });
+      expect(getCurrentPlatform()).toBe(expected);
+      expect(getRecordedShortcutStep({
+        key: "z",
+        metaKey: expected === "mac",
+        ctrlKey: expected !== "mac",
+      })).toBe("mod+z");
+      expect(getShortcutSettingsDisplayLabel({
+        isRecording: true,
+        recordingSteps: ["mod+z"],
+        shortcutLabel: null,
+      })).toBe(label);
+      const markup = renderToStaticMarkup(
+        <MantineProvider theme={workbenchTheme}>
+          <ShortcutHint shortcut={parseShortcut("mod+z")} />
+        </MantineProvider>,
+      );
+      expect(markup).toContain(label);
+    }
+    vi.stubGlobal("navigator", undefined);
+    expect(getCurrentPlatform()).toBe("windows");
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

@@ -10,7 +10,7 @@ import type {
   EditorEvent,
   EditorViewState,
   SelectionRequestMode,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type {
   SketchAnnotationDescriptor,
   SketchSessionDisplayRenderable,
@@ -18,7 +18,7 @@ import type {
 import type { MeasurementWitness } from "@/core/measure/measurement";
 import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
-import { getSketchMergeOfferEvents } from "@/domain/editor/workbench-interactions";
+import { getSketchMergeOfferEvents } from "@/core/editor/workbench-interactions";
 import type {
   ViewportCommand,
   ViewportIntent,

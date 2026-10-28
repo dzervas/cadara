@@ -10,7 +10,7 @@ import {
   entityRef,
   mirroredSession,
   pid,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { getSketchSessionInvalidFeedback } from "./session-feedback";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import {
@@ -25,7 +25,7 @@ import {
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
 import { commitSketchAnnotationEditValue } from "./annotation-editing";
-import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
+import { getEscapeEvent } from "@/core/editor/workbench-interactions";
 
 // T16f, logic lane, seam: the sketch session (live solve, invalid feedback,
 // Dimension tool, annotation edit, annotation descriptors and context) on

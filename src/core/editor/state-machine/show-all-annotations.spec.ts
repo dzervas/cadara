@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
 import { getSketchAnnotationAffectedGeometryRefs } from "@/core/editor/sketch-session";
 import { transitionEditorState } from "./reducer-root";
 import { getEditorViewState } from "./selectors";

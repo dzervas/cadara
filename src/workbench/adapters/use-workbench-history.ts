@@ -12,7 +12,7 @@ import {
 import type {
   EditorEvent,
   EditorHistoryAvailability,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
 import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {

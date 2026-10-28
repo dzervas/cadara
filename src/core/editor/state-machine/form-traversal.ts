@@ -4,8 +4,8 @@ import type {
   FeatureEditorFormSchema,
 } from "@/core/feature-authoring/form-schema";
 import { getFeatureEditorFormField } from "@/core/editor/feature-editing";
-import { getSketchPlaneEditFormField } from "@/domain/editor/sketch-plane-editing";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { getSketchPlaneEditFormField } from "@/core/editor/sketch-plane-editing";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type {
   FeatureEditorState,

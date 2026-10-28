@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import {
   isModifierOnlyShortcutEvent,
   serializeShortcut,
@@ -10,7 +11,9 @@ export function getRecordedShortcutStep(event: KeyboardShortcutEvent) {
     return null;
   }
 
-  const shortcut = shortcutFromKeyboardEvent(event);
+  const shortcut = shortcutFromKeyboardEvent(event, {
+    platform: getCurrentPlatform(),
+  });
   if (!shortcut) {
     return null;
   }

@@ -14,7 +14,7 @@ import {
   getEditorViewState,
   initialEditorState,
   type EditorViewState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 
 function createDenseImportFormSchema(): FeatureEditorFormSchema {
   return {

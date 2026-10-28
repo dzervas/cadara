@@ -108,6 +108,8 @@ function browserGlobalReferences(filePath: string, text: string): string[] {
     "document",
     "self",
     "localStorage",
+    "sessionStorage",
+    "navigator",
     "indexedDB",
     "BroadcastChannel",
     "Worker",
@@ -221,6 +223,10 @@ test("browser-global guard resolves runtime references rather than local names",
     "window.foo",
     "const x = { [window.name]: 1 };",
     "document.body",
+    "navigator.platform",
+    "sessionStorage.getItem('key')",
+    "globalThis.navigator.platform",
+    "globalThis.sessionStorage.getItem('key')",
     "globalThis.window",
     "const { document } = globalThis; document.body;",
     "let document; ({ document } = globalThis); document.body;",
@@ -245,6 +251,9 @@ test("browser-global guard resolves runtime references rather than local names",
   }
   for (const text of [
     "const window = { coneHigh: 1 }; window.coneHigh;",
+    "const navigator = { platform: 'MacIntel' }; navigator.platform;",
+    "function f(navigator: { platform: string }) { return navigator.platform; }",
+    "const sessionStorage = { getItem: () => null }; sessionStorage.getItem('key');",
     "function f(window: { coneHigh: number }) { return window.coneHigh; }",
     "const x = { window: 1 }; x.window;",
     "const { window: value } = input;",
@@ -370,16 +379,6 @@ test("src/layer-architecture-boundary.spec.ts migrated compatibility entrypoints
 test("src/layer-architecture-boundary.spec.ts core domain dependency debt stays explicit", () => {
   const allowedCoreDomainImports = new Set([
     "src/core/editor/state-machine/dependencies.ts",
-    "src/core/editor/state-machine/document-helpers.ts",
-    "src/core/editor/state-machine/effect-emitters.ts",
-    "src/core/editor/state-machine/form-traversal.ts",
-    "src/core/editor/state-machine/reducer-root.ts",
-    "src/core/editor/state-machine/state-creators.ts",
-    "src/core/editor/state-machine/transitions-effects.ts",
-    "src/core/editor/state-machine/transitions-feature.ts",
-    "src/core/editor/state-machine/transitions-sketch.ts",
-    "src/core/editor/state-machine/transitions-viewport.ts",
-    "src/core/editor/state-machine/types.ts",
   ]);
   const offenders: string[] = [];
 

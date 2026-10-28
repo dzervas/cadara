@@ -6,7 +6,7 @@ import type {
   SketchAuthoringToolId,
   SketchSessionStatus,
 } from "@/core/editor/sketch-session";
-import { shouldViewportStartSketchGeometryDrag } from "@/domain/editor/workbench-interactions";
+import { shouldViewportStartSketchGeometryDrag } from "@/core/editor/workbench-interactions";
 import {
   resolveHandleFromTarget,
   type SketchDragAcceptance,

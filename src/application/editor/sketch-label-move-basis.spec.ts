@@ -10,7 +10,7 @@
 import { describe, expect, test } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type { EditorEvent } from "@/core/editor/state-machine";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,

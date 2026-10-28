@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { getEscapeEvent } from "@/domain/editor/workbench-interactions";
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { getEscapeEvent } from "@/core/editor/workbench-interactions";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
 import { transitionEditorState } from "./reducer-root";
 import { getEditorViewState } from "./selectors";

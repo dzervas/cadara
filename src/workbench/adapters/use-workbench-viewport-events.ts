@@ -4,10 +4,10 @@ import type {
   EditorEvent,
   EditorViewState,
   SelectionRequestMode,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
-import { getNavigationReopenRequest } from "@/domain/editor/workbench-interactions";
+import { getNavigationReopenRequest } from "@/core/editor/workbench-interactions";
 import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";

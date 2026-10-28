@@ -23,13 +23,13 @@ import {
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   eid,
   entityRef,
   mirroredSession,
   pid,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";

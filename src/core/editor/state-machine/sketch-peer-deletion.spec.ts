@@ -16,7 +16,7 @@ import {
   transitionEditorState,
   type EditorState,
 } from "@/core/editor/state-machine";
-import { enterSketchSessionState } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSessionState } from "@/core/editor/sketch-entry.fixtures";
 import {
   createNewSketchSession,
   createSketchSessionFromSnapshot,

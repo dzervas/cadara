@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { createSketchActionOwnerFixture } from "./sketch-action-owner.fixtures";
 import { createNewSketchSessionFromSupport } from "@/core/editor/sketch-session";
-import { resolveSketchDragTarget } from "@/domain/editor/workbench-interactions";
+import { resolveSketchDragTarget } from "@/core/editor/workbench-interactions";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 
 // O4: the direct point-drag path already resized correctly. The viewport's

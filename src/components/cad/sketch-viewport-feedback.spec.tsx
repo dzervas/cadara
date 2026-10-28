@@ -32,8 +32,8 @@ import {
   updateSketchPointer,
 } from "@/core/editor/sketch-session";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
 import { transitionEditorState } from "@/core/editor/state-machine/reducer-root";
 import type { SketchEditorState } from "@/core/editor/state-machine/types";
 import {
@@ -42,7 +42,7 @@ import {
   entityTarget,
   mirroredSession,
   seedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { beginSketchMirrorRepair } from "@/core/editor/sketch-session/mirror-actions";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,

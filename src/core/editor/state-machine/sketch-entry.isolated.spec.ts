@@ -4,7 +4,7 @@ import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-v
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
 import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
-import { openSketchSessionFromSelection } from "@/domain/editor/sketch-session-controller";
+import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
 import { defaultEditorExtensionDependencies } from "./dependencies";

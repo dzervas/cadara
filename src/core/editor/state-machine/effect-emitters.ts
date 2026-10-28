@@ -15,7 +15,7 @@ import {
 import {
   buildSketchPlaneCommitRequest,
   hasSketchPlaneEditChanges,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import {
   getSketchSpecialModeSelectionFilter,
   resolveSketchSpecialModeEffectRequest,

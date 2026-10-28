@@ -29,13 +29,13 @@ import {
 } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createSketchDerivedTransformContribution } from "@/core/sketch-editing/operations";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   entityRef,
   handleRef,
   pointRef,
   withDerived,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,

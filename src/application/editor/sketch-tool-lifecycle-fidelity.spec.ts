@@ -22,14 +22,14 @@ import {
   finalizeSketchDraw,
   startSketchDraw,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   eid,
   entityRef,
   seedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
-import { getEnterEvent } from "@/domain/editor/workbench-interactions";
+} from "@/core/editor/sketch-mirror.fixtures";
+import { getEnterEvent } from "@/core/editor/workbench-interactions";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

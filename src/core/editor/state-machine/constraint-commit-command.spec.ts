@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { makeAnnotationLifecycleState } from "@/domain/editor/annotation-lifecycle.fixtures";
+import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
 import { transitionEditorState } from "./reducer-root";
 import { getEditorViewState } from "./selectors";
 import type { EditorEvent, EditorState, SketchEditorState } from "./types";

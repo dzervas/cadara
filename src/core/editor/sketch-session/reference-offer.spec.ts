@@ -22,7 +22,7 @@ import {
   withLiveSolveBasis,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { createSessionCommitFactories } from "./tool-authoring";
 import { createSketchFilletMutation } from "@/core/sketch-editing/operations";
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";

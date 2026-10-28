@@ -19,7 +19,7 @@ import {
   pid,
   pointRef,
   seedDefinition,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,
   beginSketchTool,
@@ -35,7 +35,7 @@ import {
 import {
   enterSketchSession,
   enterSketchSessionState,
-} from "@/domain/editor/sketch-entry.fixtures";
+} from "@/core/editor/sketch-entry.fixtures";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import {
   createStandardPlaneDefinition,

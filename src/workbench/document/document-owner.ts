@@ -1,4 +1,4 @@
-import type { ImportSessionState } from "@/domain/editor/state-machine";
+import type { ImportSessionState } from "@/core/editor/state-machine";
 import type {
   DocumentHistoryOrderEntry,
   WorkspaceSnapshot,
@@ -25,7 +25,7 @@ import type { ModelingService } from "@/domain/modeling/modeling-service";
 import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
-import type { EditorEvent, EditorState } from "@/domain/editor/state-machine";
+import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
 
 type VariablePatch = Pick<DocumentVariableRecord, "name" | "valueText">;
 

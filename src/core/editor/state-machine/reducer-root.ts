@@ -17,7 +17,7 @@ import {
   getSketchPlaneEditSelectionTarget,
   applySelectionToSketchPlaneEditSession,
   patchSketchPlaneEditSession,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 import {
   getDocumentHistoryCursorIndex,
   isValidDocumentHistoryCursor,

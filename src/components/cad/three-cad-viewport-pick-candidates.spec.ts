@@ -35,7 +35,7 @@ import {
   eid,
   entityRef,
   mirroredSession,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import { resolveSketchPickStack } from "@/core/sketch-interaction/pick-stack";
 import {
   createStandardPlaneDefinition,
@@ -100,7 +100,7 @@ import {
   resolveSketchSnap,
 } from "@/core/sketch-snapping/snap-candidates";
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
 import { svgSketchExportProvider } from "@/application/export/providers/svg-sketch-export-provider";
 import type { ExportCapabilities } from "@/contracts/export/capabilities";

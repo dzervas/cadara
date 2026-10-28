@@ -1,4 +1,4 @@
-import type { EditorEvent } from "@/domain/editor/state-machine";
+import type { EditorEvent } from "@/core/editor/state-machine";
 
 type ScheduledFrameCallback = (time: number) => void;
 

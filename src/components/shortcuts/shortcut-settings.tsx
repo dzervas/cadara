@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActionIcon,
@@ -73,6 +74,7 @@ export function ShortcutSettings() {
       createShortcutReferenceGroups(
         shortcuts.registry,
         shortcuts.effectiveKeymap,
+        { platform: getCurrentPlatform() },
       ),
     [shortcuts.effectiveKeymap, shortcuts.registry],
   );

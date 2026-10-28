@@ -28,8 +28,8 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
 import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
-import { querySketchEditIntersectionsForTest } from "@/domain/editor/state-machine-test-builder";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { querySketchEditIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import { emitPendingSketchEditQuery } from "./effect-emitters";
 import { transitionEditorState } from "./reducer-root";

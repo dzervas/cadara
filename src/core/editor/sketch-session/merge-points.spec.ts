@@ -40,7 +40,7 @@ import {
   getEnterEvent,
   getEscapeEvent,
   getSketchMergeOfferEvents,
-} from "@/domain/editor/workbench-interactions";
+} from "@/core/editor/workbench-interactions";
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
 import {
   initialEditorState,

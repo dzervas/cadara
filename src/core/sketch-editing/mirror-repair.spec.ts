@@ -35,7 +35,7 @@ import {
   seedDefinition,
   withDerived,
   type P,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   MIRROR_CYCLE_MESSAGE,
   removeMirrorRelationship,

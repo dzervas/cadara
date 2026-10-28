@@ -29,12 +29,12 @@ import {
   entityTarget,
   pid,
   withDerived,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 import {
   offsetSession,
   withOffset,
   type OffsetVariant,
-} from "@/domain/editor/sketch-offset.fixtures";
+} from "@/core/editor/sketch-offset.fixtures";
 import { getEntityPointIds } from "@/core/sketch-editing/definition-references";
 import { removeDerivedRelationship } from "@/core/sketch-editing/derived-removal";
 

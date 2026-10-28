@@ -31,7 +31,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { toolIconAssetFileNames } from "@/core/tools/tool-icons";
 import {
   inferDimensionAnnotationPlacement,

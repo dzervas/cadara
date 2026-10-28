@@ -1,3 +1,4 @@
+import { getCurrentPlatform } from "@/infrastructure/shortcuts/platform";
 import type { ShortcutCommandId } from "@/core/shortcuts/commands";
 import { formatShortcut } from "@/core/shortcuts/shortcut-grammar";
 
@@ -84,8 +85,9 @@ export function getShortcutSettingsDisplayLabel({
 }) {
   if (isRecording) {
     return (
-      recordingSteps.map((step) => formatShortcut(step)).join(" > ") ||
-      "Recording"
+      recordingSteps
+        .map((step) => formatShortcut(step, { platform: getCurrentPlatform() }))
+        .join(" > ") || "Recording"
     );
   }
 

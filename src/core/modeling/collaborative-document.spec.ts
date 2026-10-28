@@ -24,7 +24,7 @@ import {
 } from "@/contracts/sketch/schema";
 import { validateSketchDefinitionCore } from "@/core/sketch-solver";
 import { createDocumentSolverTolerances } from "@/contracts/solver/schema";
-import { mirroredSession } from "@/domain/editor/sketch-mirror.fixtures";
+import { mirroredSession } from "@/core/editor/sketch-mirror.fixtures";
 import { rebuildSessionForDefinition } from "@/core/editor/sketch-session/definition-authoring";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 import {

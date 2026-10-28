@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { createStandardPlaneDefinition, OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { acceptSketchDraw, beginSketchTool, createNewSketchSession, finalizeSketchDraw, startSketchDraw, updateSketchPointer } from "@/core/editor/sketch-session";
 import { reconcileSketchToolDraft } from "./tool-placement";
 import { withSketchSnapScale, SPEC_SKETCH_UNITS_PER_PIXEL } from "./test-snap-scale";

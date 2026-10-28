@@ -19,7 +19,7 @@ import {
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 
 function dimension(
   session: SketchSessionState,

@@ -28,7 +28,7 @@ import {
 import {
   createNewSketchSession
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { buildOccRenderExport } from "@/infrastructure/occ/snapshot";
 import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";

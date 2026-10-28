@@ -12,9 +12,9 @@ import {
   patchSketchEditToolValue,
   getSketchToolPresentation,
 } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
-import { offsetSession } from "@/domain/editor/sketch-offset.fixtures";
+import { offsetSession } from "@/core/editor/sketch-offset.fixtures";
 import {
   beginSketchAnnotationEdit,
   patchSketchAnnotationEditValue,

@@ -21,7 +21,7 @@ import {
 import { createSessionCommitFactories } from "./tool-authoring";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import type { SketchSessionState } from "@/core/editor/sketch-session/types";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

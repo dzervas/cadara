@@ -39,7 +39,7 @@ import {
   selectionFilterAllowsTarget,
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
-import { canReassignCommittedSketchPlane } from "@/domain/editor/sketch-plane-editing";
+import { canReassignCommittedSketchPlane } from "@/core/editor/sketch-plane-editing";
 import { getSketchErrorSummary } from "@/core/modeling/document-snapshot-view";
 import { useEditorState } from "@/hooks/use-editor-state";
 import type { ShellSelectRequest } from "@/core/editor/state-machine/types";

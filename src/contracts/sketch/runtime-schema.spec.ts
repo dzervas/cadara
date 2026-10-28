@@ -24,8 +24,8 @@ import {
 import {
   offsetSeedSession,
   withOffset,
-} from "@/domain/editor/sketch-offset.fixtures";
-import { eid } from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-offset.fixtures";
+import { eid } from "@/core/editor/sketch-mirror.fixtures";
 import { readFileSync } from "node:fs";
 import {
   validateDeriveSketchRegionsRequest,

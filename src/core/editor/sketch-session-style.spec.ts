@@ -1,0 +1,813 @@
+import { test, expect } from "vitest";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+
+import type {
+  SketchDefinition,
+  SketchEntityDefinition,
+  SketchStyleRecord,
+} from "@/contracts/sketch/schema";
+import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
+import { solveSketchDefinitionCore as solveSketchDefinitionCoreResolved } from "@/core/sketch-solver";
+import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
+import { lineLoopSegmentsForTest } from "@/contracts/sketch/region-record.fixtures";
+import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import type {
+  ConstraintId,
+  DimensionId,
+  SketchEntityId,
+  SketchPointId,
+} from "@/contracts/shared/ids";
+import type { PrimitiveRef } from "@/core/editor/schema";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import {
+  createSketchSessionFromSnapshot,
+  getSketchConstraintDisplayForTarget,
+  getSketchConstraintDisplaySummary,
+  normalizeSketchConstraintDisplayState
+} from "@/core/editor/sketch-session";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
+import {
+  createStandardPlaneDefinition,
+  OCC_KERNEL_SETTINGS,
+} from "@/core/modeling/opencascade-kernel-seed";
+
+// T17p2 (F-2): the solver consumes the resolved definition; these fixtures
+// author literal values, resolved before each solve (`literalResolvedDefinition`).
+const solveSketchDefinitionCore = (
+  input: Omit<
+    Parameters<typeof solveSketchDefinitionCoreResolved>[0],
+    "definition"
+  > & {
+    definition: SketchDefinition;
+  },
+) =>
+  solveSketchDefinitionCoreResolved({
+    ...input,
+    definition: literalResolvedDefinition(input.definition),
+  });
+
+test("src/domain/editor/sketch-session-style.spec.ts", () => {
+  const definition = {
+    schemaVersion: "sketch-definition/v1alpha2",
+    referenceIds: [],
+    references: [],
+    pointIds: ["sketch_point_a", "sketch_point_b"],
+    points: [
+      {
+        pointId: "sketch_point_a",
+        label: "A",
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_primary",
+          pointId: "sketch_point_a",
+        },
+        position: [0, 0],
+        isConstruction: false,
+      },
+      {
+        pointId: "sketch_point_b",
+        label: "B",
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_primary",
+          pointId: "sketch_point_b",
+        },
+        position: [4, 0],
+        isConstruction: false,
+      },
+    ],
+    entityIds: ["sketch_entity_ab"],
+    entities: [
+      {
+        kind: "lineSegment",
+        entityId: "sketch_entity_ab",
+        label: "AB",
+        target: {
+          kind: "sketchEntity",
+          sketchId: "sketch_primary",
+          entityId: "sketch_entity_ab",
+        },
+        isConstruction: false,
+        startPointId: "sketch_point_a",
+        endPointId: "sketch_point_b",
+        styleId: "sketch_style_primary",
+      },
+    ],
+    styleIds: ["sketch_style_primary"],
+    styles: [
+      {
+        styleId: "sketch_style_primary",
+        label: "Primary style",
+        target: { kind: "entity", entityId: "sketch_entity_ab" },
+        fill: { kind: "solid", color: "#3366ff", opacity: 0.42 },
+        paint: { color: "#3366ff", opacity: 0.42 },
+        stroke: {
+          color: "#ff8844",
+          opacity: 0.63,
+          width: 2.5,
+          lineCap: "butt",
+          lineJoin: "bevel",
+          miterLimit: 5,
+          dashSize: 0.8,
+          gapSize: 0.3,
+        },
+      },
+    ],
+    constraintIds: [],
+    constraints: [],
+    dimensionIds: [],
+    dimensions: [],
+    svgRenderingEnabled: true,
+  } satisfies SketchDefinition & {
+    // Persisted legacy display fields remain part of this compatibility fixture.
+    entities: (SketchEntityDefinition & { styleId: string })[];
+    styles: (SketchStyleRecord & { paint: { color: string; opacity: number } })[];
+  };
+
+  const solved = solveSketchDefinitionCore({
+    definition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  });
+  const plane = createStandardPlaneDefinition("xy");
+  const session = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
+        ownerDocumentId: "doc_workspace",
+        ownerRevisionId: "rev_0001",
+        ownerFeatureId: null,
+        ownerSketchId: "sketch_primary",
+        ownerBodyId: null,
+        sketchId: "sketch_primary",
+        label: "Sketch",
+        plane,
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition,
+          solvedSnapshot: solved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+
+  const lineRenderable = getSketchSessionDisplayRenderables(session).find(
+    (entry) => entry.id.includes("line"),
+  );
+  expect(
+    lineRenderable,
+    "Sketch line display renderable should exist.",
+  ).toBeTruthy();
+  if (!lineRenderable) throw new Error("Expected styled line renderable.");
+  expect(
+    lineRenderable.target?.kind,
+    "Styled renderables should preserve selection/picking target bindings.",
+  ).toBe("sketchEntity");
+  expect(
+    lineRenderable.linePattern,
+    "Style metadata should not alter construction/line-pattern state.",
+  ).toBe("solid");
+  expect(
+    lineRenderable.paintStyle?.color,
+    "Paint style color should resolve from persisted style records.",
+  ).toBe(0x3366ff);
+  expect(
+    lineRenderable.paintStyle?.opacity,
+    "Paint style opacity should resolve from persisted style records.",
+  ).toBe(0.42);
+  expect(
+    lineRenderable.strokeStyle?.color,
+    "Stroke style color should resolve from persisted style records.",
+  ).toBe(0xff8844);
+  expect(
+    lineRenderable.strokeStyle?.opacity,
+    "Stroke style opacity should resolve from persisted style records.",
+  ).toBe(0.63);
+  expect(
+    lineRenderable.strokeStyle?.width,
+    "Stroke style width should resolve from persisted style records.",
+  ).toBe(2.5);
+  expect(
+    lineRenderable.strokeStyle?.lineCap,
+    "Persisted stroke cap should resolve through display renderables.",
+  ).toBe("butt");
+  expect(
+    lineRenderable.strokeStyle?.lineJoin,
+    "Persisted stroke join should resolve through display renderables.",
+  ).toBe("bevel");
+  expect(
+    lineRenderable.strokeStyle?.miterLimit,
+    "Persisted stroke miter limit should resolve through display renderables.",
+  ).toBe(5);
+  expect(
+    lineRenderable.strokeStyle?.dashSize,
+    "Stroke dash size should resolve from persisted style records.",
+  ).toBe(0.8);
+  expect(
+    lineRenderable.strokeStyle?.gapSize,
+    "Stroke gap size should resolve from persisted style records.",
+  ).toBe(0.3);
+
+  const localDefinition = {
+    ...definition,
+    entities: [
+      {
+        ...definition.entities[0]!,
+        styleId: undefined,
+        style: {
+          fillMode: "gradient",
+          fillColor: "#111111",
+          gradientStartColor: "#2266ff",
+          strokeEnabled: true,
+          strokeColor: "#33ffaa",
+          strokeWidth: 3,
+          strokeCap: "square",
+          strokeJoin: "miter",
+          strokeMiterLimit: 7,
+          strokeDashSize: 0.45,
+          strokeGapSize: 0.15,
+        },
+      },
+    ],
+    styleIds: [],
+    styles: [],
+  } satisfies SketchDefinition & {
+    entities: (SketchEntityDefinition & { styleId: undefined })[];
+  };
+  const localSolved = solveSketchDefinitionCore({
+    definition: localDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  });
+  const localSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
+        ownerDocumentId: "doc_workspace",
+        ownerRevisionId: "rev_0001",
+        ownerFeatureId: null,
+        ownerSketchId: "sketch_primary",
+        ownerBodyId: null,
+        sketchId: "sketch_primary",
+        label: "Sketch",
+        plane,
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: localDefinition,
+          solvedSnapshot: localSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+
+  const localLineRenderable = getSketchSessionDisplayRenderables(
+    localSession,
+  ).find((entry) => entry.id.includes("line"));
+  expect(
+    localLineRenderable?.paintStyle?.color,
+    "Local gradient fill should render with the documented fill-color fallback.",
+  ).toBe(0x111111);
+  if (!localLineRenderable) throw new Error("Expected local styled line.");
+  expect(
+    localLineRenderable.strokeStyle?.color,
+    "Local stroke color should render from inline style metadata.",
+  ).toBe(0x33ffaa);
+  expect(
+    localLineRenderable.strokeStyle?.lineCap,
+    "Local stroke cap should remain available to display helpers.",
+  ).toBe("square");
+  expect(
+    localLineRenderable.strokeStyle?.lineJoin,
+    "Local stroke join should remain available to display helpers.",
+  ).toBe("miter");
+  expect(
+    localLineRenderable.strokeStyle?.miterLimit,
+    "Local stroke miter limit should remain available to display helpers.",
+  ).toBe(7);
+  expect(
+    localLineRenderable.strokeStyle?.dashSize,
+    "Local stroke dash size should render from inline style metadata.",
+  ).toBe(0.45);
+  expect(
+    localLineRenderable.strokeStyle?.gapSize,
+    "Local stroke gap size should render from inline style metadata.",
+  ).toBe(0.15);
+
+  const regionDefinition: SketchDefinition = {
+    ...definition,
+    pointIds: ["sketch_point_a", "sketch_point_b", "sketch_point_c"],
+    points: [
+      definition.points[0]!,
+      definition.points[1]!,
+      {
+        pointId: "sketch_point_c",
+        label: "C",
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_primary",
+          pointId: "sketch_point_c",
+        },
+        position: [0, 4],
+        isConstruction: false,
+      },
+    ],
+    // T10e: the region's boundary is three real lines (fill resolves the
+    // region's segments against the record's solved pair).
+    entityIds: ["sketch_entity_ab", "sketch_entity_bc", "sketch_entity_ca"],
+    entities: (
+      [
+        ["sketch_entity_ab", "sketch_point_a", "sketch_point_b"],
+        ["sketch_entity_bc", "sketch_point_b", "sketch_point_c"],
+        ["sketch_entity_ca", "sketch_point_c", "sketch_point_a"],
+      ] as const
+    ).map(([entityId, startPointId, endPointId]) => ({
+      kind: "lineSegment",
+      entityId,
+      label: entityId,
+      target: { kind: "sketchEntity", sketchId: "sketch_primary", entityId },
+      isConstruction: false,
+      startPointId,
+      endPointId,
+    })),
+    styleIds: ["sketch_style_region_gradient"],
+    styles: [
+      {
+        styleId: "sketch_style_region_gradient",
+        label: "Region gradient",
+        target: { kind: "region", regionId: "region_primary" },
+        fill: {
+          kind: "gradient",
+          gradient: {
+            kind: "linear",
+            angleRadians: Math.PI / 3,
+            startColor: "#2266ff",
+            startOpacity: 0.21,
+            endColor: "#ffaa33",
+            endOpacity: 0.74,
+          },
+        },
+        stroke: {
+          color: "#1188aa",
+          opacity: 0.52,
+          width: 4,
+          lineCap: "square",
+          lineJoin: "miter",
+          miterLimit: 9,
+          dashSize: 1.25,
+          gapSize: 0.5,
+        },
+      },
+    ],
+  };
+  const regionSolved = solveSketchDefinitionCore({
+    definition: regionDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  });
+  const regionSession = {
+    ...enterSketchSession(
+      createSketchSessionFromSnapshot(
+        {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          plane,
+          sketch: {
+            ownerDocumentId: "doc_workspace",
+            ownerRevisionId: "rev_0001",
+            ownerFeatureId: null,
+            ownerSketchId: "sketch_primary",
+            ownerBodyId: null,
+            sketchId: "sketch_primary",
+            label: "Sketch",
+            planeSupport: plane.support,
+            definition: regionDefinition,
+            solvedSnapshot: regionSolved.solvedSnapshot,
+            derivedValidity: { state: "current", diagnostics: [] },
+            regions: [
+              {
+                ownerDocumentId: "doc_workspace",
+                ownerRevisionId: "rev_0001",
+                ownerFeatureId: null,
+                ownerSketchId: "sketch_primary",
+                ownerBodyId: null,
+                regionId: "region_primary",
+                signature: "region_primary",
+                label: "Primary region",
+                target: {
+                  kind: "region",
+                  sketchId: "sketch_primary",
+                  regionId: "region_primary",
+                },
+                sourceSketch: { kind: "sketch", sketchId: "sketch_primary" },
+                loops: [
+                  {
+                    loopId: "region_loop_primary",
+                    role: "outer",
+                    orientation: "counterClockwise",
+                    segments: lineLoopSegmentsForTest(
+                      [
+                        { pointId: "sketch_point_a", position: [0, 0] },
+                        { pointId: "sketch_point_b", position: [4, 0] },
+                        { pointId: "sketch_point_c", position: [0, 4] },
+                      ],
+                      [
+                        "sketch_entity_ab",
+                        "sketch_entity_bc",
+                        "sketch_entity_ca",
+                      ],
+                    ),
+                    isClosed: true,
+                  },
+                ],
+                isClosed: true,
+              },
+            ],
+          },
+        } satisfies SketchSnapshotRecord,
+        OCC_KERNEL_SETTINGS,
+      ),
+    ),
+    definition: regionDefinition,
+  };
+  const regionRenderable = getSketchSessionDisplayRenderables(
+    regionSession,
+  ).find((entry) => entry.semanticClass === "region");
+  expect(
+    regionRenderable?.paintStyle?.kind,
+    "Region style records should preserve gradient fill metadata through display renderables.",
+  ).toBe("linearGradient");
+  if (regionRenderable?.paintStyle?.kind !== "linearGradient") {
+    throw new Error("Expected region gradient fill.");
+  }
+  expect(
+    regionRenderable.paintStyle.startColor === 0x2266ff &&
+      regionRenderable.paintStyle.startOpacity === 0.21 &&
+      regionRenderable.paintStyle.endColor === 0xffaa33 &&
+      regionRenderable.paintStyle.endOpacity === 0.74 &&
+      regionRenderable.paintStyle.angleRadians === Math.PI / 3,
+    "Region gradient display metadata should preserve colors, opacities, and angle.",
+  ).toBeTruthy();
+  expect(
+    regionRenderable.strokeStyle?.lineCap,
+    "Region style record stroke cap should reach display renderables.",
+  ).toBe("square");
+  if (!regionRenderable.strokeStyle) throw new Error("Expected region stroke.");
+  expect(
+    regionRenderable.strokeStyle.lineJoin,
+    "Region style record stroke join should reach display renderables.",
+  ).toBe("miter");
+  expect(
+    regionRenderable.strokeStyle.miterLimit,
+    "Region style record miter limit should reach display renderables.",
+  ).toBe(9);
+  expect(
+    regionRenderable.strokeStyle.dashSize === 1.25 &&
+      regionRenderable.strokeStyle.gapSize === 0.5,
+    "Region style record dash and gap should reach display renderables.",
+  ).toBeTruthy();
+
+  const disabledStrokeDefinition = {
+    ...localDefinition,
+    entities: [
+      {
+        ...localDefinition.entities[0]!,
+        style: {
+          strokeColor: "#ff00ff",
+          strokeWidth: 6,
+        },
+      },
+    ],
+  } as SketchDefinition;
+  const disabledStrokeSolved = solveSketchDefinitionCore({
+    definition: disabledStrokeDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  });
+  const disabledStrokeSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
+        ownerDocumentId: "doc_workspace",
+        ownerRevisionId: "rev_0001",
+        ownerFeatureId: null,
+        ownerSketchId: "sketch_primary",
+        ownerBodyId: null,
+        sketchId: "sketch_primary",
+        label: "Sketch",
+        plane,
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: disabledStrokeDefinition,
+          solvedSnapshot: disabledStrokeSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  const disabledStrokeLineRenderable = getSketchSessionDisplayRenderables(
+    disabledStrokeSession,
+  ).find((entry) => entry.id.includes("line"));
+  expect(
+    disabledStrokeLineRenderable?.strokeStyle,
+    "Local stroke fields should not render unless stroke styling is explicitly enabled.",
+  ).toBe(undefined);
+
+  const pointStyledDefinition = {
+    ...localDefinition,
+    points: [
+      {
+        ...localDefinition.points[0]!,
+        style: {
+          strokeEnabled: true,
+          strokeColor: "#dd44aa",
+          strokeWidth: 2,
+        },
+      },
+      localDefinition.points[1]!,
+    ],
+  } as SketchDefinition;
+  const pointStyledSolved = solveSketchDefinitionCore({
+    definition: pointStyledDefinition,
+    tolerances: {
+      coincidence: 1e-6,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-6,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+  });
+  const pointStyledSession = enterSketchSession(
+    createSketchSessionFromSnapshot(
+      {
+        ownerDocumentId: "doc_workspace",
+        ownerRevisionId: "rev_0001",
+        ownerFeatureId: null,
+        ownerSketchId: "sketch_primary",
+        ownerBodyId: null,
+        sketchId: "sketch_primary",
+        label: "Sketch",
+        plane,
+        sketch: {
+          ownerDocumentId: "doc_workspace",
+          ownerRevisionId: "rev_0001",
+          ownerFeatureId: null,
+          ownerSketchId: "sketch_primary",
+          ownerBodyId: null,
+          sketchId: "sketch_primary",
+          label: "Sketch",
+          planeSupport: plane.support,
+          definition: pointStyledDefinition,
+          solvedSnapshot: pointStyledSolved.solvedSnapshot,
+          derivedValidity: { state: "current", diagnostics: [] },
+          regions: [],
+        },
+      } satisfies SketchSnapshotRecord,
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  const pointRenderable = getSketchSessionDisplayRenderables(
+    pointStyledSession,
+  ).find(
+    (entry) =>
+      entry.target?.kind === "sketchPoint" &&
+      entry.target.pointId === "sketch_point_a",
+  );
+  expect(
+    pointRenderable?.strokeStyle?.color,
+    "Point marker renderables should resolve enabled local stroke style.",
+  ).toBe(0xdd44aa);
+
+  expect(
+    normalizeSketchConstraintDisplayState(
+      { solveState: "solved", constraintState: "wellConstrained" },
+      0,
+    ),
+    "Well constrained solver status should normalize to constrained display state.",
+  ).toBe("constrained");
+  expect(
+    normalizeSketchConstraintDisplayState(
+      { solveState: "solved", constraintState: "unknown" },
+      0,
+    ),
+    "Unknown solver constrainedness should normalize to underconstrained display state.",
+  ).toBe("underconstrained");
+  expect(
+    normalizeSketchConstraintDisplayState(
+      { solveState: "solved", constraintState: "inconsistent" },
+      0,
+    ),
+    "Inconsistent solver constrainedness should normalize to overconstrained display state.",
+  ).toBe("overconstrained");
+  expect(
+    normalizeSketchConstraintDisplayState(
+      { solveState: "partiallySolved", constraintState: "underConstrained" },
+      1,
+    ),
+    "Partial solves with known affected geometry should normalize to overconstrained display state.",
+  ).toBe("overconstrained");
+
+  const constrainedDefinition = {
+    ...definition,
+    constraintIds: ["constraint_horizontal"],
+    constraints: [
+      {
+        kind: "horizontal",
+        constraintId: "constraint_horizontal",
+        label: "Horizontal",
+        entityId: "sketch_entity_ab",
+      },
+    ],
+  } as SketchDefinition;
+  const unsatisfiedSnapshot: SolvedSketchSnapshot = {
+    schemaVersion: "solved-sketch/v1alpha2",
+    status: {
+      solveState: "partiallySolved",
+      constraintState: "underConstrained",
+    },
+    solvedEntities: [],
+    solvedPoints: [],
+    constraintStatuses: [
+      { constraintId: "constraint_horizontal", status: "unsatisfied" },
+    ],
+    dimensionStatuses: [],
+    diagnostics: [],
+  };
+  const displaySummary = getSketchConstraintDisplaySummary({
+    sketchId: "sketch_primary",
+    definition: constrainedDefinition,
+    solvedSnapshot: unsatisfiedSnapshot,
+  });
+  expect(
+    displaySummary.state,
+    "Unsatisfied partial solve display summary should be overconstrained.",
+  ).toBe("overconstrained");
+  expect(
+    getSketchConstraintDisplayForTarget(
+      {
+        kind: "sketchEntity",
+        sketchId: "sketch_primary",
+        entityId: "sketch_entity_ab",
+      },
+      displaySummary,
+    ).isAffectedOverconstraint,
+    "Unsatisfied constraints should mark only their affected sketch geometry targets.",
+  ).toBeTruthy();
+  expect(
+    getSketchConstraintDisplayForTarget(
+      {
+        kind: "sketchPoint",
+        sketchId: "sketch_primary",
+        pointId: "sketch_point_b",
+      },
+      displaySummary,
+    ).isAffectedOverconstraint,
+    "Unaffected geometry should not receive overconstraint diagnostics.",
+  ).toBeFalsy();
+
+  // [TECH] G16″: a requirement blocked by a failed offset relationship
+  // leaves the sketch solved, yet it and its geometry keep the problem
+  // styling of an unsatisfied requirement; nothing else is marked.
+  const blockedDefinition = {
+    ...constrainedDefinition,
+    dimensionIds: ["dimension_ab"],
+    dimensions: [
+      {
+        kind: "distance",
+        dimensionId: "dimension_ab",
+        label: "Distance",
+        pointIds: ["sketch_point_a", "sketch_point_b"],
+        axis: "aligned",
+        value: createLiteralAuthoredValue(1),
+      },
+    ],
+  } as SketchDefinition;
+  for (const [label, constraintStatus, dimensionStatus] of [
+    ["blocked constraint", "blocked", "driving"],
+    ["blocked dimension", "satisfied", "blocked"],
+  ] as const) {
+    const blockedSummary = getSketchConstraintDisplaySummary({
+      sketchId: "sketch_primary",
+      definition: blockedDefinition,
+      solvedSnapshot: {
+        ...unsatisfiedSnapshot,
+        status: { solveState: "solved", constraintState: "wellConstrained" },
+        constraintStatuses: [
+          { constraintId: "constraint_horizontal", status: constraintStatus },
+        ],
+        dimensionStatuses: [
+          {
+            dimensionId: "dimension_ab",
+            status: dimensionStatus,
+            solvedValue: 1,
+          },
+        ],
+      },
+    });
+    expect(
+      blockedSummary.state,
+      `${label}: the solved sketch keeps its own display state`,
+    ).toBe("constrained");
+    const marked = (target: PrimitiveRef) =>
+      getSketchConstraintDisplayForTarget(target, blockedSummary)
+        .isAffectedOverconstraint;
+    const requirement: PrimitiveRef =
+      constraintStatus === "blocked"
+        ? {
+            kind: "constraint",
+            sketchId: "sketch_primary",
+            constraintId: "constraint_horizontal" as ConstraintId,
+          }
+        : {
+            kind: "dimension",
+            sketchId: "sketch_primary",
+            dimensionId: "dimension_ab" as DimensionId,
+          };
+    expect(
+      marked(requirement),
+      `${label}: the blocked requirement shows the problem styling`,
+    ).toBe(true);
+    expect(
+      marked(
+        constraintStatus === "blocked"
+          ? {
+              kind: "sketchEntity",
+              sketchId: "sketch_primary",
+              entityId: "sketch_entity_ab" as SketchEntityId,
+            }
+          : {
+              kind: "sketchPoint",
+              sketchId: "sketch_primary",
+              pointId: "sketch_point_b" as SketchPointId,
+            },
+      ),
+      `${label}: its geometry shows the problem styling`,
+    ).toBe(true);
+    expect(
+      marked(
+        constraintStatus === "blocked"
+          ? {
+              kind: "dimension",
+              sketchId: "sketch_primary",
+              dimensionId: "dimension_ab" as DimensionId,
+            }
+          : {
+              kind: "constraint",
+              sketchId: "sketch_primary",
+              constraintId: "constraint_horizontal" as ConstraintId,
+            },
+      ),
+      `${label}: the satisfied requirement is not marked`,
+    ).toBe(false);
+  }
+});

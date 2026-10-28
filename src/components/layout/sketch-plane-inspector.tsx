@@ -15,7 +15,7 @@ import {
   getSketchPlaneEditSelectionTarget,
   hasSketchPlaneEditChanges,
   type SketchPlaneEditSessionState,
-} from "@/domain/editor/sketch-plane-editing";
+} from "@/core/editor/sketch-plane-editing";
 
 interface SketchPlaneInspectorProps {
   onCancel: () => void;

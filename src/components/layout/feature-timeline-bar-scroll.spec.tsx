@@ -7,7 +7,7 @@ import type { FeatureId, SketchId } from "@/contracts/shared/ids";
 import {
   getEditorViewState,
   initialEditorState,
-} from "@/domain/editor/state-machine";
+} from "@/core/editor/state-machine";
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";

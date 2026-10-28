@@ -20,12 +20,12 @@ import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
 import { deleteSelectedSketchGeometry } from "@/core/editor/sketch-session";
-import { enterSketchSession } from "@/domain/editor/sketch-entry.fixtures";
+import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {
   eid,
   entityRef,
   mirroredSession,
-} from "@/domain/editor/sketch-mirror.fixtures";
+} from "@/core/editor/sketch-mirror.fixtures";
 
 // Lane: logic (per docs/testing.md — persistence/runtime validation seam).
 // T17o (E2, [TECH] T17-14): the hand-written sketch normalizer
