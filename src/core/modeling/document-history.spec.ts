@@ -12,7 +12,7 @@ import {
 } from "@/core/modeling/document-history";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { SKETCH_SCHEMA_VERSION } from "@/contracts/sketch/schema";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/domain/modeling/document-history.spec.ts", async () => {
   const adapter = new MockKernelAdapter();

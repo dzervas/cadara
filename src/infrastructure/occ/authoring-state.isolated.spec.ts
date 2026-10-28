@@ -8,7 +8,7 @@ import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   SHELL_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
@@ -70,7 +70,7 @@ const {
   serializeOccFeatureTopologyLineage,
 } = await import("@/infrastructure/occ/topology-stage");
 const { OpenCascadeKernelAdapter } =
-  await import("@/domain/modeling/opencascade-kernel-adapter");
+  await import("@/infrastructure/occ/opencascade-kernel-adapter");
 
 const { seedOccTopologyNaming, reconcileReplacementTopology, deriveGeneratedTopologyContributors } =
   await import("@/infrastructure/occ/topology-naming");

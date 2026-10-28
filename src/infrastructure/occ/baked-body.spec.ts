@@ -17,7 +17,7 @@ import {
   type OccAuthoringFeatureRecord,
 } from "@/infrastructure/occ/authoring-state";
 import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   OCC_KERNEL_DOCUMENT_ID,
@@ -27,7 +27,7 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import {
   createMemoryGeometryAssetStore,
   hashGeometryAssetBytes,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 import {
   createGeometryAssetRecordFromReference,
   type BakedGeometryAssetReference,

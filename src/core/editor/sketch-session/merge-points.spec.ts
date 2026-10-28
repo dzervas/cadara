@@ -51,7 +51,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 
 // Lane: logic (docs/testing.md). Seam: the sketch session's Merge Points
 // tool (T13j, D25): picks, the destination presentation, confirm and

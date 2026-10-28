@@ -4,7 +4,7 @@ import {
   encodeGeometryAssetData,
   type BakedMeshGeometryAssetData,
 } from "./geometry-assets";
-import { createDeterministicCadaraBrepData } from "@/domain/modeling/geometry-asset-test-helpers";
+import { createDeterministicCadaraBrepData } from "@/core/modeling/geometry-asset-test-helpers";
 
 it("preserves the content-addressed bytes of retained geometry data in native JSON", () => {
   const mesh: BakedMeshGeometryAssetData = {

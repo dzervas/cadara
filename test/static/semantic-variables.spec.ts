@@ -15,7 +15,7 @@ it("variable commands retain shared production validation and dependent rebuild 
   expect(read("src/workbench/document/document-owner.ts")).toContain(
     "modelingService.updateDocumentVariable(",
   );
-  const adapter = read("src/domain/modeling/opencascade-kernel-adapter.ts");
+  const adapter = read("src/infrastructure/occ/opencascade-kernel-adapter.ts");
   expect(adapter).toContain(
     "evaluateDocumentVariableExpressions(candidateVariables)",
   );

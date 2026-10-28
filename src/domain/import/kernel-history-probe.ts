@@ -11,7 +11,7 @@ import type {
 } from "@/contracts/import/actions";
 import type { BodyId, DocumentId, RevisionId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";
 import {
   ImportDeferredMaterializer,

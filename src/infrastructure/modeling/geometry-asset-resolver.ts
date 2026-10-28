@@ -6,7 +6,7 @@ import {
   createGeometryAssetRecordFromReference,
   type BakedGeometryAssetReference,
 } from "@/contracts/modeling/geometry-assets";
-import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 /**
  * Resolve a baked geometry asset from a self-describing reference carried by the
  * feature definition. The reference reconstructs the store record, so resolution

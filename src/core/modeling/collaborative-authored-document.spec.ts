@@ -13,7 +13,7 @@ import {
   COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
   normalizeCollaborativeAuthoredModelDocument,
 } from "@/core/modeling/collaborative-authored-document";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/domain/modeling/collaborative-authored-document.spec.ts", async () => {
   async function createSeedDocument() {

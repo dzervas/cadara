@@ -1,5 +1,5 @@
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 import { expect, test } from "vitest";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
 

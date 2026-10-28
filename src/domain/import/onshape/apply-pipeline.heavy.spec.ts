@@ -58,13 +58,13 @@ import {
   translateSketch,
   verifySketchTranslationSolveConsistency,
 } from "@/application/import/onshape/sketch-translator";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import { createModelingService } from "@/application/modeling/modeling-service";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
 import { deriveLiveBodySignatures } from "@/domain/import/live-body-signatures";

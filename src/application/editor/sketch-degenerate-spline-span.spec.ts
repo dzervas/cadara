@@ -52,7 +52,7 @@ import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,
 } from "@/core/editor/sketch-session/test-snap-scale";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

@@ -91,10 +91,8 @@ import {
   getOccDurableRefKey,
   type OccTrackedBody,
 } from "@/infrastructure/occ/topology";
-import {
-  getOccTessellationTier,
-  type OccTessellationTierId,
-} from "@/infrastructure/occ/tessellation";
+import { getOccTessellationTier } from "@/infrastructure/occ/tessellation";
+import { type OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type {
   OccNativeShimMeshSummary,
   OccNativeTopologyBodyPayload,

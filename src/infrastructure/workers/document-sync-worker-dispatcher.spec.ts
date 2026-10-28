@@ -1,6 +1,6 @@
 import { test, expect, assert } from "vitest";
 
-import type { DocumentSyncWorkerRequest } from "@/domain/modeling/document-sync-worker-protocol";
+import type { DocumentSyncWorkerRequest } from "@/infrastructure/workers/document-sync-worker-protocol";
 import { createDocumentSyncWorkerDispatcher } from "@/infrastructure/workers/document-sync-worker-dispatcher";
 
 test("src/infrastructure/workers/document-sync-worker-dispatcher.spec.ts", async () => {

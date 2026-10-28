@@ -131,7 +131,7 @@ function dimensionDiscovery(
 export function createSemanticSketchPort(input: {
   loop: EditorEventLoop;
   referenceImageFiles?: import("@/application/semantic/reference-image-files").ReferenceImageFiles;
-  service: import("@/domain/modeling/modeling-service").ModelingService;
+  service: import("@/application/modeling/modeling-service").ModelingService;
   publications: ReturnType<
     typeof import("./sketch-publication-receipts").createSketchPublicationReceipts
   >;
@@ -501,9 +501,9 @@ export function createSemanticSketchPort(input: {
     let events: readonly EditorEvent[] = [];
     let editQuery: { requestId: RequestId; generation: number } | undefined;
     let publicationReceipt:
-      | import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult
+      | import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult
       | undefined;
-    const cursorWrites: { event: Extract<EditorEvent, { type: "effect.documentCursorMoved" | "effect.documentCursorMoveFailed" }>; receipt: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult | undefined }[] = [];
+    const cursorWrites: { event: Extract<EditorEvent, { type: "effect.documentCursorMoved" | "effect.documentCursorMoveFailed" }>; receipt: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult | undefined }[] = [];
     try {
       if (command.operation === "sketch.begin")
         events = await input.loop.dispatchAndSettle(command.commandId, {

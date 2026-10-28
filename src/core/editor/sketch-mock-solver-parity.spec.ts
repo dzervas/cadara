@@ -25,8 +25,8 @@ import {
   MockSketchSolverAdapter,
 } from "@/application/solver/mock-sketch-solver-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 
 // Logic lane: compare the exported adapter contract, not private residuals.
 // The non-moving mock must explicitly refuse requirements it cannot evaluate.

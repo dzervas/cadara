@@ -8,15 +8,15 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 import {
   encodeGeometryAssetData,
   type BakedMeshGeometryAssetData,
   type GeometryAssetRecord,
 } from "@/contracts/modeling/geometry-assets";
-import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import { hashGeometryAssetBytes } from "@/core/modeling/geometry-asset-store";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 import { BAKED_BODY_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 
 const exec = promisify(execFile);

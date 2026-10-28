@@ -14,7 +14,7 @@ import {
   withDimensions,
 } from "@/contracts/sketch/reference-dimension.fixtures";
 import { reconstructSplineAggregate } from "@/contracts/sketch/spline-geometry";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {

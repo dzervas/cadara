@@ -5,13 +5,13 @@ import {
   createDurableHistoryService,
   DEFAULT_REPOSITORY_SYNCHRONIZATION_TIMEOUT_MS,
 } from "@/application/history/durable-history";
-import type { DocumentRepository } from "@/domain/modeling/document-repository";
+import type { DocumentRepository } from "@/contracts/modeling/document-repository";
 import {
   createModelingService,
   type ModelingService,
-} from "@/domain/modeling/modeling-service";
-import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+} from "@/application/modeling/modeling-service";
+import { createMemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";

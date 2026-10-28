@@ -5,7 +5,7 @@ import {
   errorContext,
   type ErrorReporter,
 } from "@/contracts/errors";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import { subscribeBrowserOccWorkerFailure } from "@/infrastructure/occ/browser-kernel-runtime";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";

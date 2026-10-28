@@ -35,10 +35,8 @@ import {
   type ViewportCameraFrame,
   type ViewportProjectionMode,
 } from "@/infrastructure/viewport/viewport-projection";
-import {
-  selectViewportLodTierForRenderables,
-  type OccTessellationTierId,
-} from "@/infrastructure/occ/tessellation";
+import { selectViewportLodTierForRenderables } from "@/infrastructure/occ/tessellation";
+import { type OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 import {
   createRenderIdleTracker,

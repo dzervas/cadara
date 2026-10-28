@@ -16,11 +16,11 @@ import { createStoreGeometryAssetResolver } from "@/infrastructure/modeling/geom
 import {
   createMemoryGeometryAssetStore,
   type GeometryAssetStore,
-} from "@/domain/modeling/geometry-asset-store";
-import type { GeometryAssetDocumentRepository } from "@/domain/modeling/document-repository";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+} from "@/core/modeling/geometry-asset-store";
+import type { GeometryAssetDocumentRepository } from "@/contracts/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { loadFilesystemOpenCascadeFactory } from "@/infrastructure/occ/filesystem-kernel-runtime";
 import { createOpenCascadeInstanceLoader } from "@/infrastructure/occ/runtime";
@@ -30,7 +30,7 @@ import { createModelingServiceEditorEffectRuntime } from "@/application/editor/e
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
 import { createConsoleErrorReporter } from "@/contracts/errors";
-import type { ModelCheckpointStore } from "@/domain/modeling/model-checkpoint-store";
+import type { ModelCheckpointStore } from "@/infrastructure/persistence/model-checkpoint-store";
 import { fingerprintModelCheckpointRuntime } from "@/infrastructure/modeling/model-checkpoint-file-store";
 import { dirname } from "node:path";
 

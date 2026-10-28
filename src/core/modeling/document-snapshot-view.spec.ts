@@ -8,7 +8,7 @@ import {
   getSketchErrorSummary,
   getTargetContributingFeatureIds,
 } from "@/core/modeling/document-snapshot-view";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { SketchDerivedValidity } from "@/contracts/sketch/schema";
 

@@ -1,4 +1,4 @@
-import type { ModelingExportDocumentInput } from "@/domain/modeling/modeling-service";
+import type { ModelingExportDocumentInput } from "@/application/modeling/modeling-service";
 import type { ObjectExportModalState } from "@/core/export/object-export-state";
 
 export function buildDocumentExportModalInput(

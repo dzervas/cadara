@@ -15,10 +15,10 @@ import {
   createImportCapabilities,
   prepareImportActions,
 } from "@/domain/import/orchestrator";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
+import { createModelingService } from "@/application/modeling/modeling-service";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 

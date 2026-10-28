@@ -3,7 +3,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
-import type { LocalSaveStatus } from "@/domain/modeling/modeling-service";
+import type { LocalSaveStatus } from "@/application/modeling/modeling-service";
 import { useLocalSaveStatus } from "@/hooks/use-local-save-status";
 
 function SavingProbe({ status }: { status: LocalSaveStatus }) {

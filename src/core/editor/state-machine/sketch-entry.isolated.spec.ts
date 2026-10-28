@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-calibration/mode/shared";
 import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";

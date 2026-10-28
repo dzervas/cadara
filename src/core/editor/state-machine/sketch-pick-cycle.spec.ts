@@ -21,7 +21,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
 import type { SketchAuthoringToolId } from "@/core/editor/sketch-session";

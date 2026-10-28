@@ -22,7 +22,7 @@ import {
 } from "@/core/editor/sketch-session/test-snap-scale";
 import { querySketchSnapIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

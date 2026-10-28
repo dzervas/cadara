@@ -1,10 +1,6 @@
 import type { RequestId } from "@/contracts/shared/ids";
-import type {
-  DocumentSyncSubscriptionId,
-  DocumentSyncWorkerRequest,
-  DocumentSyncWorkerResponse,
-  DocumentSyncWriteStatus,
-} from "@/domain/modeling/document-sync-worker-protocol";
+import type { DocumentSyncSubscriptionId, DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 
 export interface DocumentSyncWorkerLike {
   postMessage(message: DocumentSyncWorkerRequest): void;

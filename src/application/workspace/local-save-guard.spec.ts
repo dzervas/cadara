@@ -7,7 +7,7 @@ import type { AppError, ErrorReportMetadata } from "@/contracts/errors";
 import type {
   LocalSaveFailure,
   LocalSaveStatus,
-} from "@/domain/modeling/modeling-service";
+} from "@/application/modeling/modeling-service";
 import {
   LocalSaveGuard,
   type LeaveAttemptEvent,

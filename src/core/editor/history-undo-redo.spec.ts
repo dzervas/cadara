@@ -8,7 +8,7 @@ import {
 } from "@/core/editor/state-machine";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
   async function createLoadedIdleState() {

@@ -1,96 +1,25 @@
+import type { OccNativeTopologyWorkerResult } from "@/contracts/modeling/kernel-worker-result";
 import typia from "typia";
 import { describeUnknownError } from "@/contracts/errors";
 
-import type {
-  AddDocumentVariableRequest,
-  AddDocumentVariableResponse,
-  CommitSketchRequest,
-  CommitSketchResponse,
-  CreateFeatureRequest,
-  CreateFeatureResponse,
-  DeleteDocumentTargetRequest,
-  DeleteDocumentTargetResponse,
-  DeleteFeatureRequest,
-  DeleteFeatureResponse,
-  EvaluatePreviewRequest,
-  EvaluatePreviewResponse,
-  FeatureBooleanOperation,
-  GetDocumentSnapshotRequest,
-  GetDocumentSnapshotResponse,
-  ModelingDiagnostic,
-  ModelingOperationResult,
-  RenameBodyRequest,
-  RenameBodyResponse,
-  RenameDocumentRequest,
-  RenameFeatureRequest,
-  RenameSketchRequest,
-  SetBodyAppearanceRequest,
-  SetBodyAppearanceResponse,
-  ReorderDocumentHistoryRequest,
-  ReorderDocumentHistoryResponse,
-  ReorderFeatureRequest,
-  ReorderFeatureResponse,
-  ResolveReferenceRequest,
-  ResolveReferenceResponse,
-  SetFeatureCursorRequest,
-  SetFeatureCursorResponse,
-  SetFeatureSuppressionRequest,
-  SetFeatureSuppressionResponse,
-  UpdateDocumentVariableRequest,
-  UpdateDocumentVariableResponse,
-  RemoveDocumentVariableRequest,
-  RemoveDocumentVariableResponse,
-  UpdateFeatureRequest,
-  UpdateFeatureResponse,
-} from "@/contracts/modeling/schema";
+import type { AddDocumentVariableRequest, AddDocumentVariableResponse, CommitSketchRequest, CommitSketchResponse, CreateFeatureRequest, CreateFeatureResponse, DeleteDocumentTargetRequest, DeleteDocumentTargetResponse, DeleteFeatureRequest, DeleteFeatureResponse, EvaluatePreviewRequest, EvaluatePreviewResponse, FeatureBooleanOperation, GetDocumentSnapshotRequest, GetDocumentSnapshotResponse, ModelingDiagnostic, ModelingOperationResult, RenameBodyRequest, RenameBodyResponse, RenameDocumentRequest, RenameFeatureRequest, RenameSketchRequest, SetBodyAppearanceRequest, SetBodyAppearanceResponse, ReorderDocumentHistoryRequest, ReorderDocumentHistoryResponse, ReorderFeatureRequest, ReorderFeatureResponse, ResolveReferenceRequest, ResolveReferenceResponse, SetFeatureCursorRequest, SetFeatureCursorResponse, SetFeatureSuppressionRequest, SetFeatureSuppressionResponse, UpdateDocumentVariableRequest, UpdateDocumentVariableResponse, RemoveDocumentVariableRequest, RemoveDocumentVariableResponse, UpdateFeatureRequest, UpdateFeatureResponse } from "@/contracts/modeling/schema";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type {
-  MeasureTopologyRequest,
-  MeasureTopologyResponse,
-} from "@/contracts/modeling/topology-measure";
+import type { MeasureTopologyRequest, MeasureTopologyResponse } from "@/contracts/modeling/topology-measure";
 import type { AuthoredDocumentRestoreOptions } from "@/contracts/modeling/adapter";
 import type { OccWorkerRestoreProgressMessage } from "@/infrastructure/occ/worker-restore-progress.runtime-schema";
 import type { OccWorkerEngineDownloadProgressMessage } from "@/infrastructure/occ/worker-engine-download-progress.runtime-schema";
-import type {
-  BakedGeometryAssetReference,
-  GeometryAssetBlobInput,
-  GeometryAssetFormat,
-} from "@/contracts/modeling/geometry-assets";
+import type { BakedGeometryAssetReference, GeometryAssetBlobInput, GeometryAssetFormat } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, GeometryAssetId, RequestId, RevisionId } from "@/contracts/shared/ids";
-import type {
-  MeshExportAccuracy,
-  MeshTriangle,
-  StepWriterOptions,
-} from "@/contracts/export/capabilities";
+import type { MeshExportAccuracy, MeshTriangle, StepWriterOptions } from "@/contracts/export/capabilities";
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
-import type {
-  NeutralCurveJoinRequest,
-  NeutralCurveJoinResult,
-  NeutralCurveQueryRequest,
-  NeutralCurveQueryResult,
-  NeutralCurveSelfIntersectionRequest,
-} from "@/contracts/modeling/neutral-curve-query";
-import type {
-  DeriveSketchRegionsRequest,
-  DeriveSketchRegionsResponse,
-  ProjectSketchExternalReferencesRequest,
-  ProjectSketchExternalReferencesResponse,
-  QuerySketchEditIntersectionsRequest,
-  QuerySketchEditIntersectionsResponse,
-  QuerySketchSnapIntersectionsRequest,
-  QuerySketchSnapIntersectionsResponse,
-} from "@/contracts/solver/schema";
+import type { NeutralCurveJoinRequest, NeutralCurveJoinResult, NeutralCurveQueryRequest, NeutralCurveQueryResult, NeutralCurveSelfIntersectionRequest } from "@/contracts/modeling/neutral-curve-query";
+import type { DeriveSketchRegionsRequest, DeriveSketchRegionsResponse, ProjectSketchExternalReferencesRequest, ProjectSketchExternalReferencesResponse, QuerySketchEditIntersectionsRequest, QuerySketchEditIntersectionsResponse, QuerySketchSnapIntersectionsRequest, QuerySketchSnapIntersectionsResponse } from "@/contracts/solver/schema";
 import type { PackedWorkspaceSnapshot } from "@/infrastructure/occ/mesh-transport";
-import type {
-  OccNativeExactBrepPayload,
-  OccNativeMeshExportPayload,
-  OccNativeTopologyCapabilityProbeResult,
-  OccNativeTopologyDiagnostic,
-  OccNativeTopologyPayload,
-} from "@/infrastructure/occ/native-topology-payload";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccNativeExactBrepPayload, OccNativeTopologyCapabilityProbeResult } from "@/contracts/modeling/kernel-payloads";
+import type { OccNativeMeshExportPayload, OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 
 export interface OccWorkerAssetConfig {
   mainWasm?: string;
@@ -102,20 +31,6 @@ interface AuthoredDocumentWorkerOperationBase {
   diagnostics?: readonly ModelingDiagnostic[];
   assets?: readonly GeometryAssetBlobInput[];
 }
-
-export interface OccNativeTopologyUnavailableResult {
-  kind: "nativeTopologyUnavailable";
-  diagnostics: readonly OccNativeTopologyDiagnostic[];
-  capability: OccNativeTopologyCapabilityProbeResult;
-}
-
-export type OccNativeTopologyWorkerResult<TPayload> =
-  | {
-      kind: "nativeTopologyPayload";
-      payload: TPayload;
-      diagnostics: readonly OccNativeTopologyDiagnostic[];
-    }
-  | OccNativeTopologyUnavailableResult;
 
 export type OccWorkerOperation =
   | {

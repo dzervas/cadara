@@ -67,9 +67,9 @@ import {
 } from "@/core/editor/sketch-session";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { createMemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { createModelingService } from "@/application/modeling/modeling-service";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import {

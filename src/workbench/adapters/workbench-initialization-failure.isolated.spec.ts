@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from "vitest";
 import { createTestErrorReporter } from "@/contracts/errors";
-import type { ModelingHistoryRestoreState } from "@/domain/modeling/modeling-service/types";
+import type { ModelingHistoryRestoreState } from "@/application/modeling/modeling-service/types";
 import {
   createHookTestHarness,
   flushMicrotasks,

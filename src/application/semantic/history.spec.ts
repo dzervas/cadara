@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
 import type { SemanticResult } from "@/contracts/semantic/schema";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
 
 async function historyFixture(
   options: Parameters<typeof createSemanticSessionWorkflow>[1] = {},

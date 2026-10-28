@@ -21,7 +21,7 @@ test("semantic replay reuses canonical production normalization and exact mutati
   expect(cli).not.toMatch(
     /replaySource|localTransforms|authoredFeatures|normalizeFeatureDefinition|buildExtrudeFeatureShape|gp_Trsf/,
   );
-  const helpers = read("src/domain/modeling/modeling-service/helpers.ts");
+  const helpers = read("src/application/modeling/modeling-service/helpers.ts");
   expect(
     helpers.match(
       /definition: normalizeFeatureDefinition\(input.definition\)/g,

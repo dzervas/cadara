@@ -15,7 +15,7 @@ import type {
   ModelCheckpoint,
   ModelCheckpointEvent,
   ModelCheckpointStore,
-} from "@/domain/modeling/model-checkpoint-store";
+} from "@/infrastructure/persistence/model-checkpoint-store";
 import { OCC_ASSET_VERSION } from "@/infrastructure/occ/assets";
 import {
   validateModelCheckpointEntryManifest,

@@ -8,7 +8,7 @@ import {
   encodeGeometryAssetData,
   type BakedMeshGeometryAssetData,
 } from "@/contracts/modeling/geometry-assets";
-import { hashGeometryAssetBytes } from "@/domain/modeling/geometry-asset-store";
+import { hashGeometryAssetBytes } from "@/core/modeling/geometry-asset-store";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { BAKED_BODY_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 

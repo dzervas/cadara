@@ -9,7 +9,7 @@ import {
 } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { projectSketchExternalReferencesFromSnapshot } from "./sketch-reference-projection";
-import { MockKernelAdapter } from "../../domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "../../application/modeling/mock-kernel-adapter";
 import { mirroredSession } from "@/core/editor/sketch-mirror.fixtures";
 import { removeMirrorRelationship } from "@/core/sketch-editing/mirror-repair";
 

@@ -11,7 +11,7 @@ import {
   type GeometryAssetStorePutResult,
   type GeometryAssetStoreGetResult,
   type GeometryAssetStoreHasResult,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 export interface IndexedDbGeometryAssetStoreOptions {
   indexedDB?: IDBFactory;
   databaseName?: string;

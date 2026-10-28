@@ -12,10 +12,8 @@ import type {
 } from "@/contracts/modeling/schema";
 import type { EditorRuntimeTraceSnapshot } from "@/core/debug/debug-platform";
 import type { EditorViewState } from "@/core/editor/state-machine";
-import {
-  MODELING_OPERATION_HISTORY_STORAGE_KEY,
-  type StorageLike,
-} from "@/domain/modeling/modeling-history-persistence";
+import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from "@/application/modeling/modeling-history-persistence";
+import { type StorageLike } from "@/contracts/modeling/operation-history-store";
 
 export const CADARA_GITHUB_BUG_REPORT_URL =
   "https://github.com/dzervas/cadara/issues/new";

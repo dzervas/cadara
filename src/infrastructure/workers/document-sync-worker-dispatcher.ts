@@ -1,4 +1,4 @@
-import type { DocumentSyncWorkerRequest } from "@/domain/modeling/document-sync-worker-protocol";
+import type { DocumentSyncWorkerRequest } from "@/infrastructure/workers/document-sync-worker-protocol";
 
 export type DocumentSyncWorkerBootstrapMessage = {
   kind: "bootstrap";

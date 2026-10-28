@@ -30,7 +30,7 @@ import {
   publishSketchLiveRegions,
 } from "@/core/editor/sketch-session/session-live-solve";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 
 // Non-default document policy: both values are far looser than the former

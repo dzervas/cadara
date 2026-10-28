@@ -4,8 +4,8 @@ import type {
   SemanticCommand,
   SemanticResult,
 } from "@/contracts/semantic/schema";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 
 type Input<T = SemanticCommand> = T extends SemanticCommand
   ? Omit<T, "version" | "commandId" | "basis">

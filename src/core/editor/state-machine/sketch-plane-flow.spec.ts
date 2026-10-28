@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import { planeSelectionFilter } from "@/core/editor/schema";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
 import { getDocumentHistoryCursorBeforeTarget } from "@/core/modeling/document-history";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import {
   getSketchPlaneEditPreviewLabel,
   SKETCH_PLANE_SUPPORT_FIELD_ID,

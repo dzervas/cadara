@@ -6,8 +6,8 @@ import type {
 } from "@/application/semantic/document-port";
 import { semanticDiagnostic } from "@/application/semantic/session";
 import type { SemanticState } from "@/contracts/semantic/schema";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 
 /** Native format and retained assets belong to the service; only disk IO belongs here. */

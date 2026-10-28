@@ -47,7 +47,7 @@ import {
   getEscapeEvent,
 } from "@/core/editor/workbench-interactions";
 import { buildSketchVectorExportModelFromSnapshot } from "@/core/export/sketch-vector-export-model";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {

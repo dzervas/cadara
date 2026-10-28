@@ -4,9 +4,9 @@ import {
   createAuthoredHistoryOperation,
   HistoryOperationError,
 } from "./authored-history";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
 
 it("retains exact appliedLive compensation when persistence fails after the undo applied", async () => {
   class FailedUndoRepository extends MemoryDocumentRepository {

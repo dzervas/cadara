@@ -20,7 +20,7 @@ import {
   publishActiveDocumentTelemetryContext,
 } from "@/contracts/errors/telemetry-context";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 interface CapturedEvent {
   kind: "exception" | "message";

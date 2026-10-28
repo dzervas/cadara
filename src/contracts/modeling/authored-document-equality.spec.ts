@@ -10,7 +10,7 @@ import {
 import {
   createRebuiltTopologyLineage,
   createSeedAuthoredModelDocument,
-} from "@/domain/modeling/modeling-test-fixtures";
+} from "@/application/modeling/modeling-test-fixtures";
 
 // Logic contract seam: the shared certification equality that decides whether
 // a repository receipt represents a runtime export.

@@ -7,7 +7,7 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { createTwoExtrudeBodiesOperationHistory } from "../e2e/helpers/modeling-fixtures.ts";
-import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from "../src/domain/modeling/modeling-history-persistence.ts";
+import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from "../src/application/modeling/modeling-history-persistence.ts";
 
 const PREVIEW_HOST = "127.0.0.1";
 const PREVIEW_PORT = 4173;

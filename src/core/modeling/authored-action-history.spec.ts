@@ -7,7 +7,7 @@ import type {
 } from "@/contracts/modeling/authored-actions";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import {
   createStandardPlaneDefinition,

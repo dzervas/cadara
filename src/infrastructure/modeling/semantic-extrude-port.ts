@@ -19,8 +19,8 @@ import type {
   SemanticFeatureReplayCommand,
   SemanticState,
 } from "@/contracts/semantic/schema";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { EditorEventLoop } from "@/application/editor/editor-event-loop";
 import {
   createSemanticResult,

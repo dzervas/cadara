@@ -6,7 +6,7 @@ import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import {
   createModelingService,
   type ModelingService,
-} from "@/domain/modeling/modeling-service";
+} from "@/application/modeling/modeling-service";
 import type {
   ConstructionSnapshotRecord,
   FeatureDefinition,

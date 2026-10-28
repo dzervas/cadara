@@ -22,9 +22,9 @@ import {
   collectOccCleanupErrors,
   OccCleanupError,
 } from "@/infrastructure/occ/memory";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createModelingService } from "@/domain/modeling/modeling-service";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import { toGpPnt } from "@/infrastructure/occ/planes";

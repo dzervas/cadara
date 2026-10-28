@@ -21,7 +21,7 @@ import type {
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import {
   createStandardPlaneDefinition,

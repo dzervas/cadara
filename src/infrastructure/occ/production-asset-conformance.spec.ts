@@ -39,7 +39,7 @@ import {
   type OracleCurve,
   type SketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
-import { createOccExportCapabilities } from "@/domain/export/occ-export-capabilities";
+import { createOccExportCapabilities } from "@/infrastructure/occ/occ-export-capabilities";
 import { stlExportProvider } from "@/application/export/providers/stl-export-provider";
 import { threeMfExportProvider } from "@/application/export/providers/threemf-export-provider";
 import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";

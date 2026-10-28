@@ -21,7 +21,7 @@ import {
   createNewSketchSession,
   createSketchSessionFromSnapshot,
 } from "@/core/editor/sketch-session";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

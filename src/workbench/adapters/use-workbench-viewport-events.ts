@@ -10,8 +10,8 @@ import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
 import { getNavigationReopenRequest } from "@/core/editor/workbench-interactions";
 import type { SketchSpecialModeHandleRef } from "@/core/sketch-special-modes/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 interface WorkbenchViewportEventsInput {
   activeCommand: EditorViewState["activeCommand"];

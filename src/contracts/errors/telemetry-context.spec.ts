@@ -8,8 +8,8 @@ import {
 } from "@/contracts/errors/telemetry-context";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createGeometryAssetDiagnostic } from "@/contracts/modeling/geometry-assets";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/contracts/errors/telemetry-context.spec.ts", async () => {
   clearActiveDocumentTelemetryContext();

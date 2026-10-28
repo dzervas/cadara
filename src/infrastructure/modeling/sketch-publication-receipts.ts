@@ -1,5 +1,5 @@
 import type { RequestId, RevisionId } from "@/contracts/shared/ids";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 
 /** A write receipt is retained by its effect request, not inferred from a global flush. */
 export function createSketchPublicationReceipts() {

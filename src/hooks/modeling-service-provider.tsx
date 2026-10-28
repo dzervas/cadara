@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { PropsWithChildren } from "react";
 
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { ModelingServiceContext } from "@/hooks/modeling-service-context";
 
 interface ModelingServiceProviderProps extends PropsWithChildren {

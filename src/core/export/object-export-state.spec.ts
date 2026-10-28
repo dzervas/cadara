@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
 import { createObjectExportModalState } from "@/core/export/object-export-state";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/app/object-export-state.spec.ts", async () => {
   const adapter = new MockKernelAdapter();

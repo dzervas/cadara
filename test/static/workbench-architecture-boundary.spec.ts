@@ -229,7 +229,7 @@ test("workbench architecture preserves extension registry composition ownership"
     "utf8",
   );
   const modelingServiceSource = readFileSync(
-    join(ROOT, "src/domain/modeling/modeling-service/service.ts"),
+    join(ROOT, "src/application/modeling/modeling-service/service.ts"),
     "utf8",
   );
   const importControllerSource = readFileSync(

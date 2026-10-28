@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
 import { createHeadlessSessionFactory } from "@/composition/headless";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";

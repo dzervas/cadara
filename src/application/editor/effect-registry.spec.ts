@@ -38,7 +38,7 @@ import type {
 import { withLiveSolveBasis } from "@/core/editor/sketch-session";
 import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import {
   SPEC_SKETCH_UNITS_PER_PIXEL,
   withSketchSnapScale,

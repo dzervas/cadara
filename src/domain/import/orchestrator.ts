@@ -53,10 +53,10 @@ import {
   createMemoryGeometryAssetStore,
   hashGeometryAssetBytes,
   type GeometryAssetStore,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 import { validateGeometryAssetRecord } from "@/contracts/modeling/geometry-assets.runtime-schema";
-import { registerEmbeddedBinaryAsset } from "@/domain/modeling/embedded-binary-asset-registry";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import { registerEmbeddedBinaryAsset } from "@/infrastructure/modeling/embedded-binary-asset-registry";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import {
   durableTopologyReferenceKey,
   followExactTopologySuccessor,

@@ -4,8 +4,8 @@ import { BAKED_BODY_FEATURE_SCHEMA_VERSION, CONTRACT_VERSION } from "@/contracts
 import type { CreateFeatureRequest } from "@/contracts/modeling/schema";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import { createImportCapabilities } from "@/domain/import/orchestrator";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 
 function makeSnapshot() {

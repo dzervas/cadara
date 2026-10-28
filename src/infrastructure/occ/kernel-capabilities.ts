@@ -1,9 +1,6 @@
 import type { OpenCascadeInstance } from "opencascade.js/dist/opencascade.full";
-import {
-  getMissingNativeTopologyKernelEntrypoints,
-  probeNativeTopologyKernelCapabilities,
-  type OccNativeTopologyCapabilityProbeResult,
-} from "@/infrastructure/occ/native-topology-payload";
+import { getMissingNativeTopologyKernelEntrypoints, probeNativeTopologyKernelCapabilities } from "@/infrastructure/occ/native-topology-payload";
+import { type OccNativeTopologyCapabilityProbeResult } from "@/contracts/modeling/kernel-payloads";
 import {
   OCC_ASSET_VERSION,
   getVersionedOpenCascadeAssetUrl,

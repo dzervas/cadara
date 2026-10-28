@@ -22,8 +22,8 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import type {
   DocumentRepository,
   DocumentRepositoryMutationResult,
-} from "@/domain/modeling/document-repository";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+} from "@/contracts/modeling/document-repository";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 /** Concrete adapter for the shared production modeling/editor owners. */
 export function createSemanticDocumentPort(input: {

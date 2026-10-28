@@ -1,39 +1,13 @@
+import { OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION, OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS, type OccNativeTopologyKernelEntrypoint, type OccNativeNonEmptyString, type OccNativeBufferScalar, type OccNativeBufferRef, type OccNativeTransferableBuffer, type OccNativeTableLayout, type OccNativeTopologyTableLayout, type OccNativeMeshTableLayout, type OccNativeExactBrepTableLayout, type OccNativeTopologyDiagnostic, type OccNativeExactBrepPayload, type OccNativeTopologyCapabilityProbeResult } from "@/contracts/modeling/kernel-payloads";
 import typia, { type tags } from "typia";
 
 import type { MeshExportAccuracy } from "@/contracts/export/capabilities";
-import type {
-  CadaraBrepGeometryAssetData,
-  CadaraBrepTopologyRecord,
-} from "@/contracts/modeling/geometry-assets";
-import type {
-  BodyId,
-  CoedgeId,
-  EdgeId,
-  FaceId,
-  FeatureId,
-  LoopId,
-  RevisionId,
-  VertexId,
-} from "@/contracts/shared/ids";
+import type { CadaraBrepGeometryAssetData, CadaraBrepTopologyRecord } from "@/contracts/modeling/geometry-assets";
+import type { BodyId, CoedgeId, EdgeId, FaceId, FeatureId, LoopId, RevisionId, VertexId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
-import type { AuthoredFeatureTopologyLineage } from "@/contracts/modeling/authored-document";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
 
-export const OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION =
-  "occ-native-topology-payload/v1alpha1";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 
-export const OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS = [
-  "CadaraNativeTopologyProbe",
-  "CadaraBuildNativeTopologyPayload",
-  "CadaraExecuteNativeFeatureTransaction",
-  "CadaraBuildNativeExactBrepPayload",
-  "CadaraBuildNativeMeshExportPayload",
-] as const;
-
-export type OccNativeTopologyKernelEntrypoint =
-  (typeof OCC_NATIVE_TOPOLOGY_KERNEL_ENTRYPOINTS)[number];
-
-type OccNativeNonEmptyString = string & tags.Pattern<"^.*\\S.*$">;
 type OccNativeNonNegativeInteger = number & tags.Type<"uint64">;
 type OccNativePositiveNumber = number & tags.ExclusiveMinimum<0>;
 type OccNativeTriangleIndex = readonly [
@@ -203,43 +177,6 @@ export type OccNativeTopologyId =
 
 export type OccNativeIdentitySource = "occt7-shim" | "brepgraph";
 
-export type OccNativeBufferScalar =
-  | "uint8"
-  | "uint16"
-  | "uint32"
-  | "int32"
-  | "float32"
-  | "float64";
-
-export interface OccNativeBufferRef {
-  bufferId: `occ_buffer_${string}`;
-  scalar: OccNativeBufferScalar;
-  byteOffset: number;
-  byteLength: number;
-  itemStride: number;
-}
-
-export interface OccNativeTransferableBuffer {
-  bufferId: OccNativeBufferRef["bufferId"];
-  buffer: ArrayBuffer;
-}
-
-export interface OccNativeTableLayout {
-  rowCount: number;
-  columns: Record<string, OccNativeBufferRef>;
-}
-
-export interface OccNativeTopologyTableLayout {
-  bodies: OccNativeTableLayout;
-  solids: OccNativeTableLayout;
-  shells: OccNativeTableLayout;
-  faces: OccNativeTableLayout;
-  loops: OccNativeTableLayout;
-  coedges: OccNativeTableLayout;
-  edges: OccNativeTableLayout;
-  vertices: OccNativeTableLayout;
-}
-
 export interface OccNativeIdentityTableLayout {
   topologyToKernelIdentity: OccNativeTableLayout;
   kernelHistorySuccessors: OccNativeTableLayout;
@@ -253,21 +190,6 @@ export interface OccNativeAdjacencyTableLayout {
   coedgeOpposites: OccNativeTableLayout;
   faceEdges: OccNativeTableLayout;
   vertexEdges: OccNativeTableLayout;
-}
-
-export interface OccNativeMeshTableLayout {
-  positions: OccNativeBufferRef;
-  normals: OccNativeBufferRef;
-  triangleIndices: OccNativeBufferRef;
-  triangleFaceBindings: OccNativeBufferRef;
-}
-
-export interface OccNativeExactBrepTableLayout {
-  topology: OccNativeTopologyTableLayout;
-  curves: OccNativeTableLayout;
-  surfaces: OccNativeTableLayout;
-  trims: OccNativeTableLayout;
-  fallbackTriangles: OccNativeMeshTableLayout | null;
 }
 
 export interface OccNativeDiagnosticTableLayout {
@@ -303,14 +225,6 @@ export interface OccNativeReferenceInvalidation {
   successors: readonly DurableRef[];
   featureId: FeatureId | null;
   message: string;
-}
-
-export interface OccNativeTopologyDiagnostic {
-  code: OccNativeNonEmptyString;
-  severity: "info" | "warning" | "error";
-  message: OccNativeNonEmptyString;
-  target: DurableRef | null;
-  detail: Record<string, unknown> | null;
 }
 
 export const OCC_NATIVE_FEATURE_TRANSACTION_HISTORY_SCHEMA_VERSION =
@@ -431,18 +345,6 @@ export interface OccNativeTopologyPayload {
   diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
-export interface OccNativeExactBrepPayload {
-  schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
-  revisionId: RevisionId;
-  target: DurableRef;
-  brep: CadaraBrepGeometryAssetData;
-  /** Exact current OCC stage source claims; transient review/apply evidence only. */
-  topologyLineage?: readonly AuthoredFeatureTopologyLineage[];
-  tables: OccNativeExactBrepTableLayout;
-  buffers: readonly OccNativeTransferableBuffer[];
-  diagnostics: readonly OccNativeTopologyDiagnostic[];
-}
-
 export interface OccNativeMeshExportPayload {
   schemaVersion: typeof OCC_NATIVE_TOPOLOGY_PAYLOAD_SCHEMA_VERSION;
   revisionId: RevisionId;
@@ -451,13 +353,6 @@ export interface OccNativeMeshExportPayload {
   mesh: OccNativeMeshTableLayout;
   meshSummary?: OccNativeShimMeshSummary | null;
   buffers: readonly OccNativeTransferableBuffer[];
-  diagnostics: readonly OccNativeTopologyDiagnostic[];
-}
-
-export interface OccNativeTopologyCapabilityProbeResult {
-  kind: "available" | "missing";
-  requiredEntrypoints: readonly OccNativeTopologyKernelEntrypoint[];
-  missingEntrypoints: readonly OccNativeTopologyKernelEntrypoint[];
   diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 

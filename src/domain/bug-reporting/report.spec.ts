@@ -24,16 +24,14 @@ import {
 } from "@/domain/bug-reporting/report";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import {
-  MODELING_OPERATION_HISTORY_STORAGE_KEY,
-  type StorageLike,
-} from "@/domain/modeling/modeling-history-persistence";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from "@/application/modeling/modeling-history-persistence";
+import { type StorageLike } from "@/contracts/modeling/operation-history-store";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 
 test("src/domain/bug-reporting/report.spec.ts", async () => {
   function createStorage(value: string | null): StorageLike {

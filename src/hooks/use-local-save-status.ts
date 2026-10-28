@@ -1,7 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 import type { LocalSaveStatusSource } from "@/application/workspace/local-save-guard";
-import type { LocalSaveStatus } from "@/domain/modeling/modeling-service";
+import type { LocalSaveStatus } from "@/application/modeling/modeling-service";
 
 /** The local save status of a service or of every open tab (cadara-8p7o). */
 export function useLocalSaveStatus(

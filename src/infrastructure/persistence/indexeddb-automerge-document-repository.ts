@@ -1,3 +1,7 @@
+import {
+  collectAssetAvailability,
+  storeGeometryAssetInputsForManifest,
+} from "@/application/modeling/geometry-asset-persistence";
 import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
@@ -25,12 +29,10 @@ import type {
   DocumentRepositoryLoadResult,
   DocumentRepositoryMutationResult,
   DocumentRepositoryRestoreStatus,
-} from "@/domain/modeling/document-repository";
+} from "@/contracts/modeling/document-repository";
 import {
-  collectAssetAvailability,
-  storeGeometryAssetInputsForManifest,
   type GeometryAssetStore,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 
 import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
 import { describeBlockedDocumentAction } from "@/core/modeling/document-action-blocked";

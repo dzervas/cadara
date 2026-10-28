@@ -18,7 +18,7 @@ import {
 } from "@/contracts/sketch/runtime-schema";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { deleteSelectedSketchGeometry } from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {

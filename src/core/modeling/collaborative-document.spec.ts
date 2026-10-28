@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import * as Automerge from "@automerge/automerge";
-import { createSeedAuthoredModelDocument } from "../../domain/modeling/modeling-test-fixtures";
+import { createSeedAuthoredModelDocument } from "../../application/modeling/modeling-test-fixtures";
 import { AuthoredActionHistory } from "./authored-action-history";
 import {
   createCollaborativeDocument,

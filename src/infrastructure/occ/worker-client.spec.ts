@@ -27,7 +27,7 @@ import {
   type DeriveSketchRegionsResponse,
 } from "@/contracts/solver/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
 
 class FakeOccWorker implements OccWorkerLike {
   private messageListener:

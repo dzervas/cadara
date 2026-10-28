@@ -24,10 +24,10 @@ import {
 } from "@/domain/import/orchestrator";
 import type { ImportProviderRegistry } from "@/domain/import/provider-registry";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
-import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { getBrowserGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";
 import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useRuntimeExtensionRegistry } from "@/hooks/use-runtime-extension-registry";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";

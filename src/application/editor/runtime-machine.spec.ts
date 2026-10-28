@@ -9,7 +9,7 @@ import {
   type EditorEventLoop,
 } from "@/application/editor/editor-event-loop";
 import { createTestErrorReporter } from "@/contracts/errors";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/domain/editor/runtime-machine.spec.ts", async () => {
   function waitForState(

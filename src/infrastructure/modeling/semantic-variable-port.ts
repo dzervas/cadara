@@ -1,8 +1,8 @@
 import { semanticSketchesCurrent } from "./semantic-sketch-currentness";
 import type { SemanticDiscovery, SemanticVariableCommand, SemanticState } from "@/contracts/semantic/schema";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { EditorEventLoop } from "@/application/editor/editor-event-loop";
 import { createSemanticResult, semanticDiagnostic } from "@/application/semantic/session";
 import { getAppErrorContextValue, isModelingMutationError, modelingMutationErrorToDiagnostic } from "@/core/editor/state-machine/error-mapping";

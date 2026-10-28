@@ -25,7 +25,7 @@ import {
   hydrateSketchPlaneEditSession,
 } from "@/core/editor/sketch-plane-editing";
 import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 
 const unusedRuntime: EditorEffectRuntime = {
   async getCurrentDocumentSnapshot() {

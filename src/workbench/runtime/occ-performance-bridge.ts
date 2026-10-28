@@ -1,5 +1,5 @@
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 export function shouldEnableOccPerfBridge() {
   if (typeof window === "undefined") {

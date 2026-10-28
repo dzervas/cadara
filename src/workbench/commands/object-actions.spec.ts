@@ -4,8 +4,8 @@ import { createTestErrorReporter, ok } from "@/contracts/errors";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";
 import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { addWorkbenchVariable } from "@/workbench/commands/object-actions";
 import { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
 

@@ -198,7 +198,7 @@ import {
   type ViewportProjectionMode,
 } from "@/infrastructure/viewport/viewport-projection";
 import { computeSketchCameraFrame } from "@/infrastructure/viewport/sketch-camera-framing";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { ViewNavigationPresetId } from "@/infrastructure/viewport/view-navigation";
 import {
   createSectionCapRenderables,

@@ -8,7 +8,7 @@ import {
   createMemoryGeometryAssetStore,
   type GeometryAssetStore,
   type GeometryAssetStorePutResult,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 import type { GeometryAssetBlobInput } from "@/contracts/modeling/geometry-assets";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 

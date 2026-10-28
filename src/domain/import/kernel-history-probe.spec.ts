@@ -21,8 +21,8 @@ import type { BodyId, DocumentId, RevisionId, SketchEntityId } from "@/contracts
 
 import type { ImportPreparedActions } from "@/contracts/import/actions";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import type { SketchSolverAdapter } from "@/contracts/solver/adapter";
 import { translateSketch } from "@/application/import/onshape/sketch-translator";

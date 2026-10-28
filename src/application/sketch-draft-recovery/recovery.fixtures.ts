@@ -1,6 +1,6 @@
 import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import type { PersistedSketchDraft } from "@/contracts/sketch/draft-recovery";
 import { publishedSketchRevision } from "./rules";
 

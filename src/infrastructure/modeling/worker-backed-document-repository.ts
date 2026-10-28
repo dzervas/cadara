@@ -6,7 +6,7 @@ import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-hi
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
-import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
+import type { LocalFileBindingMetadata } from "@/contracts/modeling/local-file-binding";
 import type {
   DocumentRepository,
   DocumentRepositoryChangeEvent,
@@ -17,9 +17,9 @@ import type {
   LocalFileBindingResult,
   LocalFileSyncDocumentRepository,
   GeometryAssetDocumentRepository,
-} from "@/domain/modeling/document-repository";
-import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
-import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
+} from "@/contracts/modeling/document-repository";
+import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
+import type { LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 
 export interface WorkerBackedDocumentRepositoryOptions {
   client: DocumentSyncWorkerClient;

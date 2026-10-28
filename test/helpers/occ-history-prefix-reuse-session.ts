@@ -21,7 +21,7 @@ import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import type { OccTrackedBody } from "@/infrastructure/occ/topology";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import {
   createTopologyIdCorrespondence,

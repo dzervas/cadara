@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
-} from "@/domain/modeling/document-sync-worker-protocol";
+} from "@/infrastructure/workers/document-sync-worker-protocol";
 import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
 import type { DocumentSyncWorkerLike } from "@/infrastructure/workers/document-sync-worker-client";
 

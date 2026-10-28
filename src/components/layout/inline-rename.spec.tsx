@@ -9,7 +9,7 @@ import {
   getEditorViewState,
   initialEditorState,
 } from "@/core/editor/state-machine";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";
 

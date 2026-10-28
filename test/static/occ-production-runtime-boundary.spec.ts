@@ -56,7 +56,7 @@ test("kernel execution adapters remain independent of CLI and browser compositio
   );
   const runtime = readSource("src/infrastructure/occ/kernel-capabilities.ts");
   const adapter = readSource(
-    "src/domain/modeling/opencascade-kernel-adapter.ts",
+    "src/infrastructure/occ/opencascade-kernel-adapter.ts",
   );
   const bootstrap = readSource("src/infrastructure/occ/runtime.ts");
   const initialization = readSource("src/infrastructure/occ/initialization.ts");

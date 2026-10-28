@@ -8,7 +8,7 @@ import {
   toggleWorkbenchTargetVisibility,
 } from "@/core/editor/visibility";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { OCC_KERNEL_CONSTRUCTION_IDS } from "@/core/modeling/opencascade-kernel-seed";
 
 test("src/domain/editor/visibility.spec.ts", async () => {

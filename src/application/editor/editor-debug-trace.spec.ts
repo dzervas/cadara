@@ -8,7 +8,7 @@ import type {
   EditorEffectRuntime,
 } from "@/core/editor/state-machine";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
 
 function createRuntime(

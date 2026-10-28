@@ -8,7 +8,7 @@ import type {
   SemanticExportCommand,
 } from "@/contracts/semantic/schema";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 /** Existing service/provider owns target, options, revision and export execution. */
 export function createSemanticExportPort(input: {

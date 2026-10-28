@@ -3,7 +3,7 @@ import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/contracts/modeling/authored-document.runtime-schema.spec.ts", async () => {
   const adapter = new MockKernelAdapter();

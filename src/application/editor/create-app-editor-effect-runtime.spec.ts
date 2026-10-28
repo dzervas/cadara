@@ -1,8 +1,8 @@
 import { test, expect } from "vitest";
 
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createAppEditorEffectRuntime } from "./create-app-editor-effect-runtime";
 
 function makeModelingService(

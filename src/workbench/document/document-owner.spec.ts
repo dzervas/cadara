@@ -12,8 +12,8 @@ import type {
 import type { FeatureEditorFormSchema } from "@/core/feature-authoring/form-schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { DocumentVariableId, RevisionId } from "@/contracts/shared/ids";
 
 function createDiagnostic(

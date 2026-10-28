@@ -2,7 +2,7 @@ import { createAppError, type ErrorReporter } from "@/contracts/errors";
 import type {
   LocalSaveFailure,
   LocalSaveStatus,
-} from "@/domain/modeling/modeling-service";
+} from "@/application/modeling/modeling-service";
 
 export interface LocalSaveStatusSource {
   getLocalSaveStatus(): LocalSaveStatus;

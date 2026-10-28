@@ -8,7 +8,7 @@ import {
   validateWorkspaceSnapshot,
   validateDeleteDocumentTargetRequest,
 } from "@/contracts/modeling/runtime-schema";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/contracts/modeling/runtime-schema.spec.ts", async () => {
   const request = requireDeleteDocumentTargetRequest({

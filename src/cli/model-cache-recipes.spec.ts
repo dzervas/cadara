@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { dirname, join, resolve } from "node:path";
 import type { SemanticResult } from "@/contracts/semantic/schema";
-import type { ModelCheckpointEvent } from "@/domain/modeling/model-checkpoint-store";
+import type { ModelCheckpointEvent } from "@/infrastructure/persistence/model-checkpoint-store";
 import { createCliModelCheckpointStore } from "@/cli/commands/model-cache";
 import type { CliIO } from "@/cli/types";
 import {

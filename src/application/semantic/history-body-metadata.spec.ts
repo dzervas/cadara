@@ -6,7 +6,7 @@
 // relabel. The SDK has no feature relabel; the modeling-service rows cover it
 // (service-repository-undo.spec.ts, opencascade-kernel-adapter.relabel.heavy).
 import { afterEach, expect, test, vi } from "vitest";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { createSemanticSessionWorkflow } from "../../../test/helpers/semantic-session-workflow";
 import { SemanticDocument } from "./sdk";
 

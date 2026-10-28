@@ -72,7 +72,7 @@ import {
   createRenderMeshUnpackCache,
   unpackWorkspaceSnapshotRenderMeshes,
 } from "@/infrastructure/occ/mesh-transport";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import { validateOccWorkerRestoreProgressMessage } from "@/infrastructure/occ/worker-restore-progress.runtime-schema";
 import {
   validateOccWorkerEngineDownloadProgressMessage,
@@ -94,13 +94,9 @@ import type {
 import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
 import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
-import type {
-  OccNativeExactBrepPayload,
-  OccNativeMeshExportPayload,
-  OccNativeTopologyCapabilityProbeResult,
-  OccNativeTopologyPayload,
-} from "@/infrastructure/occ/native-topology-payload";
-import type { OccNativeTopologyWorkerResult } from "@/infrastructure/occ/worker-protocol";
+import type { OccNativeExactBrepPayload, OccNativeTopologyCapabilityProbeResult } from "@/contracts/modeling/kernel-payloads";
+import type { OccNativeMeshExportPayload, OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
+import type { OccNativeTopologyWorkerResult } from "@/contracts/modeling/kernel-worker-result";
 
 export interface OccWorkerLike {
   postMessage(message: OccWorkerRequest, transfer?: Transferable[]): void;

@@ -1,7 +1,7 @@
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
 import type { EditorEffectRuntime } from "@/core/editor/state-machine";
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { supportedReferenceImageFileTypes } from "@/infrastructure/reference-image/raster";
 import { readReferenceImagePayload } from "@/infrastructure/reference-image/import-flow";
 import { showOpenImportFilePicker } from "@/lib/import-file-picker";

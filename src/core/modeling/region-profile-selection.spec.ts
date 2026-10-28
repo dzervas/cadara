@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { MockKernelAdapter } from "../../domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "../../application/modeling/mock-kernel-adapter";
 import { ImportDeferredMaterializer } from "@/domain/import/orchestrator";
 import {
   addRectangle,

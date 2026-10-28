@@ -49,7 +49,7 @@ import type {
   NeutralCurveQueryRequest,
   NeutralCurveSelfIntersectionRequest,
 } from "@/contracts/modeling/neutral-curve-query";
-import type { OccTessellationTierId } from "@/infrastructure/occ/tessellation";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { OccWorkerAssetConfig } from "@/infrastructure/occ/worker-protocol";
 import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 

@@ -4,7 +4,7 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
 import type { GetDocumentSnapshotRequest } from "@/contracts/modeling/schema";
 import { createDurableHistoryService } from "@/application/history/durable-history";
-import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
+import { createMemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
 import type { AppError } from "@/contracts/errors";
 import { LocalSaveGuard } from "@/application/workspace/local-save-guard";
 import {
@@ -12,9 +12,9 @@ import {
   type LocalSaveFailure,
   type LocalSaveStatus,
   type ModelingService,
-} from "@/domain/modeling/modeling-service";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
+} from "@/application/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
 import { WorkbenchModelingServices } from "./workbench-modeling-services";
 
 class CountingAdapter extends MockKernelAdapter {

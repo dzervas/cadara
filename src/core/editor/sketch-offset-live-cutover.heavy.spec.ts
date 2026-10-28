@@ -122,7 +122,7 @@ import {
 } from "@/core/editor/sketch-session/offset-editing";
 import { refreshSketchEditToolAfterOffsetRound } from "@/core/editor/sketch-session/edit-tool-interaction";
 import { AuthoredActionHistory } from "@/core/modeling/authored-action-history";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
 import {

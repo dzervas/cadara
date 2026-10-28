@@ -24,7 +24,7 @@ import {
 import { publishSketchOffsets } from "@/contracts/sketch/offset-publication";
 import { createCertifiedCubicTubeChain } from "@/core/modeling/neutral-curve-certification/cubic-tube-chain";
 import { createCertifiedNeutralCurveRequestQuery } from "@/core/modeling/neutral-curve-certification/query";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import * as mirror from "@/core/editor/sketch-mirror.fixtures";
 import {
   acceptSketchDraw,

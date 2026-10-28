@@ -19,7 +19,7 @@ import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sket
 import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { getFirstSketchStyleTarget } from "@/core/editor/sketch-session/styles";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import {
   emitPendingSketchOffsetPreviewPublication,
   emitPendingSketchRegionDerivation,

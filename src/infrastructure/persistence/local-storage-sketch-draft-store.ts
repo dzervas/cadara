@@ -1,6 +1,6 @@
 import type { SketchDraftRecoveryStore } from "@/contracts/sketch/draft-recovery";
 import { validatePersistedSketchDraft } from "@/contracts/sketch/draft-recovery.runtime-schema";
-import type { StorageLike } from "@/domain/modeling/modeling-history-persistence";
+import type { StorageLike } from "@/contracts/modeling/operation-history-store";
 
 export const sketchDraftStorageKey = (documentId: string) => `cad.sketchDraftRecovery.${documentId}.v1`;
 

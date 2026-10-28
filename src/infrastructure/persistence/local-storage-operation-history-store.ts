@@ -3,7 +3,7 @@ import { parseOperationHistoryPayload as validateOperationHistoryPayload } from 
 import type {
   OperationHistoryStore,
   StorageLike,
-} from "@/domain/modeling/modeling-history-persistence";
+} from "@/contracts/modeling/operation-history-store";
 
 const MODELING_OPERATION_HISTORY_STORAGE_KEY =
   "cad.modeling.operationHistory.v1";

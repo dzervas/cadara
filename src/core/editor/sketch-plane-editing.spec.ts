@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 import {
   applySelectionToSketchPlaneEditSession,

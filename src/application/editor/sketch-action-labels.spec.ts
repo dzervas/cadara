@@ -48,7 +48,7 @@ import type {
   EditorEvent,
   SketchEditorState,
 } from "@/core/editor/state-machine";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 
 const seeded = () =>
   rebuildSessionForDefinition(

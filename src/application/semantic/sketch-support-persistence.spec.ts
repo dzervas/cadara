@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
 
 // Only the persistence boundary fails; all modeling, cursor and projection work stays native.

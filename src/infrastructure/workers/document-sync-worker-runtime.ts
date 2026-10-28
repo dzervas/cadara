@@ -8,21 +8,15 @@ import {
   normalizeAuthoredDocumentId,
 } from "@/contracts/modeling/authored-document-equality";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
-import {
-  createDocumentSyncWorkerFailure,
-  type DocumentSyncWorkerRequest,
-  type DocumentSyncWorkerResponse,
-  type DocumentSyncWriteStatus,
-} from "@/domain/modeling/document-sync-worker-protocol";
-import {
-  isGeometryAssetDocumentRepository,
-  type DocumentRepository,
-} from "@/domain/modeling/document-repository";
+import { createDocumentSyncWorkerFailure, type DocumentSyncWorkerRequest, type DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import { type DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
+import { isGeometryAssetDocumentRepository } from "@/core/modeling/document-repository";
+import { type DocumentRepository } from "@/contracts/modeling/document-repository";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type {
   LocalFileBindingRecord,
   LocalFileBindingStore,
-} from "@/domain/modeling/local-file-binding-store";
+} from "@/infrastructure/persistence/local-file-binding-store";
 import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
 import {
   createLocalAuthoredDocumentPayload,

@@ -3,36 +3,31 @@ import { test, expect, assert } from "vitest";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetAvailability } from "@/contracts/modeling/geometry-assets";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
-import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
-import type {
-  DocumentSyncWorkerRequest,
-  DocumentSyncWorkerResponse,
-  DocumentSyncWriteStatus,
-} from "@/domain/modeling/document-sync-worker-protocol";
+import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
+import type { DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 import type {
   LocalFileBindingRecord,
   LocalFileBindingStore,
-} from "@/domain/modeling/local-file-binding-store";
+} from "@/infrastructure/persistence/local-file-binding-store";
 import type {
   DocumentRepositoryChangeEvent,
   DocumentRepositoryLoadResult,
   DocumentRepositoryMetadata,
-} from "@/domain/modeling/document-repository";
+} from "@/contracts/modeling/document-repository";
 import {
   MemoryDocumentRepository,
   createMemoryDocumentRepository,
-} from "@/domain/modeling/memory-document-repository";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
+} from "@/application/modeling/memory-document-repository";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 import {
   DocumentSyncWorkerClient,
   type DocumentSyncWorkerLike,
 } from "@/infrastructure/workers/document-sync-worker-client";
 import { createDocumentSyncWorkerMessageHandler } from "@/infrastructure/workers/document-sync-worker-runtime";
 import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
-import {
-  createLocalAuthoredDocumentPayload,
-  type LocalFileSystemFileHandle,
-} from "@/lib/local-file-system-access";
+import { createLocalAuthoredDocumentPayload } from "@/lib/local-file-system-access";
+import { type LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 
 test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () => {

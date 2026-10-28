@@ -2,7 +2,7 @@ import type { CliEnv, CliIO, CommandModule } from "@/cli/types";
 import type {
   ModelCheckpointEvent,
   ModelCheckpointStore,
-} from "@/domain/modeling/model-checkpoint-store";
+} from "@/infrastructure/persistence/model-checkpoint-store";
 import {
   createFileModelCheckpointStore,
   isModelCheckpointCacheFailure,

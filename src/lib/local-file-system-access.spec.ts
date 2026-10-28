@@ -1,26 +1,14 @@
+import { createLocalFileBindingMetadata } from "@/core/modeling/local-file-binding-metadata";
 import { test, expect, expectTypeOf } from "vitest";
 
-import {
-  CADARA_OPEN_FILE_PICKER_OPTIONS,
-  CADARA_SAVE_FILE_PICKER_OPTIONS,
-  createLocalAuthoredDocumentPayload,
-  getLocalFileSystemOpenSupport,
-  readCadaraDocumentFile,
-  getLocalFileSystemSaveSupport,
-  showOpenLocalDocumentPicker,
-  showSaveLocalDocumentPicker,
-  writeTextToLocalFileHandle,
-  type LocalFileSystemFileHandle,
-  type LocalFileSystemOpenPickerOptions,
-  type LocalFileSystemSavePickerOptions,
-} from "@/lib/local-file-system-access";
+import { CADARA_OPEN_FILE_PICKER_OPTIONS, CADARA_SAVE_FILE_PICKER_OPTIONS, createLocalAuthoredDocumentPayload, getLocalFileSystemOpenSupport, readCadaraDocumentFile, getLocalFileSystemSaveSupport, showOpenLocalDocumentPicker, showSaveLocalDocumentPicker, writeTextToLocalFileHandle, type LocalFileSystemOpenPickerOptions, type LocalFileSystemSavePickerOptions } from "@/lib/local-file-system-access";
+import { type LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 import {
   createIndexedDbLocalFileBindingStore,
-  createLocalFileBindingMetadata,
-} from "@/domain/modeling/local-file-binding-store";
+} from "@/infrastructure/persistence/local-file-binding-store";
 import { serializeAuthoredDocumentJson } from "@/contracts/modeling/authored-document-serialization";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 
 test("src/lib/local-file-system-access.spec.ts", async () => {
   function createHandle(name = "part.cadara"): LocalFileSystemFileHandle {

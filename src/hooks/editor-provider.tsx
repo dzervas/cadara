@@ -10,7 +10,7 @@ import {
 } from "@/contracts/errors/telemetry-context";
 import { useEditorEventLoop } from "@/hooks/use-editor-event-loop";
 import type { EditorExtensionDependencies } from "@/core/editor/state-machine";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { EditorContext } from "@/hooks/editor-context";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";

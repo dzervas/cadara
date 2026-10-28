@@ -1,6 +1,6 @@
 import { beforeEach, vi, test, expect } from "vitest";
 
-import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
+import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 
 import {
   createHookTestHarness,

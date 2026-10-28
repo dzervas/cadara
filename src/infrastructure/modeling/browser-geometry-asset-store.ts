@@ -5,7 +5,7 @@ import type {
 } from "@/contracts/modeling/adapter";
 import {
   type GeometryAssetStore,
-} from "@/domain/modeling/geometry-asset-store";
+} from "@/core/modeling/geometry-asset-store";
 
 /**
  * App-level composition for baked geometry: one `GeometryAssetStore` shared by

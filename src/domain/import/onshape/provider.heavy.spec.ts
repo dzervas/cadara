@@ -46,12 +46,12 @@ import {
   TopologyApplyRematchError,
 } from "@/domain/import/orchestrator";
 import type { ImportDeferredTopologyRef } from "@/contracts/import/actions";
-import { createMemoryGeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { createGeometryAssetRecordFromReference } from "@/contracts/modeling/geometry-assets";
 import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";

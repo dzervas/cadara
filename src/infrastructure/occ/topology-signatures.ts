@@ -6,7 +6,7 @@ import type {
   GeometryAssetPoint3,
 } from "@/contracts/modeling/geometry-assets";
 import type { BodyId, EdgeId, FaceId, VertexId } from "@/contracts/shared/ids";
-import type { OccNativeExactBrepPayload, OccNativeTopologyDiagnostic } from "@/infrastructure/occ/native-topology-payload";
+import type { OccNativeExactBrepPayload, OccNativeTopologyDiagnostic } from "@/contracts/modeling/kernel-payloads";
 
 export type KernelTopologySignatureCapabilityDiagnostic =
   OccNativeTopologyDiagnostic & {

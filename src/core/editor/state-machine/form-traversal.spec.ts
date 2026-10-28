@@ -9,7 +9,7 @@ import type {
 } from "@/core/feature-authoring/form-schema";
 import { getFeatureEditorFormSchema } from "@/core/editor/feature-editing";
 import { createFeatureEditSession } from "@/core/editor/feature-editing";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import type {
   FeatureEditorState,
   ImportEditorState,

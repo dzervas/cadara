@@ -3,7 +3,7 @@ import type {
   LocalSaveFailure,
   LocalSaveStatus,
   ModelingService,
-} from "@/domain/modeling/modeling-service";
+} from "@/application/modeling/modeling-service";
 
 /** Open tabs own services; selecting a tab must not rebuild its native history. */
 export class WorkbenchModelingServices {

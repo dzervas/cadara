@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { DocumentId } from "@/contracts/shared/ids";
-import type { LocalFileSyncDocumentRepository } from "@/domain/modeling/document-repository";
-import { createMemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
+import type { LocalFileSyncDocumentRepository } from "@/contracts/modeling/document-repository";
+import { createMemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
 import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import {
   exportWorkbenchDocument,
@@ -11,7 +11,7 @@ import {
   openLinkedDocumentAsTab,
   saveWorkbenchLocalFile,
 } from "@/workbench/document/document-file-actions";
-import type { LocalFileSystemFileHandle } from "@/lib/local-file-system-access";
+import type { LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 
 function createHandle(name: string): LocalFileSystemFileHandle {
   return {

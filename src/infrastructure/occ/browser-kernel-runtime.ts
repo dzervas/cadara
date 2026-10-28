@@ -1,5 +1,5 @@
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
 import {
@@ -11,7 +11,7 @@ import {
   createOccPreloadController,
   type OccPreloadController,
 } from "@/infrastructure/occ/preload";
-import { createBrowserOccWorkerClient } from "@/domain/modeling/occ/worker-runtime";
+import { createBrowserOccWorkerClient } from "@/infrastructure/occ/worker-runtime";
 import {
   getBrowserGeometryAssetComposition,
 } from "@/infrastructure/modeling/browser-geometry-asset-store";

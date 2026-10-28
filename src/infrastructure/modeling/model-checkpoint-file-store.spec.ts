@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ModelCheckpoint,
   ModelCheckpointEvent,
-} from "@/domain/modeling/model-checkpoint-store";
+} from "@/infrastructure/persistence/model-checkpoint-store";
 import {
   createFileModelCheckpointStore,
   fingerprintModelCheckpointRuntime,

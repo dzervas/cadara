@@ -10,8 +10,8 @@ import {
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
-} from "@/domain/modeling/document-sync-worker-protocol";
-import { createIndexedDbLocalFileBindingStore } from "@/domain/modeling/local-file-binding-store";
+} from "@/infrastructure/workers/document-sync-worker-protocol";
+import { createIndexedDbLocalFileBindingStore } from "@/infrastructure/persistence/local-file-binding-store";
 
 interface DocumentSyncWorkerGlobalScope {
   postMessage(message: DocumentSyncWorkerResponse): void;

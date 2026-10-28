@@ -24,7 +24,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createReferenceImageOperation } from "@/core/reference-image/operations";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import {

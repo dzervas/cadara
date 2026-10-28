@@ -21,8 +21,8 @@ import {
 import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import type { GeometryAssetStore } from "@/domain/modeling/geometry-asset-store";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import type { EditorEvent, EditorState } from "@/core/editor/state-machine";

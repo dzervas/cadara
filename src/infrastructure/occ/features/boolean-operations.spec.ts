@@ -17,7 +17,7 @@ import type { OpenCascadeNativeTopologyKernelHost } from "@/infrastructure/occ/n
 import { toGpPnt } from "@/infrastructure/occ/planes";
 import { getDefaultOpenCascadeInstance } from "@/infrastructure/occ/runtime";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import {
   getOccDurableRefKey,
   OCC_REFERENCE_INVALIDATION_REASONS,

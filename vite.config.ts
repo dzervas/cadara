@@ -205,8 +205,8 @@ export default defineConfig({
       "app.html",
       "404.html",
       "src/infrastructure/workers/document-sync.worker.ts",
-      "src/domain/modeling/occ/worker.ts",
-      "src/domain/modeling/occ/sketch-derivation.worker.ts",
+      "src/infrastructure/occ/worker.ts",
+      "src/infrastructure/occ/sketch-derivation.worker.ts",
     ],
     // Typia's generated validators import these runtime helpers from deep
     // package paths after the transformer runs. Include them explicitly so

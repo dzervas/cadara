@@ -15,8 +15,8 @@ import type {
 } from "@/contracts/semantic/schema";
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { EditorEventLoop } from "@/application/editor/editor-event-loop";
-import type { DocumentRepository } from "@/domain/modeling/document-repository";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { DocumentRepository } from "@/contracts/modeling/document-repository";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 export function createSemanticHistoryPort(input: {
   repository: DocumentRepository;

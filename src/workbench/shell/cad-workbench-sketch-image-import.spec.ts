@@ -16,9 +16,9 @@ import {
 import {
   createModelingService,
   type ModelingService,
-} from "@/domain/modeling/modeling-service";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { OpenCascadeKernelAdapter } from "@/domain/modeling/opencascade-kernel-adapter";
+} from "@/application/modeling/modeling-service";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import {
   OCC_KERNEL_DOCUMENT_ID,
   OCC_KERNEL_SETTINGS,

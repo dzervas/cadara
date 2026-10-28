@@ -9,7 +9,7 @@ import {
   initialEditorState,
   type EditorViewState,
 } from "@/core/editor/state-machine";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { hydrateSketchPlaneEditSession } from "@/core/editor/sketch-plane-editing";
 import { SketchPlaneInspector } from "./sketch-plane-inspector";
 

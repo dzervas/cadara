@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { createEditorEventLoop } from "./editor-event-loop";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
 import type {
   EditorEffectRuntime,

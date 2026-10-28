@@ -9,7 +9,7 @@ import {
   initialEditorState,
 } from "@/core/editor/state-machine";
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
 import { EditorContext } from "@/hooks/editor-context";
 import { workbenchTheme } from "@/theme/workbench-theme";

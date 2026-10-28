@@ -3,7 +3,7 @@ import {
   createLoadingStatus,
   selectInitialLoadingPhase,
 } from "@/contracts/modeling/loading-status";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { WorkbenchDocumentActionResult } from "@/workbench/document/document-file-actions";
 import { browserOccLoadingStatus } from "@/infrastructure/occ/browser-kernel-runtime";
 

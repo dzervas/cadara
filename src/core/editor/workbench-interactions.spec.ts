@@ -14,7 +14,7 @@ import {
   startSketchDraw,
 } from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,

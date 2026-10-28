@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { WorkbenchDocumentActionResult } from "@/workbench/document/document-file-actions";
 import { createHookTestHarness } from "@/workbench/adapters/controller-test-harness";
 

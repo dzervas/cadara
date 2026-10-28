@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import type { LocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
-import type { DocumentSyncWriteStatus } from "@/domain/modeling/document-sync-worker-protocol";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import type { LocalFileBindingMetadata } from "@/contracts/modeling/local-file-binding";
+import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 
 function isLocalFileSyncEnabledStatus(status: DocumentSyncWriteStatus) {
   return (

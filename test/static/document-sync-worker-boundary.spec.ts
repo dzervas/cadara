@@ -4,7 +4,7 @@ import { test, expect } from "vitest";
 
 test("test/static/document-sync-worker-boundary.spec.ts", () => {
   const modelingServiceSource = readFileSync(
-    join(process.cwd(), "src/domain/modeling/modeling-service.ts"),
+    join(process.cwd(), "src/application/modeling/modeling-service/index.ts"),
     "utf8",
   );
   const workerSource = readFileSync(

@@ -25,7 +25,7 @@ test("test/static/occ-asset-version.spec.ts", () => {
   ).toBe(statSync(join(process.cwd(), "public", "cadara-occ.wasm")).size);
 
   const workerSource = readFileSync(
-    join(process.cwd(), "src/domain/modeling/occ/worker.ts"),
+    join(process.cwd(), "src/infrastructure/occ/worker.ts"),
     "utf8",
   );
   expect(

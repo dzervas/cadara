@@ -23,7 +23,7 @@ import {
   runEditorEffect,
   createModelingServiceEditorEffectRuntime,
 } from "./effect-registry";
-import { createSketchPublicationFailureFixture } from "@/domain/modeling/modeling-service/sketch-publication.fixtures";
+import { createSketchPublicationFailureFixture } from "@/application/modeling/modeling-service/sketch-publication.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import {
   acceptSketchDraw,
@@ -48,7 +48,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { encodeAuthoredActionState } from "@/core/modeling/authored-action-history";
 import {
   appendReferenceImageOperations,

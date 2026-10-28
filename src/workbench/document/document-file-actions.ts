@@ -1,23 +1,13 @@
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type { DocumentId } from "@/contracts/shared/ids";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
-import {
-  type DocumentRepository,
-  type LocalFileSyncDocumentRepository,
-  isLocalFileSyncDocumentRepository,
-} from "@/domain/modeling/document-repository";
-import { createLocalFileBindingMetadata } from "@/domain/modeling/local-file-binding-store";
+import type { ModelingService } from "@/application/modeling/modeling-service";
+import { type DocumentRepository, type LocalFileSyncDocumentRepository } from "@/contracts/modeling/document-repository";
+import { isLocalFileSyncDocumentRepository } from "@/core/modeling/document-repository";
+import { createLocalFileBindingMetadata } from "@/core/modeling/local-file-binding-metadata";
 import type { WorkbenchTab } from "@/core/workspace/workbench-tabs";
 import { downloadDocumentExportResult } from "@/lib/download-export";
-import {
-  ensureLocalFileWritePermission,
-  readCadaraDocumentFile,
-  readLocalCadaraDocument,
-  showOpenLocalDocumentPicker,
-  showSaveLocalDocumentPicker,
-  type LocalFileSystemFileHandle,
-  writeTextToLocalFileHandle,
-} from "@/lib/local-file-system-access";
+import { ensureLocalFileWritePermission, readCadaraDocumentFile, readLocalCadaraDocument, showOpenLocalDocumentPicker, showSaveLocalDocumentPicker, writeTextToLocalFileHandle } from "@/lib/local-file-system-access";
+import { type LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 
 export type WorkbenchDocumentActionResult =
   | { status: "success"; documentId: DocumentId; message: string }

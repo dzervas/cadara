@@ -2,11 +2,11 @@ import { expect, it } from "vitest";
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
 import type { NativeDocumentFileIO } from "@/application/semantic/document-port";
 import type { SemanticState } from "@/contracts/semantic/schema";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createRebuiltTopologyLineage } from "@/domain/modeling/modeling-test-fixtures";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
+import { createModelingService } from "@/application/modeling/modeling-service";
+import { createRebuiltTopologyLineage } from "@/application/modeling/modeling-test-fixtures";
 import { createNativeDocumentFiles } from "./native-document-files";
 
 // Logic adapter-conformance seam: the native-file save guard over the

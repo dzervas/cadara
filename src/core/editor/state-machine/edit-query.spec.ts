@@ -4,8 +4,8 @@ import { createSketchActionOwnerFixture } from "@/application/editor/sketch-acti
 import { prepareSketchIntersectionEdit } from "@/core/editor/sketch-session/edit-queries";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SketchRegionDerivationSupersededError } from "@/application/solver/sketch-constraint-solver-adapter";
-import { SketchRegionDerivationWorkerPool } from "@/domain/modeling/occ/sketch-derivation-worker-client";
-import { FakeDerivationWorker } from "@/domain/modeling/occ/sketch-derivation-worker.fixtures";
+import { SketchRegionDerivationWorkerPool } from "@/infrastructure/occ/sketch-derivation-worker-client";
+import { FakeDerivationWorker } from "@/infrastructure/occ/sketch-derivation-worker.fixtures";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
@@ -27,7 +27,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
 import { querySketchEditIntersectionsForTest } from "@/application/editor/state-machine-test-builder";
 import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";

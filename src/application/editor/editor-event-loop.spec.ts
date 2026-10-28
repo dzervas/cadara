@@ -31,7 +31,7 @@ import { runEditorEffect } from "./effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
-import { createSeedDocumentSnapshot } from "@/domain/modeling/modeling-test-fixtures";
+import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
 import { createTestErrorReporter } from "@/contracts/errors";
 import { getPreviousDocumentHistoryCursor } from "@/core/modeling/document-history";
 import {

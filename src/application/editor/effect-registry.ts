@@ -661,8 +661,8 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
     definition: SketchSessionState["commitRequest"] extends null
       ? never
       : NonNullable<SketchSessionState["commitRequest"]>["definition"];
-    observePublication?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
-    observePersistence?: (transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+    observePublication?: (transaction: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult) => void;
+    observePersistence?: (transaction: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult) => void;
     solverCorrelation: {
       requestId: RequestId;
       projectionRequestId: RequestId;
@@ -731,7 +731,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
       | { kind: "rejected"; reasonCode: string };
     diagnostics: ModelingDiagnostic[];
   }>;
-}, options: { observeSketchPublication?: (requestId: RequestId, transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void; observeCursorPersistence?: (baseRevisionId: RevisionId, transaction: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => void } = {}): EditorEffectRuntime {
+}, options: { observeSketchPublication?: (requestId: RequestId, transaction: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult) => void; observeCursorPersistence?: (baseRevisionId: RevisionId, transaction: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult) => void } = {}): EditorEffectRuntime {
   return {
     supersedesSketchRegionDerivation:
       modelingService.sketchSolver?.supersedesRegionDerivation === true,
@@ -1042,7 +1042,7 @@ export function createModelingServiceEditorEffectRuntime(modelingService: {
         baseRepositoryHeads: input.baseRepositoryHeads,
         cursor: input.cursor,
         persistHistory: input.transient ? false : undefined,
-        ...(options.observeCursorPersistence ? { observePersistence: (receipt: import("@/domain/modeling/document-repository").DocumentRepositoryMutationResult) => options.observeCursorPersistence!(input.baseRevisionId, receipt) } : {}),
+        ...(options.observeCursorPersistence ? { observePersistence: (receipt: import("@/contracts/modeling/document-repository").DocumentRepositoryMutationResult) => options.observeCursorPersistence!(input.baseRevisionId, receipt) } : {}),
       });
 
       if (result.isErr()) {

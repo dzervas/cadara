@@ -1,10 +1,6 @@
-import type {
-  RenderPoint3D,
-  RenderableEntityRecord,
-} from "@/contracts/render/schema";
+import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
+import type { RenderPoint3D, RenderableEntityRecord } from "@/contracts/render/schema";
 import type { BodyId } from "@/contracts/shared/ids";
-
-export type OccTessellationTierId = "startup" | "normal" | "fine";
 
 export interface OccTessellationTier {
   id: OccTessellationTierId;

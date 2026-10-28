@@ -4,11 +4,8 @@ import boxFixture from "@/infrastructure/occ/fixtures/topology-signatures/box.pa
 import cylinderBossFixture from "@/infrastructure/occ/fixtures/topology-signatures/cylinder-boss.payload.json";
 import filletedBlockFixture from "@/infrastructure/occ/fixtures/topology-signatures/filleted-block.payload.json";
 import type { BodyId, RevisionId } from "@/contracts/shared/ids";
-import {
-  createOccNativeExactBrepPayloadFromShimPayload,
-  parseNativeShimPayloadJson,
-  type OccNativeExactBrepPayload,
-} from "@/infrastructure/occ/native-topology-payload";
+import { createOccNativeExactBrepPayloadFromShimPayload, parseNativeShimPayloadJson } from "@/infrastructure/occ/native-topology-payload";
+import { type OccNativeExactBrepPayload } from "@/contracts/modeling/kernel-payloads";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 
 function exactBrepPayloadFromFixture(

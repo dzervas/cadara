@@ -8,14 +8,14 @@ import type { ModelingKernelAdapter } from "@/contracts/modeling/adapter";
 import type { PerformanceTelemetry } from "@/contracts/performance/telemetry";
 import { noopPerformanceTelemetry } from "@/contracts/performance/telemetry";
 import type { DocumentId } from "@/contracts/shared/ids";
-import { createModelingService } from "@/domain/modeling/modeling-service";
-import { createInstrumentedModelingService } from "@/domain/modeling/modeling-service/instrumented-service";
-import { isLocalFileSyncDocumentRepository } from "@/domain/modeling/document-repository";
-import { createInstrumentedDocumentRepository } from "@/domain/modeling/instrumented-document-repository";
+import { createModelingService } from "@/application/modeling/modeling-service";
+import { createInstrumentedModelingService } from "@/application/modeling/modeling-service/instrumented-service";
+import { isLocalFileSyncDocumentRepository } from "@/core/modeling/document-repository";
+import { createInstrumentedDocumentRepository } from "@/application/modeling/instrumented-document-repository";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
-import { getBrowserSketchRegionDerivation } from "@/domain/modeling/occ/sketch-derivation-worker-runtime";
+import { getBrowserSketchRegionDerivation } from "@/infrastructure/occ/sketch-derivation-worker-runtime";
 import { createInstrumentedSketchSolverAdapter } from "@/application/solver/instrumented-sketch-solver-adapter";
 import {
   createInitialWorkbenchTabsState,

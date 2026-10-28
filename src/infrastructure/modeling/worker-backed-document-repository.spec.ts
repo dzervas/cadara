@@ -1,13 +1,13 @@
 import { test, expect } from "vitest";
 
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
-import { createSeedAuthoredModelDocument } from "@/domain/modeling/modeling-test-fixtures";
-import type { DocumentRepositoryChangeSource } from "@/domain/modeling/document-repository";
+import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
+import type { DocumentRepositoryChangeSource } from "@/contracts/modeling/document-repository";
 import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
-} from "@/domain/modeling/document-sync-worker-protocol";
-import { createDeterministicGeometryAsset } from "@/domain/modeling/geometry-asset-test-helpers";
+} from "@/infrastructure/workers/document-sync-worker-protocol";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 import { createWorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
 import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
 import {

@@ -1,6 +1,6 @@
 import type { SemanticDiscovery } from "@/contracts/semantic/schema";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
-import type { ModelingService } from "@/domain/modeling/modeling-service";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
 
 /** No display fallback: unavailable exact records are not a measurement certificate. */

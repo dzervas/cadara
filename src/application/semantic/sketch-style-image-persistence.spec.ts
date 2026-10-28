@@ -2,8 +2,8 @@ import { expect, test } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MemoryDocumentRepository } from "@/domain/modeling/memory-document-repository";
-import type { DocumentRepositoryMutationResult } from "@/domain/modeling/document-repository";
+import { MemoryDocumentRepository } from "@/application/modeling/memory-document-repository";
+import type { DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
 
 class FailedImageRepository extends MemoryDocumentRepository {

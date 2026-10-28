@@ -19,7 +19,7 @@ import {
   EXTRUDE_FEATURE_SCHEMA_VERSION,
   REVOLVE_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
-import { MockKernelAdapter } from "@/domain/modeling/mock-kernel-adapter";
+import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 const profileRef = {
   kind: "region",
