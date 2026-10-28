@@ -869,7 +869,7 @@ function assertPoint3(point: readonly [number, number, number], path: string) {
   assertFiniteNumber(point[2], `${path}.2`);
 }
 
-function assertNativeShimMeshSummaryInvariants(
+export function assertNativeShimMeshSummaryInvariants(
   mesh: OccNativeShimMeshSummary | undefined,
   path: string,
 ) {

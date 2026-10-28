@@ -64,6 +64,7 @@ mainBuild:
     - symbol: CadaraNativeFeatureTransactionResult
     - symbol: CadaraNativeNeutralCurveQuery
     - symbol: CadaraNativeShapeSetCheckpoint
+    - symbol: CadaraNativeTopologyMeshBuffers
     - symbol: CadaraNativeTopologyProbe
     - symbol: ChFi3d_FilletShape
     - symbol: CDM_Document
@@ -213,6 +214,10 @@ additionalCppCode: |
 
   class CadaraBuildNativeTopologyPayload {
   #include "/src/occ-native-shims/cadara-build-native-topology-payload.inc"
+  };
+
+  class CadaraNativeTopologyMeshBuffers {
+  #include "/src/occ-native-shims/cadara-native-topology-mesh-buffers.inc"
   };
 
   class CadaraExecuteNativeFeatureTransaction {

@@ -1,0 +1,15 @@
+{
+  "abi": [
+    "class CadaraNativeTopologyMeshBuffers base=-",
+    "ctor CadaraNativeTopologyMeshBuffers(CadaraNativeTopologyMeshBuffers*) ii",
+    "method CadaraNativeTopologyMeshBuffers.NodeCount(int, const CadaraNativeTopologyMeshBuffers*) iii pure=0",
+    "method CadaraNativeTopologyMeshBuffers.PositionsAddress(double, const CadaraNativeTopologyMeshBuffers*) dii pure=0",
+    "method CadaraNativeTopologyMeshBuffers.TopologyJson(std::string, const CadaraNativeTopologyMeshBuffers*) iii pure=0",
+    "method CadaraNativeTopologyMeshBuffers.TriangleCount(int, const CadaraNativeTopologyMeshBuffers*) iii pure=0",
+    "method CadaraNativeTopologyMeshBuffers.TriangleFaceIndicesAddress(double, const CadaraNativeTopologyMeshBuffers*) dii pure=0",
+    "method CadaraNativeTopologyMeshBuffers.TriangleIndicesAddress(double, const CadaraNativeTopologyMeshBuffers*) dii pure=0",
+    "static CadaraNativeTopologyMeshBuffers.Build(CadaraNativeTopologyMeshBuffers, TopoDS_Shape, std::string, std::string, double, double) iiiiidd"
+  ],
+  "declaration": "export declare class CadaraNativeTopologyMeshBuffers {\n  constructor();\n  static Build(shape: TopoDS_Shape, bodyId: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeTopologyMeshBuffers;\n  TopologyJson(): string;\n  NodeCount(): Standard_Integer;\n  TriangleCount(): Standard_Integer;\n  PositionsAddress(): Standard_Real;\n  TriangleIndicesAddress(): Standard_Real;\n  TriangleFaceIndicesAddress(): Standard_Real;\n  delete(): void;\n}",
+  "instanceEntry": "CadaraNativeTopologyMeshBuffers: typeof CadaraNativeTopologyMeshBuffers;"
+}

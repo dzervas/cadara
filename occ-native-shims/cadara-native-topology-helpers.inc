@@ -379,7 +379,27 @@ namespace {
    * corner torus) far below the linear deflection: 2 degrees put 368k
    * triangles on one 49 mm^2 fillet face and 64.8k on each shell torus.
    * `minSize` <= 0 keeps OCCT's default (a tenth of the deflection).
+   * Both payload builders (CadaraAppendMeshPayload and
+   * CadaraNativeTopologyMeshBuffers) mesh through here, so they triangulate
+   * a shape identically.
    */
+  void CadaraMeshShapeForPayload(
+    const TopoDS_Shape& shape,
+    const double linearDeflection,
+    const double angularDeflection,
+    const double minSize
+  ) {
+    IMeshTools_Parameters meshParameters;
+    meshParameters.Deflection = linearDeflection;
+    meshParameters.Angle = angularDeflection;
+    meshParameters.Relative = false;
+    meshParameters.InParallel = false;
+    if (minSize > 0.0) {
+      meshParameters.MinSize = minSize;
+    }
+    BRepMesh_IncrementalMesh mesher(shape, meshParameters);
+  }
+
   void CadaraAppendMeshPayload(
     std::ostringstream& out,
     const TopoDS_Shape& shape,
@@ -399,15 +419,7 @@ namespace {
       return;
     }
 
-    IMeshTools_Parameters meshParameters;
-    meshParameters.Deflection = linearDeflection;
-    meshParameters.Angle = angularDeflection;
-    meshParameters.Relative = false;
-    meshParameters.InParallel = false;
-    if (minSize > 0.0) {
-      meshParameters.MinSize = minSize;
-    }
-    BRepMesh_IncrementalMesh mesher(shape, meshParameters);
+    CadaraMeshShapeForPayload(shape, linearDeflection, angularDeflection, minSize);
     TopTools_IndexedMapOfShape faceMap;
     TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
     const std::vector<std::string> faceIds = CadaraCanonicalTopologyIdsForShapeMap(

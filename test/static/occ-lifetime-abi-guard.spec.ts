@@ -351,3 +351,66 @@ test("lifetime policy rejects a partial or altered shape-set checkpoint registry
     );
   }
 });
+
+// cadara-dx2k.10: the topology mesh-buffer builder is a second whole shim
+// class added after v8; like the checkpoint it must arrive complete and
+// exactly as audited, or not at all.
+const meshBuffersExtension = JSON.parse(
+  readFileSync("scripts/occ/topology-mesh-buffers-extension.json", "utf8"),
+) as { abi: string[]; declaration: string; instanceEntry: string };
+const withMeshBuffers =
+  meshBuffersExtension.declaration +
+  "\n\n" +
+  declarations.replace(
+    "export type OpenCascadeInstance = {FS: typeof FS} & {",
+    "export type OpenCascadeInstance = {FS: typeof FS} & {\n  " +
+      meshBuffersExtension.instanceEntry,
+  );
+
+test("lifetime policy accepts declarations with or without the approved topology mesh-buffer builder", () => {
+  for (const candidate of [declarations, withMeshBuffers]) {
+    const result = checkDeclarations(candidate);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  }
+});
+
+test("lifetime policy rejects an altered or partial topology mesh-buffer builder declaration", () => {
+  for (const [changed, message] of [
+    [
+      withMeshBuffers.replace(
+        "  PositionsAddress(): Standard_Real;",
+        "  PositionsAddress(): Standard_Integer;",
+      ),
+      "Topology mesh-buffer builder declaration must equal the approved inventory",
+    ],
+    [
+      withMeshBuffers.replace(meshBuffersExtension.instanceEntry, ""),
+      "Topology mesh-buffer builder instance entry must match the approved declaration",
+    ],
+  ] as const) {
+    expect(changed).not.toBe(withMeshBuffers);
+    const result = checkDeclarations(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(message);
+  }
+});
+
+test("lifetime policy rejects a partial or altered topology mesh-buffer builder registry", () => {
+  for (const changed of [
+    meshBuffersExtension.abi.slice(1),
+    meshBuffersExtension.abi.map((line) =>
+      line.replace(
+        "PositionsAddress(double, const CadaraNativeTopologyMeshBuffers*) dii",
+        "PositionsAddress(int, const CadaraNativeTopologyMeshBuffers*) iii",
+      ),
+    ),
+  ]) {
+    expect(changed).not.toEqual(meshBuffersExtension.abi);
+    const result = checkAbi(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Topology mesh-buffer builder registry must equal the approved inventory",
+    );
+  }
+});

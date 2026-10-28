@@ -225,6 +225,7 @@ import {
   getRevolveFeatureExtent,
 } from "@/contracts/modeling/feature-extents";
 import { createOccExportCapabilities } from "@/infrastructure/occ/occ-export-capabilities";
+import { getNativeTopologyDisplayPayloadBuilder, type NativeTopologyDisplayPayloadBuilder, type OpenCascadeNativeTopologyMeshBuffersHost } from "@/infrastructure/occ/native-topology-mesh-buffers";
 import { createNativeTopologyDiagnostic, createOccNativeReferenceInvalidationsFromHistoryPayload, createOccNativeExactBrepPayloadFromShimPayload, createOccNativeMeshExportPayloadFromShimPayload, createOccNativeTopologyPayloadFromShimPayloads, parseNativeFeatureTransactionHistoryJson, parseNativeShimPayloadJson, type OccNativeShimPayload, type OpenCascadeNativeTopologyKernelHost, type OccNativeMeshExportPayload, type OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
 import { type OccNativeExactBrepPayload } from "@/contracts/modeling/kernel-payloads";
 import type { OccNativeTopologyWorkerResult } from "@/contracts/modeling/kernel-worker-result";
@@ -4535,7 +4536,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     // This is a display read, even after a feature transaction. The committed
     // builder prepares/unifies the shape again and can merge tracked faces;
     // snapshot meshing must enumerate the exact, already-owned topology instead.
-    const builder = nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson;
+    const builder = getNativeTopologyDisplayPayloadBuilder(
+      // The host is the Emscripten module, which carries the HEAP views.
+      nativeHost.host as OpenCascadeNativeTopologyKernelHost &
+        OpenCascadeNativeTopologyMeshBuffersHost,
+    );
     if (!builder) {
       return this.createNativeTopologyUnavailableResult<OccNativeTopologyPayload>(
         state,
@@ -4587,11 +4592,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     state: OccAuthoringState,
     body: OccTrackedBody,
     tier: ReturnType<typeof getOccTessellationTier>,
-    builder: NonNullable<
-      NonNullable<
-        OpenCascadeNativeTopologyKernelHost["CadaraBuildNativeTopologyPayload"]
-      >["BuildJson"]
-    >,
+    builder: NativeTopologyDisplayPayloadBuilder,
   ) {
     // The committed identity payload has its own mesh budget, not this
     // display tier. OCCT also reuses triangulations when the angular budget
@@ -4599,14 +4600,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     // BRepMesh_IncrementalMesh (absolute tier deflections). Exact shapes and
     // naming owners stay intact; immutable payload arrays are cached per tier.
     state.oc.BRepTools.Clean(body.shape, true);
-    const parsedNativePayload = parseNativeShimPayloadJson(
-      builder(
-        body.shape,
-        body.bodyId,
-        body.topologyToken,
-        tier.linearDeflectionModelUnits,
-        tier.angularDeflectionRadians,
-      ),
+    const parsedNativePayload = builder(
+      body.shape,
+      body.bodyId,
+      body.topologyToken,
+      tier.linearDeflectionModelUnits,
+      tier.angularDeflectionRadians,
     );
     // A remesh must keep semantic/history-preserved face bindings rather
     // than exposing the builder's canonical native ids as new public ids.
@@ -4706,7 +4705,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const nativeHost =
       this.getNativeTopologyHost<OccNativeTopologyPayload>(state);
     const builder = nativeHost.ok
-      ? nativeHost.host.CadaraBuildNativeTopologyPayload?.BuildJson
+      ? getNativeTopologyDisplayPayloadBuilder(
+          // The host is the Emscripten module, which carries the HEAP views.
+          nativeHost.host as OpenCascadeNativeTopologyKernelHost &
+            OpenCascadeNativeTopologyMeshBuffersHost,
+        )
       : undefined;
     // Without the native builder the snapshot read reports the gap itself.
     if (!builder) return false;

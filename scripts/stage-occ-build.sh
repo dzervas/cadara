@@ -19,12 +19,14 @@ cp \
   "$root/scripts/occ/native-semantic-conformance.mjs" \
   "$root/scripts/occ/shape-set-checkpoint-conformance.mjs" \
   "$root/scripts/occ/topology-mesh-budget-conformance.mjs" \
+  "$root/scripts/occ/topology-mesh-buffers-conformance.mjs" \
   "$root/scripts/occ/probe-custom-build.mjs" \
   "$root/scripts/occ/smoke-custom-build.mjs" \
   "$root/scripts/occ/native-lifetime-conformance.mjs" \
   "$root/scripts/occ/lifetime-abi-policy.mjs" \
   "$root/scripts/occ/step-binding-extension.json" \
   "$root/scripts/occ/shape-set-checkpoint-extension.json" \
+  "$root/scripts/occ/topology-mesh-buffers-extension.json" \
   "$stage/probe/"
 printf '{"type":"module"}\n' > "$stage/package.json"
 cat > "$stage/builder-identity.json" <<'JSON'

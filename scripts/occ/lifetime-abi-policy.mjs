@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 
 // Destructor-only repairs retain the original v8 ABI. The separately audited
 // STEP inheritance closure and return-status enum may add ONLY the independently
-// audited registration/declaration inventories below, as may the bit-exact
-// shape-set checkpoint shim (cadara-3sq.7). Do not replace these baseline
-// hashes with a new build's hashes.
+// audited registration/declaration inventories below, as may the Cadara shim
+// classes added after v8 (SHIM_CLASS_EXTENSIONS). Do not replace these
+// baseline hashes with a new build's hashes.
 export const EXPECTED_DTS_SHA256 =
   "e30f46eca4fa30d12b6ccb16281a86d2c439433e6c4de6a43eeef623c93a8443";
 export const EXPECTED_ABI_SHA256 =
@@ -21,12 +21,26 @@ const extension = JSON.parse(
     "utf8",
   ),
 );
-const checkpoint = JSON.parse(
-  readFileSync(
-    new URL("./shape-set-checkpoint-extension.json", import.meta.url),
-    "utf8",
-  ),
-);
+const readExtension = (file) =>
+  JSON.parse(readFileSync(new URL(file, import.meta.url), "utf8"));
+// Whole Cadara shim classes added after v8, each with its exact registry and
+// declaration inventory. A build either has a class exactly or not at all.
+const SHIM_CLASS_EXTENSIONS = [
+  {
+    // Bit-exact shape-set checkpoint (cadara-3sq.7).
+    className: "CadaraNativeShapeSetCheckpoint",
+    key: "ShapeSetCheckpoint",
+    label: "Shape-set checkpoint",
+    ...readExtension("./shape-set-checkpoint-extension.json"),
+  },
+  {
+    // Display payload mesh as typed buffers (cadara-dx2k.10).
+    className: "CadaraNativeTopologyMeshBuffers",
+    key: "TopologyMeshBuffers",
+    label: "Topology mesh-buffer builder",
+    ...readExtension("./topology-mesh-buffers-extension.json"),
+  },
+];
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -59,24 +73,29 @@ export function assertLifetimeAbi(lines) {
       "STEP status registry must equal the approved enum and return resolutions",
     );
   }
-  const checkpointAdded = lines.filter((line) =>
-    /^(class|ctor|method|static) CadaraNativeShapeSetCheckpoint[ (.]/.test(
-      line,
-    ),
-  );
-  if (checkpointAdded.length) {
-    assert(
-      JSON.stringify([...checkpointAdded].sort()) ===
-        JSON.stringify(checkpoint.abi),
-      "Shape-set checkpoint registry must equal the approved inventory",
+  const shimClassesAdded = SHIM_CLASS_EXTENSIONS.map((shimClass) => {
+    const classAdded = lines.filter(
+      (line) =>
+        line.startsWith(`class ${shimClass.className} `) ||
+        line.startsWith(`ctor ${shimClass.className}(`) ||
+        line.startsWith(`method ${shimClass.className}.`) ||
+        line.startsWith(`static ${shimClass.className}.`),
     );
-  }
+    if (classAdded.length) {
+      assert(
+        JSON.stringify([...classAdded].sort()) ===
+          JSON.stringify(shimClass.abi),
+        `${shimClass.label} registry must equal the approved inventory`,
+      );
+    }
+    return classAdded;
+  });
   const baseline = lines
     .filter(
       (line) =>
         !added.includes(line) &&
         !enumAdded.includes(line) &&
-        !checkpointAdded.includes(line),
+        !shimClassesAdded.some((classAdded) => classAdded.includes(line)),
     )
     .map((line) =>
       enumAdded.length && status.resolvedAbi.includes(line)
@@ -102,7 +121,12 @@ export function assertLifetimeAbi(lines) {
     baselineAbiSha256,
     approvedAbiEntries: added.length,
     approvedReturnStatusAbiEntries: enumAdded.length,
-    approvedShapeSetCheckpointAbiEntries: checkpointAdded.length,
+    ...Object.fromEntries(
+      SHIM_CLASS_EXTENSIONS.map((shimClass, index) => [
+        `approved${shimClass.key}AbiEntries`,
+        shimClassesAdded[index].length,
+      ]),
+    ),
   };
 }
 
@@ -132,15 +156,18 @@ export function assertLifetimeDeclarations(declarations) {
       (enumAdded.length === 1 && enumAdded[0][0].trim() === status.declaration),
     "STEP status declaration must equal the approved enum inventory",
   );
-  const checkpointAdded = classes.filter(
-    (match) => match[1] === "CadaraNativeShapeSetCheckpoint",
-  );
-  assert(
-    checkpointAdded.length === 0 ||
-      (checkpointAdded.length === 1 &&
-        checkpointAdded[0][0].trim() === checkpoint.declaration),
-    "Shape-set checkpoint declaration must equal the approved inventory",
-  );
+  const shimClassesAdded = SHIM_CLASS_EXTENSIONS.map((shimClass) => {
+    const classAdded = classes.filter(
+      (match) => match[1] === shimClass.className,
+    );
+    assert(
+      classAdded.length === 0 ||
+        (classAdded.length === 1 &&
+          classAdded[0][0].trim() === shimClass.declaration),
+      `${shimClass.label} declaration must equal the approved inventory`,
+    );
+    return classAdded;
+  });
   let rest = declarations.replace(
     /^[ \t]*export declare (?:class|type) (\w+)[^\n]*\{\n[\s\S]*?^\s*}/gm,
     "",
@@ -171,14 +198,19 @@ export function assertLifetimeDeclarations(declarations) {
       JSON.stringify(enumAdded.length ? [status.instanceEntry] : []),
     "STEP status instance entry must match the approved enum declaration",
   );
-  const checkpointEntries = entries.filter((line) =>
-    /^CadaraNativeShapeSetCheckpoint:/.test(line),
-  );
-  assert(
-    JSON.stringify(checkpointEntries) ===
-      JSON.stringify(checkpointAdded.length ? [checkpoint.instanceEntry] : []),
-    "Shape-set checkpoint instance entry must match the approved declaration",
-  );
+  const shimClassEntries = SHIM_CLASS_EXTENSIONS.map((shimClass, index) => {
+    const classEntries = entries.filter((line) =>
+      line.startsWith(`${shimClass.className}:`),
+    );
+    assert(
+      JSON.stringify(classEntries) ===
+        JSON.stringify(
+          shimClassesAdded[index].length ? [shimClass.instanceEntry] : [],
+        ),
+      `${shimClass.label} instance entry must match the approved declaration`,
+    );
+    return classEntries;
+  });
   rest = rest.replace(instance[0], "");
   const canonical =
     classes
@@ -186,7 +218,7 @@ export function assertLifetimeDeclarations(declarations) {
         (match) =>
           !added.includes(match) &&
           !enumAdded.includes(match) &&
-          !checkpointAdded.includes(match),
+          !shimClassesAdded.some((classAdded) => classAdded.includes(match)),
       )
       .map((match) => match[0].trim())
       .sort()
@@ -197,7 +229,7 @@ export function assertLifetimeDeclarations(declarations) {
         (line) =>
           !addedEntries.includes(line) &&
           !enumEntries.includes(line) &&
-          !checkpointEntries.includes(line),
+          !shimClassEntries.some((classEntries) => classEntries.includes(line)),
       )
       .sort()
       .join("\n") +
@@ -217,6 +249,11 @@ export function assertLifetimeDeclarations(declarations) {
     baselineDeclarationsSha256,
     approvedDeclarationClasses: added.length,
     approvedReturnStatusDeclarationEnums: enumAdded.length,
-    approvedShapeSetCheckpointDeclarationClasses: checkpointAdded.length,
+    ...Object.fromEntries(
+      SHIM_CLASS_EXTENSIONS.map((shimClass, index) => [
+        `approved${shimClass.key}DeclarationClasses`,
+        shimClassesAdded[index].length,
+      ]),
+    ),
   };
 }

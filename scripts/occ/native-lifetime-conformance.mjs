@@ -502,6 +502,11 @@ run("registry-abi-and-declarations-approved-extension", (out) => {
       (out.approvedShapeSetCheckpointDeclarationClasses === 0),
     "Registry and declarations must agree on the approved shape-set checkpoint",
   );
+  assert(
+    (out.approvedTopologyMeshBuffersAbiEntries === 0) ===
+      (out.approvedTopologyMeshBuffersDeclarationClasses === 0),
+    "Registry and declarations must agree on the approved topology mesh-buffer builder",
+  );
 });
 
 // Audited inventory: every binding returning T* yields a borrowed alias that must
@@ -825,6 +830,35 @@ const slopeCases = [
       const text = shapeSetCheckpointText(i);
       keep.push(oc.CadaraNativeShapeSetCheckpoint.Read(text));
       oc.CadaraNativeShapeSetCheckpoint.Read(text.slice(0, -8)).delete();
+    },
+  },
+  {
+    // The result owns its mesh buffers: deleting it must free them.
+    name: "CadaraNativeTopologyMeshBuffers results and their mesh buffers",
+    reps: 2_000,
+    deleted: (i) => {
+      const s = meshedBox(i);
+      oc.CadaraNativeTopologyMeshBuffers.Build(
+        s,
+        "body_lifetime",
+        "t0001",
+        0.1,
+        0.5,
+      ).delete();
+      s.delete();
+    },
+    retained: (i, keep) => {
+      const s = meshedBox(i);
+      keep.push(
+        oc.CadaraNativeTopologyMeshBuffers.Build(
+          s,
+          "body_lifetime",
+          "t0001",
+          0.1,
+          0.5,
+        ),
+      );
+      s.delete();
     },
   },
   {
