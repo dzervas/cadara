@@ -55,7 +55,9 @@
 //   sketchDraw end inside the open sketch, so their settled is null and the
 //   exit's own cost is the sketchExit row),
 //   sketchCreateOnFace/sketchExitFace (face picked in the viewport),
-//   sketchExitUnchanged (first timeline sketch reopened; Face variant),
+//   sketchExitUnchanged (first timeline sketch reopened and finished, until
+//   its kernel work drained; Face variant; AfterEdit: right after a
+//   committed depth edit),
 //   sketchEditUpstream (Exit after an untimed dimension edit: the publish
 //   rebuilds the downstream features; until idle on a new revision) and
 //   sketchDimensionEdit (the in-session Enter), both on the first visible
@@ -184,6 +186,7 @@ const MUTATION_KINDS = [
   "sketchExitFace",
   "sketchExitUnchanged",
   "sketchExitUnchangedFace",
+  "sketchExitUnchangedAfterEdit",
   "sketchEditUpstream",
   "sketchDimensionEdit",
   "sketchConstraintAdd",

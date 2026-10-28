@@ -43,7 +43,10 @@ import {
   drawRectangle,
   enterTopSketch,
   exitSketch,
+  exitUnchangedSketch,
   findSketchFacePoint,
+  firstSketchId,
+  reopenSketch,
 } from "./rows-sketch.ts";
 
 export const FEATURE_ROW_KINDS = [
@@ -67,6 +70,7 @@ export const FEATURE_ROW_KINDS = [
   "featureDeleteMid",
   "featureEditUndo",
   "featureEditUndoFaceSketch",
+  "sketchExitUnchangedAfterEdit",
 ] as const;
 export type FeatureRowKind = (typeof FEATURE_ROW_KINDS)[number];
 
@@ -409,6 +413,24 @@ export async function prepareFeatureRow(
           () => undoButton(page).click(),
           await finalRevisionSignal(page),
         );
+      };
+    }
+    // sketchExitUnchanged right after a committed depth edit: the first
+    // restore after a forward edit (cadara-dx2k.16).
+    case "sketchExitUnchangedAfterEdit": {
+      const editDepth = prepareDepthEdit(session);
+      if (typeof editDepth === "string") return editDepth;
+      const sketchId = await firstSketchId(page);
+      if (!sketchId) return "the timeline has no sketch";
+      return async (_session, index) => {
+        const commit = await editDepth(index % 2 === 0);
+        await untimedHistoryAction(page, async () => {
+          await commit.click();
+          await waitForInspectorClosed(page, "extrude-depth");
+        });
+        await waitForOccQuiet(page);
+        await reopenSketch(session, sketchId);
+        return exitUnchangedSketch(session);
       };
     }
     case "featureAdd":

@@ -7,6 +7,7 @@ import {
 } from "@/contracts/modeling/geometry-assets";
 import type { EmbeddedBinaryAssetRecord } from "@/contracts/modeling/embedded-binary-assets";
 import type { AuthoredTopologyLineageOutput } from "@/contracts/modeling/authored-document";
+import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import {
   withAutoBodyAppearances,
   type BodyAppearance,
@@ -262,6 +263,23 @@ export function getSketchIdsResolvingDifferently(
 }
 
 /**
+ * Whether two feature definitions are the same authored value. Object key
+ * order is not part of it: a document from the repository holds the keys
+ * sorted, a feature the session evaluated holds them as its request did.
+ */
+function isSameFeatureDefinition(
+  left: FeatureDefinition,
+  right: FeatureDefinition,
+) {
+  return (
+    left === right ||
+    JSON.stringify(left) === JSON.stringify(right) ||
+    JSON.stringify(stableJsonValue(left)) ===
+      JSON.stringify(stableJsonValue(right))
+  );
+}
+
+/**
  * The number of leading `prefix` features that `checkpoint` evaluated from
  * the same record and from the same sketches and resolved variable values
  * that a rebuild from `base` would use.
@@ -309,7 +327,7 @@ function countUnchangedCheckpointFeatures(
       (labelsFeedCheckpoint &&
         (evaluated.label ?? evaluated.featureId) !==
           (feature.label ?? feature.featureId)) ||
-      JSON.stringify(evaluated.definition) !== definition ||
+      !isSameFeatureDefinition(evaluated.definition, feature.definition) ||
       // Any sketch id the definition names, wherever it nests.
       [...changedSketchIds].some((sketchId) =>
         definition.includes(`"${sketchId}"`),
@@ -464,8 +482,7 @@ export function getResumableUnappliedTail(
       evaluated?.featureId !== feature.featureId ||
       evaluated.suppressed ||
       feature.suppressed ||
-      JSON.stringify(evaluated.definition) !==
-        JSON.stringify(feature.definition)
+      !isSameFeatureDefinition(evaluated.definition, feature.definition)
     ) {
       break;
     }

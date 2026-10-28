@@ -317,6 +317,23 @@ export async function waitForOccQuiet(page: Page) {
 }
 
 /**
+ * Epoch ms when the OCC worker last finished a request, once none has been
+ * in flight for OCC_QUIET_MS: the end of the kernel work a gesture started
+ * (a publication's restore runs after the editor is already idle).
+ */
+export async function occDrained(page: Page) {
+  await waitForOccQuiet(page);
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __benchOcc: { changedAtMs: number };
+        }
+      ).__benchOcc.changedAtMs,
+  );
+}
+
+/**
  * One timed mutation: `act` is the user's committing gesture; `reflected`
  * resolves (epoch ms) when the UI shows the result (null: no such signal);
  * persisted is the undo strip listing the action (`persisted` for

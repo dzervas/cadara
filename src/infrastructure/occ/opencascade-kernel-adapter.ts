@@ -1012,6 +1012,11 @@ function buildSketchSnapshotRecord(
   };
 }
 
+/** Stable JSON of a solved sketch record: equal keys, equal records. */
+function createSketchSnapshotRecordKey(record: SketchSnapshotRecord) {
+  return JSON.stringify(stableJsonValue(record));
+}
+
 function buildSketchChangedTargets(sketch: SketchSnapshotRecord) {
   return [
     { kind: "sketch", sketchId: sketch.sketchId } as const,
@@ -3576,8 +3581,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
           cursor: document.cursor,
           deferredFeatureIds: options.deferredFeatureIds,
           onProgress: options.onProgress,
+          // An unapplied stage is not part of the restored model: only a
+          // later Roll To End (a forward rebuild) resumes it, so it needs the
+          // document to persist its outputs but not a cold evaluation.
           resumeFrom: live
-            ? { state: live, isReusable: isLiveStageReusable }
+            ? {
+                state: live,
+                isReusable: isLiveStageReusable,
+                isUnappliedStageReusable: (stage) =>
+                  stage.checkpoint !== undefined &&
+                  isStagePersistedInLineage(
+                    stage,
+                    previousFeatureTopologyLineage,
+                  ),
+              }
             : undefined,
         },
       );
@@ -4177,11 +4194,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       /**
        * Resumes from the checkpoints of `state` (a live runtime that a
        * restore into `runtimeState` replaces) instead of `runtimeState`'s,
-       * for the features `isReusable` admits (cadara-jxe3).
+       * for the features `isReusable` admits (cadara-jxe3). Of the features
+       * the cursor leaves unapplied, it keeps the stages
+       * `isUnappliedStageReusable` admits as the resumable tail, so a
+       * restore at a rolled-back cursor leaves Roll To End what it had
+       * before (cadara-dx2k.16).
        */
       resumeFrom?: {
         state: OccAuthoringState;
         isReusable: (feature: OccAuthoringFeatureRecord) => boolean;
+        isUnappliedStageReusable: (stage: OccFeatureTopologyStage) => boolean;
       };
     },
   ): RebuildAttempt {
@@ -4198,11 +4220,31 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       runtimeState.authoringState.previousFeatureTopologyStages,
       runtimeState.authoringState.featureTopologyStages,
     );
+    const resumeFrom = input.resumeFrom;
+    const unappliedStages = resumeFrom
+      ? new Map(
+          [
+            ...mergeOccFeatureTopologyStageMaps(
+              resumeFrom.state.previousFeatureTopologyStages,
+              resumeFrom.state.featureTopologyStages,
+            ),
+          ].filter(([, stage]) => resumeFrom.isUnappliedStageReusable(stage)),
+        )
+      : runtimeStages;
     const resumableTail = getResumableUnappliedTail(
       features,
       appliedFeatures,
-      runtimeStages,
+      unappliedStages,
     );
+    // A restore's runtime holds no stages: its previous stages are only the
+    // resumable tail it keeps from the live runtime.
+    const previousStages = resumeFrom
+      ? new Map(
+          [...resumableTail].map(
+            (featureId) => [featureId, unappliedStages.get(featureId)!] as const,
+          ),
+        )
+      : runtimeStages;
     const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
       documentId: this.documentId,
       name: runtimeState.authoringState.name,
@@ -4233,7 +4275,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       // resumable unapplied tail, whose checkpoints a later Roll To End
       // resumes (cadara-vjcv).
       previousFeatureTopologyStages: new Map(
-        [...runtimeStages]
+        [...previousStages]
           .filter(([featureId]) => featureIds.has(featureId))
           .map(([featureId, stage]) => [
             featureId,
@@ -5525,27 +5567,40 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     );
     const nextSequence = runtimeState.revisionSequence + 1;
     const nextRevisionId = createRevisionId(nextSequence);
-    const normalizedRegions =
-      derivedValidity.state === "current"
-        ? normalizeDerivedRegionsForSketchId(
-            derivedRegions,
-            sketchId,
-            nextRevisionId,
-          )
-        : [];
-    const snapshotRecord = buildSketchSnapshotRecord(
-      request,
-      sketchId,
-      nextRevisionId,
-      normalizedDefinition,
-      normalizedRegions,
-      solvedSnapshot,
-      derivedValidity,
-      projectedReferences,
-    );
-    const isNewSketch = !runtimeState.authoringState.sketches.some(
+    const buildCommittedRecord = (revisionId: RevisionId) =>
+      buildSketchSnapshotRecord(
+        request,
+        sketchId,
+        revisionId,
+        normalizedDefinition,
+        derivedValidity.state === "current"
+          ? normalizeDerivedRegionsForSketchId(
+              derivedRegions,
+              sketchId,
+              revisionId,
+            )
+          : [],
+        solvedSnapshot,
+        derivedValidity,
+        projectedReferences,
+      );
+    const liveRecord = runtimeState.authoringState.sketches.find(
       (entry) => entry.sketchId === sketchId,
     );
+    // A commit that solves the live record again (Finish without edits)
+    // keeps that record: features and checkpoints compare sketches by
+    // identity, so a fresh copy would rerun every consumer (and, at a
+    // rolled-back cursor, drop the kept tail Roll To End resumes). The kept
+    // record keeps the revision that last changed it, as every sketch a
+    // commit leaves alone does.
+    const snapshotRecord =
+      liveRecord &&
+      createSketchSnapshotRecordKey(
+        buildCommittedRecord(liveRecord.ownerRevisionId),
+      ) === createSketchSnapshotRecordKey(liveRecord)
+        ? liveRecord
+        : buildCommittedRecord(nextRevisionId);
+    const isNewSketch = liveRecord === undefined;
     const nextSketches = !isNewSketch
       ? runtimeState.authoringState.sketches.map((entry) =>
           entry.sketchId === sketchId ? snapshotRecord : entry,

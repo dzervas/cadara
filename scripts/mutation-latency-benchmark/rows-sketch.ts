@@ -19,6 +19,7 @@ import {
   historySignature,
   medianAndP95,
   now,
+  occDrained,
   openFixture,
   partsTree,
   selectableTargets,
@@ -138,6 +139,21 @@ export async function exitSketch(session: Session, timed = false) {
 }
 
 /**
+ * Finish of a reopened sketch without edits, timed until the editor is idle
+ * (reflected) and the kernel work the Finish started has drained
+ * (persisted: the publication's restore, or the cursor's return to the end).
+ */
+export function exitUnchangedSketch(session: Session) {
+  const { page } = session;
+  return timedSample(
+    session,
+    () => activateTool(page, EXIT_SKETCH_TOOL),
+    () => waitForMachine(page, "idle"),
+    () => occDrained(page),
+  );
+}
+
+/**
  * A body face that starts a sketch with the Sketch tool armed (hovered and
  * pressed in the viewport). The untimed trial enters and finishes that
  * sketch, then deletes what it added to the timeline. Null when no face is
@@ -234,7 +250,11 @@ export async function createFaceSketch(session: Session, face: string) {
  * Picked by sketch id: aria labels repeat (the wheel's timeline lists 22
  * "Sketch Draft" sketches).
  */
-async function reopenSketch(session: Session, sketchId: string, timed = false) {
+export async function reopenSketch(
+  session: Session,
+  sketchId: string,
+  timed = false,
+) {
   const { page } = session;
   const entry = page.locator(`button[data-history-sketch-id="${sketchId}"]`);
   await glideOnto(page, entry);
@@ -247,7 +267,7 @@ async function reopenSketch(session: Session, sketchId: string, timed = false) {
   return null;
 }
 
-async function firstSketchId(page: Page) {
+export async function firstSketchId(page: Page) {
   const entries = page.locator("button[data-history-sketch-id]");
   if ((await entries.count()) === 0) return null;
   return entries.first().getAttribute("data-history-sketch-id");
@@ -552,7 +572,7 @@ export async function prepareSketchRow(
       }
       return async () => {
         await reopenSketch(session, sketchId);
-        return (await exitSketch(session, true))!;
+        return exitUnchangedSketch(session);
       };
     }
     // The in-session Enter only re-solves the sketch (one OCC request, the
