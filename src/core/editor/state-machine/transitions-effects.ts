@@ -1,5 +1,8 @@
 import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
-import { getFeaturePrimarySelectionTarget } from "@/core/editor/feature-editing";
+import {
+  buildFeatureDefinition,
+  getFeaturePrimarySelectionTarget,
+} from "@/core/editor/feature-editing";
 import {
   applyFeatureBooleanTargetPreselection,
   classifyPreviewBooleanTarget,
@@ -29,6 +32,7 @@ import type {
   EditorEvent,
   EditorTransitionResult,
   EditorState,
+  FeatureEditorState,
   SketchEditorState,
 } from "./types";
 import type { EditorExtensionDependencies } from "./dependencies";
@@ -335,25 +339,33 @@ export function handleEffectFeaturePreviewCompleted(
           }),
         )
       : state.session;
-
-  return {
-    state: {
-      ...state,
-      pendingPreviewRequestId: null,
-      previewRenderables,
-      command: {
-        ...state.command,
-        phase: "editing",
-      },
-      session: {
-        ...session,
-        status: event.stale ? "idle" : "previewReady",
-        diagnostics: event.diagnostics,
-        lastPreviewRevisionId: event.revisionId,
-      },
+  const completed: FeatureEditorState = {
+    ...state,
+    pendingPreviewRequestId: null,
+    previewRenderables,
+    command: {
+      ...state.command,
+      phase: "editing",
     },
-    effects: [],
+    session: {
+      ...session,
+      status: event.stale ? "idle" : "previewReady",
+      diagnostics: event.diagnostics,
+      lastPreviewRevisionId: event.revisionId,
+    },
   };
+
+  // The preview showed the draft before the preselection changed its
+  // operation or target: preview the changed draft, so the preview that ends
+  // ready is the one a commit runs.
+  if (
+    JSON.stringify(buildFeatureDefinition(session)) !==
+    JSON.stringify(buildFeatureDefinition(state.session))
+  ) {
+    return emitFeaturePreview(completed);
+  }
+
+  return { state: completed, effects: [] };
 }
 
 export function handleEffectFeaturePreviewFailed(

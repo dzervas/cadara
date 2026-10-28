@@ -159,6 +159,150 @@ test("feature preview completion keeps unsupported advanced boolean families exp
   ).toBeTruthy();
 });
 
+// Seam: the editor transition on preview completion. The preselection infers
+// the operation and target from the preview of a New body draft; when that
+// changes the draft, the changed draft is previewed before the session is
+// ready, so the ready preview is what a commit runs. A join or cut preview
+// shows the boolean result, which is never classified again (it overlaps the
+// body it merged with: a join became a cut). A same-value New body inference
+// previews nothing more.
+test("a preselection that changes a New body draft previews the inferred operation once before the preview is ready", () => {
+  const regionSession = () => ({
+    ...createFeatureEditSession({
+      featureType: "extrude",
+      selectedTarget: {
+        kind: "region",
+        sketchId: "sketch_a" as SketchId,
+        regionId: "region_profile" as RegionId,
+      },
+    }),
+    status: "previewing" as const,
+  });
+  // body_a's top face, planar, so a preview face on it is in coplanar contact.
+  const withPlanarTop = (state: FeatureEditorState): FeatureEditorState => {
+    const snapshot = state.snapshot!;
+    return {
+      ...state,
+      snapshot: {
+        ...snapshot,
+        document: {
+          ...snapshot.document,
+          render: {
+            ...snapshot.document.render,
+            records: [
+              ...snapshot.document.render.records,
+              squareMesh("body_a_top", "body_a" as BodyId, [0, 0], [1, 1], 1),
+            ],
+          },
+        },
+      },
+    };
+  };
+  const completion = (
+    requestId: RequestId,
+    renderables: RenderableEntityRecord[],
+  ) =>
+    ({
+      type: "effect.featurePreviewCompleted",
+      requestId,
+      documentId: "doc_workspace",
+      commandSessionId: "command_extrude-1" as CommandSessionId,
+      baseRevisionId: "rev_1" as RevisionId,
+      revisionId: "rev_1" as RevisionId,
+      stale: false,
+      diagnostics: [],
+      renderables,
+    }) as const;
+  const onTop = [squareMesh("preview_on_top", null, [0.2, 0.2], [0.8, 0.8], 1)];
+  const intersecting = [
+    boxMesh("preview_intersecting", null, [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]),
+  ];
+  const apart = [boxMesh("preview_apart", null, [5, 5, 5], [6, 6, 6])];
+  const summary = (result: ReturnType<typeof transitionEditorState>) => {
+    if (result.state.kind !== "editingFeature") {
+      throw new Error("Expected feature editing after preview completion.");
+    }
+    const { draft, status } = result.state.session;
+    return {
+      previews: result.effects.flatMap((effect) =>
+        effect.type === "feature.evaluatePreview" &&
+        effect.requestId ===
+          (result.state as FeatureEditorState).pendingPreviewRequestId
+          ? [effect.featureSession.draft]
+          : [],
+      ),
+      effects: result.effects.length,
+      operation: draft.operation,
+      booleanScope: draft.booleanScope,
+      status,
+    };
+  };
+  const join = {
+    operation: "join",
+    booleanScope: { kind: "targetBody", bodyId: "body_a" },
+  };
+  const cut = { ...join, operation: "cut" };
+
+  for (const [inferred, profileRenderables, resultRenderables] of [
+    [join, onTop, intersecting],
+    [cut, intersecting, apart],
+  ] as const) {
+    const first = transitionEditorState(
+      withPlanarTop(
+        createPreviewState(
+          regionSession(),
+          "request_feature-preview-1" as RequestId,
+        ),
+      ),
+      completion("request_feature-preview-1" as RequestId, [
+        ...profileRenderables,
+      ]),
+      defaultEditorExtensionDependencies,
+    );
+    expect(
+      summary(first),
+      `the inferred ${inferred.operation} is previewed before the session is ready`,
+    ).toMatchObject({
+      previews: [inferred],
+      effects: 1,
+      ...inferred,
+      status: "previewing",
+    });
+
+    // The boolean result overlaps body_a, or lies apart from it: a profile
+    // preview like either would infer another operation.
+    const confirmed = transitionEditorState(
+      first.state,
+      completion((first.state as FeatureEditorState).pendingPreviewRequestId!, [
+        ...resultRenderables,
+      ]),
+      defaultEditorExtensionDependencies,
+    );
+    expect(
+      summary(confirmed),
+      `the ${inferred.operation} preview is ready and is not classified again`,
+    ).toMatchObject({ effects: 0, ...inferred, status: "previewReady" });
+  }
+
+  expect(
+    summary(
+      transitionEditorState(
+        createPreviewState(
+          regionSession(),
+          "request_feature-preview-2" as RequestId,
+        ),
+        completion("request_feature-preview-2" as RequestId, apart),
+        defaultEditorExtensionDependencies,
+      ),
+    ),
+    "a New body inferred for a New body draft previews nothing more",
+  ).toMatchObject({
+    effects: 0,
+    operation: "newBody",
+    status: "previewReady",
+  });
+});
+
 function createPreviewState(
   session: FeatureEditorState["session"],
   pendingPreviewRequestId: RequestId,
@@ -316,6 +460,39 @@ function boxMesh(
         [0, 2, 3],
         [4, 6, 5],
         [4, 7, 6],
+      ],
+    },
+  };
+}
+
+function squareMesh(
+  id: string,
+  ownerBodyId: BodyId | null,
+  min: [number, number],
+  max: [number, number],
+  z: number,
+): RenderableEntityRecord {
+  const box = boxMesh(
+    id,
+    ownerBodyId,
+    [min[0], min[1], z],
+    [max[0], max[1], z],
+  );
+  return {
+    ...box,
+    binding: { ...box.binding, semanticClass: "planarFace" },
+    geometry: {
+      kind: "mesh",
+      vertexPositions: [
+        [min[0], min[1], z],
+        [max[0], min[1], z],
+        [max[0], max[1], z],
+        [min[0], max[1], z],
+      ],
+      vertexNormals: null,
+      triangleIndices: [
+        [0, 1, 2],
+        [0, 2, 3],
       ],
     },
   };

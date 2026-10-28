@@ -8,6 +8,7 @@ import type {
   ModelingDocumentSettings,
 } from "@/contracts/modeling/schema";
 import type { AdvancedSolidOperationIntent } from "@/contracts/modeling/advanced-solid";
+import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
   FeatureDraftPatch,
   FeatureEditSessionState,
@@ -136,7 +137,8 @@ export function applyFeatureBooleanTargetPreselection(
   if (
     session.mode !== "create" ||
     session.booleanTargetPreselection.operationManuallyChanged ||
-    session.booleanTargetPreselection.targetManuallyChanged
+    session.booleanTargetPreselection.targetManuallyChanged ||
+    !previewsStandaloneBody(session)
   ) {
     return session;
   }
@@ -151,6 +153,26 @@ export function applyFeatureBooleanTargetPreselection(
     ...session,
     draft: definition.applyPatch(session.draft, patch as never) as never,
   } as FeatureEditSessionState;
+}
+
+/**
+ * Whether the previewed draft creates a standalone body, which is what the
+ * classification compares with the existing bodies. A join or cut preview
+ * shows the boolean result, which overlaps the body it merged with: classifying
+ * it would turn an inferred join into a cut.
+ */
+function previewsStandaloneBody(session: FeatureEditSessionState) {
+  const draft = session.draft as {
+    operation?: MaybeAuthoredValue<FeatureBooleanOperation>;
+    operationIntent?: MaybeAuthoredValue<AdvancedSolidOperationIntent>;
+  };
+  const literal = <T>(value: MaybeAuthoredValue<T> | undefined) =>
+    typeof value === "object" && value !== null && "value" in value
+      ? value.value
+      : value;
+  return "operation" in draft
+    ? literal(draft.operation) === "newBody"
+    : literal(draft.operationIntent) === "create";
 }
 
 export function isBooleanOperationPatch(patch: FeatureDraftPatch) {
