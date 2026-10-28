@@ -4448,7 +4448,19 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
                 ],
               ),
             ),
-      previousFeatureTopologyLineage: new Map(),
+      // A persisted lineage record stands for its feature until an evaluation
+      // of it exists. A feature this state holds no stage for (behind the
+      // cursor of a restored document, or failed) keeps it, so the export
+      // still persists it and a later evaluation reuses its topology ids
+      // instead of minting fresh ones that its consumers do not reference.
+      previousFeatureTopologyLineage: new Map(
+        [...baseState.previousFeatureTopologyLineage].filter(
+          ([featureId]) =>
+            featureIds.has(featureId) &&
+            !current.featureTopologyStages.has(featureId) &&
+            !current.previousFeatureTopologyStages.has(featureId),
+        ),
+      ),
     };
 
     return {

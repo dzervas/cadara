@@ -92,7 +92,6 @@ it("creates, drives, publishes, rebuilds, compensates, saves and freshly reopens
         (reference) => reference.target.kind === "face",
       ),
     ).toHaveLength(6);
-    expect(changed.discovery!.references).not.toEqual(references);
     const stale = await fixture.run({
       operation: "export.step",
       basis: fixture.solid.discovery!.state,
