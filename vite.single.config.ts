@@ -5,15 +5,14 @@ import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import UnpluginTypia from "@typia/unplugin/vite";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 import {
   createBuildMetadataDefines,
   readBuildMetadata,
-} from "./build-metadata";
-import { createTypiaPluginOptions } from "./typia-plugin-options";
+} from "./build-metadata.ts";
+import { createTypiaVitePlugins } from "./typia-plugin-options.ts";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 const buildMetadata = readBuildMetadata(rootDir);
@@ -141,10 +140,10 @@ export default defineConfig({
   define: createBuildMetadataDefines(buildMetadata),
   publicDir: false,
   worker: {
-    plugins: () => [UnpluginTypia(createTypiaPluginOptions(rootDir))],
+    plugins: () => createTypiaVitePlugins(rootDir),
   },
   plugins: [
-    UnpluginTypia(createTypiaPluginOptions(rootDir)),
+    ...createTypiaVitePlugins(rootDir),
     react(),
     tailwindcss(),
     cadaraSingleHtmlPlugin(),

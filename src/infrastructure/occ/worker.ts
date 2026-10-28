@@ -99,7 +99,11 @@ function getWorkerOpenCascadeInstance(assets?: OccWorkerAssetConfig) {
         postOccWorkerMessage({ kind: "engineDownloadProgress", ...progress }),
     });
     openCascadePromise = loadDefaultOpenCascadeFactory({ isNodeRuntime: false })
-      .then((initializeOpenCascade) => Promise.race([
+      // The explicit return type keeps TypeScript 7 from structurally comparing
+      // the ~25k-member OpenCascadeInstance against the inferred
+      // `T | PromiseLike<T>` callback result, which alone cost over a minute
+      // of type checking.
+      .then((initializeOpenCascade): Promise<OpenCascadeInstance> => Promise.race([
         initializeOpenCascade({
           ...lastAssets,
           module: {

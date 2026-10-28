@@ -40,8 +40,10 @@ test("test/static/runtime-validation-policy.spec.ts", () => {
   ).toBeTruthy();
 
   expect(
-    readFileSync("vite.config.ts", "utf8").includes("UnpluginTypia") &&
-      readFileSync("vite.single.config.ts", "utf8").includes("UnpluginTypia"),
+    readFileSync("vite.config.ts", "utf8").includes("createTypiaVitePlugins") &&
+      readFileSync("vite.single.config.ts", "utf8").includes(
+        "createTypiaVitePlugins",
+      ),
     "Both Vite browser build paths should keep Typia transformation wired.",
   ).toBeTruthy();
 });

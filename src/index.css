@@ -1,4 +1,8 @@
-@import "tailwindcss";
+/* Only app sources carry utility classes; the default automatic detection
+   would also scan test fixtures, captures and docs across the whole repo. */
+@import "tailwindcss" source(none);
+@source "./**/*.{ts,tsx}";
+@source not "./**/*.spec.{ts,tsx}";
 
 @theme {
   --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;

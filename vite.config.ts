@@ -3,15 +3,14 @@ import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import UnpluginTypia from "@typia/unplugin/vite";
 import path from "node:path";
 
 import {
   createBuildMetadataDefines,
   readBuildMetadata,
-} from "./build-metadata";
-import { createTypiaPluginOptions } from "./typia-plugin-options";
-import { createServiceWorkerPlugin } from "./service-worker-plugin";
+} from "./build-metadata.ts";
+import { createTypiaVitePlugins } from "./typia-plugin-options.ts";
+import { createServiceWorkerPlugin } from "./service-worker-plugin.ts";
 
 export function getBuildSourcemap(uploadToSentry: boolean) {
   return uploadToSentry ? ("hidden" as const) : false;
@@ -83,7 +82,7 @@ function createOpenCascadeAssetHeadersPlugin() {
   };
 }
 
-const buildMetadata = readBuildMetadata(__dirname);
+const buildMetadata = readBuildMetadata(import.meta.dirname);
 const shouldUploadSentrySourceMaps = Boolean(
   process.env.SENTRY_AUTH_TOKEN && buildMetadata.sentryRelease,
 );
@@ -148,12 +147,12 @@ export default defineConfig({
     ],
   },
   worker: {
-    plugins: () => [UnpluginTypia(createTypiaPluginOptions(__dirname))],
+    plugins: () => createTypiaVitePlugins(import.meta.dirname),
   },
   plugins: [
     createOpenCascadeAssetHeadersPlugin(),
-    createServiceWorkerPlugin(path.resolve(__dirname, "src")),
-    UnpluginTypia(createTypiaPluginOptions(__dirname)),
+    createServiceWorkerPlugin(path.resolve(import.meta.dirname, "src")),
+    ...createTypiaVitePlugins(import.meta.dirname),
     react(),
     tailwindcss(),
     sentryVitePlugin({
@@ -186,12 +185,12 @@ export default defineConfig({
     alias: [
       {
         find: "@",
-        replacement: path.resolve(__dirname, "./src"),
+        replacement: path.resolve(import.meta.dirname, "./src"),
       },
       {
         find: /^@automerge\/automerge$/,
         replacement: path.resolve(
-          __dirname,
+          import.meta.dirname,
           "./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js",
         ),
       },
@@ -231,30 +230,9 @@ export default defineConfig({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       input: {
-        landing: path.resolve(__dirname, "index.html"),
-        editor: path.resolve(__dirname, "app.html"),
-        notFound: path.resolve(__dirname, "404.html"),
-      },
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) {
-            return undefined;
-          }
-
-          if (id.includes("/three/")) {
-            return "three";
-          }
-
-          if (id.includes("/@radix-ui/")) {
-            return "radix";
-          }
-
-          if (id.includes("/react/") || id.includes("/react-dom/")) {
-            return "react-vendor";
-          }
-
-          return "vendor";
-        },
+        landing: path.resolve(import.meta.dirname, "index.html"),
+        editor: path.resolve(import.meta.dirname, "app.html"),
+        notFound: path.resolve(import.meta.dirname, "404.html"),
       },
     },
   },

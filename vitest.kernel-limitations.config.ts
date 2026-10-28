@@ -1,6 +1,6 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
-import appConfig from "./vite.config";
+import appConfig from "./vite.config.ts";
 
 /**
  * `bun run test:kernel-limitations` only (docs/testing.md "Kernel

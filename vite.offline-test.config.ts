@@ -1,6 +1,6 @@
 import { mergeConfig, type UserConfig } from "vite";
 
-import appConfig from "./vite.config";
+import appConfig from "./vite.config.ts";
 
 /**
  * The offline E2E sub-lane's build (`bun run test:e2e:offline` only; never

@@ -159,9 +159,11 @@ function uncertain(code: string, message: string): NeutralCurveQueryResult {
   return { kind: "uncertain", code, message };
 }
 
-function missingBindings(
-  oc: NeutralOccBindings,
-  names: readonly (keyof NeutralOccBindings)[],
+// Typed by the requested names only: relating or inferring against the whole
+// NeutralOccBindings (~25k OCC bindings) cost over a second of type checking.
+function missingBindings<Name extends keyof NeutralOccBindings>(
+  oc: NoInfer<Partial<Record<Name, unknown>>>,
+  names: readonly Name[],
 ) {
   return names.filter((name) => typeof oc[name] !== "function");
 }
