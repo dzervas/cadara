@@ -1324,3 +1324,56 @@ test("a restore of the session's own export after a new face sketch at the tail 
     session.adapter.dispose();
   }
 }, 900_000);
+
+// A restore that must re-solve a face sketch (Undo/Redo or a peer's write of
+// a feature before it) evaluates the projection history it places the sketch
+// against. That projection resumes from the live runtime's checkpoints like
+// the rebuild does, so each runs only the changed tail (on the wheel, a face
+// sketch made every Undo of a depth edit replay the whole history).
+test("a restore that re-solves a face sketch after a tail parameter edit runs only the tail and equals a cold open (cadara-dx2k.5)", async () => {
+  const { session, sketchId } = await enclosureSessionWithTailFaceSketch();
+  try {
+    const exported = await session.exported();
+    const tailEdit = tailParameterEdits.enclosure!;
+    const applied = appliedFeatureIds(exported);
+    const tailRuns = applied.length - applied.indexOf(tailEdit.featureId);
+    expect(
+      [tailRuns, exported.historyOrder.at(-1)],
+      "premise: the edited feature is the last one before the face sketch",
+    ).toEqual([1, { kind: "sketch", sketchId }]);
+    const restore = async (document: AuthoredModelDocument) => {
+      const sketchRebuilds = spyOnSketchRebuilds(session);
+      featureRuns.count = 0;
+      try {
+        await session.restore(document);
+        return {
+          runs: featureRuns.count,
+          sketchRebuilds: sketchRebuilds.mock.calls.length,
+        };
+      } finally {
+        sketchRebuilds.mockRestore();
+      }
+    };
+    // The projection and the rebuild each run the tail once.
+    const tailOnly = { runs: 2 * tailRuns, sketchRebuilds: 1 };
+
+    const peer = withEditedFeature(exported, tailEdit);
+    expect
+      .soft(
+        await restore(peer),
+        "a peer's tail edit re-solves the face sketch and runs only the tail",
+      )
+      .toEqual(tailOnly);
+    await expectColdEquivalent(session, peer, "peer tail edit", "exact");
+
+    expect
+      .soft(
+        await restore(exported),
+        "undo of the tail edit re-solves the face sketch and runs only the tail",
+      )
+      .toEqual(tailOnly);
+    await expectColdEquivalent(session, exported, "undo", "exact");
+  } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);

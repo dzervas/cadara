@@ -1187,8 +1187,8 @@ function createRestoredSketchHistoryFeatureItem(
 
 /**
  * Reads the RestoredSketchInputs a restore of `document` solves each sketch
- * from, walking its history in restore order: the document's body labels and
- * assets, then one item per earlier sketch and feature. History items are
+ * from, walking its history in restore order: the document's assets, then
+ * one item per earlier sketch and feature. History items are
  * built once, and only when a sketch that reads upstream geometry asks.
  * A restore and a commit that registers its record (cadara-dx2k.5) both read
  * the inputs here, so the keys of the same document are equal.
@@ -1207,8 +1207,7 @@ function createRestoredSketchInputsReader(
   const restoredFeatureIds = new Set(document.featureOrder);
   const lineage = createOccFeatureTopologyLineageMap(document.topologyLineage);
   const items: (() => string)[] = [
-    () =>
-      JSON.stringify(stableJsonValue([document.bodyLabels, document.assets])),
+    () => JSON.stringify(stableJsonValue([document.assets])),
   ];
   const sketchPositions = new Map<
     SketchId,
@@ -3245,6 +3244,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         | { kind: "sketch"; sketch: SketchSnapshotRecord }
       )[] = [];
       const failedProjectionFeatures: FailedFeatureRecord[] = [];
+      // Whether the projection evaluated (or skipped) any feature yet: until
+      // then it may resume from the live runtime's checkpoints.
+      let projectionTookFeature = false;
       const appendProjectionSketch = (sketch: SketchSnapshotRecord) => {
         projectionState = {
           ...projectionState,
@@ -3295,11 +3297,56 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             continue;
           }
 
-          for (const pending of pendingProjection.splice(0)) {
+          const flushed = pendingProjection.splice(0);
+          let resumedItems = 0;
+          // Resume the projection after the last feature the rebuild below
+          // would also take from the live runtime, under the same gate, so a
+          // re-solve evaluates only the features after it (cadara-dx2k.5).
+          if (live && !projectionTookFeature) {
+            const sketchesOf = (items: typeof flushed) => [
+              ...projectionState.sketches,
+              ...items.flatMap((pending) =>
+                pending.kind === "sketch" ? [pending.sketch] : [],
+              ),
+            ];
+            const reusable = findReusableOccFeatureCheckpoint(
+              live.featureTopologyStages,
+              { ...projectionState, sketches: sketchesOf(flushed) },
+              flushed.flatMap((pending) =>
+                pending.kind === "feature" ? [pending.feature] : [],
+              ),
+              isLiveStageReusable,
+            );
+            if (reusable) {
+              projectionTookFeature = true;
+              const last = reusable.prefixFeatures.at(-1)!.featureId;
+              resumedItems =
+                flushed.findIndex(
+                  (pending) =>
+                    pending.kind === "feature" &&
+                    pending.feature.featureId === last,
+                ) + 1;
+              // The sketches before the last resumed feature, as a
+              // sequential projection would hold them there.
+              const base = {
+                ...projectionState,
+                sketches: sketchesOf(flushed.slice(0, resumedItems)),
+              };
+              projectionState = resumeOccAuthoringStateFromCheckpoint(
+                base,
+                reusable.checkpoint,
+                live.featureTopologyStages,
+                reusable.prefixFeatures,
+                base.referenceState,
+              );
+            }
+          }
+          for (const pending of flushed.slice(resumedItems)) {
             if (pending.kind === "sketch") {
               appendProjectionSketch(pending.sketch);
               continue;
             }
+            projectionTookFeature = true;
             const { feature } = pending;
             if (findBlockingFeature(failedProjectionFeatures, feature)) {
               failedProjectionFeatures.push(createFailedFeatureRecord(feature));
@@ -3426,9 +3473,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     try {
+      // A resumed projection holds the live runtime's checkpoint bodies,
+      // which that runtime owns even after this restore replaced it.
       this.releaseDiscardedState(projectionState, [
         ...(retainedRestoreState ? [retainedRestoreState] : []),
         ...(this.runtimeState ? [this.runtimeState.authoringState] : []),
+        ...(live ? [live] : []),
       ]);
     } catch (cleanupError) {
       if (restoreError !== undefined) {
