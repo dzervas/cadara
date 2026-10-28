@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import { makeAnnotationLifecycleState } from "@/core/editor/annotation-lifecycle.fixtures";
@@ -11,7 +12,7 @@ import type { EditorEvent, EditorState, SketchEditorState } from "./types";
 // clearing the committed pick on both annotation-placement paths.
 
 function apply(state: EditorState, event: EditorEvent) {
-  const next = transitionEditorState(state, event).state;
+  const next = transitionEditorState(state, event, defaultEditorExtensionDependencies).state;
   expect(next.kind, `${event.type} stays in sketch editing`).toBe(
     "editingSketch",
   );

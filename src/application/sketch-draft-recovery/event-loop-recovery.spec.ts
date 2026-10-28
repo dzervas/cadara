@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { expect, test, vi } from "vitest";
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
 import { createTestErrorReporter } from "@/contracts/errors";
@@ -35,7 +36,7 @@ for (const published of [false, true]) {
         return { revisionId: live.document.revisionId, accepted: true, diagnostics: [] };
       },
     };
-    const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+    const loop = createEditorEventLoop(runtime, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
     const store = { load: () => draft, save: vi.fn(), clear: vi.fn() };
     await loop.startAndSettle("load");
     const recovery = createSketchDraftRecoveryController(loop, store);

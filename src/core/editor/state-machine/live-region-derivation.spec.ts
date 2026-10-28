@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import { defaultSelectionFilter } from "@/core/editor/schema";
@@ -75,7 +76,7 @@ async function makeSketchState() {
     derivedEvent(
       onlyDeriveEffect(round.effects),
       structuredClone(sketch.sketch.regions),
-    ),
+    ), defaultEditorExtensionDependencies,
   ).state as SketchEditorState;
   expect(state.session.liveRegions.status, "premise: entry settled").toBe(
     "current",
@@ -268,7 +269,7 @@ test("publication applies only the pending request of the same command session a
       state,
       withLiveSolveBasis(state.session, state.session.definition),
     ),
-    { type: "document.refreshRequested" },
+    { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
   );
   const firstEffect = onlyDeriveEffect(first.effects);
   const inFlight = first.state as SketchEditorState;
@@ -278,20 +279,20 @@ test("publication applies only the pending request of the same command session a
     transitionEditorState(inFlight, {
       ...derivedEvent(firstEffect, published),
       requestId: "request_other-1",
-    } as EditorEvent).state,
+    } as EditorEvent, defaultEditorExtensionDependencies).state,
     "A result for another request is ignored.",
   ).toBe(inFlight);
   expect(
     transitionEditorState(inFlight, {
       ...derivedEvent(firstEffect, published),
       commandSessionId: "command_other-1",
-    } as EditorEvent).state,
+    } as EditorEvent, defaultEditorExtensionDependencies).state,
     "A result for another command session is ignored.",
   ).toBe(inFlight);
 
   const applied = transitionEditorState(
     inFlight,
-    derivedEvent(firstEffect, published),
+    derivedEvent(firstEffect, published), defaultEditorExtensionDependencies,
   );
   const appliedState = applied.state as SketchEditorState;
   expect(appliedState.pendingRegionRequest).toBe(null);
@@ -310,7 +311,7 @@ test("a stale generation is discarded and the hook re-emits for the latest basis
       state,
       withLiveSolveBasis(state.session, state.session.definition),
     ),
-    { type: "document.refreshRequested" },
+    { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
   );
   const firstEffect = onlyDeriveEffect(first.effects);
   const inFlight = first.state as SketchEditorState;
@@ -330,7 +331,7 @@ test("a stale generation is discarded and the hook re-emits for the latest basis
 
   const discarded = transitionEditorState(
     edited,
-    derivedEvent(firstEffect, structuredClone(sketch.sketch.regions)),
+    derivedEvent(firstEffect, structuredClone(sketch.sketch.regions)), defaultEditorExtensionDependencies,
   );
   const discardedState = discarded.state as SketchEditorState;
   expect(discardedState.session.liveRegions.status).toBe("pending");
@@ -351,7 +352,7 @@ test("a failed derivation marks live regions failed with a diagnostic and keeps 
       state,
       withLiveSolveBasis(state.session, state.session.definition),
     ),
-    { type: "document.refreshRequested" },
+    { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
   );
   const effect = onlyDeriveEffect(first.effects);
   const inFlight = first.state as SketchEditorState;
@@ -364,7 +365,7 @@ test("a failed derivation marks live regions failed with a diagnostic and keeps 
     baseRevisionId: effect.baseRevisionId,
     generation: effect.generation,
     message: "Region derivation exploded.",
-  });
+  }, defaultEditorExtensionDependencies);
   const failedState = failed.state as SketchEditorState;
   expect(failedState.pendingRegionRequest).toBe(null);
   expect(failedState.session.liveRegions.status).toBe("failed");
@@ -395,7 +396,7 @@ test("T17o A-6: a failed region derivation is explained on the status line until
         from,
         withLiveSolveBasis(from.session, from.session.definition),
       ),
-      { type: "document.refreshRequested" },
+      { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
     );
     return {
       state: next.state as SketchEditorState,
@@ -412,7 +413,7 @@ test("T17o A-6: a failed region derivation is explained on the status line until
     baseRevisionId: first.effect.baseRevisionId,
     generation: first.effect.generation,
     message: "OCC worker transport failed.",
-  }).state as SketchEditorState;
+  }, defaultEditorExtensionDependencies).state as SketchEditorState;
   const text =
     "OCC worker transport failed. The sketch's regions could not be computed, so its profiles are blocked. Edit the sketch to try again, or Undo.";
   expect(failed.session.validationMessage).toBe(text);
@@ -428,7 +429,7 @@ test("T17o A-6: a failed region derivation is explained on the status line until
     derivedEvent(
       second.effect,
       structuredClone(state.session.liveRegions.regions),
-    ),
+    ), defaultEditorExtensionDependencies,
   ).state as SketchEditorState;
   expect(published.session.liveRegions.status).toBe("current");
   expect(
@@ -446,7 +447,7 @@ test("T17o A-6: a failed region derivation is explained on the status line until
     derivedEvent(
       third.effect,
       structuredClone(state.session.liveRegions.regions),
-    ),
+    ), defaultEditorExtensionDependencies,
   ).state as SketchEditorState;
   expect(
     kept.session.validationMessage,
@@ -488,7 +489,7 @@ test("an accepted edit after an unavailable or failed state drops the stale synt
 
   const first = transitionEditorState(withSession(state, cleanPending), {
     type: "document.refreshRequested",
-  });
+  }, defaultEditorExtensionDependencies);
   const effect = onlyDeriveEffect(first.effects);
   const failedSession = (
     transitionEditorState(first.state, {
@@ -499,7 +500,7 @@ test("an accepted edit after an unavailable or failed state drops the stale synt
       baseRevisionId: effect.baseRevisionId,
       generation: effect.generation,
       message: "Region derivation exploded.",
-    }).state as SketchEditorState
+    }, defaultEditorExtensionDependencies).state as SketchEditorState
   ).session;
   expect(failedSession.liveRegions.status).toBe("failed");
   // T17o (A-6): the status line now carries the failure (with what is
@@ -571,7 +572,7 @@ test("T08b-g5 supersession: with a superseding runtime a newer generation is emi
       state,
       withLiveSolveBasis(state.session, state.session.definition),
     ),
-    { type: "document.refreshRequested" },
+    { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
   );
   const firstEffect = onlyDeriveEffect(first.effects);
   const inFlight = first.state as SketchEditorState;
@@ -609,7 +610,7 @@ test("T08b-g5 supersession: with a superseding runtime a newer generation is emi
 
   const published = structuredClone(sketch.sketch.regions);
   expect(
-    transitionEditorState(replaced, derivedEvent(firstEffect, published)).state,
+    transitionEditorState(replaced, derivedEvent(firstEffect, published), defaultEditorExtensionDependencies).state,
     "The superseded request's result is dropped.",
   ).toBe(replaced);
   expect(
@@ -621,12 +622,12 @@ test("T08b-g5 supersession: with a superseding runtime a newer generation is emi
       baseRevisionId: firstEffect.baseRevisionId,
       generation: firstEffect.generation,
       message: "Sketch region derivation was superseded.",
-    }).state,
+    }, defaultEditorExtensionDependencies).state,
     "The superseded request's cancellation is dropped, never a visible failure.",
   ).toBe(replaced);
   const applied = transitionEditorState(
     replaced,
-    derivedEvent(secondEffect, published),
+    derivedEvent(secondEffect, published), defaultEditorExtensionDependencies,
   ).state as SketchEditorState;
   expect(applied.session.liveRegions.status).toBe("current");
 });
@@ -638,7 +639,7 @@ test("T08b-g5 supersession (U-A): no emission during a drag even with a supersed
       state,
       withLiveSolveBasis(state.session, state.session.definition),
     ),
-    { type: "document.refreshRequested" },
+    { type: "document.refreshRequested" }, defaultEditorExtensionDependencies,
   );
   const inFlight = first.state as SketchEditorState;
   const dragTarget1 = state.session.definition.points[0]!.target;
@@ -710,10 +711,10 @@ test("T08b-g5 U-G3: a staged offset preview emits one background publication; it
     ],
   });
   expect(
-    transitionEditorState(inFlight, published("request_stale-1")).state,
+    transitionEditorState(inFlight, published("request_stale-1"), defaultEditorExtensionDependencies).state,
     "A result for another request is dropped.",
   ).toBe(inFlight);
-  const applied = transitionEditorState(inFlight, published(effect.requestId))
+  const applied = transitionEditorState(inFlight, published(effect.requestId), defaultEditorExtensionDependencies)
     .state as SketchEditorState;
   expect(applied.pendingOffsetPreviewRequest).toBe(null);
   expect(applied.session.activeEditTool?.offsetPublication?.status).toBe(
@@ -755,7 +756,7 @@ test("T10i R-1: a settled live-region round re-evaluates the active edit tool's 
   };
   const first = transitionEditorState(withSession(state, stale), {
     type: "document.refreshRequested",
-  });
+  }, defaultEditorExtensionDependencies);
   const effect = onlyDeriveEffect(first.effects);
   for (const event of [
     derivedEvent(effect, structuredClone(sketch.sketch.regions)),
@@ -771,7 +772,7 @@ test("T10i R-1: a settled live-region round re-evaluates the active edit tool's 
   ]) {
     const settled = transitionEditorState(
       first.state as SketchEditorState,
-      event,
+      event, defaultEditorExtensionDependencies,
     ).state as SketchEditorState;
     expect(settled.session.liveRegions.status).not.toBe("pending");
     expect(

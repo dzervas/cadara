@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 import { getSketchConstraintDefinition } from "@/core/sketch-constraints/registry";
 import type { SketchConstraintTargetRecord } from "@/core/sketch-constraints/definition";
@@ -136,12 +137,12 @@ test.each([
     const armed = transitionEditorState(state, {
       type: "tool.activated",
       toolId: "point",
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     const hovered = transitionEditorState(armed, {
       type: "sketch.pointerMoved",
       point,
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(hovered.session.activeInference?.candidate?.kind).toBe(candidate);
     const schema = hovered.session.toolPresentation;
     const projections = collectSketchViewportFeedbackAnchors(schema).map(
@@ -178,7 +179,7 @@ test.each([
     const suppressed = transitionEditorState(hovered, {
       type: "sketch.inferenceSuppressionChanged",
       held: true,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     const free = renderToStaticMarkup(
       <SketchViewportFeedbackLayer
         schema={suppressed.session.toolPresentation}
@@ -193,7 +194,7 @@ test.each([
       type: "sketch.pointerMoved",
       point: [40, 40],
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     const cleared = renderToStaticMarkup(
       <SketchViewportFeedbackLayer
         schema={away.session.toolPresentation}

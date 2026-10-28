@@ -17,7 +17,7 @@ import {
   applyImportPreparedActions,
   createImportCapabilities,
   prepareImportActions,
-  } from "@/domain/import/orchestrator";
+  } from "@/infrastructure/import/orchestrator";
 import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";

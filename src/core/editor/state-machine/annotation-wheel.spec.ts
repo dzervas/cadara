@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -16,7 +17,7 @@ import type { EditorEvent, EditorState, SketchEditorState } from "./types";
 // K; A Horizontal(G), B Fix(G start), C Parallel(G, H), D Horizontal(K).
 
 function apply(state: EditorState, event: EditorEvent) {
-  const next = transitionEditorState(state, event).state;
+  const next = transitionEditorState(state, event, defaultEditorExtensionDependencies).state;
   expect(next.kind, `${event.type} stays in sketch editing`).toBe(
     "editingSketch",
   );
@@ -240,7 +241,7 @@ describe("T14g radial wheel lifecycle (T-10)", () => {
     const finish = transitionEditorState(open, {
       type: "tool.activated",
       toolId: "finishSketch",
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       finish.effects.map((effect) => effect.type),
       "premise: Finish commits",

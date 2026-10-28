@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
@@ -16,7 +17,7 @@ import type { EditorEvent, EditorState, SketchEditorState } from "./types";
 // an annotation": owners = the annotation's affected geometry).
 
 function apply(state: EditorState, event: EditorEvent) {
-  const next = transitionEditorState(state, event).state;
+  const next = transitionEditorState(state, event, defaultEditorExtensionDependencies).state;
   expect(next.kind, `${event.type} stays in sketch editing`).toBe(
     "editingSketch",
   );
@@ -82,7 +83,7 @@ describe("T14e Show all", () => {
     const finished = transitionEditorState(on, {
       type: "tool.activated",
       toolId: "finishSketch",
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       finished.effects.map((effect) => effect.type),
       "premise: Finish commits",
@@ -97,7 +98,7 @@ describe("T14e Show all", () => {
       revisionId: state.document.revisionId!,
       accepted: true,
       diagnostics: [],
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     expect(committed.kind, "premise: the published sketch is left").not.toBe(
       "editingSketch",
     );
@@ -106,14 +107,14 @@ describe("T14e Show all", () => {
     const left = transitionEditorState(on, {
       type: "command.cancelled",
       commandSessionId: on.command.commandSessionId,
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     expect(left.kind, "premise: the sketch is left").toBe("idle");
     expect(viewShowAll(left)).toBe(false);
 
     const command = transitionEditorState(left, {
       type: "tool.activated",
       toolId: "sketch",
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     const reopened = transitionEditorState(
       { ...command, pendingRequestId: "request_reopen" } as EditorState,
       {
@@ -124,7 +125,7 @@ describe("T14e Show all", () => {
         commandSessionId: (command as SketchEditorState).command
           .commandSessionId,
         session: on.session,
-      },
+      }, defaultEditorExtensionDependencies,
     ).state;
     expect(reopened.kind, "premise: reopened").toBe("editingSketch");
     expect(viewShowAll(reopened), "a reopened sketch starts off").toBe(false);
@@ -136,7 +137,7 @@ describe("T14e Show all", () => {
     let state: EditorState = fixture.state;
     const dispatch = (event: EditorEvent) => {
       state = owner.transition(state, event, (current) =>
-        transitionEditorState(current, event),
+        transitionEditorState(current, event, defaultEditorExtensionDependencies),
       ).state;
       if (state.kind !== "editingSketch") throw Error("Expected sketch state");
       return state;

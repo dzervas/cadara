@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import { createSketchActionOwnerFixture } from "@/application/editor/sketch-action-owner.fixtures";
@@ -122,7 +123,7 @@ const runtime = {
 } as EditorEffectRuntime;
 
 async function answer(state: SketchEditorState, effect: QueryEffect) {
-  return transitionEditorState(state, await runEditorEffect(effect, runtime));
+  return transitionEditorState(state, await runEditorEffect(effect, runtime), defaultEditorExtensionDependencies);
 }
 
 const sketchState = (result: { state: unknown }) => {
@@ -302,7 +303,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
       });
       const appliedTransition = transitionEditorState(
         sketchState(gliding),
-        await clickedDone,
+        await clickedDone, defaultEditorExtensionDependencies,
       );
       const applied = sketchState(appliedTransition);
       expect(applied.session.validationMessage).toBeNull();
@@ -320,7 +321,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
           .targetEntityId,
       ).toBe(cutter);
       for (const late of [await waitingDone, await firstDone]) {
-        const ignored = sketchState(transitionEditorState(applied, late));
+        const ignored = sketchState(transitionEditorState(applied, late, defaultEditorExtensionDependencies));
         expect(ignored.session).toBe(applied.session);
         expect(ignored.pendingEditQueryRequest).toBe(
           applied.pendingEditQueryRequest,
@@ -353,13 +354,13 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
       transitionEditorState(pending, {
         ...event,
         requestId: "request_other",
-      } as EditorEvent),
+      } as EditorEvent, defaultEditorExtensionDependencies),
     );
     expect(other.session, "A result for another request is dropped.").toBe(
       pending.session,
     );
     expect(other.pendingEditQueryRequest).toBe(pending.pendingEditQueryRequest);
-    const applied = sketchState(transitionEditorState(pending, event));
+    const applied = sketchState(transitionEditorState(pending, event, defaultEditorExtensionDependencies));
     expect(applied.pendingEditQueryRequest).toBeNull();
     expect(applied.session.definition.entities).toHaveLength(4);
     expect(applied.session.validationMessage).toBeNull();
@@ -468,7 +469,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
       const clicked = click(state, target);
       const [effect] = queryEffects(clicked.effects);
       const cancelled = sketchState(
-        transitionEditorState(sketchState(clicked), event),
+        transitionEditorState(sketchState(clicked), event, defaultEditorExtensionDependencies),
       );
       expect(cancelled.session.activeEditTool?.editQuery).toBeUndefined();
       const late = sketchState(await answer(cancelled, effect!));
@@ -496,7 +497,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
       const cancelled = sketchState(
         transitionEditorState(sketchState(clickedA), {
           type: "sketch.activeToolCleared",
-        }),
+        }, defaultEditorExtensionDependencies),
       );
       expect(cancelled.pendingEditQueryRequest, "Esc forgets the request").toBe(
         null,
@@ -571,7 +572,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
         baseRevisionId: effect!.baseRevisionId,
         queryId: effect!.queryId,
         message: "worker crashed",
-      }),
+      }, defaultEditorExtensionDependencies),
     );
     expect(failed.session.definition).toBe(state.session.definition);
     expect(failed.session.toolPresentation?.validation?.[0]?.message).toBe(
@@ -593,7 +594,7 @@ describe("T10g-1 Trim edit query (editor loop)", () => {
         queryId: effect!.queryId,
       },
     };
-    const dropped = sketchState(transitionEditorState(newer, superseded));
+    const dropped = sketchState(transitionEditorState(newer, superseded, defaultEditorExtensionDependencies));
     expect(dropped.session).toBe(newer.session);
     expect(dropped.pendingEditQueryRequest).toBe(newer.pendingEditQueryRequest);
   });
@@ -679,10 +680,10 @@ describe.each([
       transitionEditorState(pending, {
         ...event,
         requestId: "request_other",
-      } as EditorEvent),
+      } as EditorEvent, defaultEditorExtensionDependencies),
     );
     expect(other.session).toBe(pending.session);
-    const applied = sketchState(transitionEditorState(pending, event));
+    const applied = sketchState(transitionEditorState(pending, event, defaultEditorExtensionDependencies));
     expect(applied.pendingEditQueryRequest).toBeNull();
     expect(applied.session.validationMessage).toBeNull();
     expect(applied.session.definition.entities).toHaveLength(
@@ -766,7 +767,7 @@ describe.each([
       const selected = select(state, first, boundary);
       const [effect] = queryEffects(selected.effects);
       const cancelled = sketchState(
-        transitionEditorState(sketchState(selected), event),
+        transitionEditorState(sketchState(selected), event, defaultEditorExtensionDependencies),
       );
       expect(cancelled.session.activeEditTool?.editQuery).toBeUndefined();
       expect(cancelled.pendingEditQueryRequest).toBeNull();
@@ -817,7 +818,7 @@ describe.each([
         baseRevisionId: effect!.baseRevisionId,
         queryId: effect!.queryId,
         message: "worker crashed",
-      }),
+      }, defaultEditorExtensionDependencies),
     );
     expect(failed.session.definition).toBe(state.session.definition);
     expect(failed.session.toolPresentation?.validation?.[0]?.message).toBe(

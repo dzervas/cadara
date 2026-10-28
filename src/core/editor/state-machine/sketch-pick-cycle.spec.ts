@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -125,7 +126,7 @@ function select(
     type: "viewport.selectionRequested",
     target,
     ...(cycleReplaces ? { cycleReplaces } : {}),
-  });
+  }, defaultEditorExtensionDependencies);
   const next = result.state as SketchEditorState;
   expect(next.kind).toBe("editingSketch");
   return next;
@@ -295,7 +296,7 @@ describe("T11d cycle selection through the editor transition", () => {
       type: "viewport.selectionRequested",
       target: construction,
       cycleReplaces: line,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       result.state,
       "The last-added target is `other`, not the previous pick: unchanged.",
@@ -311,7 +312,7 @@ describe("T11d cycle selection through the editor transition", () => {
         type: "viewport.selectionRequested",
         target: xAxis,
         cycleReplaces: line,
-      }).state,
+      }, defaultEditorExtensionDependencies).state,
       "Offset ignores the axis: the line is not dropped.",
     ).toBe(first);
 
@@ -321,7 +322,7 @@ describe("T11d cycle selection through the editor transition", () => {
         type: "viewport.selectionRequested",
         target: construction,
         cycleReplaces: line,
-      }).state,
+      }, defaultEditorExtensionDependencies).state,
       "The construction line is already a target: no toggle-off.",
     ).toBe(both);
   });
@@ -344,7 +345,7 @@ describe("T11d cycle selection through the editor transition", () => {
       type: "viewport.selectionRequested",
       target: construction,
       cycleReplaces: line,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(result.session, "Trim queued nothing.").toBe(state.session);
     expect(result.selection).toBe(state.selection);
   });
@@ -397,7 +398,7 @@ describe("T11e chooser picks through the editor transition", () => {
       type: "viewport.selectionRequested",
       target: construction,
       cycleReplaces: line,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(
       refused.selection,
       "Contrast: a cycle event (what the chooser never sends here) selects nothing.",

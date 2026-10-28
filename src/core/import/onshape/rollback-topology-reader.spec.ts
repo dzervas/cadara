@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 
 import { validateOnshapeCaptureBundle } from "@/contracts/import/onshape-capture-bundle";
 import { readPartStudio } from "@/core/import/onshape/bundle-reader";
-import { makeWaveBBodyCaptureBundle } from "@/domain/import/onshape/wave-b-capture-fixtures";
+import { makeWaveBBodyCaptureBundle } from "../../../../test/helpers/onshape/body-feature-capture-fixtures";
 import {
   createRollbackTopologyTimeline,
   diffRollbackTopologySnapshots,

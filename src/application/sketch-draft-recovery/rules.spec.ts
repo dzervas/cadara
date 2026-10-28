@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { expect, test } from "vitest";
 import { canOfferSketchDraft, restoreSketchDraftSession, shouldPersistSketchDraft } from "./rules";
 import { makeSketchDraftRecoveryFixture } from "./recovery.fixtures";
@@ -50,7 +51,7 @@ test("accepted checkpoint excludes unfinished creation; Undo/Redo are completed 
   const owner = new SketchAuthoredActions();
   let state = f.state;
   const dispatch = (event: EditorEvent) => {
-    const result = owner.transition(state, event, current => transitionEditorState(current, event));
+    const result = owner.transition(state, event, current => transitionEditorState(current, event, defaultEditorExtensionDependencies));
     if (result.state.kind !== "editingSketch") throw new Error("Expected private sketch");
     state = result.state;
   };

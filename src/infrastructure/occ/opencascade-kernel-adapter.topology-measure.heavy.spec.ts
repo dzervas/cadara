@@ -14,7 +14,7 @@ import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeNativeTopologyKernelHost } from "@/infrastructure/occ/native-topology-payload";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/core/modeling/topology-signatures";
 import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 

@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -15,7 +16,7 @@ import type { EditorEvent, EditorState, SketchEditorState } from "./types";
 // the last selected annotation are `annotationContext`.
 
 function apply(state: EditorState, event: EditorEvent) {
-  const next = transitionEditorState(state, event).state;
+  const next = transitionEditorState(state, event, defaultEditorExtensionDependencies).state;
   expect(next.kind, `${event.type} stays in sketch editing`).toBe(
     "editingSketch",
   );
@@ -231,7 +232,7 @@ describe("T14c annotation selection lifecycle", () => {
         commandSessionId: retained.command.commandSessionId,
       },
     ] as const) {
-      const finish = transitionEditorState(retained, event);
+      const finish = transitionEditorState(retained, event, defaultEditorExtensionDependencies);
       expect(
         finish.effects.map((effect) => effect.type),
         `premise: ${event.type} commits`,
@@ -279,13 +280,13 @@ describe("T14c annotation selection lifecycle", () => {
     const left = transitionEditorState(retained, {
       type: "command.cancelled",
       commandSessionId: retained.command.commandSessionId,
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     expect(left.kind).toBe("idle");
 
     const command = transitionEditorState(left, {
       type: "tool.activated",
       toolId: "sketch",
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     expect(command.kind).toBe("selectionCommand");
     const reopened = transitionEditorState(
       { ...command, pendingRequestId: "request_reopen" } as EditorState,
@@ -297,7 +298,7 @@ describe("T14c annotation selection lifecycle", () => {
         commandSessionId: (command as SketchEditorState).command
           .commandSessionId,
         session: retained.session,
-      },
+      }, defaultEditorExtensionDependencies,
     ).state;
     expect(reopened.kind, "premise: reopened").toBe("editingSketch");
     expect(contextOf(reopened as SketchEditorState)).toBe(null);

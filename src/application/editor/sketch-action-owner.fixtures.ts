@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import {
@@ -105,7 +106,7 @@ export async function createSketchActionOwnerFixture(
         emitPendingSketchOffsetPreviewPublication(
           emitPendingSketchRegionDerivation(
             owner.transition(state, event, (current) =>
-              transitionEditorState(current, event),
+              transitionEditorState(current, event, defaultEditorExtensionDependencies),
             ),
           ),
         ),

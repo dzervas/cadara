@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -120,7 +121,7 @@ function activate(
 ) {
   const result = transitionEditorState(
     { ...state, selection: [...selection] },
-    { type: "tool.activated", toolId },
+    { type: "tool.activated", toolId }, defaultEditorExtensionDependencies,
   );
   expect(result.state.kind).toBe("editingSketch");
   return result.state as SketchEditorState;
@@ -194,7 +195,7 @@ describe("cadara-h026.2 Fillet/Chamfer adopt the preselected corners", () => {
     const created = transitionEditorState(fillet, {
       type: "sketch.toolPatched",
       patch: { intent: "commitSketchEditOperator" },
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(
       created.session.definition.entities.filter(
         (entity) => entity.kind === "arc",
@@ -264,7 +265,7 @@ describe("cadara-h026.2 Fillet/Chamfer adopt the preselected corners", () => {
     const picked = transitionEditorState(fillet, {
       type: "viewport.selectionRequested",
       target: far,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(editTargets(picked)).toEqual([quad[3], far]);
   });
 
@@ -362,13 +363,13 @@ describe("cadara-h026.2 constraint and Dimension tools act on the preselection",
       {
         type: "viewport.selectionRequested",
         target: quad[0]!,
-      },
+      }, defaultEditorExtensionDependencies,
     ).state as SketchEditorState;
     expect(chamfer.selection).toEqual([quad[0]]);
     const horizontal = transitionEditorState(chamfer, {
       type: "tool.activated",
       toolId: "constraintHorizontal",
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(constraintsOfKind(horizontal, "horizontal")).toEqual([]);
     expect(constraintTargets(horizontal)).toEqual([]);
     expect(horizontal.selection, "The old tool's pick is cleared.").toEqual([]);
@@ -391,12 +392,12 @@ describe("cadara-h026.2 a tool cycle's deselect entry removes only its own pick"
       type: "viewport.selectionRequested",
       target,
       selectionMode: "remove",
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
   const pick = (state: SketchEditorState, target: PrimitiveRef) =>
     transitionEditorState(state, {
       type: "viewport.selectionRequested",
       target,
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
 
   test("Chamfer: the last-added line is removed and the preview re-stages; an earlier pick is not", async () => {
     const { state, quad } = await makeQuadState();

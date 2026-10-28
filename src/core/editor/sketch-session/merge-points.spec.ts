@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -492,7 +493,7 @@ describe("selection-first activation (T13j)", () => {
     const result = transitionEditorState(state, {
       type: "tool.activated",
       toolId: "sketchMergePoints",
-    });
+    }, defaultEditorExtensionDependencies);
     if (result.state.kind !== "editingSketch")
       throw new Error("Expected sketch state");
     return { session, next: result.state.session };
@@ -549,7 +550,7 @@ describe("Merge… from the near-gap hint (T13k)", () => {
     events: Parameters<typeof transitionEditorState>[1][],
   ) => {
     const next = events.reduce(
-      (current, event) => transitionEditorState(current, event).state,
+      (current, event) => transitionEditorState(current, event, defaultEditorExtensionDependencies).state,
       state as Parameters<typeof transitionEditorState>[0],
     );
     if (next.kind !== "editingSketch") throw new Error("Expected sketch");

@@ -1104,6 +1104,7 @@ export function handleSketchSpecialModeEntered(
   transitionEditorState: (
     state: EditorState,
     event: EditorEvent,
+    dependencies: EditorExtensionDependencies,
   ) => EditorTransitionResult,
   dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
@@ -1128,7 +1129,7 @@ export function handleSketchSpecialModeEntered(
     }
 
     const entered = enterSketchEditing(state, session);
-    const forwarded = transitionEditorState(entered.state, event);
+    const forwarded = transitionEditorState(entered.state, event, dependencies);
     return {
       state: forwarded.state,
       effects: [...entered.effects, ...forwarded.effects],

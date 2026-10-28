@@ -1,13 +1,5 @@
-import {
-  defaultEditorExtensionDependencies,
-  initialEditorState,
-  transitionEditorState,
-  type EditorExtensionDependencies,
-  type EditorEffect,
-  type EditorEffectRuntime,
-  type EditorEvent,
-  type EditorTransitionResult,
-} from "@/core/editor/state-machine";
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
+import { initialEditorState, transitionEditorState, type EditorExtensionDependencies, type EditorEffect, type EditorEffectRuntime, type EditorEvent, type EditorTransitionResult } from "@/core/editor/state-machine";
 import { runEditorEffect } from "@/application/editor/effect-registry";
 import { SOLVER_SCHEMA_VERSION } from "@/contracts/solver/schema";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";

@@ -34,7 +34,6 @@ import type {
   ToolActivatedEvent,
 } from "./types";
 import {
-  defaultEditorExtensionDependencies,
   type EditorExtensionDependencies,
 } from "./dependencies";
 import {
@@ -414,15 +413,16 @@ function handleFeatureToolActivation(
 function handleSharedToolActivated(
   state: EditorState,
   event: ToolActivatedEvent,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   const commandBehavior = getToolCommandBehavior(event.toolId);
 
   if (commandBehavior === "undo") {
-    return transitionEditorState(state, { type: "history.undoRequested" });
+    return transitionEditorState(state, { type: "history.undoRequested" }, dependencies);
   }
 
   if (commandBehavior === "redo") {
-    return transitionEditorState(state, { type: "history.redoRequested" });
+    return transitionEditorState(state, { type: "history.redoRequested" }, dependencies);
   }
 
   if (commandBehavior === "partImport") {
@@ -531,7 +531,7 @@ function handleSharedEvent(
         ? handleSketchToolActivation({ ...state, selection: [event.target] })
         : { state, effects: [] };
     case "tool.activated":
-      return handleSharedToolActivated(state, event);
+      return handleSharedToolActivated(state, event, dependencies);
     case "history.undoRequested":
     case "history.redoRequested":
       return { state, effects: [] };
@@ -630,7 +630,8 @@ function handleSharedEvent(
         ? handleSketchReferenceImagePayloadsPicked(
             state,
             event,
-            transitionEditorState,
+            (nextState, nextEvent) =>
+              transitionEditorState(nextState, nextEvent, dependencies),
           )
         : { state, effects: [] };
     case "sketch.specialModeEntered":
@@ -716,7 +717,7 @@ function handleSharedEvent(
 export function transitionEditorState(
   state: EditorState,
   event: EditorEvent,
-  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
+  dependencies: EditorExtensionDependencies,
 ): EditorTransitionResult {
   const result =
     routeToWorkflow(state, event, dependencies) ??

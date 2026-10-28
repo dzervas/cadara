@@ -21,8 +21,8 @@ import {
   createImportCapabilities,
   createImportSession,
   resolveLocalFileImportSource,
-} from "@/domain/import/orchestrator";
-import type { ImportProviderRegistry } from "@/domain/import/provider-registry";
+} from "@/infrastructure/import/orchestrator";
+import type { ImportProviderRegistry } from "@/core/import/provider-registry";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { getBrowserGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";

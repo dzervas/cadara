@@ -79,7 +79,6 @@ export type {
 export { initialEditorState } from "./state-creators";
 export { createEditorEffectFailureEvent } from "./error-mapping";
 export type { EditorExtensionDependencies } from "./dependencies";
-export { defaultEditorExtensionDependencies } from "./dependencies";
 export { transitionEditorState } from "./reducer-root";
 export {
   emitPendingSketchEditQuery,

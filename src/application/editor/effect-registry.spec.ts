@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import { ResultAsync, type AppError } from "@/contracts/errors";
@@ -520,7 +521,7 @@ test("a superseded live derivation completes as a stale failure event; real erro
   const deriveEffect = (state: SketchEditorState) => {
     const result = transitionEditorState(state, {
       type: "document.refreshRequested",
-    });
+    }, defaultEditorExtensionDependencies);
     const effect = result.effects.find(
       (
         candidate,
@@ -576,7 +577,7 @@ test("a superseded live derivation completes as a stale failure event; real erro
     commandSessionId: "command_sketch-1",
     generation: old.effect.generation,
   });
-  const after = transitionEditorState(current.state, event);
+  const after = transitionEditorState(current.state, event, defaultEditorExtensionDependencies);
   const afterState = after.state as SketchEditorState;
   expect(
     afterState.pendingRegionRequest,

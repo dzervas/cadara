@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import { runEditorEffect } from "@/application/editor/effect-registry";
@@ -132,7 +133,7 @@ function emit(state: SketchEditorState) {
 async function answer(state: SketchEditorState, effect: SnapEffect) {
   const result = transitionEditorState(
     state,
-    await runEditorEffect(effect, runtime),
+    await runEditorEffect(effect, runtime), defaultEditorExtensionDependencies,
   );
   return result.state as SketchEditorState;
 }
@@ -372,7 +373,7 @@ describe("T13i spline intersection snaps (editor loop)", () => {
     // The answer's own transition issues the next stage (post-transition hook).
     const stagedResult = transitionEditorState(
       first.state,
-      await runEditorEffect(first.effects[0]!, runtime),
+      await runEditorEffect(first.effects[0]!, runtime), defaultEditorExtensionDependencies,
     );
     const staged = stagedResult.state as SketchEditorState;
     const secondEffects = snapEffects(stagedResult.effects);
@@ -457,7 +458,7 @@ describe("T13i spline intersection snaps (editor loop)", () => {
     // The superseded first query's result (or a late duplicate) is dropped.
     const late = transitionEditorState(
       second.state,
-      await runEditorEffect(first.effects[0]!, runtime),
+      await runEditorEffect(first.effects[0]!, runtime), defaultEditorExtensionDependencies,
     ).state as SketchEditorState;
     expect(late.session.snapIntersections).toBe(
       second.state.session.snapIntersections,
@@ -556,7 +557,7 @@ describe("T13i spline intersection snaps (editor loop)", () => {
       baseRevisionId: effect.baseRevisionId,
       queryId: effect.queryId,
       message: "worker failed",
-    }).state as SketchEditorState;
+    }, defaultEditorExtensionDependencies).state as SketchEditorState;
     expect(failed.session.snapIntersections?.status).toBe("failed");
     expect(failed.pendingSnapQueryRequest).toBeNull();
     expect(emit(failed).effects).toEqual([]);

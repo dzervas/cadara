@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 import {
   createFeatureEditSession,
@@ -57,7 +58,7 @@ test("feature preview completion preselects boolean targets and preserves later 
       renderables: [
         boxMesh("preview_intersecting", null, [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]),
       ],
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   expect(
@@ -102,7 +103,7 @@ test("feature preview completion preselects boolean targets and preserves later 
           [10.5, 10.5, 10.5],
         ),
       ],
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   expect(
@@ -146,7 +147,7 @@ test("feature preview completion keeps unsupported advanced boolean families exp
       renderables: [
         boxMesh("preview_intersecting", null, [0.5, 0.5, 0.5], [1.5, 1.5, 1.5]),
       ],
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   expect(

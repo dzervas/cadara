@@ -1,6 +1,6 @@
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { DocumentId } from "@/contracts/shared/ids";
-import { createKernelHistoryProbeSession } from "@/domain/import/kernel-history-probe";
+import { createKernelHistoryProbeSession } from "@/infrastructure/import/kernel-history-probe";
 import { createModelingService } from "@/application/modeling/modeling-service";
 import {
   createBrowserOccKernelAdapter,

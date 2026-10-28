@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import type {
   CommandSessionId,
   DocumentId,
@@ -46,7 +47,7 @@ export function enterSketchSessionState(
     ...document,
     commandSessionId: command.command.commandSessionId,
     session,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   if (entered.kind !== "editingSketch" || entered.session.liveSolve === null)
     throw new Error("The sketch entry did not establish a live solve basis.");
   return entered;

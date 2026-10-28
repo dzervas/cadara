@@ -1,0 +1,5254 @@
+/**
+ * Onshape capture-bundle import provider (probe-less v1).
+ *
+ * Composes the pure translation modules into an `ImportProvider`: a
+ * non-mutating review that validates the bundle and plans per-feature fidelity,
+ * a schema-driven review form with studio selection and demotion controls, and
+ * a prepare step that emits history-ordered actions for the parametric-tier
+ * features (document variables and datum-plane sketches) plus an honest
+ * fidelity report. Solid features degrade to `baked` with capability reason
+ * codes while the history probe is absent.
+ */
+import type {
+  ImportCommitSketchRequest,
+  ImportCreateFeatureRequest,
+  ImportDeferredExtrudeFeatureParameters,
+  ImportDeferredFeatureBooleanScope,
+  ImportDeferredFeatureDefinition,
+  ImportDeferredTopologyRef,
+  ImportDeferredProfileRef,
+  ImportDeferredSurfaceProfileRef,
+  ImportPreparedActions,
+  ImportPreparedActionRef,
+  ImportDeferredValue,
+} from "@/contracts/import/actions";
+import type { ImportDiagnostic } from "@/contracts/import/diagnostics";
+import { describeUnknownError } from "@/contracts/errors";
+import type { ImportProvider } from "@/contracts/import/provider";
+import type { ImportReviewEnvelope } from "@/contracts/import/review";
+import type { ResolvedImportSource } from "@/contracts/import/source";
+import {
+  BAKED_BODY_FEATURE_SCHEMA_VERSION,
+  FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
+  EXTRUDE_FEATURE_SCHEMA_VERSION,
+  IMPORT_CONTRACT_SCHEMA_VERSION,
+  PLANE_FEATURE_SCHEMA_VERSION,
+  REVOLVE_FEATURE_SCHEMA_VERSION,
+} from "@/contracts/shared/versioning";
+import {
+  hasOnshapeGroundTruthGeometry,
+  validateOnshapeCaptureBundle,
+  type OnshapeCaptureBundle,
+} from "@/contracts/import/onshape-capture-bundle";
+import type {
+  AddDocumentVariableRequest,
+} from "@/contracts/modeling/schema";
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
+import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
+import { getSurfaceExtrudeGeneratedSideFaceEndRole } from "@/contracts/modeling/feature-extents";
+import type {
+  HistoryProbeResult,
+  HistoryProbeStepResult,
+  HistoryProbeTopologySignature,
+  ImportCapabilities,
+} from "@/contracts/import/capabilities";
+import type {
+  SketchPlaneDefinition,
+  SketchPlaneFrame,
+} from "@/contracts/shared/sketch-plane";
+import type { BodyId, ConstructionId, FaceId, ReferenceId, RequestId } from "@/contracts/shared/ids";
+import type { DurableRef } from "@/contracts/shared/references";
+import type {
+  FeatureEditorFormSchema,
+  FeatureEditorFormField,
+} from "@/core/feature-authoring/form-schema";
+
+import {
+  listPartStudios,
+  readPartStudio,
+} from "@/core/import/onshape/bundle-reader";
+import { unreachableFeatureDependencies } from "@/application/import/onshape/bake-segment-planner";
+import {
+  extractSketchPlaneDeterministicId,
+  onshapeFeatureTranslatorRegistry,
+  planStudioFidelity,
+  replanStudioBakeStrategy,
+  type FeaturePlan,
+  type FidelityTier,
+  type PlanReasonCode,
+  type StudioPlan,
+} from "@/application/import/onshape/fidelity-planner";
+import {
+  compareTessellation,
+  verificationPartial,
+  verificationUnavailable,
+  type GroundTruthVerification,
+} from "@/core/import/onshape/ground-truth";
+import {
+  projectPointToPlane,
+  projectPointToSketchPlane,
+  importedOnshapeSketchEntityId,
+  translateSketch,
+  verifySketchTranslationSolveConsistency,
+  type SketchExternalReference,
+  type SketchExternalReferenceVerificationGeometry,
+  type SolvedSketchEntityGeometry,
+} from "@/application/import/onshape/sketch-translator";
+import { translateOnshapeExpression } from "@/core/import/onshape/expression-translator";
+import {
+  matchSignature,
+  type TopologyMatchOutcome,
+} from "@/core/import/onshape/signature-matcher";
+import { normalizeOnshapeTopologySignature } from "@/core/import/onshape/topology-signature-normalizer";
+import type {
+  OnshapeGeometricSignature,
+  OnshapeResolvedReference,
+} from "@/contracts/import/onshape-capture-bundle";
+import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
+import { encodeOnshapeTessellationAsBakedMeshBytes } from "@/application/import/onshape/rollback-bake";
+import { probeTopologyConsumerPrefixes } from "@/application/import/onshape/topology-resolution-planner";
+import { createMemoizedHistoryProbe } from "@/infrastructure/import/kernel-history-probe";
+import { OCC_KERNEL_CAPABILITIES } from "@/core/modeling/opencascade-kernel-seed";
+import { readTopologyQueryRefs } from "@/core/import/onshape/topology-query-reader";
+import { captureSplitInterfaceOwnerWitness } from "@/core/import/onshape/split-interface-owner-witness";
+import { readSplitInterfaceFaceQuery } from "@/core/import/onshape/split-interface-face-query-reader";
+import {
+  isUniquePrefixBodyQuery,
+  resolveImplicitUnionTarget,
+  resolveTopologyReferences,
+  resolveUniquePrefixBody,
+  scopeLiveSignaturesToCapturedBody,
+  capturedBodyScopeEvidence,
+  type TopologyResolutionResult,
+} from "@/core/import/onshape/topology-reference-resolver";
+import {
+  composeCaptureFrameTransforms,
+  computeCaptureFrameToWorld,
+  computeParametricTransformReframe,
+} from "@/core/import/onshape/capture-frame";
+import {
+  createRollbackTopologyTimeline,
+  type RollbackTopologySnapshot,
+} from "@/core/import/onshape/rollback-topology-reader";
+import { readCompressedQueryLiteralFields } from "@/core/import/onshape/compressed-query-decoder";
+import {
+  resolveExactBodyProducerBindings,
+  type DeferredBodyOfSourceFeature,
+} from "@/core/import/onshape/exact-body-producer-resolver";
+import {
+  LIVE_TOPOLOGY_MATCH_TOLERANCE,
+  resolveHistoricalTopology,
+  type HistoricalTopologyPlanSelector,
+} from "@/core/import/historical-topology-selector";
+import { buildResolvedBodyConsumerDefinition } from "@/application/import/onshape/body-feature-translators";
+import { prepareRollbackCheckpointBake } from "@/application/import/onshape/rollback-bake";
+import {
+  extrudeAwaitsLiveSketchPointExtent,
+  extrudeSketchPointExtentFeatureIds,
+  hasUnresolvedExtrudeTopology,
+  resolvePlannedExtrudeTopology,
+  resolvedExtrudeExtent,
+  resolvedExtrudeStartExtent,
+} from "@/application/import/onshape/extrude-planner";
+import { isTopologyApplyRematchError } from "@/infrastructure/import/orchestrator";
+import {
+  IMPORT_VERIFICATION_DOCUMENT_ID,
+  IMPORT_VERIFICATION_REVISION_ID,
+  type ImportProfileVerifier,
+} from "@/application/import/onshape/profile-resolver";
+
+const ACCEPTED_EXTENSION = ".onshape-capture.json";
+const profileVerifiers = new WeakMap<
+  ImportCapabilities["modeling"],
+  ImportProfileVerifier
+>();
+
+/**
+ * Solve and region derivation boundary for import-time sketch-profile
+ * verification: the target kernel's queries at the target document's
+ * tolerances. One solver per modeling capability keeps its exact query cache
+ * across plans.
+ */
+function profileVerifierFor(capabilities: ImportCapabilities): ImportProfileVerifier {
+  const existing = profileVerifiers.get(capabilities.modeling);
+  if (existing) return existing;
+  const verifier: ImportProfileVerifier = {
+    sketchSolver: new SketchConstraintSolverAdapter({
+      documentId: IMPORT_VERIFICATION_DOCUMENT_ID,
+      revisionId: IMPORT_VERIFICATION_REVISION_ID,
+      neutralCurveQueries: capabilities.modeling.neutralCurveQueries,
+    }),
+    modelingTolerance: capabilities.modeling.modelingTolerance,
+    angularToleranceRadians: capabilities.modeling.angularToleranceRadians,
+  };
+  profileVerifiers.set(capabilities.modeling, verifier);
+  return verifier;
+}
+
+type ContainmentResult =
+  | { kind: "contained" }
+  | { kind: "historical-retry-requested"; featureId: string };
+
+type ProbeBackedPlanningActivation =
+  | { kind: "activated"; plan: OnshapeStudioPlan; probeResult: HistoryProbeResult | null }
+  | { kind: "historical-retry-requested"; featureId: string };
+
+function usesDirectTopologyOf(actions: ImportPreparedActions, featureId: string): boolean {
+  const visited = new Set<object>();
+  const visit = (value: unknown): boolean => {
+    if (!value || typeof value !== "object") return false;
+    if (visited.has(value)) return false;
+    visited.add(value);
+    if (
+      (value as { kind?: unknown }).kind === "topologyOf" &&
+      (value as { source?: { consumerFeatureId?: unknown } }).source?.consumerFeatureId === featureId
+    ) {
+      return true;
+    }
+    return Array.isArray(value)
+      ? value.some(visit)
+      : Object.values(value).some(visit);
+  };
+  return visit(actions);
+}
+
+function hasTopologyApplyRematchFailure(step: HistoryProbeResult["steps"][number] | undefined) {
+  return step?.status === "failed" &&
+    step.diagnostics.some((diagnostic) => diagnostic.code === "topology-apply-rematch-failed");
+}
+
+export interface OnshapeStudioReview {
+  elementId: string;
+  name: string;
+  hasBodies: boolean;
+  featurePlans: FeaturePlan[];
+  tierCounts: Record<FidelityTier, number>;
+  bakeStrategy: StudioPlan["bakeStrategy"];
+  bakeDiagnostics: StudioPlan["bakeDiagnostics"];
+  requiresStudioBake: boolean;
+  verification: GroundTruthVerification;
+  sketchRelationshipSummaries: OnshapeSketchRelationshipReview[];
+}
+
+export interface OnshapeSketchRelationshipReview {
+  featureId: string;
+  label: string;
+  summary: import("@/application/import/onshape/sketch-translator").SketchRelationshipSummary;
+}
+
+export interface OnshapeImportReview {
+  valid: boolean;
+  studios: OnshapeStudioReview[];
+  defaultStudioId: string | null;
+}
+
+export interface OnshapeImportSelections {
+  studioElementId: string | null;
+  /** Feature ids the user demoted from parametric to baked. */
+  demotedFeatureIds: string[];
+}
+
+interface ReviewedBundleContext {
+  bundle: OnshapeCaptureBundle;
+  studioReads: Map<string, ReturnType<typeof readPartStudio>>;
+}
+
+const reviewedBundles = new WeakMap<OnshapeImportReview, ReviewedBundleContext>();
+
+
+function decodeBundle(source: ResolvedImportSource): OnshapeCaptureBundle | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(source.bytes));
+  } catch {
+    return null;
+  }
+  const result = validateOnshapeCaptureBundle(parsed);
+  return result.success ? result.data : null;
+}
+
+function referenceKey(reference: HistoryProbeTopologySignature["reference"]): string {
+  switch (reference.kind) {
+    case "body":
+      return `body:${reference.bodyId}`;
+    case "face":
+      return `face:${reference.bodyId}:${reference.faceId}`;
+    case "edge":
+      return `edge:${reference.bodyId}:${reference.edgeId}`;
+    case "vertex":
+      return `vertex:${reference.bodyId}:${reference.vertexId}`;
+    default:
+      return JSON.stringify(reference);
+  }
+}
+
+function readPoint3(value: unknown): [number, number, number] | null {
+  return Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((component) => typeof component === "number")
+    ? [value[0] as number, value[1] as number, value[2] as number]
+    : null;
+}
+
+function cross(
+  left: readonly [number, number, number],
+  right: readonly [number, number, number],
+): [number, number, number] {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function planeFromProbeSignature(
+  signature: HistoryProbeTopologySignature,
+): SketchPlaneDefinition | null {
+  if (signature.reference.kind !== "face" || signature.geometryType !== "plane") {
+    return null;
+  }
+  const origin = readPoint3(signature.definingData?.origin);
+  const normal = readPoint3(signature.definingData?.normal);
+  const xAxis = readPoint3(signature.definingData?.xDirection);
+  if (!origin || !normal || !xAxis) {
+    return null;
+  }
+  return {
+    support: signature.reference,
+    frame: {
+      origin,
+      xAxis,
+      yAxis: cross(normal, xAxis),
+      normal,
+      linearUnit: "documentLength",
+      handedness: "rightHanded",
+    },
+    key: null,
+  };
+}
+
+function arbitraryXAxisForNormal(
+  normal: readonly [number, number, number],
+): [number, number, number] | null {
+  const seed: [number, number, number] = Math.abs(normal[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const seedDotNormal = seed[0] * normal[0] + seed[1] * normal[1] + seed[2] * normal[2];
+  const projected: [number, number, number] = [
+    seed[0] - normal[0] * seedDotNormal,
+    seed[1] - normal[1] * seedDotNormal,
+    seed[2] - normal[2] * seedDotNormal,
+  ];
+  return normalizeVector(projected);
+}
+
+function frameFromCapturedSignature(
+  signature: OnshapeGeometricSignature,
+): SketchPlaneFrame | null {
+  if (signature.entityClass !== "face" || signature.geometryType !== "plane") {
+    return null;
+  }
+  const originMeters = readPoint3(signature.definingData?.origin);
+  const normal = normalizeVector(readPoint3(signature.definingData?.normal) ?? [0, 0, 0]);
+  if (!originMeters || !normal) {
+    return null;
+  }
+  const xAxis =
+    normalizeVector(readPoint3(signature.definingData?.xDirection) ?? [0, 0, 0]) ??
+    arbitraryXAxisForNormal(normal);
+  if (!xAxis) {
+    return null;
+  }
+  const origin: [number, number, number] = [
+    originMeters[0] * 1000,
+    originMeters[1] * 1000,
+    originMeters[2] * 1000,
+  ];
+  return {
+    origin,
+    xAxis,
+    yAxis: cross(normal, xAxis),
+    normal,
+    linearUnit: "documentLength",
+    handedness: "rightHanded",
+  };
+}
+
+/**
+ * Extract the producing feature id from a `newSketch`'s sketchPlane query string.
+ * Onshape encodes the plane's operation id as `<featureId>planeOp`, so a sketch
+ * drawn on a construction plane names the `cPlane` feature that created it.
+ */
+function extractSketchPlaneProducingFeatureId(
+  feature: ReturnType<typeof readPartStudio>["features"][number],
+): string | null {
+  for (const queryString of queryStringsForFeature(feature)) {
+    const match = queryString.match(
+      /\$([A-Za-z0-9_]+)planeOp|id\s*\+\s*"([A-Za-z0-9_]+)"\s*\+\s*"planeOp"/,
+    );
+    const featureId = match?.[1] ?? match?.[2];
+    if (featureId) {
+      return featureId;
+    }
+  }
+  return null;
+}
+
+function extractPlaneConsumerReference(
+  feature: ReturnType<typeof readPartStudio>["features"][number],
+  parameterId: "mirrorPlane" | "transformDirection",
+): { featureId: string; deterministicId: string } | null {
+  const parameter = (feature.parameters ?? []).find(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { parameterId?: unknown }).parameterId === parameterId,
+  ) as { queries?: unknown } | undefined;
+  const queries = parameter?.queries;
+  if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const query = queries[0];
+  if (typeof query !== "object" || query === null) return null;
+  const queryString = (query as { queryString?: unknown }).queryString;
+  const deterministicIds = (query as { deterministicIds?: unknown }).deterministicIds;
+  if (typeof queryString !== "string" || !Array.isArray(deterministicIds)) return null;
+  const deterministicId = deterministicIds.find(
+    (candidate): candidate is string => typeof candidate === "string",
+  );
+  const match = queryString.match(
+    /\$([A-Za-z0-9_]+)planeOp|id\s*\+\s*"([A-Za-z0-9_]+)"\s*\+\s*"planeOp"/,
+  );
+  const featureId = match?.[1] ?? match?.[2];
+  return featureId && deterministicId ? { featureId, deterministicId } : null;
+}
+
+function queryStringsForFeature(feature: ReturnType<typeof readPartStudio>["features"][number]) {
+  const values: string[] = [];
+  for (const parameter of feature.parameters ?? []) {
+    if (typeof parameter !== "object" || parameter === null) continue;
+    const queries = (parameter as { queries?: unknown }).queries;
+    if (!Array.isArray(queries)) continue;
+    for (const query of queries) {
+      if (typeof query !== "object" || query === null) continue;
+      const queryString = (query as { queryString?: unknown }).queryString;
+      if (typeof queryString === "string") values.push(queryString);
+    }
+  }
+  return values;
+}
+
+function readExactSplitInterfaceFaceQuery(
+  feature: ReturnType<typeof readPartStudio>["features"][number],
+) {
+  const parameters = feature.parameters as Array<{
+    parameterId?: unknown;
+    queries?: unknown;
+  }> | undefined;
+  const parameter = parameters?.find(
+    (candidate) => candidate.parameterId === "sketchPlane",
+  );
+  const queries = parameter?.queries;
+  if (!Array.isArray(queries) || queries.length !== 1) return null;
+  const queryString = (queries[0] as { queryString?: unknown })?.queryString;
+  const parsed = typeof queryString === "string" ? readSplitInterfaceFaceQuery(queryString) : null;
+  if (!parsed) return null;
+  const ids = (queries[0] as { deterministicIds?: unknown }).deterministicIds;
+  return { ...parsed, capturedFaceId: Array.isArray(ids) && ids.length === 1 && typeof ids[0] === "string" && ids[0].length > 0 ? ids[0] : null };
+}
+
+
+function readEvaluatedDepthMm(
+  feature: ReturnType<typeof readPartStudio>["features"][number] | undefined,
+): number | null {
+  for (const parameter of feature?.parameters ?? []) {
+    if (typeof parameter !== "object" || parameter === null) {
+      continue;
+    }
+    const record = parameter as { parameterId?: unknown; value?: unknown };
+    if (record.parameterId === "depth" && typeof record.value === "number") {
+      return record.value * 1000;
+    }
+  }
+  return null;
+}
+
+function extractSweptFaceQuery(input: string) {
+  const sketchEntityId = input.match(/sketchEntityIdS[a-z]\$([^$]+)/)?.[1] ?? null;
+  const extrudeFeatureId = input.match(/S\d+\.\d+\$([^$]+)opExtrude/)?.[1] ?? null;
+  return sketchEntityId && extrudeFeatureId
+    ? { sketchEntityId, extrudeFeatureId }
+    : null;
+}
+
+function normalizeVector(
+  vector: readonly [number, number, number],
+): [number, number, number] | null {
+  const length = Math.hypot(vector[0], vector[1], vector[2]);
+  if (length === 0) {
+    return null;
+  }
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function inferredSweptFaceSignature(input: {
+  feature: ReturnType<typeof readPartStudio>["features"][number];
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+}): OnshapeGeometricSignature | null {
+  const query = queryStringsForFeature(input.feature)
+    .map(extractSweptFaceQuery)
+    .find((candidate): candidate is NonNullable<typeof candidate> => candidate != null);
+  if (!query) {
+    return null;
+  }
+  const extrudeFeature = input.read.features.find(
+    (entry) => entry.featureId === query.extrudeFeatureId,
+  );
+
+  const extrudePlan = input.plan.featurePlans.find(
+    (plan) => plan.onshapeFeatureId === query.extrudeFeatureId,
+  );
+  const extrude = extrudePlan?.plannedExtrude;
+  if (!extrude || extrude.extent.mode !== "oneSide" || extrude.extent.end.kind !== "blind") {
+    return null;
+  }
+
+  const sketchProfile = extrude.profiles.find(
+    (profile) => profile.kind === "sketchRegion",
+  );
+  if (!sketchProfile || sketchProfile.kind !== "sketchRegion") return null;
+  const solved = input.read.solvedSketchesByFeatureId.get(sketchProfile.sketchFeatureId);
+  const queryEntityBaseId = query.sketchEntityId.match(/^(.+?)R\d+C\d+S\d+$/)?.[1] ?? query.sketchEntityId;
+  const curve = solved?.entities.find(
+    (entity) =>
+      entity.entityId === query.sketchEntityId ||
+      entity.entityId === queryEntityBaseId,
+  );
+  if (!curve?.start3d || !curve.end3d) {
+    return null;
+  }
+
+  const start: [number, number, number] = curve.start3d.map((component) => component * 1000) as [number, number, number];
+  const end: [number, number, number] = curve.end3d.map((component) => component * 1000) as [number, number, number];
+  const distanceValue = extrude.extent.end.distance;
+  const distance =
+    distanceValue.source === "literal"
+      ? distanceValue.value
+      : readEvaluatedDepthMm(extrudeFeature);
+  if (distance == null) {
+    return null;
+  }
+  const direction = extrude.extent.end.direction === "negative" ? -distance : distance;
+  const extrudeVector: [number, number, number] = [0, 0, direction];
+  const extrudedStart: [number, number, number] = [
+    start[0] + extrudeVector[0],
+    start[1] + extrudeVector[1],
+    start[2] + extrudeVector[2],
+  ];
+  const extrudedEnd: [number, number, number] = [
+    end[0] + extrudeVector[0],
+    end[1] + extrudeVector[1],
+    end[2] + extrudeVector[2],
+  ];
+  const edgeVector: [number, number, number] = [
+    end[0] - start[0],
+    end[1] - start[1],
+    end[2] - start[2],
+  ];
+  const normal = normalizeVector(cross(edgeVector, extrudeVector));
+  const xDirection = normalizeVector(edgeVector);
+  if (!normal || !xDirection) {
+    return null;
+  }
+  const points = [start, end, extrudedStart, extrudedEnd];
+  const low: [number, number, number] = [
+    Math.min(...points.map((point) => point[0])),
+    Math.min(...points.map((point) => point[1])),
+    Math.min(...points.map((point) => point[2])),
+  ];
+  const high: [number, number, number] = [
+    Math.max(...points.map((point) => point[0])),
+    Math.max(...points.map((point) => point[1])),
+    Math.max(...points.map((point) => point[2])),
+  ];
+  return {
+    entityClass: "face",
+    geometryType: "plane",
+    definingData: { origin: start, normal, xDirection },
+    boundingBox: { low, high },
+    centroid: [(low[0] + high[0]) / 2, (low[1] + high[1]) / 2, (low[2] + high[2]) / 2],
+  };
+}
+
+function readCapturedPoint(value: unknown): [number, number, number] | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const record = value as { x?: unknown; y?: unknown; z?: unknown };
+  return typeof record.x === "number" &&
+    typeof record.y === "number" &&
+    typeof record.z === "number"
+    ? [record.x * 1000, record.y * 1000, record.z * 1000]
+    : null;
+}
+
+function extractCapturedTessellationPoints(tessellatedFaces: unknown): number[] {
+  if (typeof tessellatedFaces !== "object" || tessellatedFaces === null) {
+    return [];
+  }
+  const bodies = (tessellatedFaces as { bodies?: unknown }).bodies;
+  if (!Array.isArray(bodies)) {
+    return [];
+  }
+  const points: number[] = [];
+  for (const body of bodies) {
+    const faces = (body as { faces?: unknown }).faces;
+    if (!Array.isArray(faces)) {
+      continue;
+    }
+    for (const face of faces) {
+      const facets = (face as { facets?: unknown }).facets;
+      if (!Array.isArray(facets)) {
+        continue;
+      }
+      for (const facet of facets) {
+        const vertices = (facet as { vertices?: unknown }).vertices;
+        if (!Array.isArray(vertices)) {
+          continue;
+        }
+        for (const vertex of vertices) {
+          const point = readCapturedPoint(vertex);
+          if (point) {
+            points.push(...point);
+          }
+        }
+      }
+    }
+  }
+  return points;
+}
+
+
+function verifyGroundTruth(input: {
+  hasHistoryCapability: boolean;
+  groundTruth: ReturnType<typeof readPartStudio>["studio"]["groundTruth"];
+  bakedCount: number;
+  probeResult: HistoryProbeResult | null;
+}): GroundTruthVerification {
+  if (!hasOnshapeGroundTruthGeometry(input.groundTruth)) {
+    return { status: "noGroundTruth" };
+  }
+  if (input.bakedCount > 0) {
+    return verificationPartial(input.bakedCount);
+  }
+  if (!input.hasHistoryCapability) {
+    return verificationUnavailable(true);
+  }
+  return compareTessellation(
+    { points: input.probeResult?.finalTessellation?.points ?? [] },
+    { points: extractCapturedTessellationPoints(input.groundTruth.tessellatedFaces) },
+    input.groundTruth.tessellationTolerance * 1000,
+  );
+}
+
+function recomputePlanWithFeaturePlans(
+  basePlan: OnshapeStudioPlan,
+  featurePlans: FeaturePlan[],
+  hasBodies: boolean,
+  read?: ReturnType<typeof readPartStudio>,
+): OnshapeStudioPlan {
+  const tierCounts = { parametric: 0, baked: 0, geometryOnly: 0 };
+  for (const plan of featurePlans) {
+    tierCounts[plan.tier] += 1;
+  }
+  const segmentResult = read && read.studio.rollbackSnapshots !== null
+    ? replanStudioBakeStrategy(read, featurePlans)
+    : null;
+  const bakeStrategy = segmentResult?.strategy ?? basePlan.bakeStrategy;
+  return {
+    ...basePlan,
+    featurePlans,
+    tierCounts,
+    bakeStrategy,
+    bakeDiagnostics: segmentResult?.diagnostics ?? basePlan.bakeDiagnostics,
+    requiresStudioBake:
+      hasBodies && bakeStrategy.kind === "wholeStudioLegacy",
+  };
+}
+
+function planToLiveSketchMap(
+  featurePlans: readonly FeaturePlan[],
+): Map<string, { tier: FidelityTier; planeKey: "xy" | "yz" | "xz"; planeFrame?: SketchPlaneFrame }> {
+  return new Map(
+    featurePlans.flatMap((plan) =>
+      plan.tier === "parametric" && plan.target.kind === "sketch"
+        ? [[plan.onshapeFeatureId, {
+            tier: plan.tier,
+            planeKey: plan.target.planeKey,
+            planeFrame: plan.target.plane?.frame ?? plan.target.capturedFrame,
+          }] as const]
+        : [],
+    ),
+  );
+}
+
+async function replanDependentFeatures(input: {
+  read: ReturnType<typeof readPartStudio>;
+  featurePlans: readonly FeaturePlan[];
+  profileVerifier: ImportProfileVerifier;
+}): Promise<FeaturePlan[]> {
+  const plansByFeatureId = new Map(
+    input.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
+  );
+  const liveSketchPlansByFeatureId = planToLiveSketchMap(input.featurePlans);
+  const references = new Map<string, OnshapeResolvedReference[]>();
+  for (const reference of input.read.studio.resolvedReferences) {
+    const existing = references.get(reference.deterministicId) ?? [];
+    existing.push(reference);
+    references.set(reference.deterministicId, existing);
+  }
+  const state = {
+    sketchPlansByFeatureId: new Map<
+      string,
+      { tier: FidelityTier; planeKey: "xy" | "yz" | "xz"; planeFrame?: SketchPlaneFrame }
+    >(),
+    bodyProducingFeatureIds: [] as string[],
+  };
+
+  const replanned: FeaturePlan[] = [];
+  for (const feature of input.read.features) {
+    const currentPlan = plansByFeatureId.get(feature.featureId);
+    if (!currentPlan) {
+      throw new Error(`Missing plan for source feature ${feature.featureId}.`);
+    }
+    const liveSketchPlan = liveSketchPlansByFeatureId.get(feature.featureId);
+    if (liveSketchPlan) state.sketchPlansByFeatureId.set(feature.featureId, liveSketchPlan);
+
+    const translator = onshapeFeatureTranslatorRegistry.forFeatureType(feature.featureType);
+    const context = {
+      feature,
+      label: currentPlan.label,
+      onshapeSuppressed: feature.suppressed === true,
+      read: input.read,
+      references,
+      state,
+      profileVerifier: input.profileVerifier,
+    };
+    const replaySourcesAreLive = currentPlan.plannedFeatureReplay?.sourceFeatureIds.every(
+      (sourceFeatureId) => plansByFeatureId.get(sourceFeatureId)?.tier === "parametric",
+    ) === true;
+    const replan =
+      (feature.featureType === "extrude" &&
+        (currentPlan.reasonCodes.includes("needs-region-resolution") ||
+          // An up-to-vertex extent terminating at a sketch point can only be
+          // read once that sketch is live. Replan strictly when the exact
+          // terminator has become readable and the plan still lacks it.
+          // A start offset is read by the same live-gated decoder, but its
+          // feature bakes without a plannedExtrude at all, so it is gated on
+          // its own reason code rather than on unresolved extent topology.
+          ((currentPlan.reasonCodes.includes("extrude-start-extent-unsupported") ||
+            (currentPlan.plannedExtrude !== undefined &&
+              hasUnresolvedExtrudeTopology(currentPlan.plannedExtrude))) &&
+            extrudeAwaitsLiveSketchPointExtent(feature, {
+              feature,
+              profileEvidence: [],
+              solvedSketchesByFeatureId: input.read.solvedSketchesByFeatureId,
+              referencedSketchesByFeatureId: state.sketchPlansByFeatureId,
+              priorBodyProducingFeatureIds: state.bodyProducingFeatureIds,
+              profileVerifier: input.profileVerifier,
+            })))) ||
+      (currentPlan.reasonCodes.includes("downstream-of-baked") && replaySourcesAreLive);
+    if (replan) {
+      const next = await translator.plan(context);
+      plansByFeatureId.set(feature.featureId, next);
+      replanned.push(next);
+      continue;
+    }
+
+    // Preserve the reviewed plan, but replay preceding translator state so a
+    // promoted extrude sees the same body-producing prefix as initial planning.
+    if (feature.featureType !== "newSketch") await translator.plan(context);
+    replanned.push(currentPlan);
+  }
+  return cascadeUnavailableActionConsumers(replanned);
+}
+
+async function activateCapturedFrameTranslation(input: {
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+  profileVerifier: ImportProfileVerifier;
+}): Promise<OnshapeStudioPlan> {
+  const references = new Map(
+    input.read.studio.resolvedReferences.map((reference) => [
+      reference.deterministicId,
+      reference,
+    ]),
+  );
+  const featuresById = new Map(
+    input.read.features.map((feature) => [feature.featureId, feature]),
+  );
+
+  // Recover, per cPlane feature, the captured world-space frame of the
+  // construction it produced, discovered through dependent sketches that name
+  // `<cPlaneFeatureId>planeOp` in their sketchPlane query. Also record which
+  // sketches must rewire their support onto the translated plane.
+  const framesByCPlaneFeatureId = new Map<string, SketchPlaneFrame>();
+  const cPlaneBySketchFeatureId = new Map<string, string>();
+  for (const featurePlan of input.plan.featurePlans) {
+    if (
+      featurePlan.featureType !== "newSketch" ||
+      featurePlan.tier !== "baked" ||
+      !featurePlan.reasonCodes.includes("needs-history-probe")
+    ) {
+      continue;
+    }
+    const feature = featuresById.get(featurePlan.onshapeFeatureId);
+    if (!feature) {
+      continue;
+    }
+    const producingFeatureId = extractSketchPlaneProducingFeatureId(feature);
+    const producer = producingFeatureId
+      ? featuresById.get(producingFeatureId)
+      : undefined;
+    if (!producingFeatureId || producer?.featureType !== "cPlane") {
+      continue;
+    }
+    const deterministicId = extractSketchPlaneDeterministicId(feature);
+    const reference = deterministicId ? references.get(deterministicId) : undefined;
+    if (!reference || !("signature" in reference)) {
+      continue;
+    }
+    const frame = frameFromCapturedSignature(reference.signature);
+    if (!frame) {
+      continue;
+    }
+    framesByCPlaneFeatureId.set(producingFeatureId, frame);
+    cPlaneBySketchFeatureId.set(featurePlan.onshapeFeatureId, producingFeatureId);
+  }
+
+  // Mirror and distance-transform consumers can be the only features that expose
+  // a translated cPlane's captured frame, so discover those references too.
+  for (const feature of input.read.features) {
+    for (const parameterId of ["mirrorPlane", "transformDirection"] as const) {
+      const consumed = extractPlaneConsumerReference(feature, parameterId);
+      if (!consumed) continue;
+      const producer = consumed ? featuresById.get(consumed.featureId) : undefined;
+      const reference = consumed ? references.get(consumed.deterministicId) : undefined;
+      if (
+        producer?.featureType !== "cPlane" ||
+        !reference ||
+        !("signature" in reference)
+      ) {
+        continue;
+      }
+      const frame = frameFromCapturedSignature(reference.signature);
+      if (frame) framesByCPlaneFeatureId.set(consumed.featureId, frame);
+    }
+  }
+
+  const nextPlans = input.plan.featurePlans.map((featurePlan) => {
+    // Translate a recoverable cPlane into a parametric plane feature.
+    if (
+      featurePlan.featureType === "cPlane" &&
+      framesByCPlaneFeatureId.has(featurePlan.onshapeFeatureId)
+    ) {
+      const frame = framesByCPlaneFeatureId.get(featurePlan.onshapeFeatureId)!;
+      return {
+        ...featurePlan,
+        tier: "parametric" as const,
+        target: { kind: "plane" as const, frame },
+        reasonCodes: ["plane-from-captured-frame" as const],
+        suppressed: false,
+      };
+    }
+    // Rewire a sketch onto the translated plane through a deferred construction.
+    const cPlaneFeatureId = cPlaneBySketchFeatureId.get(
+      featurePlan.onshapeFeatureId,
+    );
+    if (cPlaneFeatureId) {
+      const frame = framesByCPlaneFeatureId.get(cPlaneFeatureId)!;
+      const plane: SketchPlaneDefinition = {
+        // Placeholder support: the provider substitutes a `constructionOf`
+        // reference to the translated plane feature at prepare time. This id is
+        // never emitted in a prepared action.
+        support: {
+          kind: "construction",
+          constructionId: `construction_pending_${cPlaneFeatureId}` as ConstructionId,
+        },
+        frame,
+        key: null,
+      };
+      return {
+        ...featurePlan,
+        tier: "parametric" as const,
+        target: {
+          kind: "sketch" as const,
+          planeKey: "xy" as const,
+          plane,
+          constructionFromFeatureId: cPlaneFeatureId,
+        },
+        reasonCodes: ["sketch-on-translated-plane" as const],
+        suppressed: false,
+      };
+    }
+    return featurePlan;
+  });
+
+  const sketchPlansByFeatureId = planToLiveSketchMap(nextPlans);
+  const replanned: FeaturePlan[] = [];
+  for (const [index, plan] of nextPlans.entries()) {
+    const feature = input.read.features[index];
+    if (plan.featureType !== "loft" || !feature) {
+      replanned.push(plan);
+      continue;
+    }
+    replanned.push(await onshapeFeatureTranslatorRegistry.forFeatureType("loft").plan({
+      feature,
+      label: plan.label,
+      onshapeSuppressed: feature.suppressed === true,
+      read: input.read,
+      references: new Map(),
+      state: {
+        sketchPlansByFeatureId,
+        bodyProducingFeatureIds: [],
+      },
+      profileVerifier: input.profileVerifier,
+    }));
+  }
+  return recomputePlanWithFeaturePlans(
+    input.plan,
+    replanned,
+    input.read.studio.groundTruth.hasBodies,
+    input.read,
+  );
+}
+
+function isCapturedFrameTranslation(plan: FeaturePlan): boolean {
+  return (
+    plan.tier === "parametric" &&
+    (plan.reasonCodes.includes("plane-from-captured-frame") ||
+      plan.reasonCodes.includes("sketch-on-translated-plane") ||
+      plan.reasonCodes.includes("sketch-on-captured-frame"))
+  );
+}
+
+function demoteCapturedFrameToBaked(plan: FeaturePlan): FeaturePlan {
+  return {
+    ...plan,
+    tier: "baked",
+    target: { kind: "suppressed" },
+    reasonCodes: ["captured-frame-unresolvable"],
+    suppressed: true,
+  };
+}
+
+/**
+ * Fail closed at the feature level: any feature still selecting the parametric
+ * tier while carrying a live extrude `topologySlot` cannot be prepared
+ * (`resolvedExtrudeExtent` throws for the whole studio). Degrade only that
+ * feature to baked/suppressed with a specific reason so a single unresolved
+ * slot never aborts the import, and every plan handed to `buildPreparedActions`
+ * stays free of planner-only extent placeholders.
+ */
+function bakeUnresolvedExtrudeTopology(featurePlans: FeaturePlan[]): FeaturePlan[] {
+  return featurePlans.map((plan) =>
+    plan.plannedExtrude && hasUnresolvedExtrudeTopology(plan.plannedExtrude)
+      ? {
+          ...plan,
+          tier: "baked" as const,
+          target: { kind: "suppressed" as const },
+          reasonCodes: ["extrude-extent-topology-unresolved" as const],
+          suppressed: true,
+        }
+      : plan,
+  );
+}
+
+/** Collect review-only references that require one emitted source-feature action. */
+function collectRequiredSourceActionIds(value: unknown, target: Set<string>): void {
+  if (!value || typeof value !== "object") return;
+  const record = value as {
+    kind?: unknown;
+    producerSourceFeatureId?: unknown;
+    witnessSourceFeatureId?: unknown;
+    successorSourceFeatureIds?: unknown;
+  };
+  if (record.kind === "bodyOfSourceFeature") {
+    if (typeof record.producerSourceFeatureId === "string") {
+      target.add(record.producerSourceFeatureId);
+    }
+    return;
+  }
+  if (record.kind === "historicalTopologyOf") {
+    if (typeof record.witnessSourceFeatureId === "string") {
+      target.add(record.witnessSourceFeatureId);
+    }
+    if (Array.isArray(record.successorSourceFeatureIds)) {
+      for (const featureId of record.successorSourceFeatureIds) {
+        if (typeof featureId === "string") target.add(featureId);
+      }
+    }
+    return;
+  }
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    collectRequiredSourceActionIds(child, target);
+  }
+}
+
+/**
+ * Fail closed when a reviewed parametric consumer depends on an action that a
+ * later containment pass demoted. This is deliberately action-specific: normal
+ * body dependencies may be satisfied by checkpoints, while exact Split owners,
+ * historical topology chains, feature replay, and sketch ids cannot.
+ */
+export function cascadeUnavailableActionConsumers(featurePlans: FeaturePlan[]): FeaturePlan[] {
+  let current = featurePlans;
+  for (;;) {
+    const emittedSourceFeatureIds = new Set(
+      current.flatMap((plan) => plan.tier === "parametric" ? [plan.onshapeFeatureId] : []),
+    );
+    const reachableSketchFeatureIds = new Set(
+      current.flatMap((plan) =>
+        plan.tier === "parametric" && plan.target.kind === "sketch"
+          ? [plan.onshapeFeatureId]
+          : [],
+      ),
+    );
+    const knownFeatureIds = new Set(current.map((plan) => plan.onshapeFeatureId));
+    const next = current.map((plan) => {
+      if (plan.tier !== "parametric") return plan;
+      const requiredSourceFeatureIds = new Set(plan.plannedFeatureReplay?.sourceFeatureIds ?? []);
+      collectRequiredSourceActionIds(plan, requiredSourceFeatureIds);
+      const missingSourceAction = [...requiredSourceFeatureIds].some(
+        (featureId) => !emittedSourceFeatureIds.has(featureId),
+      );
+      const missingSketch = unreachableFeatureDependencies(plan.inputDependencies, {
+        reachableSketchFeatureIds,
+        reachableBodyFeatureIds: new Set(knownFeatureIds),
+        knownFeatureIds,
+      }).some((dependency) => dependency.kind === "sketch");
+      return missingSourceAction || missingSketch
+        ? {
+            ...plan,
+            tier: "baked" as const,
+            target: { kind: "suppressed" as const },
+            reasonCodes: [
+              ...new Set([...plan.reasonCodes, "downstream-of-baked" as const]),
+            ],
+            suppressed: true,
+          }
+        : plan;
+    });
+    if (next.every((plan, index) => plan === current[index])) return next;
+    current = next;
+  }
+}
+
+/**
+ * Render the exact reason each live candidate was rejected (or which candidates
+ * tied) so a `topology-reference-no-match` / `-ambiguous` bake names the real
+ * mismatch instead of only its reason code. Purely diagnostic.
+ */
+function describeResolutionFailure(
+  resolution: Extract<TopologyResolutionResult, { kind: "degraded" }>,
+  liveSignatures: readonly HistoryProbeTopologySignature[],
+): string | undefined {
+  const parts: string[] = [];
+  for (const detail of resolution.details) {
+    const rejected = (detail.rejected ?? [])
+      .map((entry) => `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}`)
+      .join(" | ");
+    const candidates = (detail.candidates ?? [])
+      .map((entry) => `${durableRefLabel(entry.reference)}@${entry.score}`)
+      .join(" | ");
+    parts.push(
+      [detail.message, rejected && `rejected ${rejected}`, candidates && `tied ${candidates}`]
+        .filter(Boolean)
+        .join("; "),
+    );
+  }
+  const census = new Map<string, number>();
+  for (const signature of liveSignatures) {
+    const key = `${signature.entityClass}/${signature.geometryType}`;
+    census.set(key, (census.get(key) ?? 0) + 1);
+  }
+  parts.push(
+    `live prefix ${liveSignatures.length}: ${
+      [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
+    }`,
+  );
+  const detail = parts.filter(Boolean).join(" || ");
+  return detail.length > 0 ? detail : undefined;
+}
+
+/**
+ * Describe why a face-backed sketch plane did not resolve to exactly one live
+ * face. Zero/one/many honesty: a `noMatch` names each rejected live candidate's
+ * gates, an `ambiguous` names the tied candidates, and both carry a live-prefix
+ * census so the next root cause is visible instead of collapsing into the
+ * generic `needs-history-probe` copy. Purely diagnostic; never affects matching.
+ */
+function describeSketchPlaneMatchFailure(
+  match: Extract<TopologyMatchOutcome, { kind: "noMatch" | "ambiguous" }>,
+  captured: OnshapeGeometricSignature,
+  liveSignatures: readonly HistoryProbeTopologySignature[],
+): string {
+  const census = new Map<string, number>();
+  for (const signature of liveSignatures) {
+    const key = `${signature.entityClass}/${signature.geometryType}`;
+    census.set(key, (census.get(key) ?? 0) + 1);
+  }
+  const prefix = `live prefix ${liveSignatures.length}: ${
+    [...census].map(([key, count]) => `${key}x${count}`).join(",") || "empty"
+  }`;
+  const liveByKey = new Map(
+    liveSignatures.map((signature) => [referenceKey(signature.reference), signature]),
+  );
+  const frameOf = (reference: DurableRef): string => {
+    const signature = liveByKey.get(referenceKey(reference));
+    return signature ? describePlaneFrame(signature) : "";
+  };
+  const wanted = `sketch plane wants ${captured.entityClass}/${captured.geometryType}${
+    describePlaneFrame(captured)
+  }`;
+  const body =
+    match.kind === "ambiguous"
+      ? `matched ${match.candidates.length} live faces, none uniquely: ${match.candidates
+          .map((entry) => `${durableRefLabel(entry.reference)}@${entry.score}`)
+          .join(" | ")}`
+      : `no live face matched; rejected ${match.rejected
+          .map(
+            (entry) =>
+              `${durableRefLabel(entry.reference)}: ${entry.reasons.join(",")}${
+                frameOf(entry.reference)
+              }`,
+          )
+          .join(" | ") || "nothing (the live prefix exposed no candidates)"}`;
+  return [wanted, body, prefix].join(" || ");
+}
+
+/** Diagnostic-only plane frame summary; empty for anything that is not a plane. */
+function describePlaneFrame(
+  signature: OnshapeGeometricSignature | HistoryProbeTopologySignature,
+): string {
+  if (signature.geometryType.toLowerCase() !== "plane") return "";
+  const data = signature.definingData ?? {};
+  const round = (value: unknown): string =>
+    Array.isArray(value) && value.length === 3
+      ? `[${value.map((entry) => (typeof entry === "number" ? entry.toFixed(4) : "?")).join(",")}]`
+      : "none";
+  const box = signature.boundingBox
+    ? ` box=${round(signature.boundingBox.low)}..${round(signature.boundingBox.high)}`
+    : "";
+  return ` (origin=${round(data.origin)} normal=${round(data.normal)}${box})`;
+}
+
+function durableRefLabel(reference: DurableRef): string {
+  switch (reference.kind) {
+    case "body":
+      return reference.bodyId;
+    case "face":
+      return reference.faceId;
+    case "edge":
+      return reference.edgeId;
+    case "vertex":
+      return reference.vertexId;
+    default:
+      return reference.kind;
+  }
+}
+export function containmentFailureReasonDetail(input: {
+  provisionalReasonDetail?: string;
+  failedStep?: HistoryProbeStepResult;
+}): string | undefined {
+  const failureDetail = input.failedStep?.status === "failed"
+    ? input.failedStep.diagnostics
+        .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+        .join("; ") || undefined
+    : undefined;
+  if (!failureDetail) return input.provisionalReasonDetail;
+  if (!input.provisionalReasonDetail || input.provisionalReasonDetail === failureDetail) {
+    return failureDetail;
+  }
+  return `${failureDetail} || Earlier planning detail: ${input.provisionalReasonDetail}`;
+}
+
+async function activateProbeBackedPlanning(input: {
+  read: ReturnType<typeof readPartStudio>;
+  plan: Awaited<ReturnType<typeof planStudioFidelity>>;
+  capabilities: ImportCapabilities;
+  /**
+   * Features whose apply-time topology rematch already failed in a prior probe.
+   * They stay baked/suppressed for this attempt and are never re-promoted, so a
+   * single feature that the live kernel rejects at apply cannot abort the studio.
+   */
+  forcedBakeFeatureIds?: ReadonlySet<string>;
+  /** Verbatim zero/one/many detail per forced bake, when the failure carried one. */
+  forcedBakeReasonDetails?: ReadonlyMap<string, string>;
+  /** Features whose live topologyOf apply failed and must retry via historical lineage. */
+  historicalRetryFeatureIds?: ReadonlySet<string>;
+  /**
+   * The outer retry loop resumes from this exact fixed-point plan after a probe
+   * throws. It must not restart from captured-frame planning and discard an
+   * upstream extrude's already-resolved topology selectors.
+   */
+  workingPlanRef?: { current: OnshapeStudioPlan };
+  /**
+   * Drop probe failures the memo retained. Called once per containment pass: the
+   * pass exists to change the conditions a probe failed under, so the contained
+   * plan must be allowed to reach the kernel again.
+   */
+  forgetFailedProbes?: () => void;
+}): Promise<ProbeBackedPlanningActivation> {
+  if (!input.capabilities.history) {
+    return { kind: "activated", plan: input.plan, probeResult: null };
+  }
+
+  const forcedBakeFeatureIds = input.forcedBakeFeatureIds ?? new Set<string>();
+  const historicalRetryFeatureIds = input.historicalRetryFeatureIds ?? new Set<string>();
+  const containmentRejectedFeatureIds = new Set<string>();
+  let workingPlan: OnshapeStudioPlan =
+    forcedBakeFeatureIds.size === 0
+      ? input.plan
+      : recomputePlanWithFeaturePlans(
+          input.plan,
+          await replanDependentFeatures({
+            read: input.read,
+            profileVerifier: profileVerifierFor(input.capabilities),
+            featurePlans: input.plan.featurePlans.map((plan) =>
+              forcedBakeFeatureIds.has(plan.onshapeFeatureId)
+                ? {
+                    ...plan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    reasonCodes: ["topology-apply-rematch-failed" as const],
+                    reasonDetail:
+                      input.forcedBakeReasonDetails?.get(plan.onshapeFeatureId) ??
+                      plan.reasonDetail,
+                    suppressed: true,
+                  }
+                : plan,
+            ),
+          }),
+          input.read.studio.groundTruth.hasBodies,
+          input.read,
+        );
+  const rememberWorkingPlan = () => {
+    if (input.workingPlanRef) input.workingPlanRef.current = workingPlan;
+  };
+  rememberWorkingPlan();
+  let probeResult: HistoryProbeResult;
+  const maxDemotions = input.plan.featurePlans.filter(isCapturedFrameTranslation).length;
+  for (let attempt = 0; ; attempt += 1) {
+    const orderedPositionToFeatureId = new Map<number, string>();
+    const verificationPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+    const candidate = await buildPreparedActions({
+      read: input.read,
+      plan: verificationPlan,
+      capabilities: input.capabilities,
+      deferSketchExternalReferences: true,
+      materializeBake: false,
+      deferUnresolvedExactBodyOwners: true,
+      orderedPositionToFeatureId,
+    });
+    rememberWorkingPlan();
+    // This full-plan probe is retained only for verification and attribution of a
+    // failed provisional action. Topology consumers are resolved below from exact
+    // pre-consumer prefixes.
+    probeResult = await input.capabilities.history.evaluateHistoryProbe({
+      actions: candidate,
+      includeFinalTessellation: true,
+      requestedSignatureStepOrdinals: [],
+    });
+    const failedOrdinal = probeResult.steps.findIndex((step) => step.status === "failed");
+    if (failedOrdinal < 0 || attempt > maxDemotions) break;
+    const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
+    const demotable = failedFeatureId
+      ? workingPlan.featurePlans.find(
+          (plan) =>
+            plan.onshapeFeatureId === failedFeatureId &&
+            isCapturedFrameTranslation(plan),
+        )
+      : undefined;
+    if (!demotable) break;
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      workingPlan.featurePlans.map((plan) =>
+        isCapturedFrameTranslation(plan) ? demoteCapturedFrameToBaked(plan) : plan,
+      ),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+  }
+
+  const topologyTimeline = createRollbackTopologyTimeline({
+    featureIds: input.read.features.map((feature) => feature.featureId),
+    snapshots: input.read.studio.rollbackSnapshots,
+  });
+  const featuresById = new Map(
+    input.read.features.map((feature) => [feature.featureId, feature]),
+  );
+  const references = new Map<string, OnshapeResolvedReference[]>();
+  for (const reference of input.read.studio.resolvedReferences) {
+    const existing = references.get(reference.deterministicId) ?? [];
+    existing.push(reference);
+    references.set(reference.deterministicId, existing);
+  }
+
+  const planFingerprint = (plan: OnshapeStudioPlan): string =>
+    JSON.stringify({
+      featurePlans: plan.featurePlans,
+      bakeStrategy: plan.bakeStrategy,
+      requiresStudioBake: plan.requiresStudioBake,
+    });
+
+  // Containment pass: prove the parametric timeline first, then validate the
+  // checkpoint-bearing action sequence only after consumer promotion has
+  // re-planned the genuinely baked segments. A feature the kernel rejects is
+  // demoted to baked with a specific reason and its dependents are re-planned,
+  // studio.
+  //
+  // Attribution is exact: `orderedPositionToFeatureId` is recorded by
+  // `buildPreparedActions` while it emits each action, so the failed ordinal
+  // names its owning feature rather than being inferred from plan ordering.
+  //
+  // This runs BEFORE the face-backed sketch pass as well as at the end. A sketch
+  // can only be lifted onto a live face that apply will actually present, and a
+  // prefix containing a feature the kernel refuses is not that prefix: probing it
+  // fails wholesale and every face-backed sketch behind it sees an empty live
+  // prefix. Containing the refusal first makes the probe present the same body
+  // state apply does.
+  //
+  // The no-checkpoint pass establishes whether a parametric timeline itself
+  // builds. Only after topology consumers have been resolved against that
+  // timeline may checkpoint materialization validate genuinely baked runs.
+  // Keep distinct proofs: a checkpoint replaces topology and is never lineage
+  // evidence for a consumer.
+  const containedPlanFingerprints = new Set<string>();
+  const containUnbuildableFeatures = async (options: {
+    materializeBake: boolean;
+  }): Promise<ContainmentResult> => {
+    const containmentFingerprint = `${options.materializeBake ? "checkpoints" : "parametric"}:${planFingerprint(workingPlan)}`;
+    if (containedPlanFingerprints.has(containmentFingerprint)) {
+      return { kind: "contained" };
+    }
+    for (let attempt = 0; attempt < workingPlan.featurePlans.length; attempt += 1) {
+      const orderedPositionToFeatureId = new Map<number, string>();
+      const buildActions = await buildPreparedActions({
+        read: input.read,
+        plan: workingPlan,
+        capabilities: input.capabilities,
+        // A checkpoint is replacement geometry, not topology evidence. The
+        // parametric containment pass must therefore see the same lineage the
+        // exploratory prefix used; checkpoint validation happens separately,
+        // after promotion has re-planned the remaining baked runs.
+        materializeBake: options.materializeBake,
+        // External sketch topology is proved by the exact pre-consumer prefix
+        // below; this whole-plan containment runs before that promotion.
+        deferSketchExternalReferences: true,
+        // Full containment validates only planner-owned baked segments.
+        // Per-feature fallback checkpoints are apply recovery, never topology
+        // evidence and therefore must not alter a consumer's proof.
+        materializeTopologyFallback: false,
+        emitBakeCheckpoints: options.materializeBake,
+        // A Split whose source producer is absent from this transient prefix is
+        // deferred, never applied or demoted from this probe artifact.
+        deferUnresolvedExactBodyOwners: true,
+        orderedPositionToFeatureId,
+      });
+      rememberWorkingPlan();
+      let buildProbe: HistoryProbeResult;
+      try {
+        buildProbe = await input.capabilities.history!.evaluateHistoryProbe({
+          actions: buildActions,
+          requestedSignatureStepOrdinals: [],
+        });
+      } catch (error) {
+        // Historical selectors are proved by their pre-consumer prefix. A
+        // whole-plan containment replay cannot use a checkpoint-replaced body
+        // to disprove that exact lineage.
+        if (
+          isTopologyApplyRematchError(error) &&
+          error.selector.kind === "historicalTopologyOf"
+        ) {
+          break;
+        }
+        throw error;
+      }
+      const failedOrdinal = buildProbe.steps.findIndex(
+        (step) => step.status === "failed",
+      );
+      if (failedOrdinal < 0) break;
+      const failedFeatureId = orderedPositionToFeatureId.get(failedOrdinal);
+      const failedPlan = failedFeatureId
+        ? workingPlan.featurePlans.find(
+            (plan) =>
+              plan.onshapeFeatureId === failedFeatureId &&
+              plan.tier === "parametric",
+          )
+        : undefined;
+      // Nothing parametric to demote means the failure is not contained by this
+      // pass; leave the plan as is so the real error surfaces at apply instead of
+      // silently mutating an unrelated feature.
+      if (!failedPlan || !failedFeatureId) break;
+      const failedStep = buildProbe.steps[failedOrdinal];
+      // A direct live selector can fail only when the whole apply-equivalent plan
+      // is assembled. Give it exactly one ID-free historical-lineage retry before
+      // recording the refusal as containment; the outer review loop resets probe
+      // memoization and restarts activation with that feature marked.
+      if (
+        hasTopologyApplyRematchFailure(failedStep) &&
+        !historicalRetryFeatureIds.has(failedFeatureId) &&
+        usesDirectTopologyOf(buildActions, failedFeatureId)
+      ) {
+        return { kind: "historical-retry-requested", featureId: failedFeatureId };
+      }
+      // A failed full-plan probe is an apply-equivalent refusal. Do not let a
+      // later fixed-point pass re-promote the same selector after containment.
+      containmentRejectedFeatureIds.add(failedFeatureId);
+      // The current apply-equivalent refusal is primary. Earlier planning
+      // context remains visible only as explicitly secondary information.
+      const reasonDetail = containmentFailureReasonDetail({
+        provisionalReasonDetail: failedPlan.reasonDetail,
+        failedStep,
+      });
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        await replanDependentFeatures({
+          read: input.read,
+          profileVerifier: profileVerifierFor(input.capabilities),
+          featurePlans: cascadeUnavailableActionConsumers(
+            workingPlan.featurePlans.map((plan) =>
+              plan.onshapeFeatureId === failedFeatureId
+                ? {
+                    ...plan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    reasonCodes: ["feature-kernel-build-failed" as const],
+                    ...(reasonDetail ? { reasonDetail } : {}),
+                    suppressed: true,
+                  }
+                : plan,
+            ),
+          ),
+        }),
+        input.read.studio.groundTruth.hasBodies,
+        input.read,
+      );
+    }
+    containedPlanFingerprints.add(containmentFingerprint);
+    // The pass ran against a changed plan, so every probe failure it took as
+    // input has had its conditions revisited. Release those retained failures;
+    // the passes that follow probe the contained plan for real.
+    input.forgetFailedProbes?.();
+    return { kind: "contained" };
+  };
+
+  const maxPromotionIterations = Math.max(1, workingPlan.featurePlans.length);
+  for (let iteration = 0; iteration < maxPromotionIterations; iteration += 1) {
+    const beforeIteration = planFingerprint(workingPlan);
+
+    // Resolve translator-declared topology consumers in source order. Each successful
+    // consumer is inserted before probing the next one, preserving the exact prefix.
+    for (const candidate of [...workingPlan.featurePlans]) {
+      // A feature the live kernel already rejected at apply stays baked; never
+      // re-promote it, or the same rematch throw would abort the studio again.
+      if (
+        forcedBakeFeatureIds.has(candidate.onshapeFeatureId) ||
+        containmentRejectedFeatureIds.has(candidate.onshapeFeatureId)
+      ) continue;
+      const slots =
+        candidate.plannedBodyTopologyConsumer?.slots ??
+        candidate.plannedExtrude?.topologySlots ??
+        [];
+      // `topologySlots` deliberately retains declarations after resolution, so
+      // candidate lifecycle must inspect live extent/boolean placeholders rather
+      // than slot count. An unresolved extrude is eligible from either tier;
+      // only a settled parametric candidate is skipped, except when a retry must
+      // replace its direct selector with historical lineage.
+      const unresolvedExtrudeTopology = candidate.plannedExtrude
+        ? hasUnresolvedExtrudeTopology(candidate.plannedExtrude)
+        : false;
+      if (
+        slots.length === 0 ||
+        (candidate.tier === "parametric" &&
+          !unresolvedExtrudeTopology &&
+          !historicalRetryFeatureIds.has(candidate.onshapeFeatureId))
+      ) {
+        continue;
+      }
+      const feature = featuresById.get(candidate.onshapeFeatureId);
+      if (!feature) continue;
+      const queryRead = readTopologyQueryRefs(
+        feature,
+        slots,
+        input.read.studio.resolvedQueryReferences ?? [],
+      );
+      // Onshape's rollback timeline names every feature that produced or reshaped
+      // each queried body before the consumer. When any of them is not parametric,
+      // the body as consumed cannot exist in the parametric prefix: the consumer
+      // is baked by design, not by a matching failure.
+      const plansById = new Map(
+        workingPlan.featurePlans.map((plan) => [plan.onshapeFeatureId, plan]),
+      );
+      const consumesBakedUpstreamBody = queryRead.refs.some((query) =>
+        topologyTimeline
+          .featuresModifyingBody(query.deterministicId, candidate.onshapeFeatureId)
+          .some((featureId) => plansById.get(featureId)?.tier !== "parametric"),
+      );
+      // A topology candidate must be allowed to close the baked run immediately
+      // before itself. Recompute only the checkpoint strategy provisionally; the
+      // candidate remains baked in the prepared prefix until exact matching proves
+      // its live refs. This breaks the old chicken-and-egg where a candidate was
+      // rejected because the checkpoint that would make it reachable was planned
+      // only after the still-baked candidate.
+      const provisionalPlan = workingPlan.bakeStrategy.kind === "segments"
+        ? recomputePlanWithFeaturePlans(
+            workingPlan,
+            workingPlan.featurePlans.map((plan) =>
+              plan.onshapeFeatureId === candidate.onshapeFeatureId
+                ? {
+                    ...plan,
+                    tier: "parametric" as const,
+                    target: { kind: "feature" as const },
+                    reasonCodes: [],
+                    suppressed: false,
+                  }
+                : plan,
+            ),
+            input.read.studio.groundTruth.hasBodies,
+            input.read,
+          )
+        : workingPlan;
+      // This is a pre-consumer probe, not a speculative apply. Suppress the
+      // candidate even if it temporarily entered the parametric tier so an
+      // unresolved extent slot can never reach buildPreparedActions.
+      const prefixPlan: OnshapeStudioPlan = {
+        ...workingPlan,
+        featurePlans: bakeUnresolvedExtrudeTopology(
+          workingPlan.featurePlans.map((plan) =>
+            plan.onshapeFeatureId === candidate.onshapeFeatureId
+              ? {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  suppressed: true,
+                }
+              : plan,
+          ),
+        ),
+        bakeStrategy: provisionalPlan.bakeStrategy,
+        requiresStudioBake: provisionalPlan.requiresStudioBake,
+        bakeDiagnostics: provisionalPlan.bakeDiagnostics,
+      };
+      const degradeConsumer = (reason: PlanReasonCode, detail?: string) => {
+        workingPlan = recomputePlanWithFeaturePlans(
+          workingPlan,
+          workingPlan.featurePlans.map((plan) =>
+            plan.onshapeFeatureId === candidate.onshapeFeatureId
+              ? {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: [reason],
+                  // Preserve the FIRST specific failure seen for this feature so
+                  // later generic degradations cannot hide the root cause.
+                  ...(plan.reasonDetail ?? detail
+                    ? { reasonDetail: plan.reasonDetail ?? detail }
+                    : {}),
+                  suppressed: true,
+                }
+              : plan,
+          ),
+          input.read.studio.groundTruth.hasBodies,
+          input.read,
+        );
+      };
+      // Checkpoints replace a body with baked geometry, so they are never
+      // topology evidence for any consumer — including whole-body consumers.
+      // Historical lineage is collected only from the parametric prefix.
+      const uniquePrefixBodyEligible = isUniquePrefixBodyQuery(feature, slots);
+      const consumesOnlyBodies =
+        uniquePrefixBodyEligible ||
+        (queryRead.refs.length > 0 &&
+          queryRead.refs.every(
+            (query) =>
+              query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
+          ));
+      const featureIdToOrderedPrefixPosition = new Map<string, number>();
+      const featureIdToOrderedActionIndex = new Map<string, number>();
+      const featureIdToBodyProducerActionIndex = new Map<string, number>();
+      const orderedPositionToFeatureId = new Map<number, string>();
+      const prefixActions = await buildPreparedActions({
+        read: input.read,
+        plan: prefixPlan,
+        capabilities: input.capabilities,
+        materializeBake: false,
+        deferSketchExternalReferences: true,
+        featureIdToOrderedPrefixPosition,
+        orderedPositionToFeatureId,
+        featureIdToOrderedActionIndex,
+        featureIdToBodyProducerActionIndex,
+        deferUnresolvedExactBodyOwners: true,
+      });
+      rememberWorkingPlan();
+      const [prefix] = await probeTopologyConsumerPrefixes({
+        actions: prefixActions,
+        featureIdToOrderedPrefixPosition,
+        consumerFeatureIds: [candidate.onshapeFeatureId],
+        history: input.capabilities.history,
+      });
+      if (!prefix || prefix.status === "failed") {
+        // The parametric prefix itself did not rebuild in the probe session, so no
+        // safe pre-consumer evidence exists in the Cadara prefix. Report that
+        // instead of silently falling through to the translator-unavailable rewrite,
+        // and keep the kernel's own first diagnostic so the next root cause is
+        // visible rather than collapsed into the generic reason.
+        degradeConsumer(
+          "topology-history-evidence-missing",
+          prefix
+            ? prefix.diagnostics
+                .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+                .join("; ") || undefined
+            : "The consumer has no ordered prefix position in the prepared actions.",
+        );
+        continue;
+      }
+      const captureFrameToWorld = computeCaptureFrameToWorld({
+        features: input.read.features,
+        consumerFeatureId: candidate.onshapeFeatureId,
+        isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+        resolvedReferences: input.read.studio.resolvedReferences,
+      });
+      if (captureFrameToWorld && !consumesOnlyBodies) {
+        // A non-identity capture→world transform means a baked feature sits
+        // between this face/edge consumer and its captured evidence. The
+        // parametric probe prefix cannot make that baked feature evidence; the
+        // owning feature itself must be parametric before its face/edge can be
+        // promoted.
+        degradeConsumer("topology-upstream-baked");
+        continue;
+      }
+      // A parametric transform preceding a face/edge consumer can leave older
+      // rollback/final evidence in the pre-transform frame while the probe
+      // rebuilds the post-transform world frame. The resolver applies this
+      // reframe only to evidence that needs conversion; current-consumer
+      // historyPoint evidence is already in the consumer's authored/live frame.
+      const parametricReframe = computeParametricTransformReframe({
+        features: input.read.features,
+        consumerFeatureId: candidate.onshapeFeatureId,
+        isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+        resolvedReferences: input.read.studio.resolvedReferences,
+      });
+      const topologyCaptureFrameToWorld = composeCaptureFrameTransforms(
+        captureFrameToWorld,
+        parametricReframe,
+      );
+      const topologyTolerance = LIVE_TOPOLOGY_MATCH_TOLERANCE;
+      const topologyResolutionInput = {
+        consumerFeatureId: candidate.onshapeFeatureId,
+        queries: queryRead.refs,
+        queryDiagnostics: queryRead.diagnostics,
+        capturedReferences: input.read.studio.resolvedReferences,
+        capturedQueryReferences: input.read.studio.resolvedQueryReferences ?? [],
+        rollback: topologyTimeline,
+        cadaraSignatures: prefix.signatures,
+        tolerance: topologyTolerance,
+        durableNamingAvailable: OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming,
+        captureFrameToWorld: topologyCaptureFrameToWorld ?? undefined,
+      };
+      const implicitUnionResolution =
+        candidate.featureType === "booleanBodies" &&
+        candidate.plannedBodyTopologyConsumer?.operationIntent === "add"
+          ? resolveImplicitUnionTarget({
+              ...topologyResolutionInput,
+              feature,
+              slots,
+            })
+          : null;
+      const exactBodyQueries = queryRead.refs.filter(
+        (query) => query.expectedKinds.length === 1 && query.expectedKinds[0] === "body",
+      );
+      const exactBodyProducerActionIndexes = new Map(featureIdToOrderedActionIndex);
+      for (const [featureId, actionIndex] of featureIdToBodyProducerActionIndex) {
+        exactBodyProducerActionIndexes.set(featureId, actionIndex);
+      }
+      const exactReviewBindings =
+        candidate.plannedBodyTopologyConsumer?.featureKind === "split" &&
+        exactBodyQueries.length > 0
+          ? resolveExactBodyProducerBindings({
+              featureIds: input.read.features.map((entry) => entry.featureId),
+              consumerFeatureId: candidate.onshapeFeatureId,
+              queries: exactBodyQueries,
+              rollback: topologyTimeline,
+              isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+              reviewMode: true,
+            })
+          : null;
+      // Keep the established prefix-index path only when rollback review cannot
+      // prove an exact owner (for example, sparse synthetic rollback captures).
+      const exactBodyBindings = exactReviewBindings ??
+        (candidate.plannedBodyTopologyConsumer?.featureKind === "split" &&
+        queryRead.diagnostics.length === 0 &&
+        exactBodyQueries.length > 0
+          ? resolveExactBodyProducerBindings({
+              featureIds: input.read.features.map((entry) => entry.featureId),
+              consumerFeatureId: candidate.onshapeFeatureId,
+              queries: exactBodyQueries,
+              rollback: topologyTimeline,
+              isParametric: (featureId) => plansById.get(featureId)?.tier === "parametric",
+              featureIdToOrderedActionIndex: exactBodyProducerActionIndexes,
+            })
+          : null);
+      let resolution: TopologyResolutionResult;
+      if (exactBodyBindings) {
+        const remainingQueries = queryRead.refs.filter(
+          (query) => !exactBodyQueries.includes(query),
+        );
+        const remainingResolution = remainingQueries.length === 0
+          ? { kind: "resolved" as const, bindings: [] }
+          : resolveTopologyReferences({ ...topologyResolutionInput, queries: remainingQueries });
+        resolution = remainingResolution.kind === "degraded"
+          ? remainingResolution
+          : {
+              kind: "resolved",
+              bindings: [
+                ...exactBodyBindings.map((binding) => ({
+                  ...binding,
+                  score: 0,
+                  evidence: ["exact-rollback-body-producer"],
+                  sourceEvidence: "exactRollbackBodyProducer" as const,
+                })),
+                ...remainingResolution.bindings,
+              ],
+            };
+      } else {
+        resolution = implicitUnionResolution ??
+          resolveUniquePrefixBody({
+            consumerFeatureId: candidate.onshapeFeatureId,
+            feature,
+            slots,
+            cadaraSignatures: prefix.signatures,
+            tolerance: topologyTolerance,
+          }) ??
+          resolveTopologyReferences(topologyResolutionInput);
+      }
+      if (
+        !exactBodyBindings &&
+        consumesBakedUpstreamBody &&
+        prefixPlan.bakeStrategy.kind !== "segments"
+      ) {
+        degradeConsumer("topology-upstream-baked");
+        continue;
+      }
+      const requiresHistoricalLineage = historicalRetryFeatureIds.has(
+        candidate.onshapeFeatureId,
+      );
+      if (
+        !exactBodyBindings &&
+        (requiresHistoricalLineage ||
+          (resolution.kind === "degraded" &&
+            resolution.reason === "topology-reference-no-match"))
+      ) {
+        const [historicalPrefix] = await probeTopologyConsumerPrefixes({
+          actions: prefixActions,
+          featureIdToOrderedPrefixPosition,
+          consumerFeatureIds: [candidate.onshapeFeatureId],
+          history: input.capabilities.history,
+          includeHistoricalSignatures: true,
+          requireFreshExecution: requiresHistoricalLineage,
+        });
+        if (historicalPrefix?.status === "rebuilt") {
+          resolution = resolveTopologyReferences({
+            ...topologyResolutionInput,
+            cadaraSignatures: historicalPrefix.signatures,
+            historicalSignatureSteps: withHistoricalSourceFeatureIds(
+              historicalPrefix.historicalSignatureSteps,
+              featureIdToOrderedActionIndex,
+            ),
+            requireHistoricalLineage: requiresHistoricalLineage,
+          });
+        }
+      }
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        workingPlan.featurePlans.map((plan) => {
+          if (plan.onshapeFeatureId !== candidate.onshapeFeatureId) return plan;
+          if (candidate.plannedExtrude) {
+            // An extrude only reaches the loop with live extent/scope topology
+            // slots. If exact-prefix resolution fails (degraded match) or leaves
+            // any slot unbound, it can never be prepared as a parametric feature;
+            // fail closed to baked at the feature level with a specific reason so
+            // one unresolved slot never aborts the whole studio.
+            const plannedExtrude =
+              resolution.kind === "degraded"
+                ? null
+                : resolvePlannedExtrudeTopology(
+                    candidate.plannedExtrude,
+                    resolution.bindings,
+                  );
+            return plannedExtrude
+              ? {
+                  ...plan,
+                  tier: "parametric" as const,
+                  target: { kind: "feature" as const },
+                  reasonCodes: [],
+                  suppressed: false,
+                  plannedExtrude,
+                }
+              : {
+                  ...plan,
+                  tier: "baked" as const,
+                  target: { kind: "suppressed" as const },
+                  reasonCodes: [
+                    resolution.kind === "degraded"
+                      ? resolution.reason
+                      : "extrude-extent-topology-unresolved",
+                  ],
+                  ...(resolution.kind === "degraded"
+                    ? { reasonDetail: describeResolutionFailure(resolution, prefix.signatures) }
+                    : {}),
+                  suppressed: true,
+                };
+          }
+          if (resolution.kind === "degraded") {
+            return {
+              ...plan,
+              tier: "baked" as const,
+              target: { kind: "suppressed" as const },
+              reasonCodes: [resolution.reason],
+              reasonDetail: describeResolutionFailure(resolution, prefix.signatures),
+              suppressed: true,
+            };
+          }
+          if (candidate.plannedBodyTopologyConsumer?.unavailableReason) {
+            return {
+              ...plan,
+              tier: "baked" as const,
+              target: { kind: "suppressed" as const },
+              reasonCodes: [candidate.plannedBodyTopologyConsumer.unavailableReason],
+              suppressed: true,
+            };
+          }
+          return {
+            ...plan,
+            tier: "parametric" as const,
+            target: { kind: "feature" as const },
+            reasonCodes: [],
+            suppressed: false,
+            plannedAdvancedSolid: buildResolvedBodyConsumerDefinition(
+              candidate.plannedBodyTopologyConsumer!,
+              resolution.bindings,
+            ),
+          };
+        }),
+        input.read.studio.groundTruth.hasBodies,
+        input.read,
+      );
+    }
+
+    const consumerIds = workingPlan.featurePlans
+      .filter(
+        (featurePlan) =>
+          featurePlan.featureType === "newSketch" &&
+          featurePlan.tier === "baked" &&
+          featurePlan.reasonCodes.includes("needs-history-probe"),
+      )
+      .map((featurePlan) => featurePlan.onshapeFeatureId);
+    const sketchConsumerIds = new Set(consumerIds);
+    const probeSketchPrefixes = async (historicalConsumerIds: readonly string[] = []) => {
+      const provisionalSketchPlan = workingPlan.bakeStrategy.kind === "segments"
+        ? recomputePlanWithFeaturePlans(
+            workingPlan,
+            workingPlan.featurePlans.map((featurePlan) =>
+              sketchConsumerIds.has(featurePlan.onshapeFeatureId)
+                ? {
+                    ...featurePlan,
+                    tier: "parametric" as const,
+                    target: { kind: "sketch" as const, planeKey: "xy" as const },
+                    reasonCodes: [],
+                    suppressed: false,
+                  }
+                : featurePlan,
+            ),
+            input.read.studio.groundTruth.hasBodies,
+            input.read,
+          )
+        : workingPlan;
+      const sketchPrefixPlan: OnshapeStudioPlan = {
+        ...workingPlan,
+        featurePlans: historicalConsumerIds.length > 0
+          ? workingPlan.featurePlans
+          : bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+        bakeStrategy: provisionalSketchPlan.bakeStrategy,
+        requiresStudioBake: provisionalSketchPlan.requiresStudioBake,
+        bakeDiagnostics: provisionalSketchPlan.bakeDiagnostics,
+      };
+      const featureIdToOrderedPrefixPosition = new Map<string, number>();
+      const featureIdToOrderedActionIndex = new Map<string, number>();
+      const orderedPositionToFeatureId = new Map<number, string>();
+      const prefixActions = await buildPreparedActions({
+        read: input.read,
+        plan: sketchPrefixPlan,
+        capabilities: input.capabilities,
+        materializeBake: false,
+        deferSketchExternalReferences: true,
+        featureIdToOrderedPrefixPosition,
+        featureIdToOrderedActionIndex,
+        orderedPositionToFeatureId,
+        deferUnresolvedExactBodyOwners: true,
+      });
+      rememberWorkingPlan();
+      return {
+        results: await probeTopologyConsumerPrefixes({
+          actions: prefixActions,
+          featureIdToOrderedPrefixPosition,
+          consumerFeatureIds: historicalConsumerIds.length > 0 ? historicalConsumerIds : consumerIds,
+          history: input.capabilities.history!,
+          includeHistoricalSignatures: historicalConsumerIds.length > 0,
+          requireFreshExecution: historicalConsumerIds.length > 0,
+        }),
+        featureIdToOrderedActionIndex,
+    };
+      };
+
+    let probedSketchPrefixes = await probeSketchPrefixes();
+    let prefixResults = probedSketchPrefixes.results;
+    const featureIdToOrderedActionIndexBySketchConsumerId = new Map(
+      prefixResults.map((result) => [
+        result.consumerFeatureId,
+        probedSketchPrefixes.featureIdToOrderedActionIndex,
+      ] as const),
+    );
+    // A face-backed sketch can only be lifted onto a live face that apply will
+    // actually present. When a sketch prefix does not rebuild, the prefix still
+    // contains a feature the live kernel refuses, so the probe exposes no live
+    // faces at all — a probe-session artifact, not a matching failure. Contain
+    // that refusal and re-probe once, so the prefix is the one apply will build.
+    // This is deliberately lazy: containment rebuilds the whole studio in the
+    // kernel, which the largest captures cannot afford on every iteration.
+    if (prefixResults.some((result) => result.status === "failed")) {
+      const containment = await containUnbuildableFeatures({ materializeBake: false });
+      if (containment.kind === "historical-retry-requested") return containment;
+      probedSketchPrefixes = await probeSketchPrefixes();
+      prefixResults = probedSketchPrefixes.results;
+      for (const result of prefixResults) {
+        featureIdToOrderedActionIndexBySketchConsumerId.set(
+          result.consumerFeatureId,
+          probedSketchPrefixes.featureIdToOrderedActionIndex,
+        );
+    }
+      }
+    let prefixByConsumerFeatureId = new Map(
+      prefixResults.map((result) => [result.consumerFeatureId, result]),
+    );
+    const historicalSketchConsumerIds = workingPlan.featurePlans.flatMap((featurePlan) => {
+      if (!sketchConsumerIds.has(featurePlan.onshapeFeatureId)) return [];
+      const prefixResult = prefixByConsumerFeatureId.get(featurePlan.onshapeFeatureId);
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      if (!feature || prefixResult?.status !== "rebuilt") return [];
+      const deterministicId = extractSketchPlaneDeterministicId(feature);
+      const records = deterministicId ? references.get(deterministicId) ?? [] : [];
+      const reference =
+        records.find(
+          (record) =>
+            record.evaluatedAt === "historyPoint" &&
+            record.consumingFeatureId === feature.featureId &&
+            "signature" in record,
+        ) ??
+        records.find((record) => record.evaluatedAt === "historyPoint" && "signature" in record) ??
+        records.find((record) => record.evaluatedAt === "finalState" && "signature" in record);
+      const capturedSignature =
+        reference && "signature" in reference
+          ? normalizeOnshapeTopologySignature(reference.signature)
+          : inferredSweptFaceSignature({ feature, read: input.read, plan: workingPlan });
+      if (!capturedSignature) return [];
+      const bodyScope = scopeLiveSignaturesToCapturedBody({
+        snapshot: topologyTimeline.snapshotBeforeFeature(featurePlan.onshapeFeatureId),
+        deterministicId,
+        liveSignatures: prefixResult.signatures,
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      });
+      return historicalRetryFeatureIds.has(featurePlan.onshapeFeatureId) ||
+        matchSignature(
+          capturedSignature,
+          bodyScope.signatures,
+          LIVE_TOPOLOGY_MATCH_TOLERANCE,
+        ).kind === "noMatch"
+        ? [featurePlan.onshapeFeatureId]
+        : [];
+    });
+    if (historicalSketchConsumerIds.length > 0) {
+      const historicalProbedSketchPrefixes = await probeSketchPrefixes(historicalSketchConsumerIds);
+      const historicalResults = historicalProbedSketchPrefixes.results;
+      prefixByConsumerFeatureId = new Map([
+        ...prefixByConsumerFeatureId,
+        ...historicalResults.map((result) => [result.consumerFeatureId, result] as const),
+      ]);
+      for (const result of historicalResults) {
+        featureIdToOrderedActionIndexBySketchConsumerId.set(
+          result.consumerFeatureId,
+          historicalProbedSketchPrefixes.featureIdToOrderedActionIndex,
+        );
+    }
+      }
+    const nextPlans: FeaturePlan[] = workingPlan.featurePlans.map((featurePlan) => {
+      if (forcedBakeFeatureIds.has(featurePlan.onshapeFeatureId)) return featurePlan;
+      if (
+        featurePlan.featureType !== "newSketch" ||
+        featurePlan.tier !== "baked" ||
+        !featurePlan.reasonCodes.includes("needs-history-probe")
+      ) {
+        if (
+          featurePlan.reasonCodes.includes("needs-history-probe") &&
+          featurePlan.featureType !== "newSketch"
+        ) {
+          return {
+            ...featurePlan,
+            reasonCodes: featurePlan.reasonCodes.map((reason) =>
+              reason === "needs-history-probe" ? "translator-unavailable" : reason,
+            ),
+          };
+        }
+        return featurePlan;
+      }
+
+      if (!OCC_KERNEL_CAPABILITIES.supportsDurableTopologyNaming) {
+        return {
+          ...featurePlan,
+          reasonCodes: ["topology-durable-naming-unavailable"],
+        };
+      }
+
+      const prefixResult = prefixByConsumerFeatureId.get(featurePlan.onshapeFeatureId);
+      const probeSignatures = prefixResult?.signatures ?? [];
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      const deterministicId = feature ? extractSketchPlaneDeterministicId(feature) : null;
+      const records = deterministicId ? references.get(deterministicId) ?? [] : [];
+      const historyReference = feature
+        ? records.find(
+            (record) =>
+              record.evaluatedAt === "historyPoint" &&
+              record.consumingFeatureId === feature.featureId &&
+              "signature" in record,
+          ) ??
+          records.find(
+            (record) => record.evaluatedAt === "historyPoint" && "signature" in record,
+          )
+        : undefined;
+      const finalStateReference = records.find(
+        (record) => record.evaluatedAt === "finalState" && "signature" in record,
+      );
+      const splitInterfaceQuery = feature
+        ? readExactSplitInterfaceFaceQuery(feature)
+        : null;
+      const splitInterfaceReference = historyReference ?? finalStateReference;
+      const splitInterfaceSignature = splitInterfaceReference && "signature" in splitInterfaceReference
+        ? splitInterfaceReference.signature
+        : null;
+      const splitInterfaceFrame = splitInterfaceSignature
+        ? frameFromCapturedSignature(splitInterfaceSignature)
+        : null;
+      if (splitInterfaceQuery && splitInterfaceFrame && splitInterfaceSignature) {
+        const placeholderSelector: ImportDeferredTopologyRef = {
+          kind: "topologyOf",
+          expectedKind: "face",
+          capturedSignature: normalizeOnshapeTopologySignature(splitInterfaceSignature),
+          tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+          source: {
+            consumerFeatureId: featurePlan.onshapeFeatureId,
+            parameterId: "sketchPlane",
+            deterministicId: `split-interface:${splitInterfaceQuery.profileSourceEntityId}`,
+          },
+        };
+        return {
+          ...featurePlan,
+          tier: "parametric" as const,
+          target: {
+            kind: "sketch" as const,
+            planeKey: "xy" as const,
+            plane: {
+              support: { kind: "face", bodyId: "body_pending" as BodyId, faceId: "face_pending" as FaceId },
+              frame: splitInterfaceFrame,
+              key: null,
+            },
+            probedFaceSelector: placeholderSelector,
+          },
+          reasonCodes: ["sketch-on-probed-face" as const],
+          suppressed: false,
+        };
+      }
+      if (!historyReference && finalStateReference) {
+        return {
+          ...featurePlan,
+          reasonCodes: ["sketch-face-on-checkpoint-body"],
+        };
+      }
+      // Every remaining exit is a bake. Record WHY (X.9.3 flywheel): without a
+      // detail these paths return the plan unchanged and the generic
+      // `needs-history-probe` copy hides the real next root cause.
+      const bakeSketchWithDetail = (detail: string): FeaturePlan => ({
+        ...featurePlan,
+        ...(featurePlan.reasonDetail ? {} : { reasonDetail: detail }),
+      });
+      // The sketch's own parametric prefix must rebuild before any live face can
+      // exist to match. Name the kernel's refusal (or the missing prefix position)
+      // rather than reporting an empty live prefix as a matching failure.
+      if (!prefixResult || prefixResult.status === "failed") {
+        return bakeSketchWithDetail(
+          prefixResult
+            ? prefixResult.diagnostics
+                .map((diagnostic) => `${diagnostic.code ?? "probe"}: ${diagnostic.message}`)
+                .join("; ") ||
+                "The sketch's parametric prefix did not rebuild in the probe session."
+            : "The sketch has no ordered prefix position in the prepared actions.",
+        );
+      }
+      const reference = historyReference ?? finalStateReference;
+      const capturedSignature =
+        reference && "signature" in reference
+          ? normalizeOnshapeTopologySignature(reference.signature)
+          : feature
+            ? inferredSweptFaceSignature({
+                feature,
+                read: input.read,
+                plan: workingPlan,
+              })
+            : null;
+      if (!capturedSignature) {
+        return bakeSketchWithDetail(
+          deterministicId
+            ? `No captured sketch-plane signature for ${deterministicId} (${records.length} reference records) and no swept-face signature could be inferred.`
+            : "The sketch feature declares no resolvable sketch-plane query id.",
+        );
+      }
+      const bodyScope = scopeLiveSignaturesToCapturedBody({
+        snapshot: topologyTimeline.snapshotBeforeFeature(featurePlan.onshapeFeatureId),
+        deterministicId,
+        liveSignatures: probeSignatures,
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      });
+      // Match with the same live-topology tolerance this selector carries into
+      // apply. Reviewing more strictly than apply rejects faces apply accepts.
+      const match = matchSignature(
+        capturedSignature,
+        bodyScope.signatures,
+        LIVE_TOPOLOGY_MATCH_TOLERANCE,
+      );
+      const requiresHistoricalLineage = historicalRetryFeatureIds.has(featurePlan.onshapeFeatureId);
+      if (match.kind !== "unique" || requiresHistoricalLineage) {
+        const historical = match.kind === "noMatch" || requiresHistoricalLineage
+          ? resolveHistoricalTopology({
+              expectedKind: "face",
+              capturedSignature,
+              historicalSteps: withHistoricalSourceFeatureIds(
+                prefixResult.historicalSignatureSteps,
+                featureIdToOrderedActionIndexBySketchConsumerId.get(
+                  featurePlan.onshapeFeatureId,
+                ) ?? new Map(),
+              ),
+              consumerSignatures: probeSignatures,
+              source: {
+                consumerFeatureId: featurePlan.onshapeFeatureId,
+                parameterId: "sketchPlane",
+                deterministicId: deterministicId ?? "historical-sketch-plane",
+              },
+            })
+          : null;
+        if (historical?.kind === "unique") {
+          const historicalSignature = probeSignatures.find(
+            (signature) => referenceKey(signature.reference) === referenceKey(historical.reference),
+          );
+          const historicalPlane = historicalSignature
+            ? planeFromProbeSignature(historicalSignature)
+            : null;
+          if (historicalPlane) {
+            return {
+              ...featurePlan,
+              tier: "parametric" as const,
+              target: {
+                kind: "sketch" as const,
+                planeKey: "xy" as const,
+                plane: historicalPlane,
+                probedFaceSelector: historical.selector,
+              },
+              reasonCodes: ["sketch-on-probed-face" as const],
+              suppressed: false,
+            };
+          }
+        }
+        const currentDetail = match.kind === "unique"
+          ? `Current geometric match ${durableRefLabel(match.reference)} was rejected after its apply-time rematch failure.`
+          : describeSketchPlaneMatchFailure(
+              match,
+              capturedSignature,
+              bodyScope.signatures,
+            );
+        return bakeSketchWithDetail(
+          `${currentDetail} || ${bodyScope.detail}${
+            historical && historical.kind !== "unique"
+              ? ` || ${historical.detail}`
+              : ""
+          }`,
+        );
+      }
+      const matchedReference = match.reference;
+      const probeSignature = probeSignatures.find(
+        (signature) => referenceKey(signature.reference) === referenceKey(matchedReference),
+      );
+      const plane = probeSignature ? planeFromProbeSignature(probeSignature) : null;
+      if (!plane) {
+        return bakeSketchWithDetail(
+          `The matched live face ${durableRefLabel(matchedReference)} exposes no planar frame (${
+            probeSignature
+              ? `${probeSignature.entityClass}/${probeSignature.geometryType}`
+              : "the probe signature was not found"
+          }).`,
+        );
+      }
+      const probedFaceSelector: ImportDeferredTopologyRef = {
+        kind: "topologyOf",
+        expectedKind: "face",
+        capturedSignature,
+        tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+        source: {
+          consumerFeatureId: featurePlan.onshapeFeatureId,
+          parameterId: "sketchPlane",
+          deterministicId: deterministicId ?? referenceKey(matchedReference),
+        },
+        // Apply rebuilds the same prefix, so the scoped body id is the same
+        // deterministic identity review matched against.
+        ...(bodyScope.liveBodyId === null
+          ? {}
+          : { bodyScope: bodyScope.liveBodyId }),
+      };
+      return {
+        ...featurePlan,
+        tier: "parametric" as const,
+        target: {
+          kind: "sketch" as const,
+          planeKey: "xy" as const,
+          plane,
+          probedFaceSelector,
+        },
+        reasonCodes: ["sketch-on-probed-face" as const],
+        suppressed: false,
+      };
+    });
+
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      await replanDependentFeatures({
+        read: input.read,
+        featurePlans: nextPlans,
+        profileVerifier: profileVerifierFor(input.capabilities),
+      }),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+
+    if (planFingerprint(workingPlan) === beforeIteration) break;
+  }
+
+  // Last-resort feature-level invariant: the fixed point degrades every
+  // unresolvable topology consumer, but should any extrude reach here still
+  // parametric with a live extent/scope `topologySlot`, degrade only that
+  // feature (and cascade its dependents) rather than letting a whole-studio
+  // prepare throw. `resolvedExtrudeExtent` remains a hard invariant behind this.
+  const swept = cascadeUnavailableActionConsumers(
+    bakeUnresolvedExtrudeTopology(workingPlan.featurePlans),
+  );
+  if (swept.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
+    workingPlan = recomputePlanWithFeaturePlans(
+      workingPlan,
+      await replanDependentFeatures({
+        read: input.read,
+        featurePlans: swept,
+        profileVerifier: profileVerifierFor(input.capabilities),
+      }),
+      input.read.studio.groundTruth.hasBodies,
+      input.read,
+    );
+  }
+
+  // Exact Split ownership is source-feature-relative during review. Once every
+  // producer and split-interface dependent is parametric, its provisional probe
+  // annotations are no longer a fidelity limitation; retain a clean promoted plan.
+  const exactSplitProducerFeatureIds = new Set<string>();
+  const collectExactSplitProducers = (value: unknown, target: Set<string>): void => {
+    if (!value || typeof value !== "object") return;
+    if ((value as { kind?: unknown }).kind === "bodyOfSourceFeature") {
+      const featureId = (value as { producerSourceFeatureId?: unknown }).producerSourceFeatureId;
+      if (typeof featureId === "string") target.add(featureId);
+      return;
+    }
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      collectExactSplitProducers(child, target);
+    }
+  };
+  const exactSplitFeatureIds = new Set<string>();
+  for (const featurePlan of workingPlan.featurePlans) {
+    if (featurePlan.plannedAdvancedSolid?.kind !== "split") continue;
+    const producerIds = new Set<string>();
+    collectExactSplitProducers(featurePlan.plannedAdvancedSolid, producerIds);
+    if (producerIds.size === 0) continue;
+    exactSplitFeatureIds.add(featurePlan.onshapeFeatureId);
+    for (const producerId of producerIds) exactSplitProducerFeatureIds.add(producerId);
+  }
+  if (exactSplitFeatureIds.size > 0) {
+    const exactSplitLineageIds = new Set(exactSplitProducerFeatureIds);
+    const pendingFeatureIds = [...exactSplitProducerFeatureIds];
+    while (pendingFeatureIds.length > 0) {
+      const featureId = pendingFeatureIds.pop()!;
+      const featurePlan = workingPlan.featurePlans.find((plan) => plan.onshapeFeatureId === featureId);
+      for (const inputFeatureId of featurePlan?.inputFeatureIds ?? []) {
+        if (!exactSplitLineageIds.has(inputFeatureId)) {
+          exactSplitLineageIds.add(inputFeatureId);
+          pendingFeatureIds.push(inputFeatureId);
+        }
+      }
+    }
+    for (const featurePlan of workingPlan.featurePlans) {
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      const splitInterface = feature ? readExactSplitInterfaceFaceQuery(feature) : null;
+      if (splitInterface && exactSplitFeatureIds.has(splitInterface.splitFeatureId)) {
+        exactSplitLineageIds.add(featurePlan.onshapeFeatureId);
+      }
+    }
+    const cleanedPlans = workingPlan.featurePlans.map((featurePlan) =>
+      featurePlan.tier === "parametric" && exactSplitLineageIds.has(featurePlan.onshapeFeatureId)
+        ? { ...featurePlan, reasonCodes: [], reasonDetail: undefined }
+        : featurePlan,
+    );
+    if (cleanedPlans.some((plan, index) => plan !== workingPlan.featurePlans[index])) {
+      workingPlan = recomputePlanWithFeaturePlans(
+        workingPlan,
+        cleanedPlans,
+        input.read.studio.groundTruth.hasBodies,
+        input.read,
+      );
+    }
+  }
+
+  // A checkpoint cannot validate a live topology consumer: it replaces the
+  // topology that consumer proved. Prefix probes are the only valid evidence
+  // for such a consumer. Once no repairable consumer remains, contain the
+  // no-checkpoint parametric sequence and then the remaining baked segments.
+  const hasRepairableTopologyConsumer = workingPlan.featurePlans.some(
+    (featurePlan) =>
+      featurePlan.tier === "parametric" &&
+      featurePlan.target.kind === "sketch" &&
+      featurePlan.target.probedFaceSelector !== undefined,
+  );
+  if (!hasRepairableTopologyConsumer) {
+    const parametricContainment = await containUnbuildableFeatures({ materializeBake: false });
+    if (parametricContainment.kind === "historical-retry-requested") return parametricContainment;
+    const containment = await containUnbuildableFeatures({ materializeBake: true });
+    if (containment.kind === "historical-retry-requested") return containment;
+  }
+  return { kind: "activated", plan: workingPlan, probeResult };
+}
+
+async function reviewStudio(
+  bundle: OnshapeCaptureBundle,
+  elementId: string,
+  rawCapabilities: ImportCapabilities,
+  read = readPartStudio(bundle, elementId),
+): Promise<OnshapeStudioReview> {
+  // Review probes the same prefixes repeatedly (once per topology consumer, once
+  // per fixed-point iteration). Memoizing on the exact prepared-action payload
+  // keeps the kernel evidence identical while paying for each distinct prefix
+  // rebuild only once.
+  const memoizedHistory = rawCapabilities.history
+    ? createMemoizedHistoryProbe(rawCapabilities.history)
+    : null;
+  const capabilities: ImportCapabilities = memoizedHistory
+    ? { ...rawCapabilities, history: memoizedHistory }
+    : rawCapabilities;
+  const planned = await planStudioFidelity(read, {
+    captureFormatVersion: bundle.formatVersion,
+    historyProbeAvailable: capabilities.history != null,
+    profileVerifier: profileVerifierFor(capabilities),
+  });
+  const basePlan =
+    bundle.formatVersion === 1 || read.studio.rollbackSnapshots === null
+      ? recomputePlanWithFeaturePlans(
+          planned,
+          planned.featurePlans.map((featurePlan) =>
+            featurePlan.reasonCodes.includes("needs-history-probe")
+              ? {
+                  ...featurePlan,
+                  reasonCodes: [
+                    ...featurePlan.reasonCodes,
+                    "topology-history-evidence-missing" as const,
+                    "topology-bake-snapshot-missing" as const,
+                  ],
+                }
+              : featurePlan,
+          ),
+          read.studio.groundTruth.hasBodies,
+        )
+      : planned;
+  // Captured-frame translation emits a real plane feature and rewires dependent
+  // sketches onto it through a deferred construction reference. A history probe
+  // validates the plane→sketch chain against the real kernel and demotes it back
+  // to baked if it does not resolve, so we only translate when a probe exists.
+  const capturedFramePlan = capabilities.history
+    ? await activateCapturedFrameTranslation({
+        read,
+        plan: basePlan,
+        profileVerifier: profileVerifierFor(capabilities),
+      })
+    : basePlan;
+  // Contain apply-time topology rematch failures at the feature level. A feature
+  // the review promoted parametrically can still be rejected when a probe applies
+  // it against the live OCC prefix (the captured signature no longer rematches).
+  // Demote only that feature to baked/suppressed with a specific reason and
+  // re-plan; its dependents cascade to baked on the retried probe pass. This keeps
+  // one rejected feature from aborting the whole studio import.
+  const forcedBakeFeatureIds = new Set<string>();
+  const forcedBakeReasonDetails = new Map<string, string>();
+  const historicalRetryFeatureIds = new Set<string>();
+  let retryPlan: OnshapeStudioPlan = capturedFramePlan;
+  const workingPlanRef = { current: retryPlan };
+  let activation: Extract<ProbeBackedPlanningActivation, { kind: "activated" }>;
+  try {
+    for (;;) {
+      try {
+        const result = await activateProbeBackedPlanning({
+          read,
+          plan: retryPlan,
+          capabilities,
+          forcedBakeFeatureIds,
+          forcedBakeReasonDetails,
+          historicalRetryFeatureIds,
+          workingPlanRef,
+          forgetFailedProbes: memoizedHistory?.forgetFailedEvaluations,
+        });
+        if (result.kind === "historical-retry-requested") {
+          historicalRetryFeatureIds.add(result.featureId);
+          // Historical resolution deliberately replans the selector from source
+          // evidence; a retained direct selector must not be re-used here.
+          retryPlan = capturedFramePlan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        const previousTiers = new Map(
+          retryPlan.featurePlans.map((featurePlan) => [
+            featurePlan.onshapeFeatureId,
+            featurePlan.tier,
+          ]),
+        );
+        if (result.plan.featurePlans.some(
+          (featurePlan) => previousTiers.get(featurePlan.onshapeFeatureId) !== featurePlan.tier,
+        )) {
+          retryPlan = result.plan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        activation = result;
+        break;
+      } catch (error) {
+        if (!isTopologyApplyRematchError(error)) throw error;
+        retryPlan = workingPlanRef.current;
+        const offendingFeatureId = error.selector.source.consumerFeatureId;
+        if (
+          error.selector.kind === "topologyOf" &&
+          !historicalRetryFeatureIds.has(offendingFeatureId)
+        ) {
+          historicalRetryFeatureIds.add(offendingFeatureId);
+          retryPlan = capturedFramePlan;
+          memoizedHistory?.forgetFailedEvaluations();
+          continue;
+        }
+        // Historical zero/many/conflict (or a second live failure) has now failed
+        // closed. Contain that one feature rather than weakening the selector.
+        if (forcedBakeFeatureIds.has(offendingFeatureId)) throw error;
+        forcedBakeFeatureIds.add(offendingFeatureId);
+        if (error.detail) {
+          forcedBakeReasonDetails.set(offendingFeatureId, error.detail);
+      }
+    }
+    }
+  } finally {
+    await memoizedHistory?.dispose?.();
+  }
+  const { plan, probeResult } = activation;
+  const sketchRelationshipSummaries = plan.featurePlans
+    .map((featurePlan) => {
+      const translation = projectSketchForPlan({ read, featurePlan });
+      return translation
+        ? {
+            featureId: featurePlan.onshapeFeatureId,
+            label: featurePlan.label,
+            summary: translation.relationshipSummary,
+          }
+        : null;
+    })
+    .filter(
+      (summary): summary is OnshapeSketchRelationshipReview => summary !== null,
+    );
+  const bakedCount = plan.featurePlans.filter((entry) => entry.tier === "baked").length;
+  return {
+    elementId: read.studio.elementId,
+    name: read.studio.name,
+    hasBodies: read.studio.groundTruth.hasBodies,
+    featurePlans: plan.featurePlans,
+    tierCounts: plan.tierCounts,
+    bakeStrategy: plan.bakeStrategy,
+    bakeDiagnostics: plan.bakeDiagnostics,
+    requiresStudioBake: plan.requiresStudioBake,
+    sketchRelationshipSummaries,
+    verification: verifyGroundTruth({
+      hasHistoryCapability: capabilities.history != null,
+      groundTruth: read.studio.groundTruth,
+      bakedCount,
+      probeResult,
+    }),
+  };
+}
+
+function extractVariable(
+  parameters: readonly unknown[] | undefined,
+): { name: string; expression: string | null } | null {
+  let name: string | null = null;
+  let expression: string | null = null;
+  for (const parameter of parameters ?? []) {
+    if (typeof parameter !== "object" || parameter === null) {
+      continue;
+    }
+    const parameterId = (parameter as { parameterId?: unknown }).parameterId;
+    const raw = parameter as { value?: unknown; expression?: unknown };
+    if (parameterId === "name" && typeof raw.value === "string") {
+      name = raw.value;
+    }
+    // Only the authored expression text is trusted; the captured evaluated
+    // value is intentionally ignored (it can be absent/zero in the bundle).
+    if (parameterId === "value" && typeof raw.expression === "string") {
+      expression = raw.expression;
+    }
+  }
+  return name ? { name, expression } : null;
+}
+
+function summaryField(id: string, label: string, value: string): FeatureEditorFormField {
+  return { kind: "summary", id, label, value };
+}
+
+const REVIEW_REASON_COPY: Record<PlanReasonCode, string> = {
+  "sketch-on-canonical-plane": "sketch is supported on a canonical plane",
+  "document-variable": "document variable was translated",
+  "needs-region-resolution": "sketch region could not be resolved",
+  "needs-history-probe": "requires captured history topology evidence",
+  "extrude-body-type-unsupported": "only solid and surface extrudes can import as parametric features",
+  "extrude-surface-operation-unsupported": "surface extrudes can only create a new sheet body, not a boolean result",
+  "extrude-surface-draft-unsupported": "surface extrudes cannot carry a draft angle",
+  "extrude-surface-profile-unresolved": "surface extrude open-curve profiles could not be resolved as durable sketch entities",
+  "extrude-default-scope-ambiguous": "default extrude scope affects more than one possible body",
+  "extrude-extent-topology-unresolved": "extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference",
+  "extrude-start-extent-unsupported": "extrude starts at an offset start plane, which is not supported yet",
+  "sketch-on-probed-face": "sketch is supported on a resolved face",
+  "sketch-face-on-checkpoint-body": "sketch plane face exists only on checkpoint-baked body geometry",
+  "sketch-on-captured-frame": "sketch is supported from its captured frame",
+  "plane-from-captured-frame": "plane was translated from its captured frame",
+  "sketch-on-translated-plane": "sketch is supported on a translated plane",
+  "captured-frame-unresolvable": "captured frame could not be resolved",
+  "translator-unavailable": "no translator is available for this feature",
+  "custom-feature": "custom feature is not supported",
+  "unsupported-feature": "feature type is not supported",
+  "downstream-of-baked": "depends on previously baked geometry",
+  "unreadable-feature": "feature parameters could not be read",
+  "revolve-operation-unsupported": "revolve operation or boolean body scope could not be represented",
+  "revolve-body-type-unsupported": "revolve body type is not supported",
+  "revolve-profile-unresolved": "revolve profile could not be resolved as parametric sketch regions",
+  "revolve-axis-unresolved": "revolve axis could not be resolved as a supported sketch line",
+  "revolve-extent-unsupported": "revolve extent could not be represented",
+  "thicken-requires-topology": "thicken requires face topology that cannot be materialized",
+  "sweep-path-unresolved": "sweep path must resolve to exactly one solved line, arc, or circle in another parametric sketch",
+  "loft-profile-unresolved": "each ordered loft profile must resolve to exactly one region on a parametric sketch",
+  "loft-guides-unsupported": "loft guide curves are not supported by the simple-form translator",
+  "loft-conditions-unsupported": "loft start and end conditions must use their defaults",
+  "loft-periodicity-unsupported": "periodic lofts are not supported by the simple-form translator",
+  "boolean-offset-unsupported": "boolean offset is not supported",
+  "boolean-operation-unsupported": "boolean operation is not supported",
+  "mirror-operation-unsupported": "mirror operation is not supported",
+  "mirror-plane-unresolved": "mirror plane could not be resolved",
+  "transform-copy-unsupported": "transform copy mode is not supported",
+  "transform-rotation-unsupported": "transform rotation is not supported",
+  "transform-rotation-angle-unreadable": "transform rotation angle could not be read",
+  "transform-rotation-axis-unresolved": "transform rotation axis could not be resolved",
+  "transform-translation-unreadable": "transform translation could not be read",
+  "transform-reference-unresolved": "transform reference could not be resolved",
+  "transform-type-unsupported": "transform type is not supported",
+  "split-face-tool-unsupported": "split with a face tool is not supported",
+  "split-one-side-unsupported": "one-sided split results are not supported",
+  "topology-query-unreadable": "topology selection query could not be read",
+  "topology-history-evidence-missing": "captured history topology evidence is missing",
+  "topology-source-query-unresolved": "topology source query could not be resolved",
+  "topology-source-kind-mismatch": "topology selection has the wrong kind",
+  "topology-reference-no-match": "topology reference did not match",
+  "topology-reference-ambiguous": "topology reference matched more than one target",
+  "topology-durable-naming-unavailable": "feature is understood, but durable topology naming is not qualified",
+  "topology-upstream-baked": "topology source depends on baked geometry",
+  "topology-apply-rematch-failed": "topology reference could not be rematched while applying",
+  "extrude-boolean-severs-target-body":
+    "the boolean split its target body into several solids, which this operation cannot replace parametrically",
+  "feature-kernel-build-failed":
+    "the modeling kernel could not build this feature against the live prefix",
+  "topology-bake-snapshot-missing": "rollback bake snapshot is missing",
+  "bake-segment-boundary-snapshot-missing": "bake segment boundary snapshot is missing",
+  "bake-segment-boundary-tessellation-unreadable": "bake segment boundary tessellation is unreadable",
+  "bake-segment-body-unreachable": "bake segment body is not reachable from the current checkpoint ledger",
+  "bake-segment-body-attribution-ambiguous": "bake segment body attribution is ambiguous",
+  "bake-segment-replacement-scope-unresolved": "bake segment replacement scope could not be proved",
+  "bake-segment-empty-output-unsupported": "deletion-only bake segment cannot be represented",
+  "fillet-radius-unreadable": "fillet radius could not be read",
+  "fillet-tangent-propagation-disabled-unsupported": "fillet with tangent propagation disabled is not supported",
+  "chamfer-tangent-propagation-disabled-unsupported": "chamfer with tangent propagation disabled is not supported",
+  "chamfer-method-unsupported": "chamfer method is not supported",
+  "chamfer-style-unsupported": "chamfer style is not supported",
+  "chamfer-direction-overrides-unsupported": "chamfer direction overrides are not supported",
+  "chamfer-width-unreadable": "chamfer width could not be read",
+  "shell-non-hollow-unsupported": "selected-face non-hollow shell is not supported",
+  "shell-hollow-without-openings": "hollow shell without removed faces is not supported",
+  "shell-closed-hollow-direction-unsupported": "closed hollow shell must offset its cavity inward",
+  "shell-thickness-unreadable": "shell thickness could not be read",
+  "hole-style-unsupported": "hole style is not supported",
+  "hole-thread-unsupported": "threaded, tapped, and clearance holes are not supported",
+  "hole-diameter-unreadable": "hole diameter could not be read",
+  "hole-location-unresolved": "hole sketch-point locations could not be resolved",
+  "hole-depth-unreadable": "blind hole depth could not be read",
+  "hole-counterbore-parameters-unreadable": "counterbore diameter or depth could not be read",
+  "hole-countersink-parameters-unreadable": "countersink diameter or angle could not be read",
+  "hole-termination-unsupported": "hole termination is not supported",
+  "hole-scope-unresolved": "hole body scope could not be resolved",
+  "hole-executor-unavailable": "legacy hole capture had no executable hole path",
+  "sheet-metal-unsupported": "sheet metal is not supported parametrically",
+  "surface-modeling-unsupported": "surface modeling is not supported parametrically",
+  "curve-modeling-unsupported": "curve modeling is not supported parametrically",
+  "primitive-unsupported": "this primitive is outside the importer scope",
+  "annotation-meta-unsupported": "annotation or metadata is not modeled",
+  "part-operation-unsupported": "this part operation is outside the importer scope",
+  "pattern-unsupported": "this pattern family is outside the importer scope",
+  "pattern-type-unsupported": "this pattern type is not supported parametrically",
+  "pattern-operation-unsupported": "this pattern boolean operation is not supported parametrically",
+  "pattern-seed-unresolved": "pattern seed bodies could not be resolved",
+  "pattern-direction-unresolved": "linear pattern direction could not be resolved",
+  "pattern-axis-unresolved": "circular pattern axis could not be resolved",
+  "pattern-count-unreadable": "pattern instance count could not be read",
+  "pattern-spacing-unreadable": "linear pattern spacing could not be read",
+  "pattern-angle-unreadable": "circular pattern angle could not be read",
+  "pattern-second-direction-unsupported": "linear pattern second direction is not supported",
+  "pattern-centered-unsupported": "centered body patterns are not supported",
+  "pattern-skipping-unsupported": "skipped pattern instances are not supported",
+  "pattern-feature-seed-unsupported": "feature-seed patterns are not supported parametrically",
+  "tolerance-unsupported": "tolerance metadata is not modeled",
+};
+
+function reviewReasonCopy(reason: PlanReasonCode): string {
+  return REVIEW_REASON_COPY[reason];
+}
+
+function featureLabelById(studio: OnshapeStudioReview, featureId: string): string {
+  return studio.featurePlans.find((plan) => plan.onshapeFeatureId === featureId)?.label ?? featureId;
+}
+
+function bakeStrategyReviewValue(studio: OnshapeStudioReview): string {
+  switch (studio.bakeStrategy.kind) {
+    case "none":
+      return "None — no baked-body checkpoints are required.";
+    case "segments":
+      return `Segmented — ${studio.bakeStrategy.segments.length} baked-body checkpoint${studio.bakeStrategy.segments.length === 1 ? "" : "s"}.`;
+    case "wholeStudioLegacy": {
+      const reason = {
+        "capture-v1": "capture format v1 has no rollback checkpoints",
+        "rollback-snapshots-absent": "rollback snapshots are absent",
+        "history-probe-unavailable": "exact-prefix history probing is unavailable",
+        "segment-preflight-failed": "segment preflight could not prove a safe checkpoint",
+      }[studio.bakeStrategy.reason];
+      return `Legacy whole-studio bake — ${reason}.`;
+    }
+  }
+}
+
+function bodySetReviewValue(bodyIds: readonly string[]): string {
+  return bodyIds.length > 0 ? bodyIds.join(", ") : "none";
+}
+
+function downstreamParametricLabels(
+  studio: OnshapeStudioReview,
+  segment: Extract<StudioPlan["bakeStrategy"], { kind: "segments" }>["segments"][number],
+): string[] {
+  const satisfiedProducerIds = new Set([
+    ...segment.featureIds,
+    ...segment.replacementProducerFeatureIds,
+  ]);
+  return studio.featurePlans
+    .filter((plan) =>
+      plan.tier === "parametric" &&
+      plan.inputDependencies.some(
+        (dependency) =>
+          dependency.kind === "body" && satisfiedProducerIds.has(dependency.featureId),
+      )
+    )
+    .map((plan) => plan.label);
+}
+
+function bakeSegmentFields(studio: OnshapeStudioReview): FeatureEditorFormField[] {
+  const fields: FeatureEditorFormField[] = [
+    summaryField("bake-strategy", "Strategy", bakeStrategyReviewValue(studio)),
+    summaryField(
+      "bake-checkpoint-count",
+      "Checkpoint summary",
+      `${studio.bakeStrategy.kind === "segments" ? studio.bakeStrategy.segments.length : 0} checkpoint${studio.bakeStrategy.kind === "segments" && studio.bakeStrategy.segments.length === 1 ? "" : "s"}; ${studio.tierCounts.parametric} parametric, ${studio.tierCounts.baked} baked, ${studio.tierCounts.geometryOnly} geometry-only features.`,
+    ),
+  ];
+
+  if (studio.bakeStrategy.kind === "segments") {
+    studio.bakeStrategy.segments.forEach((segment, index) => {
+      const downstream = downstreamParametricLabels(studio, segment);
+      fields.push(summaryField(
+        `bake-segment-${index + 1}`,
+        `Checkpoint ${index + 1} — ${featureLabelById(studio, segment.boundaryFeatureId)}`,
+        `Feature span: ${featureLabelById(studio, segment.fromFeatureId)} → ${featureLabelById(studio, segment.toFeatureId)}; output bodies: ${bodySetReviewValue(segment.checkpointBodyDeterministicIds)}; consumed: ${bodySetReviewValue(segment.consumedBodyDeterministicIds)}; carried: ${bodySetReviewValue(segment.carriedBodyDeterministicIds)}; replaces ${segment.replacementProducerFeatureIds.length} prior producer action${segment.replacementProducerFeatureIds.length === 1 ? "" : "s"}; downstream parametric continuation: ${downstream.length > 0 ? downstream.join(", ") : "none declared"}; tessellation-backed checkpoint; preflight limitations: none.`,
+      ));
+    });
+  }
+
+  for (const diagnostic of studio.bakeDiagnostics) {
+    fields.push(summaryField(
+      `bake-diagnostic-${diagnostic.segmentId}-${diagnostic.featureId}`,
+      `Checkpoint limitation — ${featureLabelById(studio, diagnostic.featureId)}`,
+      `${reviewReasonCopy(diagnostic.code)}. ${diagnostic.message}`,
+    ));
+  }
+  return fields;
+}
+
+function reviewFeatureDiagnostic(plan: FeaturePlan, studio: OnshapeStudioReview): string {
+  const status = plan.suppressed ? " (suppressed)" : "";
+  const reasons = plan.reasonCodes.length > 0
+    ? plan.reasonCodes.map(reviewReasonCopy).join("; ")
+    : "translated parametrically";
+  const segment = studio.bakeStrategy.kind === "segments"
+    ? studio.bakeStrategy.segments.find((candidate) =>
+        candidate.featureIds.includes(plan.onshapeFeatureId)
+      )
+    : undefined;
+  const segmentIndex = segment && studio.bakeStrategy.kind === "segments"
+    ? studio.bakeStrategy.segments.indexOf(segment) + 1
+    : 0;
+  const segmentStatus = segment
+    ? plan.tier === "baked"
+      ? ` — represented by bake segment ${segmentIndex}; intrinsic reason retained above`
+      : plan.suppressed
+        ? ` — source-suppressed in bake segment ${segmentIndex}; no checkpoint geometry created for this row`
+        : plan.target.kind === "variable" || plan.target.kind === "sketch" || plan.target.kind === "plane"
+          ? ` — pass-through in bake segment ${segmentIndex}; no checkpoint geometry created for this row`
+          : ""
+    : "";
+  const dependencySegment = studio.bakeStrategy.kind === "segments"
+    ? studio.bakeStrategy.segments.find((candidate) => {
+        const producerIds = new Set([
+          ...candidate.featureIds,
+          ...candidate.replacementProducerFeatureIds,
+        ]);
+        return plan.tier === "parametric" && plan.inputDependencies.some(
+          (dependency) =>
+            dependency.kind === "body" && producerIds.has(dependency.featureId),
+        );
+      })
+    : undefined;
+  const dependencyStatus = dependencySegment && studio.bakeStrategy.kind === "segments"
+    ? ` — body dependency satisfied by checkpoint ${studio.bakeStrategy.segments.indexOf(dependencySegment) + 1} (${dependencySegment.segmentId})`
+    : "";
+  const detail = plan.reasonDetail ? ` [${plan.reasonDetail}]` : "";
+  return `${plan.tier}${status} — ${reasons}${detail}${segmentStatus}${dependencyStatus}`;
+}
+
+function sanitizeCorrelationPart(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+interface DecodedSketchEntityProvenance {
+  sourceFeatureId: string;
+  sourceEntityId: string;
+  geometryKind: "point" | "lineSegment";
+}
+
+function decodedSketchEntityProvenance(
+  read: ReturnType<typeof readPartStudio>,
+): ReadonlyMap<string, DecodedSketchEntityProvenance | null> {
+  const byDeterministicId = new Map<string, DecodedSketchEntityProvenance | null>();
+  for (const feature of read.features) {
+    for (const constraint of feature.constraints ?? []) {
+      for (const parameter of constraint.parameters) {
+        for (const query of parameter.queries ?? []) {
+          const fields = readCompressedQueryLiteralFields(query.queryString);
+          if (!fields) continue;
+          const field = (name: string) => {
+            const index = fields.findIndex((parts) => parts.length === 1 && parts[0] === name);
+            return index >= 0 ? fields[index + 1] ?? [] : [];
+          };
+          const operationId = field("operationId");
+          const sourceEntityId = field("sketchEntityId")[0];
+          const entityType = field("entityType")[0];
+          const queryType = field("queryType")[0];
+          const sourceFeatureId = operationId[1] === "wireOp" ? operationId[0] : undefined;
+          const geometryKind = entityType === "EDGE"
+            ? "lineSegment"
+            : entityType === "VERTEX"
+              ? "point"
+              : null;
+          if (!sourceFeatureId || !sourceEntityId || queryType !== "SKETCH_ENTITY" || !geometryKind) continue;
+          const provenance = { sourceFeatureId, sourceEntityId, geometryKind } as const;
+          for (const deterministicId of query.deterministicIds) {
+            const existing = byDeterministicId.get(deterministicId);
+            byDeterministicId.set(
+              deterministicId,
+              existing === undefined ||
+                (existing !== null && existing.sourceFeatureId === provenance.sourceFeatureId &&
+                  existing.sourceEntityId === provenance.sourceEntityId &&
+                  existing.geometryKind === provenance.geometryKind)
+                ? provenance
+                : null,
+            );
+          }
+        }
+      }
+    }
+  }
+  return byDeterministicId;
+}
+
+function finiteVector3(value: unknown): readonly [number, number, number] | null {
+  return Array.isArray(value) && value.length === 3 && value.every(
+    (entry) => typeof entry === "number" && Number.isFinite(entry),
+  )
+    ? value as unknown as readonly [number, number, number]
+    : null;
+}
+
+function lineVerificationGeometry(
+  signature: OnshapeGeometricSignature,
+): SketchExternalReferenceVerificationGeometry | null {
+  const origin = finiteVector3(signature.definingData?.origin);
+  const direction = finiteVector3(signature.definingData?.direction);
+  const low = finiteVector3(signature.boundingBox?.low);
+  const high = finiteVector3(signature.boundingBox?.high);
+  if (!origin || !direction || !low || !high) return null;
+
+  let minimum = Number.NEGATIVE_INFINITY;
+  let maximum = Number.POSITIVE_INFINITY;
+  for (let axis = 0; axis < 3; axis += 1) {
+    const component = direction[axis]!;
+    if (Math.abs(component) <= 1e-12) {
+      if (origin[axis]! < low[axis]! - 1e-12 || origin[axis]! > high[axis]! + 1e-12) return null;
+      continue;
+    }
+    const first = (low[axis]! - origin[axis]!) / component;
+    const second = (high[axis]! - origin[axis]!) / component;
+    minimum = Math.max(minimum, Math.min(first, second));
+    maximum = Math.min(maximum, Math.max(first, second));
+  }
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum - minimum <= 1e-12) return null;
+  const pointAt = (parameter: number): readonly [number, number, number] => [
+    origin[0] + parameter * direction[0],
+    origin[1] + parameter * direction[1],
+    origin[2] + parameter * direction[2],
+  ];
+  return { kind: "lineSegment", start3d: pointAt(minimum), end3d: pointAt(maximum) };
+}
+
+function sketchVerificationGeometry(input: {
+  read: ReturnType<typeof readPartStudio>;
+  provenance: DecodedSketchEntityProvenance;
+}): SketchExternalReferenceVerificationGeometry | null {
+  const entity = input.read.solvedSketchesByFeatureId
+    .get(input.provenance.sourceFeatureId)
+    ?.entities.find((candidate) => candidate.entityId === input.provenance.sourceEntityId);
+  if (!entity) return null;
+  if (
+    input.provenance.geometryKind === "lineSegment" &&
+    entity.entityType === "lineSegment" &&
+    entity.start3d &&
+    entity.end3d
+  ) {
+    return { kind: "lineSegment", start3d: entity.start3d, end3d: entity.end3d };
+  }
+  if (
+    input.provenance.geometryKind === "point" &&
+    entity.entityType === "point" &&
+    entity.center3d
+  ) {
+    return { kind: "point", position3d: entity.center3d };
+  }
+  return null;
+}
+
+/**
+ * Every B-rep vertex is a facet vertex of the captured face tessellation, so a
+ * body vertex or line edge must have a facet vertex at each defining point.
+ */
+function capturedBodyWitnessesGeometry(
+  snapshot: RollbackTopologySnapshot | null,
+  geometry: SketchExternalReferenceVerificationGeometry,
+): boolean {
+  const body = snapshot?.bodies.length === 1 ? snapshot.bodies[0]! : null;
+  if (!body) return false;
+  // Captured coordinates are metres; the live rematch tolerance is millimetres.
+  const tolerance = LIVE_TOPOLOGY_MATCH_TOLERANCE.linear / 1000;
+  const points = geometry.kind === "point"
+    ? [geometry.position3d]
+    : [geometry.start3d, geometry.end3d];
+  return points.every((point) =>
+    body.faces.some((face) =>
+      face.facets.some((facet) =>
+        facet.vertices.some((vertex) =>
+          Math.hypot(
+            vertex[0] - point[0],
+            vertex[1] - point[1],
+            vertex[2] - point[2],
+          ) <= tolerance
+        )
+      )
+    )
+  );
+}
+
+/**
+ * Classify captured sketch references using query provenance or a unique prior
+ * body witness. Every result is an Onshape constraint target, so it is marked
+ * `constraintTargetOnly` (see `SketchReferenceDefinition`).
+ */
+export function classifySketchExternalReferences(input: {
+  read: ReturnType<typeof readPartStudio>;
+  consumerFeatureId: string;
+  orderedIndexByFeatureId: ReadonlyMap<string, number>;
+}): ReadonlyMap<string, SketchExternalReference> {
+  const consumer = input.read.features.find((feature) => feature.featureId === input.consumerFeatureId);
+  if (!consumer) return new Map();
+  const featureOrder = new Map(input.read.features.map((feature, index) => [feature.featureId, index]));
+  const consumerOrder = featureOrder.get(input.consumerFeatureId) ?? -1;
+  const provenanceById = decodedSketchEntityProvenance(input.read);
+  const timeline = createRollbackTopologyTimeline({
+    featureIds: input.read.features.map((feature) => feature.featureId),
+    snapshots: input.read.studio.rollbackSnapshots,
+  });
+  const occurrencesById = new Map<string, Set<string>>();
+  for (const feature of input.read.features) {
+    for (const constraint of feature.constraints ?? []) {
+      for (const parameter of constraint.parameters) {
+        for (const deterministicId of parameter.queries?.flatMap((query) => query.deterministicIds) ?? []) {
+          const consumers = occurrencesById.get(deterministicId) ?? new Set<string>();
+          consumers.add(feature.featureId);
+          occurrencesById.set(deterministicId, consumers);
+        }
+      }
+    }
+  }
+
+  const references = new Map<string, SketchExternalReference>();
+  const consumerIds = new Set(
+    consumer.constraints?.flatMap((constraint) => constraint.parameters.flatMap((parameter) =>
+      parameter.queries?.flatMap((query) => query.deterministicIds) ?? [],
+    )) ?? [],
+  );
+  for (const deterministicId of consumerIds) {
+    const provenance = provenanceById.get(deterministicId);
+    if (provenance) {
+      const sourceOrder = featureOrder.get(provenance.sourceFeatureId) ?? Number.MAX_SAFE_INTEGER;
+      const actionIndex = input.orderedIndexByFeatureId.get(provenance.sourceFeatureId);
+      const verificationGeometry = sketchVerificationGeometry({ read: input.read, provenance });
+      if (sourceOrder >= consumerOrder || actionIndex === undefined || !verificationGeometry) continue;
+      const referenceId = `ref_${sanitizeCorrelationPart(input.consumerFeatureId)}_${sanitizeCorrelationPart(deterministicId)}` as ReferenceId;
+      references.set(deterministicId, {
+        geometryKind: provenance.geometryKind,
+        verificationGeometry,
+        definition: {
+          referenceId,
+          kind: "sketchReference",
+          label: deterministicId,
+          projectionMode: "useExistingCoplanarGeometry",
+          // Onshape constraint targets never bound regions; only Use creates
+          // sketch geometry, and Use entities translate as local geometry.
+          constraintTargetOnly: true,
+          source: {
+            kind: "sketchEntity",
+            sketchId: { kind: "sketchIdOf", actionIndex },
+            entityId: importedOnshapeSketchEntityId(
+              provenance.sourceFeatureId,
+              provenance.sourceEntityId,
+            ),
+          },
+        },
+      });
+      continue;
+    }
+    // An ID with decoded but conflicting sketch provenance is not eligible for body fallback.
+    if (provenance === null) continue;
+    const occurrenceConsumers = occurrencesById.get(deterministicId) ?? new Set();
+    const occurrenceSignatures = new Map<string, ReturnType<typeof normalizeOnshapeTopologySignature>>();
+    let hasAuthoritativeBodyWitnesses = true;
+    for (const featureId of occurrenceConsumers) {
+      if (timeline.snapshotBeforeFeature(featureId)?.bodies.length !== 1) {
+        hasAuthoritativeBodyWitnesses = false;
+        break;
+      }
+      const records = input.read.studio.resolvedReferences.filter((reference) =>
+        reference.deterministicId === deterministicId &&
+        reference.evaluatedAt === "historyPoint" &&
+        reference.consumingFeatureId === featureId &&
+        "signature" in reference,
+      );
+      if (records.length !== 1 || !("signature" in records[0]!)) {
+        hasAuthoritativeBodyWitnesses = false;
+        break;
+      }
+      occurrenceSignatures.set(
+        featureId,
+        normalizeOnshapeTopologySignature(records[0]!.signature),
+      );
+    }
+    if (!hasAuthoritativeBodyWitnesses) continue;
+    const signature = occurrenceSignatures.get(input.consumerFeatureId);
+    if (!signature) continue;
+    const geometryKind = signature.entityClass === "vertex"
+      ? "point"
+      : signature.entityClass === "edge" && signature.geometryType === "line"
+        ? "lineSegment"
+        : null;
+    if (
+      !geometryKind ||
+      [...occurrenceSignatures.values()].some((occurrenceSignature) =>
+        geometryKind === "point"
+          ? occurrenceSignature.entityClass !== "vertex"
+          : occurrenceSignature.entityClass !== "edge" || occurrenceSignature.geometryType !== "line"
+      )
+    ) continue;
+    const capturedSignatureRecord = input.read.studio.resolvedReferences.find((reference) =>
+      reference.deterministicId === deterministicId &&
+      reference.evaluatedAt === "historyPoint" &&
+      reference.consumingFeatureId === input.consumerFeatureId &&
+      "signature" in reference
+    );
+    if (!capturedSignatureRecord || !("signature" in capturedSignatureRecord)) continue;
+    const capturedCentroid = finiteVector3(capturedSignatureRecord.signature.centroid);
+    const verificationGeometry = geometryKind === "point"
+      ? (capturedCentroid
+          ? { kind: "point" as const, position3d: capturedCentroid }
+          : null)
+      : lineVerificationGeometry(capturedSignatureRecord.signature);
+    if (!verificationGeometry) continue;
+    // An ID without decoded provenance may equally name another sketch's
+    // vertex/edge (9841 JHo is a Screen Outline corner). Body fallback is only
+    // sound when the captured body before the consumer has a B-rep vertex at
+    // every defining point, at the tolerance the apply-time rematch uses.
+    if (!capturedBodyWitnessesGeometry(
+      timeline.snapshotBeforeFeature(input.consumerFeatureId),
+      verificationGeometry,
+    )) continue;
+    const referenceId = `ref_${sanitizeCorrelationPart(input.consumerFeatureId)}_${sanitizeCorrelationPart(deterministicId)}` as ReferenceId;
+    references.set(deterministicId, {
+      geometryKind,
+      verificationGeometry,
+      definition: {
+        referenceId,
+        kind: "modelReference",
+        label: deterministicId,
+        projectionMode: "projectAlongPlaneNormal",
+        constraintTargetOnly: true,
+        source: {
+          kind: "topologyOf",
+          expectedKind: geometryKind === "point" ? "vertex" : "edge",
+          capturedSignature: signature,
+          tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+          source: {
+            consumerFeatureId: input.consumerFeatureId,
+            parameterId: "externalSketchReference",
+            deterministicId,
+          },
+        },
+      },
+    });
+  }
+  return references;
+}
+
+function authoredLineParameterDirections(input: {
+  feature: ReturnType<typeof readPartStudio>["features"][number] | undefined;
+  sourceFrame: SketchPlaneFrame | undefined;
+  plane: SketchPlaneDefinition | undefined;
+  planeKey: "xy" | "yz" | "xz";
+}): ReadonlyMap<string, readonly [number, number]> {
+  if (!input.feature || !input.sourceFrame) return new Map();
+  const rawEntities = (input.feature as unknown as { entities?: unknown }).entities;
+  if (!Array.isArray(rawEntities)) return new Map();
+
+  const project = (point: readonly [number, number, number]) =>
+    input.plane
+      ? projectPointToSketchPlane(point, input.plane)
+      : projectPointToPlane(point, input.planeKey);
+  const sourceOrigin: readonly [number, number, number] = [
+    input.sourceFrame.origin[0] / 1000,
+    input.sourceFrame.origin[1] / 1000,
+    input.sourceFrame.origin[2] / 1000,
+  ];
+  const directions = new Map<string, readonly [number, number]>();
+  for (const rawEntity of rawEntities) {
+    if (!rawEntity || typeof rawEntity !== "object") continue;
+    const entity = rawEntity as {
+      entityId?: unknown;
+      startParam?: unknown;
+      endParam?: unknown;
+      geometry?: { dirX?: unknown; dirY?: unknown };
+    };
+    const { entityId, startParam, endParam } = entity;
+    const dirX = entity.geometry?.dirX;
+    const dirY = entity.geometry?.dirY;
+    if (
+      typeof entityId !== "string" ||
+      typeof startParam !== "number" || !Number.isFinite(startParam) ||
+      typeof endParam !== "number" || !Number.isFinite(endParam) ||
+      typeof dirX !== "number" || !Number.isFinite(dirX) ||
+      typeof dirY !== "number" || !Number.isFinite(dirY)
+    ) {
+      continue;
+    }
+    const parameterDelta = endParam - startParam;
+    const localDirection: readonly [number, number] = [
+      dirX * parameterDelta,
+      dirY * parameterDelta,
+    ];
+    if (localDirection[0] === 0 && localDirection[1] === 0) continue;
+    const worldEnd: readonly [number, number, number] = [
+      sourceOrigin[0] +
+        input.sourceFrame.xAxis[0] * localDirection[0] +
+        input.sourceFrame.yAxis[0] * localDirection[1],
+      sourceOrigin[1] +
+        input.sourceFrame.xAxis[1] * localDirection[0] +
+        input.sourceFrame.yAxis[1] * localDirection[1],
+      sourceOrigin[2] +
+        input.sourceFrame.xAxis[2] * localDirection[0] +
+        input.sourceFrame.yAxis[2] * localDirection[1],
+    ];
+    const projectedStart = project(sourceOrigin);
+    const projectedEnd = project(worldEnd);
+    directions.set(entityId, [
+      projectedEnd[0] - projectedStart[0],
+      projectedEnd[1] - projectedStart[1],
+    ]);
+  }
+  return directions;
+}
+
+function projectSketchForPlan(input: {
+  read: ReturnType<typeof readPartStudio>;
+  featurePlan: FeaturePlan;
+  orderedIndexByFeatureId?: ReadonlyMap<string, number>;
+  deferExternalReferences?: boolean;
+  externalReferences?: ReadonlyMap<string, SketchExternalReference>;
+}): ReturnType<typeof translateSketch> | null {
+  if (input.featurePlan.target.kind !== "sketch") {
+    return null;
+  }
+  const feature = input.read.features.find(
+    (candidate) => candidate.featureId === input.featurePlan.onshapeFeatureId,
+  );
+  const planeKey = input.featurePlan.target.planeKey;
+  const plane = input.featurePlan.target.plane ??
+    (input.featurePlan.target.capturedFrame
+      ? {
+          support: {
+            kind: "construction" as const,
+            constructionId: `construction_pending_${input.featurePlan.onshapeFeatureId}` as ConstructionId,
+          },
+          frame: input.featurePlan.target.capturedFrame,
+          key: null,
+        }
+      : undefined);
+  const solved = input.read.solvedSketchesByFeatureId.get(
+    input.featurePlan.onshapeFeatureId,
+  );
+  const authoredDirections = authoredLineParameterDirections({
+    feature,
+    sourceFrame: solved?.sketchFrame,
+    plane,
+    planeKey,
+  });
+  const entities: SolvedSketchEntityGeometry[] = (solved?.entities ?? []).map(
+    (curve) => ({
+      ...(authoredDirections.has(curve.entityId)
+        ? { authoredParameterDirection: authoredDirections.get(curve.entityId)! }
+        : {}),
+      entityId: curve.entityId,
+      entityType: curve.entityType,
+      isConstruction: curve.isConstruction,
+      start: curve.start3d
+        ? plane
+          ? projectPointToSketchPlane(curve.start3d, plane)
+          : projectPointToPlane(curve.start3d, planeKey)
+        : undefined,
+      end: curve.end3d
+        ? plane
+          ? projectPointToSketchPlane(curve.end3d, plane)
+          : projectPointToPlane(curve.end3d, planeKey)
+        : undefined,
+      center: curve.center3d
+        ? plane
+          ? projectPointToSketchPlane(curve.center3d, plane)
+          : projectPointToPlane(curve.center3d, planeKey)
+        : undefined,
+      radius: curve.radius === undefined ? undefined : curve.radius * 1000,
+    }),
+  );
+  const externalReferences = input.externalReferences ?? (input.deferExternalReferences
+    ? new Map<string, SketchExternalReference>()
+    : classifySketchExternalReferences({
+        read: input.read,
+        consumerFeatureId: input.featurePlan.onshapeFeatureId,
+        orderedIndexByFeatureId: input.orderedIndexByFeatureId ?? new Map(),
+      }));
+  return translateSketch({
+    featureId: input.featurePlan.onshapeFeatureId,
+    label: input.featurePlan.label,
+    planeKey,
+    plane,
+    sourceFrame: solved?.sketchFrame,
+    entities,
+    externalReferences,
+    constraints: feature?.constraints,
+    sourceSolveStatus: solved?.sketchSolveStatus,
+  });
+}
+
+type OnshapeStudioPlan = Pick<
+  Awaited<ReturnType<typeof planStudioFidelity>>,
+  | "featurePlans"
+  | "tierCounts"
+  | "bakeStrategy"
+  | "bakeDiagnostics"
+  | "requiresStudioBake"
+>;
+
+function isHistoricalTopologyPlanSelector(
+  selector: unknown,
+): selector is HistoricalTopologyPlanSelector {
+  return Boolean(
+    selector &&
+      typeof selector === "object" &&
+      (selector as { kind?: unknown }).kind === "historicalTopologyOf" &&
+      typeof (selector as { witnessSourceFeatureId?: unknown }).witnessSourceFeatureId === "string" &&
+      Array.isArray((selector as { successorSourceFeatureIds?: unknown }).successorSourceFeatureIds),
+  );
+}
+
+/** Replace exploratory review indexes with this prepared sequence's source actions. */
+export function rebaseHistoricalTopologySelectorForPreparedActions(input: {
+  selector: HistoricalTopologyPlanSelector;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): import("@/contracts/import/actions").ImportDeferredHistoricalTopologyRef {
+  const rebase = (sourceFeatureId: string, role: string): number => {
+    const actionIndexes = input.actionIndexesBySourceFeatureId.get(sourceFeatureId) ?? [];
+    if (actionIndexes.length !== 1) {
+      throw new Error(
+        `Historical topology ${role} source feature ${sourceFeatureId} for ${input.selector.source.consumerFeatureId}:${input.selector.source.parameterId}:${input.selector.source.deterministicId} must map to exactly one emitted action (found ${actionIndexes.length}).`,
+      );
+    }
+    const actionIndex = actionIndexes[0]!;
+    if (actionIndex >= input.consumerActionIndex || !input.orderedActions[actionIndex]) {
+      throw new Error(
+        `Historical topology ${role} source feature ${sourceFeatureId} must map to one prior emitted action.`,
+      );
+    }
+    return actionIndex;
+  };
+  const witnessActionIndex = rebase(input.selector.witnessSourceFeatureId, "witness");
+  const successorActionIndexes = input.selector.successorSourceFeatureIds.map(
+    (sourceFeatureId) => rebase(sourceFeatureId, "successor"),
+  );
+  if (successorActionIndexes.some((index, position) =>
+    index <= (position === 0 ? witnessActionIndex : successorActionIndexes[position - 1]!),
+  )) {
+    throw new Error("Historical topology source-feature successors are not in prepared action order.");
+  }
+  const selector = Object.fromEntries(
+    Object.entries(input.selector).filter(
+      ([key]) => key !== "witnessSourceFeatureId" && key !== "successorSourceFeatureIds",
+    ),
+  ) as unknown as import("@/contracts/import/actions").ImportDeferredHistoricalTopologyRef;
+  return { ...selector, witnessActionIndex, successorActionIndexes };
+}
+
+/** Rebase review-only exact body ownership after all source actions are emitted. */
+export function rebaseExactBodyOwnerForPreparedActions(input: {
+  target: DeferredBodyOfSourceFeature;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  exactBodyProducerActionIndexes: ReadonlyMap<string, number>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): Extract<import("@/contracts/import/actions").ImportDeferredValue, { kind: "bodyOf" }> {
+  const actionIndexes = input.actionIndexesBySourceFeatureId.get(
+    input.target.producerSourceFeatureId,
+  ) ?? [];
+  if (actionIndexes.length !== 1) {
+    throw new Error(
+      `Exact body owner ${input.target.producerSourceFeatureId} must map to exactly one emitted action (found ${actionIndexes.length}).`,
+    );
+  }
+  const actionIndex = actionIndexes[0]!;
+  if (
+    actionIndex >= input.consumerActionIndex ||
+    !input.orderedActions[actionIndex] ||
+    input.exactBodyProducerActionIndexes.get(input.target.producerSourceFeatureId) !== actionIndex
+  ) {
+    throw new Error(
+      `Exact body owner ${input.target.producerSourceFeatureId} must map to one prior action with exactly one rollback body output (${input.target.deterministicId}).`,
+    );
+  }
+  return { kind: "bodyOf", actionIndex };
+}
+
+function rebaseExactBodyOwnersInPreparedValue(input: {
+  value: unknown;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  exactBodyProducerActionIndexes: ReadonlyMap<string, number>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): unknown {
+  if (
+    input.value &&
+    typeof input.value === "object" &&
+    (input.value as { kind?: unknown }).kind === "bodyOfSourceFeature"
+  ) {
+    const target = input.value as DeferredBodyOfSourceFeature;
+    if (
+      typeof target.producerSourceFeatureId !== "string" ||
+      typeof target.deterministicId !== "string"
+    ) {
+      throw new Error("Exact body owner is missing review source-feature identity.");
+    }
+    return rebaseExactBodyOwnerForPreparedActions({
+      target,
+      actionIndexesBySourceFeatureId: input.actionIndexesBySourceFeatureId,
+      exactBodyProducerActionIndexes: input.exactBodyProducerActionIndexes,
+      orderedActions: input.orderedActions,
+      consumerActionIndex: input.consumerActionIndex,
+    });
+  }
+  if (Array.isArray(input.value)) {
+    return input.value.map((value) => rebaseExactBodyOwnersInPreparedValue({ ...input, value }));
+  }
+  if (
+    !input.value ||
+    typeof input.value !== "object" ||
+    Object.getPrototypeOf(input.value) !== Object.prototype
+  ) {
+    return input.value;
+  }
+  return Object.fromEntries(
+    Object.entries(input.value).map(([key, value]) => [
+      key,
+      rebaseExactBodyOwnersInPreparedValue({ ...input, value }),
+    ]),
+  );
+}
+
+function rebaseHistoricalSelectorsInPreparedValue(input: {
+  value: unknown;
+  actionIndexesBySourceFeatureId: ReadonlyMap<string, readonly number[]>;
+  orderedActions: readonly ImportPreparedActionRef[];
+  consumerActionIndex: number;
+}): unknown {
+  if (isHistoricalTopologyPlanSelector(input.value)) {
+    return rebaseHistoricalTopologySelectorForPreparedActions({
+      selector: input.value,
+      actionIndexesBySourceFeatureId: input.actionIndexesBySourceFeatureId,
+      orderedActions: input.orderedActions,
+      consumerActionIndex: input.consumerActionIndex,
+    });
+  }
+  if (
+    input.value &&
+    typeof input.value === "object" &&
+    (input.value as { kind?: unknown }).kind === "historicalTopologyOf"
+  ) {
+    throw new Error("Historical topology selector is missing review source-feature identities.");
+  }
+  if (Array.isArray(input.value)) {
+    return input.value.map((value) => rebaseHistoricalSelectorsInPreparedValue({ ...input, value }));
+  }
+  if (
+    !input.value ||
+    typeof input.value !== "object" ||
+    Object.getPrototypeOf(input.value) !== Object.prototype
+  ) {
+    return input.value;
+  }
+  return Object.fromEntries(
+    Object.entries(input.value).map(([key, value]) => [
+      key,
+      rebaseHistoricalSelectorsInPreparedValue({ ...input, value }),
+    ]),
+  );
+}
+
+function withHistoricalSourceFeatureIds(
+  steps: readonly import("@/core/import/historical-topology-selector").HistoricalTopologySignatureStep[],
+  featureIdToOrderedActionIndex: ReadonlyMap<string, number>,
+) {
+  const featureIdByActionIndex = new Map<number, string>();
+  for (const [featureId, actionIndex] of featureIdToOrderedActionIndex) {
+    featureIdByActionIndex.set(actionIndex, featureId);
+  }
+  return steps.map((step) => ({
+    ...step,
+    sourceFeatureId: featureIdByActionIndex.get(step.orderedActionIndex),
+  }));
+}
+
+export function resolvePlannedDeferredParticipants(
+  definition: ImportDeferredFeatureDefinition,
+  orderedIndexByFeatureId: ReadonlyMap<string, number>,
+): { definition: ImportDeferredFeatureDefinition; missingFeatureId: null } | {
+  definition: null;
+  missingFeatureId: string;
+} {
+  const parameters = definition.parameters as {
+    participants?: readonly { role: string; targets: readonly unknown[] }[];
+  };
+  if (!parameters.participants) return { definition, missingFeatureId: null };
+
+  let missingFeatureId: string | null = null;
+  const participants = parameters.participants.map((participant) => ({
+    ...participant,
+    targets: participant.targets.map((target) => {
+      if (!target || typeof target !== "object") return target;
+      const kind = (target as { kind?: unknown }).kind;
+      if (kind === "constructionFromFeature") {
+        const featureId = (target as { featureId?: unknown }).featureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return { kind: "constructionOf" as const, actionIndex };
+      }
+      if (kind === "sketchEntityFromFeature") {
+        const featureId = (target as { sketchFeatureId?: unknown }).sketchFeatureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return {
+          kind: "sketchEntity" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex },
+          entityId: (target as { entityId: unknown }).entityId,
+        };
+      }
+      if (kind === "sketchPointFromFeature") {
+        const featureId = (target as { sketchFeatureId?: unknown }).sketchFeatureId;
+        const actionIndex =
+          typeof featureId === "string"
+            ? orderedIndexByFeatureId.get(featureId)
+            : undefined;
+        if (typeof featureId !== "string" || actionIndex === undefined) {
+          missingFeatureId = typeof featureId === "string" ? featureId : "unknown";
+          return target;
+        }
+        return {
+          kind: "sketchPoint" as const,
+          sketchId: { kind: "sketchIdOf" as const, actionIndex },
+          pointId: (target as { pointId: unknown }).pointId,
+        };
+      }
+      return target;
+    }),
+  }));
+  if (missingFeatureId) return { definition: null, missingFeatureId };
+  return {
+    definition: {
+      ...definition,
+      parameters: { ...definition.parameters, participants },
+    } as ImportDeferredFeatureDefinition,
+    missingFeatureId: null,
+  };
+}
+
+async function buildPreparedActions(input: {
+  source?: ResolvedImportSource;
+  read: ReturnType<typeof readPartStudio>;
+  plan: OnshapeStudioPlan;
+  capabilities: ImportCapabilities;
+  demotedFeatureIds?: Iterable<string>;
+  includeBinding?: boolean;
+  materializeBake?: boolean;
+  /**
+   * Attach per-feature topology fallback checkpoints. These are apply recovery,
+   * not evidence for containment or historical lineage.
+   */
+  materializeTopologyFallback?: boolean;
+  /**
+   * Emit planner-selected bake checkpoints (segment checkpoint bodies) into the
+   * prepared prefix without materializing the monolithic whole-studio bake.
+   * Probe prefixes set this so whole-body consumers (Split/Boolean/Delete/
+   * body-scope extrude) can match on the checkpoint's body-identity signature,
+   * while `materializeBake` stays false (no full-studio baked mesh).
+   */
+  emitBakeCheckpoints?: boolean;
+  /**
+   * Optional sink recording, per ordered-action position, the Onshape feature id
+   * that produced it. The probe-backed planner uses it to correlate a failed
+   * probe step back to the feature plan that must be demoted.
+   */
+  orderedPositionToFeatureId?: Map<number, string>;
+  /** Ordered prefix length immediately before each source feature. */
+  featureIdToOrderedPrefixPosition?: Map<string, number>;
+  /** Exact action ownership for deferred whole-body producer references. */
+  featureIdToOrderedActionIndex?: Map<string, number>;
+  /** Unique emitted action whose rollback delta owns one body transition. */
+  featureIdToBodyProducerActionIndex?: Map<string, number>;
+  /** Exploratory review may omit an exact-owner consumer until its source action exists. */
+  deferUnresolvedExactBodyOwners?: boolean;
+  /** Preliminary whole-plan probes run before topology-consumer promotion. */
+  deferSketchExternalReferences?: boolean;
+}): Promise<ImportPreparedActions> {
+  const demoted = new Set(input.demotedFeatureIds ?? []);
+  const featuresById = new Map(input.read.features.map((f) => [f.featureId, f]));
+  const context = input.capabilities.context;
+  const solveConsistencySolver = new SketchConstraintSolverAdapter({
+    documentId: context.documentId,
+    revisionId: context.baseRevisionId,
+    neutralCurveQueries: input.capabilities.modeling.neutralCurveQueries,
+  });
+  const addDocumentVariables: AddDocumentVariableRequest[] = [];
+  const commitSketches: ImportCommitSketchRequest[] = [];
+  const createFeatures: ImportCreateFeatureRequest[] = [];
+  const orderedActions: ImportPreparedActionRef[] = [];
+  const bodyScopeBindings: NonNullable<ImportPreparedActions["bodyScopeBindings"]> = [];
+  const diagnostics: ImportDiagnostic[] = [];
+  // Onshape feature id -> its position in `orderedActions`, so deferred
+  // references can address producing actions by ordered-sequence position
+  // (the index the orchestrator records outputs under).
+  const orderedIndexByFeatureId = new Map<string, number>();
+  const actionIndexesBySourceFeatureId = new Map<string, number[]>();
+  const recordSourceAction = (featureId: string, actionIndex: number) => {
+    const actionIndexes = actionIndexesBySourceFeatureId.get(featureId) ?? [];
+    actionIndexes.push(actionIndex);
+    actionIndexesBySourceFeatureId.set(featureId, actionIndexes);
+  };
+  const segmentByBoundaryFeatureId = new Map(
+    input.plan.bakeStrategy.kind === "segments"
+      ? input.plan.bakeStrategy.segments.map((segment) => [
+          segment.boundaryFeatureId,
+          segment,
+        ] as const)
+      : [],
+  );
+
+  // A checkpoint replaces live topology. If a promoted sketch immediately
+  // following a baked segment has topology support, emit the replacement only
+  // after that sketch commits; support is derived solely from the parametric
+  // predecessor, never from checkpoint geometry.
+  const deferredCheckpointBoundaryIds = new Set<string>();
+  const checkpointBoundaryIdsBeforeFeature = new Map<string, string[]>();
+  const trailingCheckpointBoundaryIds: string[] = [];
+  if (input.plan.bakeStrategy.kind === "segments") {
+    for (const segment of input.plan.bakeStrategy.segments) {
+      const boundaryIndex = input.plan.featurePlans.findIndex(
+        (featurePlan) => featurePlan.onshapeFeatureId === segment.boundaryFeatureId,
+      );
+      const consumerIndex = input.plan.featurePlans.findIndex(
+        (featurePlan, index) =>
+          index > boundaryIndex &&
+          featurePlan.tier === "parametric" &&
+          featurePlan.target.kind === "sketch" &&
+          featurePlan.target.probedFaceSelector !== undefined,
+      );
+      if (boundaryIndex < 0 || consumerIndex < 0) continue;
+      deferredCheckpointBoundaryIds.add(segment.boundaryFeatureId);
+      const nextFeatureId = input.plan.featurePlans[consumerIndex + 1]?.onshapeFeatureId;
+      if (nextFeatureId) {
+        const boundaries = checkpointBoundaryIdsBeforeFeature.get(nextFeatureId) ?? [];
+        boundaries.push(segment.boundaryFeatureId);
+        checkpointBoundaryIdsBeforeFeature.set(nextFeatureId, boundaries);
+      } else {
+        trailingCheckpointBoundaryIds.push(segment.boundaryFeatureId);
+      }
+    }
+  }
+  const rollbackTimeline = input.read.studio.rollbackSnapshots
+    ? createRollbackTopologyTimeline({
+        featureIds: input.read.features.map((feature) => feature.featureId),
+        snapshots: input.read.studio.rollbackSnapshots,
+      })
+    : null;
+  type PreparedBodyProducer = {
+    actionIndex: number;
+    bodyDeterministicIds: readonly string[];
+    bindings: ReadonlyMap<string, ImportDeferredTopologyRef>;
+    ownerRef?: Extract<ImportDeferredValue, { kind: "bodyOf" }>;
+  };
+  const bodyProducerByDeterministicId = new Map<string, PreparedBodyProducer>();
+  const exactProducerActionIndexByFeatureId = new Map<string, number>();
+  const exactProducerActionCountByFeatureId = new Map<string, number>();
+  const firstRollbackFeatureId = input.read.studio.rollbackSnapshots?.[0]?.featureId;
+
+  const bodyScopeBindingKey = (
+    consumerActionIndex: number,
+    selector: ImportDeferredTopologyRef,
+  ) => JSON.stringify([
+    consumerActionIndex,
+    selector.bodyScope,
+    selector.source.consumerFeatureId,
+    selector.source.parameterId,
+    selector.source.deterministicId,
+  ]);
+  const bodyScopeBindingKeys = new Set<string>();
+  const captureBodyScopeBindings = (
+    value: unknown,
+    consumerActionIndex: number,
+  ): void => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => captureBodyScopeBindings(entry, consumerActionIndex));
+      return;
+    }
+    if (
+      (value as { kind?: unknown }).kind === "topologyOf" &&
+      typeof (value as { bodyScope?: unknown }).bodyScope === "string"
+    ) {
+      const selector = value as ImportDeferredTopologyRef;
+      const evidence = capturedBodyScopeEvidence(
+        rollbackTimeline?.snapshotBeforeFeature(selector.source.consumerFeatureId) ?? null,
+        selector.source.deterministicId,
+      );
+      const producer = evidence
+        ? bodyProducerByDeterministicId.get(evidence.capturedBodyId)
+        : undefined;
+      if (producer && evidence && evidence.siblingSignatures.length > 0) {
+        if (producer.actionIndex >= consumerActionIndex) {
+          throw new Error(
+            `Body-scope producer action ${producer.actionIndex} must precede consumer action ${consumerActionIndex}.`,
+          );
+        }
+        const key = bodyScopeBindingKey(consumerActionIndex, selector);
+        if (bodyScopeBindingKeys.has(key)) {
+          throw new Error(`Duplicate prepared body-scope binding for ${key}.`);
+        }
+        bodyScopeBindingKeys.add(key);
+        bodyScopeBindings.push({
+          probeBodyId: selector.bodyScope!,
+          consumerActionIndex,
+          source: selector.source,
+          producerActionIndex: producer.actionIndex,
+          siblingSignatures: evidence.siblingSignatures,
+          ownerRef: producer.ownerRef,
+        });
+      }
+    }
+    Object.values(value).forEach((entry) =>
+      captureBodyScopeBindings(entry, consumerActionIndex)
+    );
+  };
+
+  const recordBodyTransition = (
+    featureId: string,
+    actionIndex: number,
+    bindings: ReadonlyMap<string, ImportDeferredTopologyRef> = new Map(),
+  ) => {
+    const actionCount = (exactProducerActionCountByFeatureId.get(featureId) ?? 0) + 1;
+    exactProducerActionCountByFeatureId.set(featureId, actionCount);
+    const delta = rollbackTimeline?.bodyDeltaBetweenFeatures(featureId, featureId);
+    const firstSnapshot = featureId === firstRollbackFeatureId
+      ? rollbackTimeline?.snapshotAfterFeature(featureId)
+      : null;
+    if (!delta && !firstSnapshot) {
+      exactProducerActionIndexByFeatureId.delete(featureId);
+      return;
+    }
+    const introducedBodyDeterministicIds = delta
+      ? delta.introducedBodyDeterministicIds
+      : firstSnapshot!.bodies.map((body) => body.id);
+    const changedBodyDeterministicIds = delta?.changedBodyDeterministicIds ?? [];
+    const removedBodyDeterministicIds = delta?.removedBodyDeterministicIds ?? [];
+    const bodyDeterministicIds = [
+      ...introducedBodyDeterministicIds,
+      ...changedBodyDeterministicIds,
+    ];
+    if (actionCount === 1 && bodyDeterministicIds.length === 1) {
+      exactProducerActionIndexByFeatureId.set(featureId, actionIndex);
+    } else {
+      exactProducerActionIndexByFeatureId.delete(featureId);
+    }
+    for (const bodyId of [
+      ...changedBodyDeterministicIds,
+      ...removedBodyDeterministicIds,
+    ]) {
+      bodyProducerByDeterministicId.delete(bodyId);
+    }
+    const producer: PreparedBodyProducer = { actionIndex, bodyDeterministicIds, bindings,
+      ownerRef: actionCount === 1 && bodyDeterministicIds.length === 1 ? { kind: "bodyOf", actionIndex } : undefined,
+    };
+    for (const bodyId of bodyDeterministicIds) {
+      bodyProducerByDeterministicId.set(bodyId, producer);
+    }
+  };
+
+  const deferredBodyForSourceFeature = (
+    sourceFeatureId: string,
+    consumerFeatureId: string,
+    parameterId: string,
+  ): Extract<ImportDeferredFeatureBooleanScope, { kind: "targetBody" }>["bodyId"] | null => {
+    const delta = rollbackTimeline?.bodyDeltaBetweenFeatures(
+      sourceFeatureId,
+      sourceFeatureId,
+    );
+    const bodyIds = delta
+      ? [...delta.introducedBodyDeterministicIds, ...delta.changedBodyDeterministicIds]
+      : sourceFeatureId === firstRollbackFeatureId
+        ? rollbackTimeline?.snapshotAfterFeature(sourceFeatureId)?.bodies.map(
+            (body) => body.id,
+          ) ?? []
+        : [];
+    if (bodyIds.length !== 1) {
+      const actionIndex = orderedIndexByFeatureId.get(sourceFeatureId);
+      return actionIndex === undefined ? null : { kind: "bodyOf", actionIndex };
+    }
+    const deterministicId = bodyIds[0]!;
+    const producer = bodyProducerByDeterministicId.get(deterministicId);
+    if (!producer) return null;
+    if (producer.bodyDeterministicIds.length === 1) {
+      return { kind: "bodyOf", actionIndex: producer.actionIndex };
+    }
+    const selector = producer.bindings.get(deterministicId);
+    return selector
+      ? {
+          ...selector,
+          source: { consumerFeatureId, parameterId, deterministicId },
+        }
+      : null;
+  };
+
+  const resolveAdvancedBodyParticipants = (
+    definition: ImportDeferredFeatureDefinition,
+    consumerFeatureId: string,
+  ): ImportDeferredFeatureDefinition | null => {
+    let rebasedDefinition: ImportDeferredFeatureDefinition;
+    try {
+      rebasedDefinition = rebaseExactBodyOwnersInPreparedValue({
+        value: definition,
+        actionIndexesBySourceFeatureId,
+        exactBodyProducerActionIndexes: exactProducerActionIndexByFeatureId,
+        orderedActions,
+        consumerActionIndex: orderedActions.length,
+      }) as ImportDeferredFeatureDefinition;
+    } catch (error) {
+      if (input.deferUnresolvedExactBodyOwners) return null;
+      throw error;
+    }
+    const parameters = rebasedDefinition.parameters as {
+      participants?: readonly { role: string; targets: readonly unknown[] }[];
+    };
+    if (!rollbackTimeline || rebasedDefinition.kind !== "split" || !parameters.participants) {
+      return rebasedDefinition;
+    }
+    const featureIds = input.read.features.map((feature) => feature.featureId);
+    const participants = parameters.participants.map((participant) => {
+      const bodyParticipant =
+        participant.role === "body" ||
+        participant.role === "targetBody" ||
+        participant.role === "toolBody";
+      if (!bodyParticipant) return participant;
+      return {
+        ...participant,
+        targets: participant.targets.map((target) => {
+          if (
+            !target ||
+            typeof target !== "object" ||
+            (target as { kind?: unknown }).kind !== "topologyOf" ||
+            (target as { expectedKind?: unknown }).expectedKind !== "body"
+          ) return target;
+          const selector = target as ImportDeferredTopologyRef;
+          const binding = resolveExactBodyProducerBindings({
+            featureIds,
+            consumerFeatureId,
+            queries: [{
+              consumerFeatureId,
+              slotKey: selector.source.parameterId,
+              parameterId: selector.source.parameterId,
+              queryIndex: 0,
+              deterministicId: selector.source.deterministicId,
+              queryString: null,
+              expectedKinds: ["body"],
+            }],
+            rollback: rollbackTimeline,
+            isParametric: (featureId) =>
+              input.plan.featurePlans.find((plan) => plan.onshapeFeatureId === featureId)?.tier === "parametric",
+            featureIdToOrderedActionIndex: exactProducerActionIndexByFeatureId,
+          })?.[0];
+          return binding?.deferred.kind === "bodyOf" ? binding.deferred : target;
+        }),
+      };
+    });
+    return {
+      ...rebasedDefinition,
+      parameters: { ...rebasedDefinition.parameters, participants },
+    } as ImportDeferredFeatureDefinition;
+  };
+
+  const deferredBodyTopologyIds = (value: unknown): string[] => {
+    if (!value || typeof value !== "object") return [];
+    if (
+      (value as { kind?: unknown }).kind === "topologyOf" &&
+      (value as { expectedKind?: unknown }).expectedKind === "body"
+    ) {
+      return [(value as ImportDeferredTopologyRef).source.deterministicId];
+    }
+    return Array.isArray(value)
+      ? value.flatMap(deferredBodyTopologyIds)
+      : Object.values(value).flatMap(deferredBodyTopologyIds);
+  };
+
+  const prepareTopologyFallback = async (
+    featurePlan: FeaturePlan,
+    request: ImportCreateFeatureRequest,
+  ) => {
+    captureBodyScopeBindings(request, orderedActions.length);
+    if (!input.materializeTopologyFallback || !rollbackTimeline) return;
+    const selectedBodyIds = deferredBodyTopologyIds(request.definition);
+    if (selectedBodyIds.length === 0) return;
+    const delta = rollbackTimeline.bodyDeltaBetweenFeatures(
+      featurePlan.onshapeFeatureId,
+      featurePlan.onshapeFeatureId,
+    );
+    const after = rollbackTimeline.snapshotAfterFeature(featurePlan.onshapeFeatureId);
+    if (!delta || !after) return;
+    const consumedIds = [
+      ...new Set([
+        ...selectedBodyIds,
+        ...delta.changedBodyDeterministicIds,
+        ...delta.removedBodyDeterministicIds,
+      ]),
+    ];
+    const replacementActionIndexes = [
+      ...new Set(
+        consumedIds.flatMap((bodyId) => {
+          const producer = bodyProducerByDeterministicId.get(bodyId);
+          return producer ? [producer.actionIndex] : [];
+        }),
+      ),
+    ];
+    if (replacementActionIndexes.length === 0) return;
+    const replacementSet = new Set(replacementActionIndexes);
+    const afterBodyIds = new Set(after.bodies.map((body) => body.id));
+    const checkpointBodyDeterministicIds = [
+      ...new Set([
+        ...delta.introducedBodyDeterministicIds,
+        ...delta.changedBodyDeterministicIds,
+        ...[...bodyProducerByDeterministicId.entries()].flatMap(([bodyId, producer]) =>
+          replacementSet.has(producer.actionIndex) && afterBodyIds.has(bodyId)
+            ? [bodyId]
+            : [],
+        ),
+      ]),
+    ];
+    if (checkpointBodyDeterministicIds.length === 0) return;
+    const checkpoint = await prepareRollbackCheckpointBake({
+      snapshot: after.source,
+      capabilities: input.capabilities,
+      featureLabel: `${featurePlan.label} topology fallback`,
+      studioElementId: input.read.studio.elementId,
+      studioName: input.read.studio.name,
+      checkpointBodyDeterministicIds,
+      provenanceFeatureSpan: {
+        fromFeatureId: featurePlan.onshapeFeatureId,
+        toFeatureId: featurePlan.onshapeFeatureId,
+      },
+      replacementActionIndexes,
+    });
+    if (checkpoint.kind === "ready") request.topologyFallback = checkpoint.request;
+  };
+
+  const emitSegmentCheckpoint = async (boundaryFeatureId: string): Promise<void> => {
+    const segment = segmentByBoundaryFeatureId.get(boundaryFeatureId);
+    if (
+      !segment ||
+      !(input.materializeBake || input.emitBakeCheckpoints) ||
+      !rollbackTimeline
+    )
+      return;
+    const replacementActionIndexes: number[] = [];
+    for (const producerFeatureId of segment.replacementProducerFeatureIds) {
+      const actionIndex = orderedIndexByFeatureId.get(producerFeatureId);
+      if (
+        actionIndex === undefined ||
+        orderedActions[actionIndex]?.kind !== "createFeature"
+      ) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Bake checkpoint ${segment.segmentId} could not resolve replacement producer ${producerFeatureId}; the checkpoint was skipped.`,
+          code: "onshape-bake-segment-replacement-unresolved",
+        });
+        return;
+      }
+      replacementActionIndexes.push(actionIndex);
+    }
+
+    const boundaryPlan = input.plan.featurePlans.find(
+      (featurePlan) => featurePlan.onshapeFeatureId === boundaryFeatureId,
+    );
+    try {
+      const checkpoint = await prepareRollbackCheckpointBake({
+        snapshot: rollbackTimeline.snapshotAfterFeature(boundaryFeatureId)?.source ?? null,
+        capabilities: input.capabilities,
+        featureLabel: `${boundaryPlan?.label ?? boundaryFeatureId} checkpoint`,
+        studioElementId: input.read.studio.elementId,
+        studioName: input.read.studio.name,
+        checkpointBodyDeterministicIds: segment.checkpointBodyDeterministicIds,
+        provenanceFeatureSpan: {
+          fromFeatureId: segment.fromFeatureId,
+          toFeatureId: segment.toFeatureId,
+        },
+        replacementActionIndexes,
+      });
+      if (checkpoint.kind !== "ready") {
+        diagnostics.push({
+          severity: "warning",
+          message: `Bake checkpoint ${segment.segmentId} could not be materialized from its rollback boundary.`,
+          code: "onshape-bake-unavailable",
+        });
+        return;
+      }
+      createFeatures.push(checkpoint.request);
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      const checkpointOrderedIndex = orderedActions.length - 1;
+      orderedIndexByFeatureId.set(boundaryFeatureId, checkpointOrderedIndex);
+      recordSourceAction(boundaryFeatureId, checkpointOrderedIndex);
+      const checkpointBindings = new Map(
+        segment.bodyBindings.map((binding) => [
+          binding.deterministicId,
+          {
+            kind: "topologyOf" as const,
+            expectedKind: "body" as const,
+            capturedSignature: normalizeOnshapeTopologySignature(
+              binding.capturedSignature,
+            ),
+            tolerance: LIVE_TOPOLOGY_MATCH_TOLERANCE,
+            source: {
+              consumerFeatureId: boundaryFeatureId,
+              parameterId: "checkpointBody",
+              deterministicId: binding.deterministicId,
+            },
+          },
+        ]),
+      );
+      const checkpointProducer = {
+        actionIndex: checkpointOrderedIndex,
+        bodyDeterministicIds: segment.checkpointBodyDeterministicIds,
+        bindings: checkpointBindings,
+      };
+      for (const consumedBodyId of segment.consumedBodyDeterministicIds) {
+        bodyProducerByDeterministicId.delete(consumedBodyId);
+      }
+      for (const bodyId of segment.checkpointBodyDeterministicIds) {
+        bodyProducerByDeterministicId.set(bodyId, checkpointProducer);
+      }
+      input.orderedPositionToFeatureId?.set(
+        checkpointOrderedIndex,
+        boundaryFeatureId,
+      );
+    } catch (error) {
+      diagnostics.push({
+        severity: "warning",
+        message: `Bake checkpoint ${segment.segmentId} could not be persisted: ${describeUnknownError(error, "unknown error")}`,
+        code: "onshape-bake-failed",
+      });
+    }
+  };
+
+  for (const featurePlan of input.plan.featurePlans) {
+    for (const boundaryFeatureId of checkpointBoundaryIdsBeforeFeature.get(
+      featurePlan.onshapeFeatureId,
+    ) ?? []) {
+      await emitSegmentCheckpoint(boundaryFeatureId);
+    }
+    input.featureIdToOrderedPrefixPosition?.set(
+      featurePlan.onshapeFeatureId,
+      orderedActions.length,
+    );
+    const demotedByUser = demoted.has(featurePlan.onshapeFeatureId);
+    if (featurePlan.tier !== "parametric" || demotedByUser) {
+      if (demotedByUser) {
+        diagnostics.push({
+          severity: "info",
+          message: `"${featurePlan.label}" was demoted to baked by the reviewer.`,
+          code: "onshape-feature-demoted",
+        });
+      } else {
+        diagnostics.push({
+          severity: "warning",
+          message: `"${featurePlan.label}" (${featurePlan.featureType}) imported as ${featurePlan.tier}: ${featurePlan.reasonCodes.join(", ")}.`,
+          code: "onshape-feature-degraded",
+        });
+      }
+      if (!deferredCheckpointBoundaryIds.has(featurePlan.onshapeFeatureId)) {
+        await emitSegmentCheckpoint(featurePlan.onshapeFeatureId);
+      }
+      continue;
+    }
+
+    // Feature-specific translators own whether a parametric plan can be applied;
+    // the provider retains the shared action-buffer mechanics.
+    if (!onshapeFeatureTranslatorRegistry.forFeatureType(featurePlan.featureType).apply) {
+      continue;
+    }
+
+    if (featurePlan.target.kind === "variable") {
+      const feature = featuresById.get(featurePlan.onshapeFeatureId);
+      const variable = extractVariable(feature?.parameters);
+      if (!variable) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Variable feature "${featurePlan.label}" had no readable name/value and was skipped.`,
+          code: "onshape-variable-unreadable",
+        });
+        continue;
+      }
+      const translated = translateOnshapeExpression({
+        expression: variable.expression,
+      });
+      if (translated.diagnostic) {
+        diagnostics.push({
+          severity: "warning",
+          message: translated.diagnostic.message,
+          code: translated.diagnostic.code,
+        });
+      }
+      addDocumentVariables.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        name: variable.name,
+        valueText: translated.valueText,
+      });
+      orderedActions.push({
+        kind: "addDocumentVariable",
+        index: addDocumentVariables.length - 1,
+      });
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      continue;
+    }
+
+    if (featurePlan.target.kind === "plane") {
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "plane",
+          featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            mode: "explicitFrame",
+            frame: featurePlan.target.frame,
+          },
+        },
+      });
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      continue;
+    }
+
+    if (featurePlan.target.kind === "sketch") {
+      const externalReferences = input.deferSketchExternalReferences
+        ? new Map<string, SketchExternalReference>()
+        : classifySketchExternalReferences({
+            read: input.read,
+            consumerFeatureId: featurePlan.onshapeFeatureId,
+            orderedIndexByFeatureId,
+          });
+      let translation = projectSketchForPlan({
+        read: input.read,
+        featurePlan,
+        orderedIndexByFeatureId,
+        deferExternalReferences: input.deferSketchExternalReferences,
+        externalReferences,
+      });
+      if (!translation) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Sketch "${featurePlan.label}" had no readable solved sketch payload and was skipped.`,
+          code: "onshape-sketch-unreadable",
+        });
+        continue;
+      }
+      const verificationSketchId = translation.definition.points[0]?.target.sketchId;
+      if (verificationSketchId) {
+        const verified = await verifySketchTranslationSolveConsistency({
+          solver: solveConsistencySolver,
+          contractVersion: context.contractVersion,
+          documentId: context.documentId,
+          revisionId: context.baseRevisionId,
+          sketchId: verificationSketchId,
+          plane: translation.plane,
+          definition: translation.definition,
+          projectedReferences: translation.projectedReferences,
+          relationshipSummary: translation.relationshipSummary,
+          sourceSolveStatus: translation.sourceSolveStatus,
+        });
+        translation = {
+          ...translation,
+          definition: verified.definition,
+          diagnostics: [...translation.diagnostics, ...verified.diagnostics],
+          relationshipSummary: verified.relationshipSummary,
+        };
+      }
+      for (const sketchDiagnostic of translation.diagnostics) {
+        diagnostics.push({
+          severity: "info",
+          message: sketchDiagnostic.message,
+          code: sketchDiagnostic.code,
+        });
+      }
+      if (
+        translation.relationshipSummary.constraints.carried > 0 ||
+        translation.relationshipSummary.dimensions.carried > 0 ||
+        translation.relationshipSummary.derivations.carried > 0 ||
+        translation.relationshipSummary.constraints.dropped > 0 ||
+        translation.relationshipSummary.dimensions.dropped > 0 ||
+        translation.relationshipSummary.derivations.dropped > 0
+      ) {
+        diagnostics.push({
+          severity: "info",
+          code: "onshape-sketch-relationship-summary",
+          message: `Sketch "${featurePlan.label}" relationships carried/dropped — constraints ${translation.relationshipSummary.constraints.carried}/${translation.relationshipSummary.constraints.dropped}, dimensions ${translation.relationshipSummary.dimensions.carried}/${translation.relationshipSummary.dimensions.dropped}, derivations ${translation.relationshipSummary.derivations.carried}/${translation.relationshipSummary.derivations.dropped}.`,
+        });
+      }
+      // The provider owns solver correlation ids per the commit contract
+      // ("Editor- or orchestrator-owned correlation IDs"); a null correlation
+      // skips projection/solve/region derivation, which the mock and real
+      // kernel lanes require for a committed import sketch.
+      const correlationRoot = `request_import_${sanitizeCorrelationPart(featurePlan.onshapeFeatureId)}`;
+      let planeSupport: ImportCommitSketchRequest["plane"]["support"] =
+        translation.plane.support;
+      if (featurePlan.target.capturedFrame) {
+        createFeatures.push({
+          contractVersion: context.contractVersion,
+          documentId: context.documentId,
+          baseRevisionId: context.baseRevisionId,
+          featureLabel: `${featurePlan.label} captured support`,
+          definition: {
+            kind: "plane",
+            featureTypeVersion: PLANE_FEATURE_SCHEMA_VERSION,
+            parameters: {
+              mode: "explicitFrame",
+              frame: featurePlan.target.capturedFrame,
+            },
+          },
+        });
+        orderedActions.push({
+          kind: "createFeature",
+          index: createFeatures.length - 1,
+        });
+        const planeOrderedIndex = orderedActions.length - 1;
+        input.orderedPositionToFeatureId?.set(
+          planeOrderedIndex,
+          featurePlan.onshapeFeatureId,
+        );
+        recordSourceAction(featurePlan.onshapeFeatureId, planeOrderedIndex);
+        planeSupport = {
+          kind: "constructionOf",
+          actionIndex: planeOrderedIndex,
+        };
+      } else if (featurePlan.target.constructionFromFeatureId) {
+        const planeOrderedIndex = orderedIndexByFeatureId.get(
+          featurePlan.target.constructionFromFeatureId,
+        );
+        if (planeOrderedIndex === undefined) {
+          diagnostics.push({
+            severity: "warning",
+            message: `Sketch "${featurePlan.label}" referenced translated plane ${featurePlan.target.constructionFromFeatureId}, which was not emitted; the sketch was skipped.`,
+            code: "onshape-sketch-missing-plane",
+          });
+          continue;
+        }
+        planeSupport = {
+          kind: "constructionOf",
+          actionIndex: planeOrderedIndex,
+        };
+      } else if (featurePlan.target.probedFaceSelector) {
+        if (isHistoricalTopologyPlanSelector(featurePlan.target.probedFaceSelector)) {
+          const witnessActions = actionIndexesBySourceFeatureId.get(
+            featurePlan.target.probedFaceSelector.witnessSourceFeatureId,
+          ) ?? [];
+          if (witnessActions.length !== 1) {
+            diagnostics.push({
+              severity: "warning",
+              code: "onshape-sketch-missing-historical-witness",
+              message: `Sketch "${featurePlan.label}" referenced historical witness ${featurePlan.target.probedFaceSelector.witnessSourceFeatureId}, which was not emitted exactly once; the sketch was skipped.`,
+            });
+            if (input.deferUnresolvedExactBodyOwners) continue;
+          }
+        }
+        const splitInterfaceQuery = readExactSplitInterfaceFaceQuery(
+          featuresById.get(featurePlan.onshapeFeatureId)!,
+        );
+        const profileSketchActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.profileSketchFeatureId)
+          : undefined;
+        const toolExtrudeActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.toolExtrudeFeatureId)
+          : undefined;
+        const splitActionIndex = splitInterfaceQuery
+          ? orderedIndexByFeatureId.get(splitInterfaceQuery.splitFeatureId)
+          : undefined;
+        const profileEntityId = splitInterfaceQuery
+          ? importedOnshapeSketchEntityId(
+              splitInterfaceQuery.profileSketchFeatureId,
+              splitInterfaceQuery.profileSourceEntityId,
+            )
+          : undefined;
+        const profileAction = profileSketchActionIndex === undefined
+          ? undefined
+          : orderedActions[profileSketchActionIndex];
+        const profileEntityEmitted = profileAction?.kind === "commitSketch" &&
+          commitSketches[profileAction.index]!.definition.entities.some(
+            (entity) => entity.entityId === profileEntityId,
+          );
+        const toolAction = toolExtrudeActionIndex === undefined
+          ? undefined
+          : orderedActions[toolExtrudeActionIndex];
+        const toolDefinition = toolAction?.kind === "createFeature"
+          ? createFeatures[toolAction.index]?.definition
+          : undefined;
+        const endRole = toolDefinition?.kind === "extrude"
+          ? getSurfaceExtrudeGeneratedSideFaceEndRole(toolDefinition.parameters)
+          : null;
+        if (
+          splitInterfaceQuery &&
+          (profileSketchActionIndex === undefined ||
+            toolExtrudeActionIndex === undefined ||
+            splitActionIndex === undefined ||
+            !profileEntityEmitted ||
+            endRole === null)
+        ) {
+          // The exact split-interface selector is meaningful only with its full
+          // producer chain, including the authored profile entity it names. A
+          // transient review prefix must not substitute the generic face
+          // selector and then demote this sketch on that artifact.
+          if (input.deferUnresolvedExactBodyOwners) continue;
+          throw new Error(
+            `Split-interface sketch ${featurePlan.label} is missing an emitted profile, tool, or Split action.`,
+          );
+        }
+        const ownerWitness = splitInterfaceQuery
+          ? captureSplitInterfaceOwnerWitness(
+              rollbackTimeline?.snapshotAfterFeature(splitInterfaceQuery.splitFeatureId) ?? null,
+              rollbackTimeline?.snapshotBeforeFeature(featurePlan.onshapeFeatureId) ?? null,
+              splitInterfaceQuery.capturedFaceId,
+            )
+          : undefined;
+        const successorActionIndexes = ownerWitness
+          ? (rollbackTimeline?.featuresModifyingBody(ownerWitness.capturedBodyId, featurePlan.onshapeFeatureId) ?? [])
+              .flatMap(featureId => {
+                const index = orderedIndexByFeatureId.get(featureId);
+                return index !== undefined && index > splitActionIndex! ? [index] : [];
+              })
+          : [];
+        planeSupport = splitInterfaceQuery
+          ? {
+              kind: "splitInterfaceFaceOf",
+              profileSketchActionIndex: profileSketchActionIndex!,
+              toolExtrudeActionIndex: toolExtrudeActionIndex!,
+              splitActionIndex: splitActionIndex!,
+              profileEntityId: profileEntityId!,
+              endRole: endRole!,
+              side: splitInterfaceQuery.side,
+              ownerWitness: ownerWitness!,
+              successorActionIndexes,
+              source: {
+                consumerFeatureId: featurePlan.onshapeFeatureId,
+                parameterId: "sketchPlane",
+                deterministicId: ownerWitness!.capturedFaceId,
+              },
+            }
+          : featurePlan.target.probedFaceSelector;
+        if (!splitInterfaceQuery && planeSupport?.kind === "topologyOf") {
+          captureBodyScopeBindings(planeSupport, orderedActions.length);
+        }
+      }
+      commitSketches.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        solverCorrelation: {
+          requestId: correlationRoot as RequestId,
+          projectionRequestId: `${correlationRoot}_project` as RequestId,
+          validationRequestId: `${correlationRoot}_validate` as RequestId,
+          solveRequestId: `${correlationRoot}_solve` as RequestId,
+          regionRequestId: `${correlationRoot}_regions` as RequestId,
+        },
+        sketchId: null,
+        sketchLabel: featurePlan.label,
+        plane: { ...translation.plane, support: planeSupport },
+        definition: translation.definition,
+      });
+      orderedActions.push({
+        kind: "commitSketch",
+        index: commitSketches.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      continue;
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedExtrude) {
+      const extrude = featurePlan.plannedExtrude;
+      const profiles: ImportDeferredSurfaceProfileRef[] = [];
+      let missingSketchFeatureId: string | null = null;
+      for (const profile of extrude.profiles) {
+        if (profile.kind === "planarFace") {
+          profiles.push(profile.selector);
+          continue;
+        }
+        const sketchOrderedIndex = orderedIndexByFeatureId.get(profile.sketchFeatureId);
+        if (sketchOrderedIndex === undefined) {
+          missingSketchFeatureId = profile.sketchFeatureId;
+          break;
+        }
+        // An open sketch curve is an exact authored entity; only its owning
+        // sketch id defers to that sketch's commit action.
+        if (profile.kind === "sketchCurve") {
+          profiles.push({
+            kind: "sketchEntity",
+            sketchId: { kind: "sketchIdOf", actionIndex: sketchOrderedIndex },
+            entityId: profile.entityId,
+          });
+          continue;
+        }
+        profiles.push({
+          kind: "regionOf",
+          actionIndex: sketchOrderedIndex,
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
+            ...(profile.evidence ? { source: profile.evidence } : {}),
+          },
+        });
+      }
+      // An up-to-vertex extent terminating at a sketch point needs its
+      // producing sketch committed earlier in this import; without it the
+      // reference cannot stay durable, so the extrude is skipped honestly.
+      for (const sketchFeatureId of extrudeSketchPointExtentFeatureIds(extrude)) {
+        if (orderedIndexByFeatureId.get(sketchFeatureId) === undefined) {
+          missingSketchFeatureId = sketchFeatureId;
+        }
+      }
+      if (missingSketchFeatureId) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Extrude "${featurePlan.label}" referenced sketch ${missingSketchFeatureId}, which was not committed; the extrude was skipped.`,
+          code: "onshape-extrude-missing-sketch",
+        });
+        continue;
+      }
+      if (profiles.length === 0) continue;
+
+      const orderedProfiles = profiles as [
+        ImportDeferredSurfaceProfileRef,
+        ...ImportDeferredSurfaceProfileRef[],
+      ];
+      const startExtent = resolvedExtrudeStartExtent(extrude, orderedIndexByFeatureId);
+      const extent = resolvedExtrudeExtent(extrude, orderedIndexByFeatureId);
+
+      let parameters: ImportDeferredExtrudeFeatureParameters;
+      if (extrude.resultBodyType === "surface") {
+        // A surface extrude creates one sheet body; boolean state is
+        // unrepresentable in the surface contract variant.
+        parameters = {
+          resultBodyType: "surface",
+          profiles: orderedProfiles,
+          startExtent,
+          extent,
+        };
+      } else {
+        let booleanScope: ImportDeferredFeatureBooleanScope;
+        if (extrude.boolean.kind === "standalone") {
+          booleanScope = { kind: "standalone" };
+        } else if (extrude.boolean.kind === "topologyTargets") {
+          booleanScope = {
+            kind: extrude.boolean.targets.length === 1 ? "targetBody" : "targetBodies",
+            ...(extrude.boolean.targets.length === 1
+              ? { bodyId: extrude.boolean.targets[0] }
+              : { bodyIds: extrude.boolean.targets }),
+          } as unknown as ImportDeferredFeatureBooleanScope;
+        } else {
+          const deferredBody = deferredBodyForSourceFeature(
+            extrude.boolean.sourceFeatureId,
+            featurePlan.onshapeFeatureId,
+            "booleanScope",
+          );
+          if (!deferredBody) {
+            diagnostics.push({
+              severity: "warning",
+              message: `Extrude "${featurePlan.label}" referenced an upstream body from ${extrude.boolean.sourceFeatureId}, which was not emitted or was not uniquely attributable; the extrude was skipped.`,
+              code: "onshape-extrude-missing-body",
+            });
+            continue;
+          }
+          booleanScope = { kind: "targetBody", bodyId: deferredBody };
+        }
+        parameters = {
+          resultBodyType: "solid",
+          profiles: orderedProfiles as [
+            ImportDeferredProfileRef,
+            ...ImportDeferredProfileRef[],
+          ],
+          startExtent,
+          extent,
+          operation: extrude.operation,
+          booleanScope,
+        };
+      }
+
+      const request: ImportCreateFeatureRequest = {
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "extrude",
+          featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
+          parameters,
+        },
+      };
+      await prepareTopologyFallback(featurePlan, request);
+      createFeatures.push(request);
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedRevolve) {
+      const revolve = featurePlan.plannedRevolve;
+      const profileSketchOrderedIndex = orderedIndexByFeatureId.get(
+        revolve.sketchFeatureId,
+      );
+      const axisSketchOrderedIndex = orderedIndexByFeatureId.get(
+        revolve.axis.sketchFeatureId,
+      );
+      if (profileSketchOrderedIndex === undefined || axisSketchOrderedIndex === undefined) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Revolve "${featurePlan.label}" referenced a profile or axis sketch that was not committed; the revolve was skipped.`,
+          code: "onshape-revolve-missing-sketch",
+        });
+        continue;
+      }
+
+      const profiles = revolve.profiles.map(
+        (profile): ImportDeferredProfileRef => ({
+          kind: "regionOf",
+          actionIndex: profileSketchOrderedIndex,
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
+          },
+        }),
+      );
+      if (profiles.length === 0) continue;
+
+      let booleanScope: ImportDeferredFeatureBooleanScope;
+      if (revolve.boolean.kind === "standalone") {
+        booleanScope = { kind: "standalone" };
+      } else {
+        const deferredBody = deferredBodyForSourceFeature(
+          revolve.boolean.sourceFeatureId,
+          featurePlan.onshapeFeatureId,
+          "booleanScope",
+        );
+        if (!deferredBody) {
+          diagnostics.push({
+            severity: "warning",
+            message: `Revolve "${featurePlan.label}" referenced an upstream body from ${revolve.boolean.sourceFeatureId}, which was not emitted or was not uniquely attributable; the revolve was skipped.`,
+            code: "onshape-revolve-missing-body",
+          });
+          continue;
+        }
+        booleanScope = { kind: "targetBody", bodyId: deferredBody };
+      }
+
+      const request = {
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "revolve",
+          featureTypeVersion: REVOLVE_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            resultBodyType: "solid",
+            profiles: profiles as [
+              ImportDeferredProfileRef,
+              ...ImportDeferredProfileRef[],
+            ],
+            axis: {
+              kind: "sketchEntity",
+              sketchId: { kind: "sketchIdOf", actionIndex: axisSketchOrderedIndex },
+              entityId: revolve.axis.entityId,
+            },
+            startAngle: revolve.startAngle,
+            extent: revolve.extent,
+            operation: revolve.operation,
+            booleanScope,
+          },
+        },
+      } as ImportCreateFeatureRequest;
+      await prepareTopologyFallback(featurePlan, request);
+      createFeatures.push(request);
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedSweep) {
+      const sweep = featurePlan.plannedSweep;
+      const profileSketchOrderedIndex = orderedIndexByFeatureId.get(
+        sweep.sketchFeatureId,
+      );
+      const pathSketchOrderedIndex = orderedIndexByFeatureId.get(
+        sweep.path.sketchFeatureId,
+      );
+      if (
+        profileSketchOrderedIndex === undefined ||
+        pathSketchOrderedIndex === undefined
+      ) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Sweep "${featurePlan.label}" referenced a profile or path sketch that was not committed; the sweep was skipped.`,
+          code: "onshape-sweep-missing-sketch",
+        });
+        continue;
+      }
+
+      const profileTargets = sweep.profiles.map(
+        (profile): ImportDeferredProfileRef => ({
+          kind: "regionOf",
+          actionIndex: profileSketchOrderedIndex,
+          selector: {
+            kind: "interiorPoint",
+            point: profile.interiorPoint,
+            expectedBoundaryIdentity: profile.boundaryIdentity,
+          },
+        }),
+      );
+      if (profileTargets.length === 0) continue;
+
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "sweep",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: createLiteralAuthoredValue("create"),
+            participants: [
+              { role: "profile", targets: profileTargets },
+              {
+                role: "path",
+                targets: [
+                  {
+                    kind: "sketchEntity",
+                    sketchId: {
+                      kind: "sketchIdOf",
+                      actionIndex: pathSketchOrderedIndex,
+                    },
+                    entityId: sweep.path.entityId,
+                  },
+                ],
+              },
+            ],
+            options: {
+              profileControl: createLiteralAuthoredValue("none"),
+              twist: { type: "none" },
+              endScale: createLiteralAuthoredValue(1),
+            },
+          },
+        },
+      } as ImportCreateFeatureRequest);
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedLoft) {
+      const profileTargets: ImportDeferredProfileRef[] = [];
+      let missingSketchFeatureId: string | null = null;
+      for (const profile of featurePlan.plannedLoft.profiles) {
+        const sketchOrderedIndex = orderedIndexByFeatureId.get(profile.sketchFeatureId);
+        if (sketchOrderedIndex === undefined) {
+          missingSketchFeatureId = profile.sketchFeatureId;
+          break;
+        }
+        profileTargets.push({
+          kind: "regionOf",
+          actionIndex: sketchOrderedIndex,
+          selector: {
+            kind: "interiorPoint",
+            point: profile.profile.interiorPoint,
+            expectedBoundaryIdentity: profile.profile.boundaryIdentity,
+          },
+        });
+      }
+      if (missingSketchFeatureId) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Loft "${featurePlan.label}" referenced sketch ${missingSketchFeatureId}, which was not committed; the loft was skipped.`,
+          code: "onshape-loft-missing-sketch",
+        });
+        continue;
+      }
+
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "loft",
+          featureTypeVersion: ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            operationIntent: createLiteralAuthoredValue("create"),
+            participants: [{ role: "profile", targets: profileTargets }],
+          },
+        },
+      } as ImportCreateFeatureRequest);
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+      orderedIndexByFeatureId.set(
+        featurePlan.onshapeFeatureId,
+        orderedActions.length - 1,
+      );
+      input.orderedPositionToFeatureId?.set(
+        orderedActions.length - 1,
+        featurePlan.onshapeFeatureId,
+      );
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedFeatureReplay) {
+      const replay = featurePlan.plannedFeatureReplay;
+      const sourceFeatureIds = replay.sourceFeatureIds.map((sourceFeatureId) => {
+        const actionIndex = orderedIndexByFeatureId.get(sourceFeatureId);
+        return actionIndex === undefined ? null : { kind: "featureOf" as const, actionIndex };
+      });
+      const missingFeatureId = replay.sourceFeatureIds.find(
+        (_sourceFeatureId, index) => sourceFeatureIds[index] === null,
+      );
+      if (missingFeatureId) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Feature "${featurePlan.label}" referenced source feature ${missingFeatureId}, which was not emitted; the replay was skipped.`,
+          code: "onshape-feature-missing-deferred-reference",
+        });
+        continue;
+      }
+      const request: ImportCreateFeatureRequest = {
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: {
+          kind: "featureReplay",
+          featureTypeVersion: FEATURE_REPLAY_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            sourceFeatureIds: sourceFeatureIds as Extract<
+              import("@/contracts/import/actions").ImportDeferredValue,
+              { kind: "featureOf" }
+            >[],
+            transform: replay.kind === "linear"
+              ? {
+                  kind: "linear",
+                  direction: replay.direction,
+                  instanceCount: createLiteralAuthoredValue(replay.instanceCount),
+                  spacing: createLiteralAuthoredValue(replay.spacing),
+                  oppositeDirection: createLiteralAuthoredValue(replay.oppositeDirection),
+                }
+              : { kind: "mirror", plane: replay.plane },
+          },
+        },
+      };
+      createFeatures.push(request);
+      orderedActions.push({ kind: "createFeature", index: createFeatures.length - 1 });
+      orderedIndexByFeatureId.set(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(orderedActions.length - 1, featurePlan.onshapeFeatureId);
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+
+    if (featurePlan.target.kind === "feature" && featurePlan.plannedAdvancedSolid) {
+      const resolvedDefinition = resolvePlannedDeferredParticipants(
+        featurePlan.plannedAdvancedSolid,
+        orderedIndexByFeatureId,
+      );
+      if (!resolvedDefinition.definition) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Feature "${featurePlan.label}" referenced deferred feature ${resolvedDefinition.missingFeatureId}, which was not emitted; the feature was skipped.`,
+          code: "onshape-feature-missing-deferred-reference",
+        });
+        continue;
+      }
+      const advancedDefinition = resolveAdvancedBodyParticipants(
+        resolvedDefinition.definition,
+        featurePlan.onshapeFeatureId,
+      );
+      if (!advancedDefinition) continue;
+      const request: ImportCreateFeatureRequest = {
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: featurePlan.label,
+        definition: advancedDefinition,
+      };
+      await prepareTopologyFallback(featurePlan, request);
+      createFeatures.push(request);
+      orderedActions.push({ kind: "createFeature", index: createFeatures.length - 1 });
+      orderedIndexByFeatureId.set(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      recordSourceAction(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+      input.orderedPositionToFeatureId?.set(orderedActions.length - 1, featurePlan.onshapeFeatureId);
+      recordBodyTransition(featurePlan.onshapeFeatureId, orderedActions.length - 1);
+    }
+  }
+
+  if (input.plan.requiresStudioBake) {
+    const bakedMeshBytes =
+      input.materializeBake && hasOnshapeGroundTruthGeometry(input.read.studio.groundTruth)
+        ? encodeOnshapeTessellationAsBakedMeshBytes(
+            input.read.studio.groundTruth.tessellatedFaces,
+          )
+        : null;
+    let bakedAsset: Awaited<
+      ReturnType<ImportCapabilities["modeling"]["bakeGeometry"]>
+    > | null = null;
+    if (bakedMeshBytes) {
+      try {
+        bakedAsset = await input.capabilities.modeling.bakeGeometry({
+          bytes: bakedMeshBytes,
+          format: "baked-mesh",
+        });
+      } catch (error) {
+        diagnostics.push({
+          severity: "warning",
+          message: `Onshape baked geometry could not be persisted: ${describeUnknownError(
+            error,
+            "unknown error",
+          )}`,
+          code: "onshape-bake-failed",
+        });
+        bakedAsset = null;
+      }
+    }
+
+    if (bakedAsset) {
+      const bakedFeatureIds = input.plan.featurePlans
+        .filter((featurePlan) => featurePlan.tier === "baked")
+        .map((featurePlan) => featurePlan.onshapeFeatureId);
+      const fromFeatureId = bakedFeatureIds[0] ?? "unknown";
+      const toFeatureId = bakedFeatureIds.at(-1) ?? fromFeatureId;
+      createFeatures.push({
+        contractVersion: context.contractVersion,
+        documentId: context.documentId,
+        baseRevisionId: context.baseRevisionId,
+        featureLabel: `${input.read.studio.name} baked body`,
+        definition: {
+          kind: "bakedBody",
+          featureTypeVersion: BAKED_BODY_FEATURE_SCHEMA_VERSION,
+          parameters: {
+            assetId: bakedAsset.assetId,
+            format: bakedAsset.format,
+            hash: bakedAsset.hash,
+            byteLength: bakedAsset.byteLength,
+            label: `${input.read.studio.name} baked body`,
+            provenance: {
+              source: "onshape",
+              sourceId: input.read.studio.elementId,
+              sourceName: input.read.studio.name,
+              featureSpan: { fromFeatureId, toFeatureId },
+              reason: "onshape-studio-bake-required",
+            },
+            replacement: {
+              kind: "replaceBodyOutputs",
+              actionIndexes: orderedActions.flatMap((action, actionIndex) =>
+                action.kind === "createFeature" ? [actionIndex] : [],
+              ),
+            },
+          },
+        },
+      });
+      orderedActions.push({
+        kind: "createFeature",
+        index: createFeatures.length - 1,
+      });
+    } else {
+      diagnostics.push({
+        severity: "warning",
+        message: hasOnshapeGroundTruthGeometry(input.read.studio.groundTruth)
+          ? "Non-parametric solid geometry could not be materialized: baking requires the geometry-import capability, which is not available. The final-state body was not imported."
+          : "Non-parametric solid geometry could not be materialized: final-state geometry was intentionally omitted because no final bake boundary required it. The captured body was not imported.",
+        code: "onshape-bake-unavailable",
+      });
+    }
+  }
+
+  for (const boundaryFeatureId of trailingCheckpointBoundaryIds) {
+    await emitSegmentCheckpoint(boundaryFeatureId);
+  }
+
+  if (input.plan.bakeStrategy.kind === "segments") {
+    for (const segment of input.plan.bakeStrategy.segments) {
+      diagnostics.push({
+        severity: "info",
+        message: `Bake checkpoint ${segment.segmentId} represents ${segment.fromFeatureId} through ${segment.toFeatureId}, outputs bodies ${bodySetReviewValue(segment.checkpointBodyDeterministicIds)}, and replaces ${segment.replacementProducerFeatureIds.length} prior producer action${segment.replacementProducerFeatureIds.length === 1 ? "" : "s"}.`,
+        code: "onshape-bake-segment-planned",
+      });
+      diagnostics.push({
+        severity: "info",
+        message: `Bake checkpoint ${segment.segmentId} is tessellation-backed; captured STEP evidence is not used for checkpoint ingestion.`,
+        code: "onshape-bake-segment-tessellation-backed",
+      });
+    }
+  } else if (input.plan.bakeStrategy.kind === "wholeStudioLegacy") {
+    const limitation = input.plan.bakeDiagnostics[0];
+    diagnostics.push({
+      severity: "warning",
+      message: limitation
+        ? `Segmented baking was unavailable (${limitation.code}): ${limitation.message} The importer retained the legacy whole-studio bake.`
+        : `Segmented baking was unavailable (${input.plan.bakeStrategy.reason}); the importer retained the legacy whole-studio bake.`,
+      code: "onshape-bake-segment-legacy-fallback",
+    });
+  }
+
+  const strategySummary = input.plan.bakeStrategy.kind === "segments"
+    ? `segmented, ${input.plan.bakeStrategy.segments.length} checkpoint${input.plan.bakeStrategy.segments.length === 1 ? "" : "s"}`
+    : input.plan.bakeStrategy.kind === "wholeStudioLegacy"
+      ? `legacy whole-studio (${input.plan.bakeStrategy.reason}), 0 checkpoints`
+      : "none, 0 checkpoints";
+  diagnostics.push({
+    severity: "info",
+    message: `Fidelity: ${input.plan.tierCounts.parametric} parametric, ${input.plan.tierCounts.baked} baked, ${input.plan.tierCounts.geometryOnly} geometry-only; bake strategy: ${strategySummary}.`,
+    code: "onshape-fidelity-summary",
+  });
+  if (input.featureIdToOrderedActionIndex) {
+    for (const [featureId, actionIndexes] of actionIndexesBySourceFeatureId) {
+      if (actionIndexes.length === 1) {
+        input.featureIdToOrderedActionIndex.set(featureId, actionIndexes[0]!);
+      }
+    }
+  }
+  if (input.featureIdToBodyProducerActionIndex) {
+    for (const [featureId, actionIndex] of exactProducerActionIndexByFeatureId) {
+      input.featureIdToBodyProducerActionIndex.set(featureId, actionIndex);
+    }
+  }
+
+  const actions: ImportPreparedActions = {
+    addDocumentVariables,
+    commitSketches,
+    createFeatures,
+    orderedActions,
+    ...(bodyScopeBindings.length > 0 ? { bodyScopeBindings } : {}),
+    diagnostics,
+  };
+
+  const rebasePreparedValue = (value: unknown, consumerActionIndex: number) => {
+    try {
+      return rebaseHistoricalSelectorsInPreparedValue({
+        value,
+        actionIndexesBySourceFeatureId,
+        orderedActions,
+        consumerActionIndex,
+      });
+    } catch (error) {
+      const buildDiagnostics = diagnostics
+        .filter((diagnostic) => diagnostic.severity !== "info")
+        .map((diagnostic) => `${diagnostic.code ?? "diagnostic"}: ${diagnostic.message}`)
+        .join("; ");
+      throw new Error(
+        `${describeUnknownError(error, "Historical topology rebase failed")}${buildDiagnostics ? ` Build diagnostics: ${buildDiagnostics}` : ""}`,
+        { cause: error },
+      );
+    }
+  };
+
+  for (const [consumerActionIndex, action] of orderedActions.entries()) {
+    if (action.kind === "commitSketch") {
+      commitSketches[action.index] = rebasePreparedValue(
+        commitSketches[action.index],
+        consumerActionIndex,
+      ) as ImportCommitSketchRequest;
+    } else if (action.kind === "createFeature") {
+      createFeatures[action.index] = rebasePreparedValue(
+        createFeatures[action.index],
+        consumerActionIndex,
+      ) as ImportCreateFeatureRequest;
+    }
+  }
+
+  if (input.includeBinding && input.source) {
+    actions.binding = {
+      schemaVersion: IMPORT_CONTRACT_SCHEMA_VERSION,
+      kind: "localFile",
+      fileName: input.source.name,
+      fingerprint: input.source.fingerprint,
+      refreshPolicy: "manual",
+    };
+  }
+
+  return actions;
+}
+
+export const onshapeImportProvider: ImportProvider<
+  OnshapeImportReview,
+  OnshapeImportSelections,
+  FeatureEditorFormSchema
+> = {
+  id: "onshape-capture-bundle",
+  label: "Onshape Capture Bundle",
+  acceptedFileTypes: [
+    { extension: ACCEPTED_EXTENSION, mediaType: "application/json" },
+  ],
+
+  accepts(source) {
+    return source.name.toLowerCase().endsWith(ACCEPTED_EXTENSION);
+  },
+
+  async review({ source, capabilities }) {
+    const bundle = decodeBundle(source);
+    if (!bundle) {
+      const envelope: ImportReviewEnvelope<OnshapeImportReview> = {
+        providerReview: { valid: false, studios: [], defaultStudioId: null },
+        proposedActionKinds: [],
+        diagnostics: [
+          {
+            severity: "error",
+            message:
+              "The selected file is not a valid Onshape capture bundle (envelope validation failed or unsupported format version).",
+            code: "onshape-bundle-invalid",
+          },
+        ],
+      };
+      return envelope;
+    }
+
+    const studioList = listPartStudios(bundle);
+    const studioReads = new Map(
+      studioList.map((entry) => [
+        entry.elementId,
+        readPartStudio(bundle, entry.elementId),
+      ]),
+    );
+    const studios: OnshapeStudioReview[] = [];
+    for (const entry of studioList) {
+      studios.push(
+        await reviewStudio(
+          bundle,
+          entry.elementId,
+          capabilities,
+          studioReads.get(entry.elementId),
+        ),
+      );
+    }
+    const defaultStudio =
+      studios.find((studio) => studio.hasBodies) ?? studios[0] ?? null;
+
+    const diagnostics: ImportDiagnostic[] = studios.flatMap((studio) => {
+      if (studio.verification.status === "unavailable") {
+        return [
+          {
+            severity: "warning" as const,
+            message: `Ground-truth verification is unavailable for "${studio.name}"; imported geometry was not checked against the captured model.`,
+            code: "onshape-verification-unavailable",
+          },
+        ];
+      }
+      if (studio.verification.status === "partial") {
+        return [
+          {
+            severity: "warning" as const,
+            message: studio.verification.reason,
+            code: "onshape-verification-partial",
+          },
+        ];
+      }
+      return [];
+    });
+
+    const providerReview: OnshapeImportReview = {
+      valid: true,
+      studios,
+      defaultStudioId: defaultStudio?.elementId ?? null,
+    };
+    reviewedBundles.set(providerReview, { bundle, studioReads });
+    return {
+      providerReview,
+      proposedActionKinds: ["addDocumentVariable", "commitSketch", "createFeature"],
+      diagnostics,
+    };
+  },
+
+  createDefaultSelections(review) {
+    return {
+      studioElementId: review.providerReview.defaultStudioId,
+      demotedFeatureIds: [],
+    };
+  },
+
+  getReviewFormSchema(review, selections) {
+    const { studios } = review.providerReview;
+    const selected =
+      studios.find((studio) => studio.elementId === selections.studioElementId) ??
+      studios[0] ??
+      null;
+
+    const studioField: FeatureEditorFormField = {
+      kind: "enum",
+      id: "studio",
+      label: "Part Studio",
+      value: selected?.elementId ?? "",
+      options: studios.map((studio) => ({
+        value: studio.elementId,
+        label: `${studio.name} (${studio.featurePlans.length} features)`,
+      })),
+      patch: { patchKey: "studioElementId" },
+    };
+
+    const reportFields: FeatureEditorFormField[] = selected
+      ? selected.featurePlans.map((plan) => {
+          const relationshipSummary = selected.sketchRelationshipSummaries.find(
+            (entry) => entry.featureId === plan.onshapeFeatureId,
+          );
+          const relationships = relationshipSummary
+            ? ` — carried/dropped: constraints ${relationshipSummary.summary.constraints.carried}/${relationshipSummary.summary.constraints.dropped}, dimensions ${relationshipSummary.summary.dimensions.carried}/${relationshipSummary.summary.dimensions.dropped}, derivations ${relationshipSummary.summary.derivations.carried}/${relationshipSummary.summary.derivations.dropped}`
+            : "";
+          return summaryField(
+            `feature-${plan.onshapeFeatureId}`,
+            plan.label,
+            `${reviewFeatureDiagnostic(plan, selected)}${relationships}`,
+          );
+        })
+      : [];
+
+    const relationshipFields: FeatureEditorFormField[] = selected
+      ? selected.sketchRelationshipSummaries.map((entry) =>
+          summaryField(
+            `sketch-relationships-${entry.featureId}`,
+            entry.label,
+            `constraints ${entry.summary.constraints.carried}/${entry.summary.constraints.dropped}, dimensions ${entry.summary.dimensions.carried}/${entry.summary.dimensions.dropped}, derivations ${entry.summary.derivations.carried}/${entry.summary.derivations.dropped}`,
+          ),
+        )
+      : [];
+
+    const verificationValue = selected
+      ? selected.verification.status === "unavailable"
+        ? "Unavailable — geometry was not verified against the captured model."
+        : selected.verification.status === "noGroundTruth"
+          ? "No captured geometry to verify."
+          : selected.verification.status
+      : "No studio selected.";
+
+    const schema: FeatureEditorFormSchema = {
+      sections: [
+        { id: "studio-selection", title: "Studio", fields: [studioField] },
+        {
+          id: "bake-segments",
+          title: "Bake segments",
+          fields: selected ? bakeSegmentFields(selected) : [],
+        },
+        {
+          id: "fidelity-report",
+          title: "Per-feature fidelity",
+          fields: reportFields,
+        },
+        {
+          id: "sketch-relationships",
+          title: "Sketch relationships carried/dropped",
+          fields: relationshipFields,
+        },
+        {
+          id: "verification",
+          title: "Ground-truth verification",
+          fields: [
+            summaryField("verification-status", "Status", verificationValue),
+          ],
+        },
+      ],
+    };
+    return schema;
+  },
+
+  applySelectionPatch(_review, selections, patch) {
+    const next: OnshapeImportSelections = { ...selections };
+    if (typeof patch.studioElementId === "string") {
+      next.studioElementId = patch.studioElementId;
+    }
+    if (Array.isArray(patch.demotedFeatureIds)) {
+      next.demotedFeatureIds = patch.demotedFeatureIds.filter(
+        (id): id is string => typeof id === "string",
+      );
+    }
+    return next;
+  },
+
+  async prepare({ source, review, selections, capabilities }) {
+    const reviewedContext = reviewedBundles.get(review.providerReview);
+    const bundle = reviewedContext?.bundle ?? decodeBundle(source);
+    if (!bundle) {
+      return {
+        diagnostics: [
+          {
+            severity: "error",
+            message: "The Onshape bundle could not be read during prepare.",
+            code: "onshape-bundle-invalid",
+          },
+        ],
+      };
+    }
+
+    const elementId =
+      selections.studioElementId ?? bundle.partStudios[0]?.elementId ?? "";
+    const read =
+      reviewedContext?.studioReads.get(elementId) ??
+      readPartStudio(bundle, elementId);
+    const reviewedStudio = review.providerReview.studios.find(
+      (studio) => studio.elementId === elementId,
+    );
+    const reviewedPlan: OnshapeStudioPlan = reviewedStudio
+      ? {
+          featurePlans: reviewedStudio.featurePlans,
+          tierCounts: reviewedStudio.tierCounts,
+          bakeStrategy: reviewedStudio.bakeStrategy,
+          bakeDiagnostics: reviewedStudio.bakeDiagnostics,
+          requiresStudioBake: reviewedStudio.requiresStudioBake,
+        }
+      : await (async () => {
+          // Fallback only: review normally supplies the post-fixed-point plan. A
+          // raw fidelity plan can still carry an optimistically promoted extrude
+          // whose extent/scope topology never resolved; bake it closed so
+          // `resolvedExtrudeExtent` cannot abort the whole studio at prepare.
+          const fallback = await planStudioFidelity(read, {
+            profileVerifier: profileVerifierFor(capabilities),
+          });
+          return {
+            ...fallback,
+            featurePlans: bakeUnresolvedExtrudeTopology(fallback.featurePlans),
+          };
+        })();
+    const selectedDemotions = new Set(selections.demotedFeatureIds);
+    const plan = selectedDemotions.size === 0
+      ? reviewedPlan
+      : recomputePlanWithFeaturePlans(
+          reviewedPlan,
+          cascadeUnavailableActionConsumers(
+            reviewedPlan.featurePlans.map((featurePlan) =>
+              selectedDemotions.has(featurePlan.onshapeFeatureId)
+                ? {
+                    ...featurePlan,
+                    tier: "baked" as const,
+                    target: { kind: "suppressed" as const },
+                    suppressed: true,
+                  }
+                : featurePlan,
+            ),
+          ),
+          read.studio.groundTruth.hasBodies,
+          read,
+        );
+    return await buildPreparedActions({
+      source,
+      read,
+      plan,
+      capabilities,
+      demotedFeatureIds: selections.demotedFeatureIds,
+      includeBinding: true,
+      materializeBake: true,
+      materializeTopologyFallback: true,
+    });
+  },
+};

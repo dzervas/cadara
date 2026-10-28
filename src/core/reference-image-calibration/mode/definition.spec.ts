@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { createReferenceImageFixture as createReferenceImageOperation } from "@/core/reference-image/operation-test-fixtures";
 import { test, expect } from "vitest";
 
@@ -98,20 +99,20 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts only places
     type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  });
+  }, defaultEditorExtensionDependencies);
   const armed = transitionEditorState(entered.state, {
     type: "sketch.specialModePanelActionInvoked",
     action: {
       kind: "invoke",
       actionId: "add-anchor",
     },
-  });
+  }, defaultEditorExtensionDependencies);
 
   const outsideBounds = transitionEditorState(armed.state, {
     type: "sketch.specialModeClickRequested",
     point: [200, 200],
     target: operationTarget,
-  });
+  }, defaultEditorExtensionDependencies);
   expect(
     getModeState(outsideBounds.state).draftState.calibration.anchors.length,
     "Clicking outside the image bounds should not create a calibration anchor.",
@@ -121,7 +122,7 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts only places
     type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  });
+  }, defaultEditorExtensionDependencies);
   const modeState = getModeState(placed.state);
   expect(
     modeState.draftState.calibration.anchors.length,
@@ -143,7 +144,7 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
     type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   for (const point of [
     [-40, 0],
@@ -152,12 +153,12 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
     state = transitionEditorState(state, {
       type: "sketch.specialModePanelActionInvoked",
       action: { kind: "invoke", actionId: "add-anchor" },
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     state = transitionEditorState(state, {
       type: "sketch.specialModeClickRequested",
       point,
       target: operationTarget,
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
   }
 
   const modeState = getModeState(state);
@@ -182,11 +183,11 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts lists autho
         value: anchorIds[0]!,
       },
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "remove-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   const remainingAnchors = getModeState(state).draftState.calibration.anchors;
   expect(
@@ -205,7 +206,7 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a
     type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   for (const point of [
     [-40, 0],
@@ -214,12 +215,12 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a
     state = transitionEditorState(state, {
       type: "sketch.specialModePanelActionInvoked",
       action: { kind: "invoke", actionId: "add-anchor" },
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     state = transitionEditorState(state, {
       type: "sketch.specialModeClickRequested",
       point,
       target: operationTarget,
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
   }
 
   const originalAnchorIds = getModeState(
@@ -234,20 +235,20 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts allocates a
         value: originalAnchorIds[0]!,
       },
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "remove-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "add-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModeClickRequested",
     point: [0, 20],
     target: operationTarget,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   const nextAnchorIds = getModeState(state).draftState.calibration.anchors.map(
     (anchor) => anchor.anchorId,
@@ -305,17 +306,17 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
     type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "add-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   const initialBinding =
     getModeState(state).draftState.calibration.anchors[0]?.pointId;
@@ -328,11 +329,11 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
         value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
       },
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "rebind-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModeClickRequested",
     point: [30, 0],
@@ -341,7 +342,7 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebinds a s
       sketchId: "sketch_draft",
       pointId: "sketch_point_anchor",
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
   expect(
@@ -389,17 +390,17 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
     type: "sketch.specialModeEntered",
     modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
     operationId: operationTarget.operationId,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "add-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModeClickRequested",
     point: [0, 0],
     target: operationTarget,
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: {
@@ -409,11 +410,11 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
         value: getModeState(state).draftState.calibration.anchors[0]?.anchorId,
       },
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModePanelActionInvoked",
     action: { kind: "invoke", actionId: "rebind-anchor" },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
   state = transitionEditorState(state, {
     type: "sketch.specialModeClickRequested",
     point: [0, 0],
@@ -422,7 +423,7 @@ test("src/domain/reference-image-calibration/mode/definition.spec.ts rebind mode
       sketchId: "sketch_draft",
       pointId: "sketch_point_overlap",
     },
-  }).state;
+  }, defaultEditorExtensionDependencies).state;
 
   const reboundAnchor = getModeState(state).draftState.calibration.anchors[0];
   expect(

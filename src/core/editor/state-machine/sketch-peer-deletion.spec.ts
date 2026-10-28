@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 /**
  * T17-20 (T17k2; T17b0 P-8 S1; issue 09: history for a deleted shared
  * sketch cannot be applied). Logic lane; seam: the editor reducer
@@ -49,7 +50,7 @@ async function editingPublishedSketch() {
         ),
       },
     },
-  });
+  }, defaultEditorExtensionDependencies);
   return { record, state, peerDeleted };
 }
 
@@ -57,7 +58,7 @@ const finish = (state: EditorState) =>
   transitionEditorState(state, {
     type: "tool.activated",
     toolId: "finishSketch",
-  });
+  }, defaultEditorExtensionDependencies);
 
 test("a peer deleting the edited sketch shows a label-based notice; Finish is refused with it and publishes nothing", async () => {
   const { record, state, peerDeleted } = await editingPublishedSketch();
@@ -83,7 +84,7 @@ test("a peer deleting the edited sketch shows a label-based notice; Finish is re
         peerDeleted.state.kind === "editingSketch"
           ? peerDeleted.state.command.commandSessionId
           : ("" as never),
-    }),
+    }, defaultEditorExtensionDependencies),
   ]) {
     expect(refused.effects, "nothing is published").toEqual([]);
     expect(refused.state.kind).toBe("editingSketch");
@@ -117,7 +118,7 @@ test("the peer restoring the sketch clears the deleted state; no stale text, Fin
   const restored = transitionEditorState(refused.state, {
     type: "document.snapshotLoaded",
     snapshot: state.snapshot!,
-  });
+  }, defaultEditorExtensionDependencies);
   expect(getPeerDeletedSketchNotice(restored.state)).toBe(null);
   expect(
     String(
@@ -137,7 +138,7 @@ test("Discard changes and leave exits the deleted sketch without publishing", as
   const left = transitionEditorState(peerDeleted.state, {
     type: "command.cancelled",
     commandSessionId: peerDeleted.state.command.commandSessionId,
-  });
+  }, defaultEditorExtensionDependencies);
   expect(left.state.kind).toBe("idle");
   expect(left.state.mode).toBe("part");
   expect(left.effects.map((effect) => effect.type)).not.toContain(

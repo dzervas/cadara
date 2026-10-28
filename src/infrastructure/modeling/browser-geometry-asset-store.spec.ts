@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { BAKED_BODY_FEATURE_SCHEMA_VERSION, CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import type { CreateFeatureRequest } from "@/contracts/modeling/schema";
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
-import { createImportCapabilities } from "@/domain/import/orchestrator";
+import { createImportCapabilities } from "@/infrastructure/import/orchestrator";
 import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createGeometryAssetComposition } from "@/infrastructure/modeling/browser-geometry-asset-store";

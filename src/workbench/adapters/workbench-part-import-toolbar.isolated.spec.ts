@@ -1,7 +1,7 @@
 import { beforeEach, vi, test, expect } from "vitest";
 
 import { createTestErrorReporter } from "@/contracts/errors";
-import { createImportProviderRegistry } from "@/domain/import/provider-registry";
+import { createImportProviderRegistry } from "@/core/import/provider-registry";
 import { createScopedRuntimeExtensionRegistryCompositionForTest } from "@/domain/extensions/test-registry-composition";
 
 import { createHookTestHarness } from "./controller-test-harness";

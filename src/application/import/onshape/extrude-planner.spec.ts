@@ -16,8 +16,8 @@ import {
   resolvedExtrudeStartExtent,
   resolvePlannedExtrudeTopology,
 } from "@/application/import/onshape/extrude-planner";
-import { makeWaveTCaptureBundle } from "@/domain/import/onshape/wave-t-capture-fixtures";
-import { makeWaveXSurfaceExtrudeCaptureBundle } from "@/domain/import/onshape/wave-x-capture-fixtures";
+import { makeWaveTCaptureBundle } from "../../../../test/helpers/onshape/topology-feature-capture-fixtures";
+import { makeWaveXSurfaceExtrudeCaptureBundle } from "../../../../test/helpers/onshape/solid-feature-capture-fixtures";
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,

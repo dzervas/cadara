@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { expect, it } from "vitest";
 import { createEditorEventLoop } from "./editor-event-loop";
 import { createSeedDocumentSnapshot } from "@/application/modeling/modeling-test-fixtures";
@@ -55,7 +56,7 @@ it("settles a correlated typed failure even when stopped before the late snapsho
   const pending = deferred<typeof snapshot>();
   const loop = createEditorEventLoop(
     { ...runtime(snapshot), getCurrentDocumentSnapshot: () => pending.promise },
-    createTestErrorReporter(),
+    createTestErrorReporter(), undefined, defaultEditorExtensionDependencies,
   );
   const completion = loop.startAndSettle("startup");
   loop.stop();
@@ -93,7 +94,7 @@ it("waits for detached derivation descendants before correlated completion and d
         return regions.promise;
       },
     },
-    createTestErrorReporter(),
+    createTestErrorReporter(), undefined, defaultEditorExtensionDependencies,
   );
   await loop.startAndSettle("startup");
   const completion = loop.dispatchAndSettle("open", {
@@ -186,7 +187,7 @@ async function createQueryLoop(lane: "snap" | "edit") {
       ...effect, type: "effect.sketchRegionsDerived", regions: [], diagnostics: [], offsetPublications: [],
     };
     return runEditorEffect(effect, service, signal);
-  });
+  }, defaultEditorExtensionDependencies);
   await loop.startAndSettle("startup");
   loop.dispatch({ type: "tool.activated", toolId: "sketch" });
   const opened = loop.dispatchAndSettle("open", {
@@ -270,7 +271,7 @@ it("recovers the previous editor context and surfaces a rejected edit-entry curs
   const loop = createEditorEventLoop({
     ...runtime(snapshot),
     setDocumentCursor: async () => { throw new Error("Rollback failed"); },
-  }, reporter);
+  }, reporter, undefined, defaultEditorExtensionDependencies);
   await loop.startAndSettle("startup");
   const previous = loop.getState();
   const events = await loop.dispatchAndSettle("reopen", {
@@ -304,7 +305,7 @@ it("retains the active sketch when cursor restoration fails and allows the exit 
       snapshot.document.cursor = input.cursor;
       return { revisionId: snapshot.document.revisionId, accepted: true, diagnostics: [] };
     },
-  }, reporter);
+  }, reporter, undefined, defaultEditorExtensionDependencies);
   await loop.startAndSettle("startup");
   await loop.dispatchAndSettle("reopen", {
     type: "authoring.reopenRequested", toolId: "sketch",
@@ -350,7 +351,7 @@ it("reissues cancelled snap work when a failed exit recovers the sketch", async 
       return result.promise;
     },
   };
-  const loop = createEditorEventLoop(base, createTestErrorReporter());
+  const loop = createEditorEventLoop(base, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
   await loop.startAndSettle("startup");
   await loop.dispatchAndSettle("open", {
     type: "authoring.reopenRequested", toolId: "sketch",

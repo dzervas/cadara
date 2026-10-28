@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import {
@@ -21,7 +22,7 @@ test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
     ).snapshot;
     const boot = transitionEditorState(initialEditorState, {
       type: "session.started",
-    });
+    }, defaultEditorExtensionDependencies);
     const fetchEffect = boot.effects[0];
     expect(fetchEffect?.type, "Session start should request a snapshot.").toBe(
       "document.fetchSnapshot",
@@ -36,7 +37,7 @@ test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
         snapshot,
         selectionCatalog: buildSelectionTargetCatalog(snapshot),
       },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(loaded.state.kind, "Loaded state should be idle.").toBe("idle");
     return { state: loaded.state, snapshot };
@@ -62,7 +63,7 @@ test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
     const requested = transitionEditorState(state, {
       type: "document.historyCursorRequested",
       cursor: previousCursor,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       requested.effects.length,
@@ -85,7 +86,7 @@ test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
     const duplicate = transitionEditorState(requested.state, {
       type: "document.historyCursorRequested",
       cursor: previousCursor,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       duplicate.effects.length,
       "A second cursor move should not be emitted while the first is pending.",
@@ -113,7 +114,7 @@ test("src/contracts/editor/history-undo-redo.spec.ts", async () => {
       "Selection commands should not expose redo.",
     ).toBeFalsy();
     expect(
-      transitionEditorState(state, { type: "history.undoRequested" }).state,
+      transitionEditorState(state, { type: "history.undoRequested" }, defaultEditorExtensionDependencies).state,
       "Unavailable undo should leave selection command state unchanged.",
     ).toBe(state);
   }

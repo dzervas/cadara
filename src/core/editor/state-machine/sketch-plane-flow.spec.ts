@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import { planeSelectionFilter } from "@/core/editor/schema";
@@ -35,7 +36,7 @@ test("sketch-plane-flow.spec.ts requests rollback-aware sketch-plane editing whe
   const requested = transitionEditorState(makeLoadedState(snapshot), {
     type: "sketchPlaneEdit.requested",
     target: { kind: "sketch", sketchId },
-  });
+  }, defaultEditorExtensionDependencies);
   const expectedRollbackCursor = getDocumentHistoryCursorBeforeTarget(
     snapshot.presentation.documentHistory,
     { kind: "sketch", sketchId },
@@ -67,7 +68,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
   const opened = transitionEditorState(makeLoadedState(directOpenSnapshot), {
     type: "sketchPlaneEdit.requested",
     target: { kind: "sketch", sketchId },
-  });
+  }, defaultEditorExtensionDependencies);
 
   expect(
     opened.state.kind === "editingSketchPlane" &&
@@ -86,7 +87,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
       ? transitionEditorState(opened.state, {
           type: "command.cancelled",
           commandSessionId: opened.state.command.commandSessionId,
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
 
   expect(
@@ -120,7 +121,7 @@ test("sketch-plane-flow.spec.ts opens directly, cancels without mutation, and re
     ? transitionEditorState(restoringState, {
         type: "command.cancelled",
         commandSessionId: restoringState.command.commandSessionId,
-      })
+      }, defaultEditorExtensionDependencies)
     : null;
 
   expect(
@@ -145,7 +146,7 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
   const opened = transitionEditorState(makeLoadedState(directOpenSnapshot), {
     type: "sketchPlaneEdit.requested",
     target: { kind: "sketch", sketchId },
-  });
+  }, defaultEditorExtensionDependencies);
 
   expect(
     opened.state.kind,
@@ -157,7 +158,7 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
       ? transitionEditorState(opened.state, {
           type: "form.referencePickerActivated",
           fieldId: "sketch-plane-support",
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
 
   expect(
@@ -172,7 +173,7 @@ test("sketch-plane-flow.spec.ts activates and cancels the sketch-plane reference
     activated?.state.kind === "editingSketchPlane"
       ? transitionEditorState(activated.state, {
           type: "form.referencePickerCancelled",
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
 
   expect(
@@ -199,7 +200,7 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
   const opened = transitionEditorState(makeLoadedState(directOpenSnapshot), {
     type: "sketchPlaneEdit.requested",
     target: { kind: "sketch", sketchId },
-  });
+  }, defaultEditorExtensionDependencies);
 
   expect(
     opened.state.kind,
@@ -220,7 +221,7 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
       ? transitionEditorState(opened.state, {
           type: "form.referencePickerActivated",
           fieldId: "sketch-plane-support",
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
   const selected =
     pickerActivated?.state.kind === "editingSketchPlane"
@@ -230,14 +231,14 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
             kind: "construction",
             constructionId: "construction_plane-yz",
           },
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
   const committed =
     selected?.state.kind === "editingSketchPlane"
       ? transitionEditorState(selected.state, {
           type: "command.commitRequested",
           commandSessionId: selected.state.command.commandSessionId,
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
 
   expect(
@@ -258,7 +259,7 @@ test("sketch-plane-flow.spec.ts emits sketch-plane commits only after a picked p
           revisionId: "rev_sketch_plane_updated",
           accepted: true,
           diagnostics: [],
-        })
+        }, defaultEditorExtensionDependencies)
       : null;
 
   expect(

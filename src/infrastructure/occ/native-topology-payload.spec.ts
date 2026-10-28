@@ -16,7 +16,7 @@ import {
   type OpenCascadeNativeFeatureTransactionResult,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/infrastructure/occ/native-topology-payload";
-import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/infrastructure/occ/topology-signatures";
+import { deriveKernelTopologySignaturesFromExactBrepPayload } from "@/core/modeling/topology-signatures";
 
 type NativeShapeForTest = { delete?: () => void };
 

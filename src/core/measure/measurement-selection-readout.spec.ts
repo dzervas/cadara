@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 /**
  * cadara-h026.3: the measurement readout of the plain selection, with no
  * tool armed. Logic lane; seams: `getMeasurementReadoutSource` (which
@@ -132,7 +133,7 @@ describe("which editor states show a readout", () => {
     const drawing = transitionEditorState(sketch, {
       type: "tool.activated",
       toolId: "line",
-    }).state;
+    }, defaultEditorExtensionDependencies).state;
     expect(drawing.kind === "editingSketch" && drawing.session.activeTool).toBe(
       "line",
     );

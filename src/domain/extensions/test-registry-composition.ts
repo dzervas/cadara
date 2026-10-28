@@ -7,7 +7,7 @@ import {
   builtinExportProviders,
 } from "@/application/export/builtin-provider-composition";
 import { createExportProviderRegistry } from "@/core/export/provider-registry";
-import { createImportProviderRegistry } from "@/domain/import/provider-registry";
+import { createImportProviderRegistry } from "@/core/import/provider-registry";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import { builtinSketchSpecialModeDefinitions } from "@/core/sketch-special-modes/builtin-definitions";
 import type { RuntimeExtensionRegistryComposition } from "@/domain/extensions/runtime-registry-composition";

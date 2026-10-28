@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
@@ -128,7 +129,7 @@ test("src/application/editor/editor-debug-trace.spec.ts observes event, effect c
       };
 
       return event;
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   const traceSubscription = loop.subscribeToTrace((entry) => {
@@ -188,7 +189,7 @@ test("src/application/editor/editor-debug-trace.spec.ts records failed effects w
     createTestErrorReporter(),
     async () => {
       throw new Error("Trace this failure.");
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   const traceSubscription = loop.subscribeToTrace((entry) => {

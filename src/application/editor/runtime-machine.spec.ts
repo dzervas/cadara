@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 
 import type {
@@ -61,7 +62,7 @@ test("src/domain/editor/runtime-machine.spec.ts", async () => {
       throw new Error("Feature commit is not used by this test.");
     },
   };
-  const actor = createEditorEventLoop(runtime);
+  const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
   actor.start();
 
@@ -182,7 +183,7 @@ test("src/domain/editor/runtime-machine.spec.ts reports escaped effect invocatio
   const reporter = createTestErrorReporter();
   const actor = createEditorEventLoop(runtime, reporter, async () => {
     throw new Error("Actor invocation escaped.");
-  });
+  }, defaultEditorExtensionDependencies);
 
   actor.start();
 
@@ -263,7 +264,7 @@ test("src/domain/editor/runtime-machine.spec.ts forwards selection clear events"
       throw new Error("Feature commit is not used by this test.");
     },
   };
-  const actor = createEditorEventLoop(runtime);
+  const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
   actor.start();
 
@@ -341,7 +342,7 @@ test("src/domain/editor/runtime-machine.spec.ts forwards direct snapshot load ev
       throw new Error("Feature commit is not used by this test.");
     },
   };
-  const actor = createEditorEventLoop(runtime);
+  const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
   actor.start();
 
@@ -426,7 +427,7 @@ test("src/domain/editor/runtime-machine.spec.ts forwards connected sketch select
       throw new Error("Feature commit is not used by this test.");
     },
   };
-  const actor = createEditorEventLoop(runtime);
+  const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
   actor.start();
 
@@ -535,7 +536,7 @@ test("src/domain/editor/runtime-machine.spec.ts forwards active section offset u
       throw new Error("Feature commit is not used by this test.");
     },
   };
-  const actor = createEditorEventLoop(runtime);
+  const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
   actor.start();
 

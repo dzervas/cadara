@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 
@@ -7,7 +8,7 @@ import type {
   EditorEvent,
   EditorState,
 } from "@/core/editor/state-machine";
-import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
+
 import { createSketchSpecialModeHandleRef } from "@/core/sketch-special-modes/presentation";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
@@ -142,7 +143,7 @@ test("src/application/editor/editor-event-loop.spec.ts bootstraps through start(
       snapshotCallCount += 1;
       return snapshot;
     },
-  });
+  }, undefined, undefined, defaultEditorExtensionDependencies);
 
   loop.start();
 
@@ -169,7 +170,7 @@ test("src/application/editor/editor-event-loop.spec.ts bootstraps through start(
 
 test("src/application/editor/editor-event-loop.spec.ts dispatches synchronous events and supports unsubscribe", async () => {
   const snapshot = await createSeedDocumentSnapshot();
-  const loop = createEditorEventLoop(createRuntime(snapshot));
+  const loop = createEditorEventLoop(createRuntime(snapshot), undefined, undefined, defaultEditorExtensionDependencies);
   let notifications = 0;
   const subscription = loop.subscribe(() => {
     notifications += 1;
@@ -224,7 +225,7 @@ test("src/application/editor/editor-event-loop.spec.ts executes effects serially
       return new Promise<EditorEvent>((resolve) => {
         resolvers.push(resolve);
       });
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   loop.start();
@@ -314,7 +315,7 @@ test("cadara-se2: a queued history move runs while LOD refinement is in flight; 
         };
       },
     },
-    createTestErrorReporter(),
+    createTestErrorReporter(), undefined, defaultEditorExtensionDependencies,
   );
   loop.start();
   await waitForState(loop, (state) => state.snapshot !== null);
@@ -365,7 +366,7 @@ test("T17o: a failed snapshot refresh is reported and kept in the editor state u
         return snapshot;
       },
     },
-    reporter,
+    reporter, undefined, defaultEditorExtensionDependencies,
   );
   loop.start();
   await waitForState(loop, (state) => state.snapshot !== null);
@@ -429,7 +430,7 @@ test("T17o review: a thrown sketch open and a thrown history move are reported a
         throw new Error("Cursor write failed.");
       },
     },
-    reporter,
+    reporter, undefined, defaultEditorExtensionDependencies,
   );
   loop.start();
   await waitForState(loop, (state) => state.snapshot !== null);
@@ -522,7 +523,7 @@ test("cadara-4x2: a history move accepted after its loop stopped and its service
             });
         }),
     },
-    reporter,
+    reporter, undefined, defaultEditorExtensionDependencies,
   );
   loop.start();
   await waitForState(loop, (state) => state.snapshot !== null);
@@ -599,7 +600,7 @@ test("T17-11: the loop reports a thrown snap query with developer visibility", a
         session,
       } as EditorEvent;
     return runEditorEffect(effect, runtime);
-  });
+  }, defaultEditorExtensionDependencies);
   loop.start();
   await waitForState(loop, (state) => state.snapshot !== null);
   loop.dispatch({ type: "tool.activated", toolId: "sketch" });
@@ -655,7 +656,7 @@ test("src/application/editor/editor-event-loop.spec.ts reports escaped effect er
     reporter,
     async () => {
       throw new Error("Editor event loop invocation escaped.");
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   loop.start();
@@ -692,7 +693,7 @@ test("src/application/editor/editor-event-loop.spec.ts stop() discards queued an
       new Promise<EditorEvent>((resolve) => {
         inFlightRequestId = effect.requestId;
         pending.resolve = resolve;
-      }),
+      }), defaultEditorExtensionDependencies,
   );
 
   loop.start();
@@ -1122,7 +1123,7 @@ test("src/application/editor/editor-event-loop.spec.ts restart() resumes drainin
       return new Promise<EditorEvent>((resolve) => {
         resolvers.push(resolve);
       });
-    },
+    }, defaultEditorExtensionDependencies,
   );
 
   loop.start();
@@ -1285,7 +1286,7 @@ test("EditorEventLoop derives live regions in the background, discards stale gen
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations, commits } =
     createControlledRegionRuntime(snapshot);
-  const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+  const loop = createEditorEventLoop(runtime, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
 
   await waitForCondition(() => derivations.length === 1);
@@ -1463,7 +1464,7 @@ test("O30 (cadara-b3k.2): a second Finish while the first commit is in flight do
     new Promise((resolve) => {
       commits.push({ resolve: () => resolve(null) });
     });
-  const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+  const loop = createEditorEventLoop(runtime, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
   await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
 
@@ -1518,7 +1519,7 @@ test("EditorEventLoop keeps drag regions stale until the drag completes, then de
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
-  const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+  const loop = createEditorEventLoop(runtime, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
   await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
 
@@ -1567,7 +1568,7 @@ test.each([false, true])(
     const { runtime, derivations } = createControlledRegionRuntime(snapshot);
     const loop = createEditorEventLoop(
       { ...runtime, supersedesSketchRegionDerivation: supersede },
-      createTestErrorReporter(),
+      createTestErrorReporter(), undefined, defaultEditorExtensionDependencies,
     );
     const currentSketch = await openSeedSketch(loop, sketch.sketchId);
     await settleOpeningRounds(loop, derivations, sketch.sketch.regions);
@@ -1670,7 +1671,7 @@ test("EditorEventLoop reports a rejected background derivation and marks live re
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
   const reporter = createTestErrorReporter();
-  const loop = createEditorEventLoop(runtime, reporter);
+  const loop = createEditorEventLoop(runtime, reporter, undefined, defaultEditorExtensionDependencies);
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
   await waitForCondition(() => derivations.length === 1);
   const retained = currentSketch().session.liveRegions.regions;
@@ -1710,7 +1711,7 @@ test("EditorEventLoop re-derives live regions after stop() drops an in-flight de
   const sketch = snapshot.document.sketches[0]!;
   snapshot.document.cursor = { kind: "sketch", sketchId: sketch.sketchId };
   const { runtime, derivations } = createControlledRegionRuntime(snapshot);
-  const loop = createEditorEventLoop(runtime, createTestErrorReporter());
+  const loop = createEditorEventLoop(runtime, createTestErrorReporter(), undefined, defaultEditorExtensionDependencies);
   const currentSketch = await openSeedSketch(loop, sketch.sketchId);
   await waitForCondition(() => derivations.length === 1);
 

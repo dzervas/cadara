@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { createBuiltinExportProviderRegistry } from "@/application/export/builtin-provider-composition";
 import { createSketchPublicationReceipts } from "@/infrastructure/modeling/sketch-publication-receipts";
 import { createSemanticDocumentPort } from "@/infrastructure/modeling/semantic-document-port";
@@ -28,7 +29,7 @@ import { assertOpenCascadeNativeTopologyKernelCapabilities } from "@/infrastruct
 import { createEditorEventLoop } from "@/application/editor/editor-event-loop";
 import { createModelingServiceEditorEffectRuntime } from "@/application/editor/effect-registry";
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
-import { defaultEditorExtensionDependencies } from "@/core/editor/state-machine";
+
 import { createConsoleErrorReporter } from "@/contracts/errors";
 import type { ModelCheckpointStore } from "@/infrastructure/persistence/model-checkpoint-store";
 import { fingerprintModelCheckpointRuntime } from "@/infrastructure/modeling/model-checkpoint-file-store";

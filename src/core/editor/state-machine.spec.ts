@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect, assert } from "vitest";
 import { getEditorHistoryAvailability, getEditorViewState, getEditorSelectionKey, type EditorEffectRuntime, initialEditorState, type SketchEditorState, transitionEditorState, type EditorEvent } from "@/core/editor/state-machine";
@@ -863,7 +864,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -890,7 +891,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           kind: "construction",
           constructionId: "construction_plane-xy",
         },
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -927,11 +928,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const activated = transitionEditorState(baseState, {
         type: "tool.activated",
         toolId: "sketch",
-      });
+      }, defaultEditorExtensionDependencies);
       const openResult = transitionEditorState(activated.state, {
         type: "viewport.selectionRequested",
         target: { kind: "construction", constructionId },
-      });
+      }, defaultEditorExtensionDependencies);
 
       expect(
         openResult.effects[0]?.type,
@@ -958,7 +959,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -992,7 +993,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1024,12 +1025,12 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
     const openResult = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_top" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       openResult.effects.length,
@@ -1056,7 +1057,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sectionView",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1086,7 +1087,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         type: "viewport.selectionRequested",
         target,
         cameraPosition: [0, 0, 20],
-      });
+      }, defaultEditorExtensionDependencies);
 
       expect(
         selected.state.kind,
@@ -1123,14 +1124,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sectionView",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     const invalidTarget = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "body", bodyId: "body_a" },
       cameraPosition: [0, 0, 20],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       invalidTarget.state.kind,
@@ -1141,7 +1142,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const missingCamera = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_top" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       missingCamera.state.kind,
@@ -1169,13 +1170,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sectionView",
-      },
+      }, defaultEditorExtensionDependencies,
     );
     const selected = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_top" },
       cameraPosition: [0, 0, 20],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -1186,14 +1187,14 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "section.offsetUpdated",
       commandSessionId: selected.state.command.commandSessionId,
       offset: 7.5,
-    });
+    }, defaultEditorExtensionDependencies);
     const flipped = transitionEditorState(moved.state, {
       type: "section.flipRequested",
       commandSessionId:
         moved.state.kind === "inspectingSection"
           ? moved.state.command.commandSessionId
           : ("command_unreachable" as CommandSessionId),
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(flipped.state.kind, "Flipping should keep the section active.").toBe(
       "inspectingSection",
@@ -1211,7 +1212,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const cleared = transitionEditorState(flipped.state, {
       type: "section.cleared",
       commandSessionId: flipped.state.command.commandSessionId,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       cleared.state.kind,
@@ -1235,7 +1236,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "measure",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1255,7 +1256,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const firstSelection = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_part-1", edgeId: "edge_outer-0" },
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       firstSelection.state.selection.length,
       "Measure should accept a first measurable target.",
@@ -1264,7 +1265,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const pairedSelection = transitionEditorState(firstSelection.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_part-1", faceId: "face_top" },
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       pairedSelection.state.selection.length,
       "Measure should pair supported two-target selections.",
@@ -1273,7 +1274,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const replacedSelection = transitionEditorState(pairedSelection.state, {
       type: "viewport.selectionRequested",
       target: { kind: "body", bodyId: "body_part-1" },
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       replacedSelection.state.selection.length === 1 &&
         replacedSelection.state.selection[0]?.kind === "body",
@@ -1282,7 +1283,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const clearedSelection = transitionEditorState(replacedSelection.state, {
       type: "selection.cleared",
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       clearedSelection.state.kind === "selectionCommand" &&
         clearedSelection.state.selection.length === 0,
@@ -1293,7 +1294,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const cancelled = transitionEditorState(clearedSelection.state, {
       type: "command.cancelled",
       commandSessionId: clearedSelection.state.command.commandSessionId,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       cancelled.state.kind,
       "Measure cancellation should return the editor to idle.",
@@ -1512,7 +1513,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "extrude",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1539,7 +1540,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       stale: false,
       diagnostics: [],
       renderables: [],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       staleIgnored.state,
@@ -1567,7 +1568,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "revolve",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1588,7 +1589,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const completed = transitionEditorState(activation.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_a", edgeId: "edge_axis" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       completed.state.kind,
@@ -1626,7 +1627,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "revolve",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1651,7 +1652,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const completed = transitionEditorState(activation.state, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_a", edgeId: "edge_axis" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       completed.state.kind,
@@ -1691,7 +1692,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "shell",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1732,7 +1733,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "thicken",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1780,7 +1781,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "combine",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1807,7 +1808,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "viewport.selectionRequested",
         target: { kind: "body", bodyId: "body_b" },
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1835,7 +1836,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "split",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1870,7 +1871,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "deleteSolid",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1925,7 +1926,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "combine",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1952,7 +1953,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "extrude",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -1985,7 +1986,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "mirror",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2020,7 +2021,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "transform",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2055,7 +2056,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "linearPattern",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2090,7 +2091,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "circularPattern",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2135,7 +2136,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "shell",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2147,7 +2148,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const facesActive = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-faces",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       facesActive.state.kind,
@@ -2166,7 +2167,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const faceAppended = transitionEditorState(facesActive.state, {
       type: "viewport.selectionRequested",
       target: { kind: "face", bodyId: "body_a", faceId: "face_side" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       faceAppended.state.kind,
@@ -2182,7 +2183,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const bodyActive = transitionEditorState(faceAppended.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-body",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       bodyActive.state.kind,
@@ -2201,7 +2202,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const bodySelected = transitionEditorState(bodyActive.state, {
       type: "viewport.selectionRequested",
       target: { kind: "body", bodyId: "body_b" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       bodySelected.state.kind,
@@ -2229,7 +2230,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "shell",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -2241,7 +2242,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const active = transitionEditorState(activation.state, {
       type: "form.referencePickerActivated",
       fieldId: "shell-faces",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       active.state.kind,
@@ -2251,7 +2252,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const escaped = transitionEditorState(active.state, {
       type: "form.referencePickerCancelled",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       escaped.state.kind,
@@ -2274,7 +2275,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const cancelled = transitionEditorState(active.state, {
       type: "command.cancelled",
       commandSessionId: active.state.command.commandSessionId,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       cancelled.state.kind,
@@ -2285,7 +2286,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const switched = transitionEditorState(active.state, {
       type: "tool.activated",
       toolId: "fillet",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       switched.state.kind,
@@ -2423,7 +2424,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const idleCleared = transitionEditorState(selectedState, {
       type: "selection.cleared",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       idleCleared.state.kind,
@@ -2442,7 +2443,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const commandStarted = transitionEditorState(selectedState, {
       type: "tool.activated",
       toolId: "sketch",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       commandStarted.state.kind,
@@ -2452,7 +2453,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const commandCleared = transitionEditorState(commandStarted.state, {
       type: "selection.cleared",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       commandCleared.state.kind,
@@ -2502,7 +2503,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const sketchCleared = transitionEditorState(sketchState, {
       type: "selection.cleared",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       sketchCleared.state.kind,
@@ -2577,7 +2578,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const loaded = transitionEditorState(loadedState, {
       type: "document.snapshotLoaded",
       snapshot: nextSnapshot,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       loaded.effects.length,
@@ -3408,7 +3409,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const boot = transitionEditorState(initialEditorState, {
       type: "session.started",
-    });
+    }, defaultEditorExtensionDependencies);
     const fetchEffect = boot.effects[0];
     expect(fetchEffect?.type, "Session start should fetch a snapshot.").toBe(
       "document.fetchSnapshot",
@@ -3422,11 +3423,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         snapshot,
         selectionCatalog: buildSelectionTargetCatalog(snapshot),
       },
-    });
+    }, defaultEditorExtensionDependencies);
     const requested = transitionEditorState(loaded.state, {
       type: "document.historyCursorRequested",
       cursor: previousCursor,
-    });
+    }, defaultEditorExtensionDependencies);
     const cursorEffect = requested.effects[0];
 
     expect(
@@ -3464,7 +3465,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           detail: null,
         },
       ],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       conflicted.effects[0]?.type,
@@ -3489,10 +3490,10 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const loaded = transitionEditorState(initialEditorState, {
       type: "document.snapshotLoaded",
       snapshot: previous,
-    });
+    }, defaultEditorExtensionDependencies);
     const refresh = transitionEditorState(loaded.state, {
       type: "document.refreshRequested",
-    });
+    }, defaultEditorExtensionDependencies);
     const effect = refresh.effects[0];
     expect(effect?.type, "Refresh should request a document snapshot.").toBe(
       "document.fetchSnapshot",
@@ -3532,7 +3533,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         selectionCatalog: buildSelectionTargetCatalog(next),
         preserveRenderRecordsOnFeatureDiagnostics: true,
       },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       failedRefresh.state.snapshot?.document.render.records[0]?.id,
@@ -3556,7 +3557,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     };
     const secondRefresh = transitionEditorState(failedRefresh.state, {
       type: "document.refreshRequested",
-    });
+    }, defaultEditorExtensionDependencies);
     const secondEffect = secondRefresh.effects[0];
     expect(
       secondEffect?.type,
@@ -3572,7 +3573,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         selectionCatalog: buildSelectionTargetCatalog(fixed),
         preserveRenderRecordsOnFeatureDiagnostics: true,
       },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       fixedRefresh.state.snapshot?.document.render.records[0]?.id,
@@ -3588,18 +3589,18 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const loaded = transitionEditorState(initialEditorState, {
       type: "document.snapshotLoaded",
       snapshot: createSnapshot(),
-    });
+    }, defaultEditorExtensionDependencies);
     const sketchCommand = transitionEditorState(loaded.state, {
       type: "tool.activated",
       toolId: "sketch",
-    });
+    }, defaultEditorExtensionDependencies);
     const replacement = createSnapshot();
     replacement.document.revisionId = "rev_replaced";
 
     const replaced = transitionEditorState(sketchCommand.state, {
       type: "document.replaced",
       snapshot: replacement,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       replaced.state.kind,
@@ -3644,7 +3645,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       }),
     };
 
-    const actor = createEditorEventLoop(runtime);
+    const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
     actor.start();
     await flushAsyncWork();
@@ -3703,7 +3704,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       }),
     };
 
-    const actor = createEditorEventLoop(runtime);
+    const actor = createEditorEventLoop(runtime, undefined, undefined, defaultEditorExtensionDependencies);
 
     actor.start();
     await flushAsyncWork();
@@ -3759,13 +3760,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     const openRequested = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "construction", constructionId: "construction_plane-xy" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     const openEffect = openRequested.effects[0];
 
@@ -3788,7 +3789,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       opened.state.kind,
@@ -3799,7 +3800,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const withTool = transitionEditorState(opened.state, {
       type: "tool.activated",
       toolId: "line",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       withTool.state.kind,
@@ -3813,7 +3814,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const cleared = transitionEditorState(withTool.state, {
       type: "sketch.activeToolCleared",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       cleared.state.kind,
@@ -3844,13 +3845,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     const openRequested = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "construction", constructionId: "construction_plane-xy" },
-    });
+    }, defaultEditorExtensionDependencies);
     const openEffect = openRequested.effects[0];
 
     expect(
@@ -3872,11 +3873,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
-    });
+    }, defaultEditorExtensionDependencies);
     const withTool = transitionEditorState(opened.state, {
       type: "tool.activated",
       toolId: "line",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       withTool.state.kind,
@@ -3895,7 +3896,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const result = transitionEditorState(withTool.state, {
         type: "tool.activated",
         toolId,
-      });
+      }, defaultEditorExtensionDependencies);
       const viewState = getEditorViewState(result.state);
 
       expect(
@@ -3953,7 +3954,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const result = transitionEditorState(entered, {
         type: "tool.activated",
         toolId,
-      });
+      }, defaultEditorExtensionDependencies);
       expect(result.state, `${toolId} leaves the open sketch untouched.`).toBe(
         entered,
       );
@@ -4003,7 +4004,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const reused = transitionEditorState(baseState, {
       type: "tool.activated",
       toolId: "offset",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       reused.state.kind,
@@ -4034,7 +4035,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "offset",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -4066,13 +4067,13 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     const openRequested = transitionEditorState(activated.state, {
       type: "viewport.selectionRequested",
       target: { kind: "construction", constructionId: "construction_plane-xy" },
-    });
+    }, defaultEditorExtensionDependencies);
     const openEffect = openRequested.effects[0];
 
     expect(
@@ -4094,11 +4095,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         ),
         SPEC_SKETCH_UNITS_PER_PIXEL,
       ),
-    });
+    }, defaultEditorExtensionDependencies);
     const withTool = transitionEditorState(opened.state, {
       type: "tool.activated",
       toolId: "line",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       withTool.state.kind,
@@ -4115,7 +4116,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const disabledResult = transitionEditorState(withTool.state, {
         type: "tool.activated",
         toolId,
-      });
+      }, defaultEditorExtensionDependencies);
 
       expect(
         disabledResult.state.kind === "editingSketch" &&
@@ -4133,7 +4134,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const svgEnabled = transitionEditorState(withTool.state, {
       type: "tool.activated",
       toolId: "svgRendering",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       svgEnabled.state.kind === "editingSketch" &&
@@ -4145,7 +4146,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const result = transitionEditorState(svgEnabled.state, {
         type: "tool.activated",
         toolId,
-      });
+      }, defaultEditorExtensionDependencies);
       const viewState = getEditorViewState(result.state);
 
       expect(
@@ -4251,7 +4252,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       const result = transitionEditorState(styledBaseState, {
         type: "tool.activated",
         toolId,
-      });
+      }, defaultEditorExtensionDependencies);
 
       expect(
         result.state.kind,
@@ -4296,7 +4297,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "viewport.selectionRequested",
         target: pointTarget,
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -4396,7 +4397,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const hovered = transitionEditorState(state, {
       type: "viewport.hovered",
       target: pointTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       hovered.state.kind,
@@ -4415,7 +4416,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selected = transitionEditorState(hovered.state, {
       type: "viewport.selectionRequested",
       target: pointTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -4440,7 +4441,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selectedFirst = transitionEditorState(state, {
       type: "viewport.selectionRequested",
       target: pointTarget,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       selectedFirst.state.kind,
       "First dimension target selection should keep sketch editing.",
@@ -4450,7 +4451,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selectedSecond = transitionEditorState(selectedFirst.state, {
       type: "viewport.selectionRequested",
       target: secondPointTarget,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       selectedSecond.state.kind,
       "Second dimension target selection should keep sketch editing.",
@@ -4461,7 +4462,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "sketch.pointerMoved",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: [5, 3],
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       moved.state.kind,
       "Pointer movement over ready dimension preview should keep sketch editing.",
@@ -4471,7 +4472,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const clickedGeometry = transitionEditorState(moved.state, {
       type: "viewport.selectionRequested",
       target: lineTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       clickedGeometry.state.kind,
@@ -4551,7 +4552,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selectedFirst = transitionEditorState(state, {
       type: "viewport.selectionRequested",
       target: firstLineTarget,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       selectedFirst.state.kind,
       "First line selection should keep sketch editing.",
@@ -4563,7 +4564,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: [5, 0],
       target: secondLineTarget,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       releaseOverSecond.state.kind,
       "Release over second line should keep sketch editing.",
@@ -4580,7 +4581,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selectedSecond = transitionEditorState(releaseOverSecond.state, {
       type: "viewport.selectionRequested",
       target: secondLineTarget,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       selectedSecond.state.kind,
       "Second line selection should keep sketch editing.",
@@ -4600,7 +4601,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       type: "sketch.pointerMoved",
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: [8, 3],
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       moved.state.kind,
       "Pointer movement after angle selection should keep sketch editing.",
@@ -4626,7 +4627,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       sketchUnitsPerPixel: SPEC_SKETCH_UNITS_PER_PIXEL,
       point: [4, -1],
       target: null,
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       placed.state.kind,
       "Angle placement click should keep sketch editing.",
@@ -4648,7 +4649,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selected = transitionEditorState(state, {
       type: "viewport.selectionRequested",
       target: lineTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -4784,7 +4785,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selected = transitionEditorState(state, {
       type: "sketch.connectedSelectionRequested",
       target: localTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -4851,7 +4852,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "sketch.connectedSelectionRequested",
         target: localTarget,
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -4873,7 +4874,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selected = transitionEditorState(state, {
       type: "sketch.connectedSelectionRequested",
       target: projectedTarget,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -4956,7 +4957,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "viewport.selectionRequested",
         target: annotation.target,
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -4983,7 +4984,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const deleted = transitionEditorState(selected.state, {
       type: "sketch.annotationDeleteRequested",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       deleted.state.kind,
@@ -5072,7 +5073,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
 
     const liveDelete = transitionEditorState(baseState, {
       type: "sketch.annotationDeleteRequested",
-    });
+    }, defaultEditorExtensionDependencies);
     expect(
       liveDelete.state.kind,
       "Live selection deletion should keep the sketch editor active.",
@@ -5164,7 +5165,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const opened = transitionEditorState(baseState, {
       type: "sketch.annotationEditRequested",
       target: annotation.target,
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       opened.state.kind,
@@ -5183,11 +5184,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const changed = transitionEditorState(opened.state, {
       type: "sketch.toolPatched",
       patch: { value: 33 },
-    });
+    }, defaultEditorExtensionDependencies);
     const committed = transitionEditorState(changed.state, {
       type: "sketch.toolPatched",
       patch: { intent: "commitAnnotationValue" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       committed.state.kind,
@@ -5259,7 +5260,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         field: "strokeColor",
         value: "#ff00ff",
       },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       patched.state.kind,
@@ -5330,7 +5331,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       revisionId: "rev_1",
       accepted: false,
       diagnostics: [diagnostic],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       rejected.state.kind,
@@ -5415,7 +5416,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       accepted: false,
       actualRevisionId: "rev_0002",
       diagnostics: [diagnostic],
-    });
+    }, defaultEditorExtensionDependencies);
 
     const refreshEffect = conflicted.effects[0];
     expect(
@@ -5448,11 +5449,11 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
         snapshot: refreshedSnapshot,
         selectionCatalog: buildSelectionTargetCatalog(refreshedSnapshot),
       },
-    });
+    }, defaultEditorExtensionDependencies);
     const retry = transitionEditorState(refreshed.state, {
       type: "tool.activated",
       toolId: "finishSketch",
-    });
+    }, defaultEditorExtensionDependencies);
     const retryEffect = retry.effects[0];
 
     expect(
@@ -5609,7 +5610,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const importing = transitionEditorState(sketchState, {
       type: "tool.activated",
       toolId: "importImage",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       importing.effects.length === 0 &&
@@ -5633,7 +5634,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           base64Data: "cG5n",
         },
       ],
-    });
+    }, defaultEditorExtensionDependencies);
 
     // T17k2 (review A-5): the import is a private sketch edit: the image
     // joins the session's draft, nothing is committed or reopened.
@@ -5711,7 +5712,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
       {
         type: "tool.activated",
         toolId: "sketch",
-      },
+      }, defaultEditorExtensionDependencies,
     );
 
     expect(
@@ -5723,7 +5724,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const selected = transitionEditorState(commandState.state, {
       type: "viewport.selectionRequested",
       target: { kind: "construction", constructionId: "construction_plane-xy" },
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       selected.state.kind,
@@ -5734,7 +5735,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
     const importing = transitionEditorState(selected.state, {
       type: "tool.activated",
       toolId: "importImage",
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       importing.state.kind === "selectionCommand" &&
@@ -5753,7 +5754,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           base64Data: "cG5n",
         },
       ],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       payloadSelected.state.kind,
@@ -5814,7 +5815,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
           base64Data: "cG5n",
         },
       ],
-    });
+    }, defaultEditorExtensionDependencies);
 
     expect(
       payloadSelected.state.kind,

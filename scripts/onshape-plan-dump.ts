@@ -15,8 +15,8 @@ import {
   planStudioFidelity,
   type FeaturePlan,
   type StudioPlan,
-} from "../src/domain/import/onshape/fidelity-planner.ts";
-import { onshapeImportProvider } from "../src/domain/import/onshape/provider.ts";
+} from "../src/application/import/onshape/fidelity-planner.ts";
+import { onshapeImportProvider } from "../src/infrastructure/import/onshape/provider.ts";
 import {
   IMPORT_VERIFICATION_DOCUMENT_ID,
   IMPORT_VERIFICATION_REVISION_ID,

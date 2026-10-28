@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 // T08b-g5a acceptance (logic lane). Seam: the live offset cutover driven from
 // native session authoring (spline/line/rectangle tools → Offset tool →
 // U-G3 commit wait → live solve → contracts publish), with the real
@@ -8157,7 +8158,7 @@ async function reopenCertified(withReference: boolean) {
     revisionId: "rev_0001",
     commandSessionId: "command_t11a",
     session: raw,
-  });
+  }, defaultEditorExtensionDependencies);
   expect(opened.state.kind).toBe("editingSketch");
   return { ...states, raw, opened };
 }
@@ -8173,7 +8174,7 @@ async function settleDerivations(
   while (queue.length > 0) {
     const next = transitionEditorState(
       state,
-      await runEditorEffect(queue.shift()!, t11aRuntime),
+      await runEditorEffect(queue.shift()!, t11aRuntime), defaultEditorExtensionDependencies,
     );
     state = next.state;
     queue.push(...derivations(next.effects));
@@ -8370,7 +8371,7 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
       baseRevisionId: "rev_0001",
       projectedReferences: [],
       diagnostics: [],
-    });
+    }, defaultEditorExtensionDependencies);
     const rebased = projected.state as SketchEditorState;
     expect(rebased.pendingProjectionRequestId).toBe(null);
     expectBeingChecked(rebased, reopened, "projection result, round pending");
@@ -8392,7 +8393,7 @@ describe("T11a reopened sketch certification (routed A3, review R-5)", () => {
         commandSessionId: "command_t11a",
         baseRevisionId: "rev_0001",
         message: "Reference projection failed.",
-      });
+      }, defaultEditorExtensionDependencies);
 
     // Failure before the entry round returns: the basis is kept.
     const early = fail(opened);
@@ -8713,7 +8714,7 @@ function reopenWithVariable(saved: SketchSessionState, w: number) {
     revisionId: "rev_0001",
     commandSessionId: "command_t13b",
     session: { ...raw, documentVariables: [variableW(w)] },
-  });
+  }, defaultEditorExtensionDependencies);
   if (opened.state.kind !== "editingSketch")
     throw new Error("Expected sketch state.");
   return opened.state.session;

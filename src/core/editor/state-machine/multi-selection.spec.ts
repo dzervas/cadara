@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -56,7 +57,7 @@ const [f1, f2, f3] = [face("f1"), face("f2"), face("f3")];
 const e1 = edge("e1");
 
 function send<TState extends EditorState>(state: TState, event: EditorEvent) {
-  return transitionEditorState(state, event).state as TState;
+  return transitionEditorState(state, event, defaultEditorExtensionDependencies).state as TState;
 }
 
 function pick<TState extends EditorState>(

@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { describe, expect, test, vi } from "vitest";
 
 import { buildSelectionTargetCatalog } from "@/core/modeling/document-snapshot-view";
@@ -7,7 +8,7 @@ import { REFERENCE_IMAGE_CALIBRATION_MODE_ID } from "@/core/reference-image-cali
 import { openSketchSessionFromSelection } from "@/core/editor/sketch-session-controller";
 import { createSketchSpecialModeRegistry } from "@/core/sketch-special-modes/registry";
 import type { SketchSpecialModeDefinition } from "@/core/sketch-special-modes/schema";
-import { defaultEditorExtensionDependencies } from "./dependencies";
+
 import { transitionEditorState } from "./reducer-root";
 import { initialEditorState } from "./state-creators";
 import type {
@@ -145,7 +146,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
           base64Data: "cG5n",
         },
       ],
-    });
+    }, defaultEditorExtensionDependencies);
     const entered = expectEntryBasis(result, "import bypass");
     expect(result.effects.map((effect) => effect.type)).toEqual([
       "sketch.projectReferences",
@@ -163,7 +164,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       type: "sketch.referenceImagePayloadsPicked",
       payloads: null,
       message: "No image selected.",
-    });
+    }, defaultEditorExtensionDependencies);
     const entered = expectEntryBasis(result, "cancelled import bypass");
     expect(entered.session.validationMessage).toBe("No image selected.");
     expect(entered.preview?.label).toBe("No image selected.");
@@ -175,7 +176,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       type: "sketch.specialModeEntered",
       modeId: REFERENCE_IMAGE_CALIBRATION_MODE_ID,
       operationId: operation.operationId,
-    });
+    }, defaultEditorExtensionDependencies);
     const entered = expectEntryBasis(result, "special-mode bypass");
     expect(
       entered.session.activeSpecialMode?.modeId,
@@ -231,7 +232,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
         revisionId: state.document.revisionId!,
         commandSessionId: state.command.commandSessionId,
         session,
-      },
+      }, defaultEditorExtensionDependencies,
     );
     expect(solveCount.value, "one synchronous solve on open").toBe(1);
     expectEntryBasis(opened, "normal open without references");
@@ -253,7 +254,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
         revisionId: state.document.revisionId!,
         commandSessionId: state.command.commandSessionId,
         session,
-      },
+      }, defaultEditorExtensionDependencies,
     );
     const opened = expectEntryBasis(openedResult, "normal open");
     expect(opened.session.definition, "opening authors nothing").toBe(
@@ -267,7 +268,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
       commandSessionId: opened.command.commandSessionId,
       baseRevisionId: opened.document.revisionId!,
       message: "Reference projection failed.",
-    });
+    }, defaultEditorExtensionDependencies);
     const failed = editingSketch(failedResult);
     expect(failed.pendingProjectionRequestId).toBe(null);
     expect(failed.session.validationMessage).toBe(
@@ -296,7 +297,7 @@ describe("T11a sketch entry establishes a live solve basis", () => {
         regions: [],
         diagnostics: [],
         offsetPublications: [],
-      }),
+      }, defaultEditorExtensionDependencies),
     );
     expect(published.session.liveRegions.status).toBe("current");
     expect(published.pendingRegionRequest).toBe(null);
@@ -318,20 +319,20 @@ describe("T11a sketch entry establishes a live solve basis", () => {
           revisionId: state.document.revisionId!,
           commandSessionId: state.command.commandSessionId,
           session,
-        },
+        }, defaultEditorExtensionDependencies,
       ),
     );
     const picking = editingSketch(
       transitionEditorState(
         { ...opened, pendingProjectionRequestId: null },
-        { type: "tool.activated", toolId: "projectReference" },
+        { type: "tool.activated", toolId: "projectReference" }, defaultEditorExtensionDependencies,
       ),
     );
     expect(picking.session.referenceTargetPicking, "premise").toBe(true);
     const result = transitionEditorState(picking, {
       type: "viewport.selectionRequested",
       target: { kind: "edge", bodyId: "body_part-1", edgeId: "edge_outer-0" },
-    });
+    }, defaultEditorExtensionDependencies);
     const picked = editingSketch(result);
     expect(
       picked.session.definition.references.length,

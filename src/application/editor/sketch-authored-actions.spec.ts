@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { assert, describe, expect, test } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
@@ -165,7 +166,7 @@ async function fixture(constrained = false, initial?: SketchSessionState) {
   /** Runs `event` through the real reducer inside the action owner. */
   function dispatch(event: EditorEvent) {
     const result = owner.transition(state, event, (current) =>
-      transitionEditorState(current, event),
+      transitionEditorState(current, event, defaultEditorExtensionDependencies),
     );
     if (result.state.kind !== "editingSketch")
       throw Error("Expected sketch state");
@@ -791,7 +792,7 @@ test("Finish never publishes an uncompleted drag preview", async () => {
     commandSessionId: f.state.command.commandSessionId,
   };
   const result = f.owner.transition(f.state, event, (state) =>
-    transitionEditorState(state, event),
+    transitionEditorState(state, event, defaultEditorExtensionDependencies),
   );
   const commit = result.effects.find(
     (effect) => effect.type === "sketch.commit",
@@ -817,7 +818,7 @@ test("Finish carries the original private base and reconciles retained history t
       transitionEditorState(state, {
         type: "tool.activated",
         toolId: "finishSketch",
-      }),
+      }, defaultEditorExtensionDependencies),
   );
   const commit = finish.effects.find(
     (effect) => effect.type === "sketch.commit",
@@ -920,7 +921,7 @@ test("an actor identity resolved mid-session keeps this session's publication ba
   const finishBase = (state: SketchEditorState) => {
     const event: EditorEvent = { type: "tool.activated", toolId: "finishSketch" };
     const finish = f.owner.transition(state, event, (current) =>
-      transitionEditorState(current, event),
+      transitionEditorState(current, event, defaultEditorExtensionDependencies),
     );
     const commit = finish.effects.find(
       (effect) => effect.type === "sketch.commit",
@@ -985,19 +986,19 @@ test("a post-write restore failure finishes the authored owner once; Finish agai
       ]),
     });
     const completed = f.owner.transition(finish.state, event, (state) =>
-      transitionEditorState(state, event),
+      transitionEditorState(state, event, defaultEditorExtensionDependencies),
     );
     expect(completed.state.kind).toBe("idle");
     let state: EditorState = completed.state;
     for (const effect of completed.effects) {
       const refreshed = await runEditorEffect(effect, runtime);
       state = f.owner.transition(state, refreshed, (current) =>
-        transitionEditorState(current, refreshed),
+        transitionEditorState(current, refreshed, defaultEditorExtensionDependencies),
       ).state;
     }
     const retryEvent: EditorEvent = { type: "sketch.publishRequested" };
     const retry = f.owner.transition(state, retryEvent, (current) =>
-      transitionEditorState(current, retryEvent),
+      transitionEditorState(current, retryEvent, defaultEditorExtensionDependencies),
     );
     expect(retry.state.kind).toBe("idle");
     expect(retry.effects).toEqual([]);
@@ -1017,7 +1018,7 @@ test("a post-write restore failure finishes the authored owner once; Finish agai
       target: { kind: "sketch", sketchId: event.publishedSketchId },
     };
     const reopened = f.owner.transition(retry.state, reopen, (current) =>
-      transitionEditorState(current, reopen),
+      transitionEditorState(current, reopen, defaultEditorExtensionDependencies),
     );
     expect(reopened.state.kind).toBe("editingSketch");
     if (reopened.state.kind !== "editingSketch")
@@ -1156,7 +1157,7 @@ test("T10g-1: an applied Trim is one 'Trim' action; Undo/Redo restore it exactly
   const result = f.owner.transition(
     emitted.state as SketchEditorState,
     event,
-    (state) => transitionEditorState(state, event),
+    (state) => transitionEditorState(state, event, defaultEditorExtensionDependencies),
   );
   if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
   const after = projection(result.state.session);
@@ -1168,7 +1169,7 @@ test("T10g-1: an applied Trim is one 'Trim' action; Undo/Redo restore it exactly
   const replay = (state: SketchEditorState, type: EditorEvent["type"]) => {
     const step = { type } as EditorEvent;
     const next = f.owner.transition(state, step, (current) =>
-      transitionEditorState(current, step),
+      transitionEditorState(current, step, defaultEditorExtensionDependencies),
     );
     expect(
       next.effects.filter(
@@ -1257,7 +1258,7 @@ test.each([
     const result = f.owner.transition(
       emitted.state as SketchEditorState,
       event,
-      (state) => transitionEditorState(state, event),
+      (state) => transitionEditorState(state, event, defaultEditorExtensionDependencies),
     );
     if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
     const after = projection(result.state.session);
@@ -1268,7 +1269,7 @@ test.each([
     const replay = (state: SketchEditorState, type: EditorEvent["type"]) => {
       const step = { type } as EditorEvent;
       const next = f.owner.transition(state, step, (current) =>
-        transitionEditorState(current, step),
+        transitionEditorState(current, step, defaultEditorExtensionDependencies),
       );
       expect(
         next.effects.filter(
@@ -1321,7 +1322,7 @@ test("T13m: an applied circle Split is one 'Split' action; Undo/Redo restore it 
   const result = f.owner.transition(
     emitted.state as SketchEditorState,
     event,
-    (state) => transitionEditorState(state, event),
+    (state) => transitionEditorState(state, event, defaultEditorExtensionDependencies),
   );
   if (result.state.kind !== "editingSketch") throw Error("Expected sketch");
   const after = projection(result.state.session);
@@ -1333,7 +1334,7 @@ test("T13m: an applied circle Split is one 'Split' action; Undo/Redo restore it 
   const replay = (state: SketchEditorState, type: EditorEvent["type"]) => {
     const step = { type } as EditorEvent;
     const next = f.owner.transition(state, step, (current) =>
-      transitionEditorState(current, step),
+      transitionEditorState(current, step, defaultEditorExtensionDependencies),
     );
     expect(
       next.effects.filter(
@@ -1404,7 +1405,7 @@ test("T10g-1: Undo of a circle Trim restores its circleRadius dimension exactly;
   const applied = f.owner.transition(
     emitted.state as SketchEditorState,
     event,
-    (state) => transitionEditorState(state, event),
+    (state) => transitionEditorState(state, event, defaultEditorExtensionDependencies),
   );
   if (applied.state.kind !== "editingSketch") throw Error("Expected sketch");
   const after = projection(applied.state.session);
@@ -1416,7 +1417,7 @@ test("T10g-1: Undo of a circle Trim restores its circleRadius dimension exactly;
   expect(applied.state.session.actionHistory?.undo.at(-1)?.label).toBe("Trim");
   const step = (state: SketchEditorState, type: EditorEvent["type"]) => {
     const next = f.owner.transition(state, { type } as EditorEvent, (current) =>
-      transitionEditorState(current, { type } as EditorEvent),
+      transitionEditorState(current, { type } as EditorEvent, defaultEditorExtensionDependencies),
     );
     if (next.state.kind !== "editingSketch") throw Error("Expected sketch");
     return next.state;
@@ -1473,7 +1474,7 @@ test("T10g-3b: an applied spline Trim is one 'Trim' action; Undo/Redo restore it
   const applied = f.owner.transition(
     emitted.state as SketchEditorState,
     event,
-    (state) => transitionEditorState(state, event),
+    (state) => transitionEditorState(state, event, defaultEditorExtensionDependencies),
   );
   if (applied.state.kind !== "editingSketch") throw Error("Expected sketch");
   const after = projection(applied.state.session);
@@ -1492,7 +1493,7 @@ test("T10g-3b: an applied spline Trim is one 'Trim' action; Undo/Redo restore it
   expect(applied.state.session.actionHistory?.undo).toHaveLength(undoDepth + 1);
   const step = (state: SketchEditorState, type: EditorEvent["type"]) => {
     const next = f.owner.transition(state, { type } as EditorEvent, (current) =>
-      transitionEditorState(current, { type } as EditorEvent),
+      transitionEditorState(current, { type } as EditorEvent, defaultEditorExtensionDependencies),
     );
     expect(
       next.effects.filter(
@@ -1718,7 +1719,7 @@ describe("T11g: drawing-tool lifecycle history boundaries (T11-D10, D14, D19)", 
       toolId: "finishSketch",
     };
     const result = f.owner.transition(f.state, event, (state) =>
-      transitionEditorState(state, event),
+      transitionEditorState(state, event, defaultEditorExtensionDependencies),
     );
     const commit = result.effects.find(
       (effect) => effect.type === "sketch.commit",
@@ -1941,7 +1942,7 @@ describe("T11h: Line chain history (T11-D11, D12)", () => {
       opened.state,
       { type: "history.undoRequested" },
       (state) =>
-        transitionEditorState(state, { type: "history.undoRequested" }),
+        transitionEditorState(state, { type: "history.undoRequested" }, defaultEditorExtensionDependencies),
     );
     if (blocked.state.kind !== "editingSketch") throw Error("Expected sketch");
     const after = blocked.state.session;
@@ -2103,7 +2104,7 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
       const result = finished.owner.transition(
         finished.state,
         event as EditorEvent,
-        (state) => transitionEditorState(state, event as EditorEvent),
+        (state) => transitionEditorState(state, event as EditorEvent, defaultEditorExtensionDependencies),
       );
       const commit = result.effects.find(
         (effect) => effect.type === "sketch.commit",
@@ -2141,7 +2142,7 @@ describe("T11i: fit-point spline history (T11-D10, D13, D14)", () => {
       toolId: "finishSketch",
     };
     const result = f.owner.transition(f.state, event, (state) =>
-      transitionEditorState(state, event),
+      transitionEditorState(state, event, defaultEditorExtensionDependencies),
     );
     const commit = result.effects.find(
       (effect) => effect.type === "sketch.commit",
@@ -3221,7 +3222,7 @@ describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune it
     let state: EditorState = fixture.state;
     const dispatch = (event: EditorEvent) => {
       state = owner.transition(state, event, (current) =>
-        transitionEditorState(current, event),
+        transitionEditorState(current, event, defaultEditorExtensionDependencies),
       ).state;
       if (state.kind !== "editingSketch") throw Error("Expected sketch state");
       return state;
@@ -3336,7 +3337,7 @@ describe("T14c: the annotation lifecycle adds no history; Undo and Redo prune it
           emitPendingSketchOffsetPreviewPublication(
             emitPendingSketchRegionDerivation(
               owner.transition(state, event, (current) =>
-                transitionEditorState(current, event),
+                transitionEditorState(current, event, defaultEditorExtensionDependencies),
               ),
             ),
           ),
@@ -4073,7 +4074,7 @@ describe("T17c2: Close Spline through the authored-action owner", () => {
     const event = await runEditorEffect(effect, {
       querySketchEditIntersections: querySketchEditIntersectionsForTest,
     } as EditorEffectRuntime);
-    const resolved = transitionEditorState(emitted.state, event).state;
+    const resolved = transitionEditorState(emitted.state, event, defaultEditorExtensionDependencies).state;
     assert(resolved.kind === "editingSketch");
     f.apply(event, resolved.session);
     expect(f.session.actionHistory?.undo.at(-1)?.label, "premise: Trim").toBe(

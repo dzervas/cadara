@@ -6,7 +6,6 @@ import {
 } from "@/contracts/errors";
 import {
   createEditorEffectFailureEvent,
-  defaultEditorExtensionDependencies,
   emitPendingSketchEditQuery,
   emitPendingSketchSnapQuery,
   emitPendingSketchOffsetPreviewPublication,
@@ -568,7 +567,7 @@ export function createEditorEventLoop(
     runtime: EditorEffectRuntime,
     runSignal: AbortSignal,
   ) => Promise<EditorEvent> = runEditorEffect,
-  dependencies: EditorExtensionDependencies = defaultEditorExtensionDependencies,
+  dependencies: EditorExtensionDependencies,
   sketchActions?: SketchAuthoredActions,
 ) {
   return new EditorEventLoop(

@@ -1,3 +1,4 @@
+import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { expect, test } from "vitest";
 
 import { createNewSketchSession } from "@/core/editor/sketch-session";
@@ -32,7 +33,7 @@ async function loaded() {
 }
 
 const step = (state: EditorState, event: EditorEvent) =>
-  transitionEditorState(state, event);
+  transitionEditorState(state, event, defaultEditorExtensionDependencies);
 
 test("T17o review: a refused sketch open (and an escaped one) is a sketchOpen notice; dismiss and a later open clear it", async () => {
   const { state } = await loaded();
