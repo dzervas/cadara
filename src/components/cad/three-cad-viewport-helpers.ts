@@ -529,11 +529,26 @@ export function getSketchStructuralGeometryToken(
   }
 }
 
-function getGeometryToken(
-  geometry:
-    | ViewportRenderableRecord["renderable"]["geometry"]
-    | SketchSessionDisplayRenderable["geometry"],
-) {
+type ViewportGeometry =
+  | ViewportRenderableRecord["renderable"]["geometry"]
+  | SketchSessionDisplayRenderable["geometry"];
+
+// The scene key is rebuilt whenever the renderable lists change identity,
+// which is every sketch drag move and in-sketch edit, while the document's
+// mesh geometry objects stay the same. Geometry values are never mutated in
+// place, so each object's content token is computed once instead of
+// re-serializing every document mesh per update.
+const geometryTokenByGeometry = new WeakMap<ViewportGeometry, string>();
+
+function getGeometryToken(geometry: ViewportGeometry) {
+  const cached = geometryTokenByGeometry.get(geometry);
+  if (cached !== undefined) return cached;
+  const token = serializeGeometryToken(geometry);
+  geometryTokenByGeometry.set(geometry, token);
+  return token;
+}
+
+function serializeGeometryToken(geometry: ViewportGeometry) {
   switch (geometry.kind) {
     case "mesh":
       return [

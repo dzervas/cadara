@@ -497,14 +497,16 @@ export async function prepareSketchRow(
   switch (kind) {
     case "sketchCreate":
       return async () => {
-        const timing = await enterTopSketch(session, true);
+        const timing = (await enterTopSketch(session, true))!;
+        await settleBeforeCleanup(page, timing, false);
         await exitSketch(session);
-        return timing!;
+        return timing;
       };
     case "sketchDraw":
       return async () => {
         await enterTopSketch(session, false);
         const timing = await drawRectangle(session);
+        await settleBeforeCleanup(page, timing, false);
         await exitSketch(session);
         return timing;
       };

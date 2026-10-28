@@ -51,7 +51,9 @@
 //   featureDeleteMid (the middle timeline feature), featureEditUndo (undo
 //   of a committed literal-depth edit; FaceSketch variant with a face
 //   sketch after it).
-//   Sketch: sketchCreate/sketchDraw/sketchExit (Top plane),
+//   Sketch: sketchCreate/sketchDraw/sketchExit (Top plane; sketchCreate and
+//   sketchDraw end inside the open sketch, so their settled is null and the
+//   exit's own cost is the sketchExit row),
 //   sketchCreateOnFace/sketchExitFace (face picked in the viewport),
 //   sketchExitUnchanged (first timeline sketch reopened; Face variant),
 //   sketchEditUpstream (Exit after an untimed dimension edit: the publish

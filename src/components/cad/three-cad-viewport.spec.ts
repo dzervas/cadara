@@ -1708,3 +1708,75 @@ test("T12d: same sketch distance, two zooms → different capture decisions", ()
     "At high zoom, 0.5 sketch units → 40 screen px → NOT captured.",
   ).toBe(false);
 });
+
+test("BVH scene key serializes each document mesh geometry once, not per update", () => {
+  // A sketch drag or in-sketch edit rebuilds the renderable lists on every
+  // update while the document's mesh geometry objects stay the same.
+  let vertexReads = 0;
+  const vertexPositions = [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+  ];
+  const geometry = {
+    kind: "mesh" as const,
+    get vertexPositions() {
+      vertexReads += 1;
+      return vertexPositions;
+    },
+    triangleIndices: [[0, 1, 2]],
+  };
+  const record = (meshGeometry: typeof geometry | object) =>
+    ({
+      origin: "document",
+      renderable: {
+        id: "render_body_face",
+        label: "Body face",
+        ownerBodyId: null,
+        ownerFeatureId: null,
+        binding: {
+          pickId: "pick_body_face",
+          pickPriority: 1,
+          target: { kind: "body", bodyId: "body_feature_extrude-1" },
+          topology: null,
+          semanticClass: "bodyFace",
+        },
+        geometry: meshGeometry,
+      },
+    }) as never;
+
+  const first = createViewportBvhSceneKey([record(geometry)], []);
+  const readsAfterFirst = vertexReads;
+  expect(readsAfterFirst, "The first key serializes the mesh.").toBeGreaterThan(
+    0,
+  );
+  expect(
+    createViewportBvhSceneKey([record(geometry)], []),
+    "A rebuilt record list over the same geometry keeps the key.",
+  ).toBe(first);
+  expect(vertexReads, "The same geometry object is not serialized again.").toBe(
+    readsAfterFirst,
+  );
+
+  const sameContent = {
+    kind: "mesh" as const,
+    vertexPositions: vertexPositions.map((position) => [...position]),
+    triangleIndices: [[0, 1, 2]],
+  };
+  const moved = {
+    ...sameContent,
+    vertexPositions: [
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+    ],
+  };
+  expect(
+    createViewportBvhSceneKey([record(sameContent)], []),
+    "A new geometry object with equal content keeps the key.",
+  ).toBe(first);
+  expect(
+    createViewportBvhSceneKey([record(moved)], []),
+    "A new geometry object with moved vertices changes the key.",
+  ).not.toBe(first);
+});
