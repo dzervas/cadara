@@ -17,8 +17,11 @@ import {
 
 export type { CaptureContext, SeverityLevel };
 
-export const SENTRY_DSN =
-  "https://0a4eee874e00861be4c30cb81fe15ce1@o4511242392961024.ingest.de.sentry.io/4511333375148112";
+// The real DSN comes from the SENTRY_DSN build variable (set in the deploy
+// environment). Builds without it (local, test, benchmark) report to this
+// placeholder: the .invalid host never resolves, so nothing reaches the real
+// project, while harnesses can still intercept the envelope requests.
+export const PLACEHOLDER_SENTRY_DSN = "https://local@sentry.invalid/0";
 const SENTRY_PERFORMANCE_TRACES_SAMPLE_RATE = 1;
 // Replay only buffers in memory and uploads the last minute when an error is
 // captured; whole-session recording stays off.
@@ -82,8 +85,12 @@ export const defaultSentryBrowserClient: SentryBrowserBoundary = SentryBrowser;
 export function initializeSentryErrorReporting(
   options: SentryInitializationOptions = {},
 ) {
-  if (options.checkDsnReachability) {
-    startSentryDsnReachabilityCheck(options);
+  const dsn = options.dsn ?? PLACEHOLDER_SENTRY_DSN;
+
+  // The placeholder never resolves, so probing it would always report an ad
+  // blocker.
+  if (options.checkDsnReachability && dsn !== PLACEHOLDER_SENTRY_DSN) {
+    startSentryDsnReachabilityCheck(dsn, options);
   }
 
   if (options.enabled === false) {
@@ -98,7 +105,7 @@ export function initializeSentryErrorReporting(
 
   try {
     client.init({
-      dsn: options.dsn ?? SENTRY_DSN,
+      dsn,
       environment: options.environment ?? "production",
       release: options.release ?? undefined,
       dist: options.dist ?? undefined,
@@ -125,7 +132,7 @@ export function initializeSentryErrorReporting(
   }
 }
 
-export function createSentryDsnTestUrl(dsn = SENTRY_DSN) {
+export function createSentryDsnTestUrl(dsn: string) {
   const dsnUrl = new URL(dsn);
   const projectId = dsnUrl.pathname.split("/").filter(Boolean).at(-1);
 
@@ -142,12 +149,10 @@ export function createSentryDsnTestUrl(dsn = SENTRY_DSN) {
   return `${dsnUrl.origin}/api/${projectId}/envelope/?${params}`;
 }
 
-export async function checkSentryDsnReachability(
-  options: {
-    dsn?: string;
-    fetchLike?: FetchLike;
-  } = {},
-) {
+export async function checkSentryDsnReachability(options: {
+  dsn: string;
+  fetchLike?: FetchLike;
+}) {
   const fetchLike = options.fetchLike ?? globalThis.fetch;
 
   if (typeof fetchLike !== "function") {
@@ -191,9 +196,12 @@ function markSentryDsnBlocked() {
   }
 }
 
-function startSentryDsnReachabilityCheck(options: SentryInitializationOptions) {
+function startSentryDsnReachabilityCheck(
+  dsn: string,
+  options: SentryInitializationOptions,
+) {
   void checkSentryDsnReachability({
-    dsn: options.dsn,
+    dsn,
     fetchLike: options.fetchLike,
   }).then((isReachable) => {
     if (!isReachable) {

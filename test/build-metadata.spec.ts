@@ -61,6 +61,21 @@ test("build metadata injects the package version and short HEAD while preserving
   });
 });
 
+test("build metadata injects SENTRY_DSN only when the build environment sets it", () => {
+  vi.stubEnv("SENTRY_DSN", "https://key@example.ingest.sentry.io/1");
+  expect(
+    createBuildMetadataDefines(readBuildMetadata(rootDir))
+      .__CADARA_SENTRY_DSN__,
+  ).toBe(JSON.stringify("https://key@example.ingest.sentry.io/1"));
+
+  // Cloudflare Pages and shells can export an empty variable.
+  vi.stubEnv("SENTRY_DSN", "");
+  expect(
+    createBuildMetadataDefines(readBuildMetadata(rootDir))
+      .__CADARA_SENTRY_DSN__,
+  ).toBe("null");
+});
+
 test("build metadata uses unknown for a source archive without Git metadata", () => {
   vi.stubEnv("CF_PAGES_COMMIT_SHA", undefined);
   vi.stubEnv("SENTRY_RELEASE", undefined);

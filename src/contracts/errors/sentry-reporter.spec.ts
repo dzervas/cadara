@@ -7,7 +7,7 @@ import {
   createSentryDsnTestUrl,
 } from "@/contracts/errors/sentry-client";
 import {
-  SENTRY_DSN,
+  PLACEHOLDER_SENTRY_DSN,
   createSentryErrorReporter,
   initializeSentryErrorReporting,
   shouldEnablePerformanceTelemetry,
@@ -90,8 +90,8 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
   ).toBe(1);
   expect(
     (initOptions[0] as { dsn?: string }).dsn,
-    "Sentry reporter should use the Bugsink DSN.",
-  ).toBe(SENTRY_DSN);
+    "Without a build-time DSN the reporter should use the placeholder DSN.",
+  ).toBe(PLACEHOLDER_SENTRY_DSN);
   expect(
     initializeSentryErrorReporting({ client }),
     "Repeated initialization should report the initialized client.",
@@ -345,6 +345,21 @@ test("src/contracts/errors/sentry-reporter.spec.ts", async () => {
     disabledInitOptions.length,
     "The dev probe should not initialize the SDK.",
   ).toBe(0);
+  const placeholderProbeUrls: string[] = [];
+  initializeSentryErrorReporting({
+    client: disabledClient,
+    enabled: false,
+    checkDsnReachability: true,
+    fetchLike(input) {
+      placeholderProbeUrls.push(input);
+      return Promise.reject(new Error("unresolvable"));
+    },
+  });
+  await Promise.resolve();
+  expect(
+    placeholderProbeUrls,
+    "Builds on the placeholder DSN should skip the probe, so no ad-blocker warning appears.",
+  ).toEqual([]);
   const probeInitOptions: unknown[] = [];
   const probeUrls: string[] = [];
   const probeClient: SentryBrowserBoundary = {

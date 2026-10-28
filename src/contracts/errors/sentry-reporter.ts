@@ -10,7 +10,7 @@ import {
   type ErrorReporter,
 } from "@/contracts/errors/reporter";
 import {
-  SENTRY_DSN,
+  PLACEHOLDER_SENTRY_DSN,
   defaultSentryBrowserClient,
   initializeSentryErrorReporting,
   shouldEnablePerformanceTelemetry,
@@ -23,7 +23,7 @@ import {
 } from "@/contracts/errors/telemetry-context";
 
 export {
-  SENTRY_DSN,
+  PLACEHOLDER_SENTRY_DSN,
   initializeSentryErrorReporting,
   shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,

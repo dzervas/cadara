@@ -448,7 +448,8 @@ async function createInstrumentedContext(browser: Browser): Promise<{
     acceptDownloads: true,
   });
   const telemetry: TelemetrySink = { spans: [], release: null };
-  await context.route(/sentry\.io\//, async (route) => {
+  // Local builds report to the placeholder DSN host (sentry.invalid).
+  await context.route(/sentry\.(io|invalid)\//, async (route) => {
     // Bytes: length-delimited envelope items can be binary (replay).
     const body = route.request().postDataBuffer();
     if (body) {

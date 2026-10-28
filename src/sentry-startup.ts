@@ -3,7 +3,7 @@ import {
   shouldEnablePerformanceTelemetry,
   shouldEnableSentryErrorReporting,
 } from "@/contracts/errors/sentry-client";
-import { sentryDist, sentryRelease } from "@/build-info";
+import { sentryDist, sentryDsn, sentryRelease } from "@/build-info";
 
 const sentryEnabled = shouldEnableSentryErrorReporting({
   isProduction: import.meta.env.PROD,
@@ -19,6 +19,7 @@ const performanceTelemetryEnabled =
 initializeSentryErrorReporting({
   enabled: sentryEnabled,
   enablePerformanceTelemetry: performanceTelemetryEnabled,
+  dsn: sentryDsn ?? undefined,
   environment: import.meta.env.MODE,
   release: sentryRelease,
   dist: sentryDist,
