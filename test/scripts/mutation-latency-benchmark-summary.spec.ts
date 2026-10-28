@@ -5,7 +5,9 @@ import {
   attributeProfileBusy,
   attributeSpans,
   parseSentryEnvelopeSpans,
+  rankRowCosts,
   summarizeLatencies,
+  summarizeMetrics,
   summarizeSpanPhases,
   type BenchmarkSpan,
   type CpuProfile,
@@ -248,5 +250,69 @@ describe("bench:mutation result shaping", () => {
     ).toEqual({
       "OCC worker renameBody": { n: 3, median: 40, p95: 60, min: 0, max: 60 },
     });
+  });
+
+  it("summarizes each row metric over the samples that measured it", () => {
+    expect(
+      summarizeMetrics([
+        { measureReadoutMs: 30, hoverStepMedianMs: null },
+        undefined,
+        { measureReadoutMs: 10 },
+      ]),
+    ).toEqual({
+      measureReadoutMs: { n: 2, median: 20, p95: 30, min: 10, max: 30 },
+    });
+  });
+
+  it("ranks rows by the steady median of their latest signal, with the dominant phase", () => {
+    const stats = (median: number) => ({
+      n: 1,
+      median,
+      p95: median,
+      min: median,
+      max: median,
+    });
+    expect(
+      rankRowCosts([
+        {
+          fixture: "bracket",
+          mutation: "rename",
+          steady: [
+            { reflectedMs: 50, persistedMs: 80, settledMs: null },
+            { reflectedMs: 60, persistedMs: 70, settledMs: 120 },
+          ],
+          stats: {
+            spans: { "a small phase": stats(5), "a big phase": stats(40) },
+          },
+        },
+        {
+          fixture: "bracket",
+          mutation: "reload",
+          steady: [{ reflectedMs: 900, persistedMs: null }],
+          stats: { spans: {} },
+        },
+        {
+          fixture: "bracket",
+          mutation: "skipped",
+          steady: [],
+          stats: { spans: {} },
+        },
+      ]),
+    ).toEqual([
+      {
+        fixture: "bracket",
+        mutation: "reload",
+        steadyMedianMs: 900,
+        samples: 1,
+        dominantPhase: null,
+      },
+      {
+        fixture: "bracket",
+        mutation: "rename",
+        steadyMedianMs: 100,
+        samples: 2,
+        dominantPhase: { name: "a big phase", medianMs: 40 },
+      },
+    ]);
   });
 });

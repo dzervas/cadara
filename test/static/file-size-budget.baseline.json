@@ -2,7 +2,6 @@
   "docs/archive/onshape-importer-completion-plan.md",
   "docs/research/agent-modelling-interface.md",
   "e2e/acceptance-annotations.spec.ts",
-  "scripts/mutation-latency-benchmark.ts",
   "src/application/editor/editor-event-loop.spec.ts",
   "src/application/editor/sketch-authored-actions.spec.ts",
   "src/cli/commands/onshape-capture/references.ts",

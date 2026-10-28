@@ -22,9 +22,46 @@
 // Output: one results.json (shape in
 // scripts/mutation-latency-benchmark-summary.ts), comparable across runs
 // with the same schemaVersion (3 renamed the `OCC worker <operation>`
-// phases above and added `phaseBusyMs`),
-// plus .cpuprofile files; the console prints the latency table, each row's
-// phase medians and the profiled samples' per-thread phase busy time.
+// phases above and added `phaseBusyMs`; 4 added per-sample `metrics`,
+// `stats.metrics` and the top-level `rankedCosts`), plus .cpuprofile files;
+// the console prints the latency table, the ranked cost table (rows by the
+// steady median of max(reflected, persisted, settled), with their dominant
+// span phase), each row's phase medians and the profiled samples'
+// per-thread phase busy time.
+//
+// This file is the orchestration (build/preview, context instrumentation,
+// runRow, profiler, output); the rows live in
+// scripts/mutation-latency-benchmark/rows-{document,feature,sketch,
+// viewport}.ts on the shared plumbing of rows-shared.ts. Every row times
+// the user's committing gesture (act) after setup work drained; reflected
+// is the visible result, persisted the undo strip (or "none"); rows that
+// clean up after the act record settled before that cleanup.
+//   Document: rename, colour, variableEdit, undo/redo (of a rename), save
+//   (download), variableAdd, reload (second open of the stored copy),
+//   newDocument (File -> New; reopens the fixture untimed), peerWrite (a
+//   second page on a local peer sync channel renames a body; reflected on
+//   the first page), exportStep/exportStl (the body export dialog's Export
+//   button; the File menu has no export).
+//   Feature: extrudeDepth, depthUndo/depthRedo, featureAdd/featureDelete (a
+//   plane), cursorMove, chamfer/fillet Preview/Commit (first edge with a
+//   clean preview), extrudePreview/extrudeCommit (region of a new rectangle
+//   sketch right of the model, picked in the viewport), shellPreview,
+//   featureReopen/featureReopenCancel/featureSuppress/featureUnsuppress/
+//   featureDeleteMid (the middle timeline feature), featureEditUndo (undo
+//   of a committed literal-depth edit; FaceSketch variant with a face
+//   sketch after it).
+//   Sketch: sketchCreate/sketchDraw/sketchExit (Top plane),
+//   sketchCreateOnFace/sketchExitFace (face picked in the viewport),
+//   sketchExitUnchanged (first timeline sketch reopened; Face variant),
+//   sketchEditUpstream/sketchDimensionEdit (first sketch's first visible
+//   dimension chip, +10% then restored on alternate samples),
+//   sketchConstraintAdd (Horizontal on a sloped line), sketchEntityDelete,
+//   sketchUndo/sketchRedo (of a rectangle), sketchDragPoint (24-step drag
+//   of a rectangle corner; per-move latency in metrics).
+//   Viewport: selectBodyTree/selectFaceViewport/selectEdgeViewport (with the
+//   Measure readout time in metrics), hoverViewport (30-step glide; per-step
+//   hover latency), orbit (300 px right-button drag; frame intervals),
+//   visibilityToggle (Parts & Objects eye).
 //
 // Run from the workspace root (Playwright's chromium must be installed, see
 // README.md):
@@ -34,8 +71,8 @@
 // --profile-worst K (default 2, 0 disables), --skip-build, --no-minify
 // (readable profiles; still a production-mode build), --dist DIR.
 // PLAYWRIGHT_GPU=1 renders on the host GPU (Vulkan ANGLE) instead of
-// SwiftShader. The sketch and chamfer rows drive the debug platform
-// (`window.__cadaraDebug`), which only a build with
+// SwiftShader. Every row after `save` in MUTATION_KINDS drives the debug
+// platform (`window.__cadaraDebug`), which only a build with
 // `import.meta.env.TEST = "true"` exposes; they are skipped otherwise:
 //   SENTRY_AUTH_TOKEN= bunx vite build --config vite.offline-test.config.ts \
 //     --minify false --outDir .scratch/bench-dist
@@ -44,7 +81,6 @@ import {
   chromium,
   type Browser,
   type BrowserContext,
-  type Download,
   type FileChooser,
   type Page,
 } from "@playwright/test";
@@ -67,7 +103,9 @@ import {
   attributeProfileBusy,
   attributeSpans,
   parseSentryEnvelopeSpans,
+  rankRowCosts,
   summarizeLatencies,
+  summarizeMetrics,
   summarizeSpanPhases,
   type BenchmarkFrame,
   type BenchmarkSpan,
@@ -76,10 +114,42 @@ import {
   type LatencyStats,
   type SpanPhase,
 } from "./mutation-latency-benchmark-summary.ts";
+import {
+  DOCUMENT_ROW_KINDS,
+  prepareDocumentRow,
+  type DocumentRowKind,
+} from "./mutation-latency-benchmark/rows-document.ts";
+import {
+  FEATURE_ROW_KINDS,
+  prepareFeatureRow,
+  type FeatureRowKind,
+} from "./mutation-latency-benchmark/rows-feature.ts";
+import {
+  hasDebugBridge,
+  now,
+  openFixture,
+  round,
+  OCC_QUIET_MS,
+  OPEN_TIMEOUT_MS,
+  type BenchmarkFixture,
+  type ProfiledTarget,
+  type RowPreparation,
+  type SampleTiming,
+  type Session,
+  waitForRenderSettled,
+} from "./mutation-latency-benchmark/rows-shared.ts";
+import {
+  SKETCH_ROW_KINDS,
+  prepareSketchRow,
+  type SketchRowKind,
+} from "./mutation-latency-benchmark/rows-sketch.ts";
+import {
+  VIEWPORT_ROW_KINDS,
+  prepareViewportRow,
+  type ViewportRowKind,
+} from "./mutation-latency-benchmark/rows-viewport.ts";
 
-const RESULT_SCHEMA_VERSION = 3;
-const SAMPLE_TIMEOUT_MS = 120_000;
-const OPEN_TIMEOUT_MS = 300_000;
+const RESULT_SCHEMA_VERSION = 4;
 // Past this the capture is too slow to prepare as a benchmark fixture.
 const LARGE_IMPORT_TIMEOUT_MS = 600_000;
 
@@ -96,7 +166,7 @@ const MUTATION_KINDS = [
   "depthUndo",
   "depthRedo",
   "save",
-  // Sketch session and edge-feature rows read the debug platform
+  // Every kind from here on reads the debug platform
   // (`window.__cadaraDebug`), which only a build with
   // `import.meta.env.TEST = "true"` exposes (vite.offline-test.config.ts).
   "sketchCreate",
@@ -104,22 +174,69 @@ const MUTATION_KINDS = [
   "sketchExit",
   "chamferPreview",
   "chamferCommit",
-] as const;
-
-const DEBUG_BRIDGE_KINDS: ReadonlySet<string> = new Set([
-  "sketchCreate",
-  "sketchDraw",
-  "sketchExit",
-  "chamferPreview",
-  "chamferCommit",
-]);
+  "sketchCreateOnFace",
+  "sketchExitFace",
+  "sketchExitUnchanged",
+  "sketchExitUnchangedFace",
+  "sketchEditUpstream",
+  "sketchDimensionEdit",
+  "sketchConstraintAdd",
+  "sketchEntityDelete",
+  "sketchUndo",
+  "sketchRedo",
+  "sketchDragPoint",
+  "extrudePreview",
+  "extrudeCommit",
+  "filletPreview",
+  "filletCommit",
+  "shellPreview",
+  "featureReopen",
+  "featureReopenCancel",
+  "featureSuppress",
+  "featureUnsuppress",
+  "featureDeleteMid",
+  "featureEditUndo",
+  "featureEditUndoFaceSketch",
+  "selectBodyTree",
+  "selectFaceViewport",
+  "selectEdgeViewport",
+  "hoverViewport",
+  "orbit",
+  "visibilityToggle",
+  "variableAdd",
+  "reload",
+  "newDocument",
+  "peerWrite",
+  "exportStep",
+  "exportStl",
+] as const satisfies readonly (
+  | DocumentRowKind
+  | FeatureRowKind
+  | SketchRowKind
+  | ViewportRowKind
+)[];
 type MutationKind = (typeof MUTATION_KINDS)[number];
 
-interface FixtureDefinition {
-  name: string;
-  /** The document variable `variableEdit` changes, when the fixture has one. */
-  variable: string | null;
-  source: string;
+/** The kinds that work without the debug platform (any production build). */
+const PLATFORM_FREE_KINDS: ReadonlySet<MutationKind> = new Set([
+  "rename",
+  "colour",
+  "extrudeDepth",
+  "variableEdit",
+  "featureAdd",
+  "featureDelete",
+  "cursorMove",
+  "undo",
+  "redo",
+  "depthUndo",
+  "depthRedo",
+  "save",
+]);
+const DEBUG_BRIDGE_KINDS: ReadonlySet<string> = new Set(
+  MUTATION_KINDS.filter((kind) => !PLATFORM_FREE_KINDS.has(kind)),
+);
+
+interface FixtureDefinition extends BenchmarkFixture {
   load: (browser: Browser) => Promise<Buffer>;
 }
 
@@ -214,8 +331,6 @@ const selectedFixtures = options.fixtures.split(",").map((name) => {
 });
 
 // ---------------------------------------------------------------- host
-
-const now = () => performance.timeOrigin + performance.now();
 
 function loadAverage() {
   return readFileSync("/proc/loadavg", "utf8")
@@ -476,898 +591,26 @@ async function createInstrumentedContext(browser: Browser): Promise<{
   return { context, page, telemetry };
 }
 
-function historySignature(page: Page) {
-  return page.evaluate(() => {
-    const history = (
-      window as unknown as { __benchHistory: { signature: string }[] }
-    ).__benchHistory;
-    return history.at(-1)?.signature ?? "";
-  });
-}
-
-/** Epoch ms of the first history-strip change after `sinceMs` away from `before`. */
-async function waitForHistoryChange(
-  page: Page,
-  before: string,
-  sinceMs: number,
-) {
-  const handle = await page.waitForFunction(
-    ({ before, sinceMs }) => {
-      const history = (
-        window as unknown as {
-          __benchHistory: { atMs: number; signature: string }[];
-        }
-      ).__benchHistory;
-      return (
-        history.find(
-          (entry) => entry.atMs >= sinceMs && entry.signature !== before,
-        )?.atMs ?? false
-      );
-    },
-    { before, sinceMs },
-    { polling: 50, timeout: SAMPLE_TIMEOUT_MS },
-  );
-  return (await handle.jsonValue()) as number;
-}
-
-/**
- * Epoch ms when the viewport last became render-idle after `sinceMs`, once
- * it is idle; null when it never left idle (no viewport work).
- */
-async function waitForRenderSettled(page: Page, sinceMs: number) {
-  const handle = await page.waitForFunction(
-    (sinceMs) => {
-      const transitions = (
-        window as unknown as {
-          __benchRenderIdle: { atMs: number; idle: boolean }[];
-        }
-      ).__benchRenderIdle;
-      const lastTransition = transitions.at(-1);
-      if (!lastTransition?.idle) return false;
-      return {
-        at: lastTransition.atMs >= sinceMs ? lastTransition.atMs : null,
-      };
-    },
-    sinceMs,
-    { polling: 50, timeout: SAMPLE_TIMEOUT_MS },
-  );
-  return ((await handle.jsonValue()) as { at: number | null }).at;
-}
-
-/** Epoch ms when `predicate(arg)` first held, polled every 10 ms in the page. */
-async function waitInPage<Arg>(
-  page: Page,
-  predicate: (arg: Arg) => boolean,
-  arg: Arg,
-) {
-  const handle = await page.waitForFunction(
-    ({ source, arg }) => {
-      const check = new Function(`return (${source})`)() as (
-        value: unknown,
-      ) => boolean;
-      return check(arg) ? performance.timeOrigin + performance.now() : false;
-    },
-    { source: predicate.toString(), arg },
-    { polling: 10, timeout: SAMPLE_TIMEOUT_MS },
-  );
-  return (await handle.jsonValue()) as number;
-}
-
-// --------------------------------------------------------------- session
-
-interface Session {
-  page: Page;
-  telemetry: TelemetrySink;
-  fixture: FixtureDefinition;
-  document: Buffer;
-  /** Set by runRow for samples that are CPU-profiled (act -> persisted). */
-  profiling: {
-    profiler: Profiler;
-    tag: string;
-    directory: string;
-  } | null;
-}
-
-interface NativeDocumentFeature {
-  label: string;
-  definition: {
-    kind: string;
-    parameters?: { extent?: { end?: { distance?: { source?: string } } } };
-  };
-}
-
-/**
- * The last extrude whose depth is a literal: expression-bound depths are
- * read-only in the inspector (edited through variables instead).
- */
-function lastLiteralDepthExtrude(document: Buffer) {
-  const { features } = JSON.parse(document.toString("utf8")) as {
-    features: NativeDocumentFeature[];
-  };
-  return features
-    .filter(
-      (feature) =>
-        feature.definition.kind === "extrude" &&
-        feature.definition.parameters?.extent?.end?.distance?.source ===
-          "literal",
-    )
-    .at(-1)?.label;
-}
-
-async function openFixture(page: Page, name: string, document: Buffer) {
-  await page.goto(`${baseUrl}/app`);
-  const fileButton = page.getByRole("button", { name: "File", exact: true });
-  await fileButton.waitFor({ timeout: OPEN_TIMEOUT_MS });
-  await fileButton.click();
-  await page.getByRole("menuitem", { name: "Open..." }).click();
-  const chooserPromise = page.waitForEvent("filechooser");
-  await page.getByRole("button", { name: "Open a copy" }).click();
-  const chooser = await chooserPromise;
-  const start = now();
-  await chooser.setFiles({
-    name: `${name}.cadara`,
-    mimeType: "application/vnd.cadara+json",
-    buffer: document,
-  });
-  await page
-    .getByRole("status")
-    .filter({ hasText: `Opened ${name}.cadara.` })
-    .waitFor({ timeout: OPEN_TIMEOUT_MS });
-  await page
-    .getByRole("status", { name: "Initial model render pending" })
-    .waitFor({ state: "detached", timeout: OPEN_TIMEOUT_MS });
-  return now() - start;
-}
-
-interface SampleTiming {
-  startMs: number;
-  endMs: number;
-  /** How long the pre-sample idle gate waited for setup work to drain. */
-  idleWaitMs: number;
-  actMs: number;
-  /** Null for kinds without a DOM signal of the applied result (colour). */
-  reflectedMs: number | null;
-  /** Null for kinds that are not undoable actions (timeline cursor moves). */
-  persistedMs: number | null;
-  /** Viewport render-idle again; null when the viewport never left idle. */
-  settledMs?: number | null;
-  /** CPU profiles of this sample, taken from `startMs` to `profileEndMs`. */
-  profile?: { profileEndMs: number; targets: ProfiledTarget[] };
-}
-
-const OCC_QUIET_MS = 300;
-
-/** Waits until no OCC worker request has been in flight for OCC_QUIET_MS. */
-async function waitForOccQuiet(page: Page) {
-  await page.waitForFunction(
-    (quietMs) => {
-      const occ = (
-        window as unknown as {
-          __benchOcc: { inFlight: Set<string>; changedAtMs: number };
-        }
-      ).__benchOcc;
-      return (
-        occ.inFlight.size === 0 &&
-        performance.timeOrigin + performance.now() - occ.changedAtMs >= quietMs
-      );
-    },
-    OCC_QUIET_MS,
-    { polling: 20, timeout: SAMPLE_TIMEOUT_MS },
-  );
-}
-
-/**
- * One timed mutation: `act` is the user's committing gesture; `reflected`
- * resolves (epoch ms) when the UI shows the result (null: no such signal);
- * persisted is the undo strip listing the action (`persisted` for
- * downloads, "none" for kinds outside undo history). The clock starts only
- * after setup work (previews, reopen, background refinement) has drained.
- */
-async function timedSample(
-  session: Session,
-  act: () => Promise<void>,
-  reflected: (() => Promise<number>) | null,
-  persisted: (() => Promise<number>) | "history" | "none" = "history",
-): Promise<SampleTiming> {
-  const { page, profiling } = session;
-  const gateStart = now();
-  await waitForOccQuiet(page);
-  const before = await historySignature(page);
-  if (profiling) await profiling.profiler.start();
-  const startMs = now();
-  await act();
-  const actedAt = now();
-  const reflectedAt = reflected ? await reflected() : null;
-  const persistedAt =
-    persisted === "history"
-      ? await waitForHistoryChange(page, before, startMs)
-      : persisted === "none"
-        ? null
-        : await persisted();
-  const timing: SampleTiming = {
-    startMs,
-    endMs: Math.max(reflectedAt ?? startMs, persistedAt ?? startMs),
-    idleWaitMs: round(startMs - gateStart),
-    actMs: round(actedAt - startMs),
-    reflectedMs: reflectedAt === null ? null : round(reflectedAt - startMs),
-    persistedMs: persistedAt === null ? null : round(persistedAt - startMs),
-  };
-  if (profiling) {
-    timing.profile = {
-      profileEndMs: now(),
-      targets: await profiling.profiler.stop(
-        profiling.tag,
-        profiling.directory,
-      ),
-    };
-  }
-  return timing;
-}
-
-const partsTree = (page: Page) =>
-  page.getByRole("complementary", { name: "Parts and objects" });
-const timelineItems = (page: Page) =>
-  page.locator(
-    "button[data-history-feature-id], button[data-history-sketch-id]",
-  );
-
-async function firstBodyRow(page: Page) {
-  const row = partsTree(page)
-    .locator('[role="treeitem"][data-parts-tree-target^="body:"]')
-    .first();
-  const target = await row.getAttribute("data-parts-tree-target");
-  return { target: target!, label: (await row.innerText()).trim() };
-}
-
-async function renameBody(session: Session, target: string, next: string) {
-  const { page } = session;
-  const row = partsTree(page).locator(`[data-parts-tree-target="${target}"]`);
-  const current = (await row.innerText()).trim();
-  await row.click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Rename", exact: true }).click();
-  const input = row.getByRole("textbox", { name: `Rename ${current}` });
-  await input.waitFor();
-  await input.fill(next);
-  return input;
-}
-
-const rowLabelIs = ({ target, label }: { target: string; label: string }) =>
-  document
-    .querySelector(`[data-parts-tree-target="${target}"]`)
-    ?.textContent?.trim() === label;
-
-async function waitForRowLabel(page: Page, target: string, label: string) {
-  return waitInPage(page, rowLabelIs, { target, label });
-}
-
-/** Untimed rename used as setup for undo/redo rows. */
-async function renameUntimed(session: Session, target: string, next: string) {
-  const before = await historySignature(session.page);
-  const since = now();
-  const input = await renameBody(session, target, next);
-  await input.press("Enter");
-  await waitForRowLabel(session.page, target, next);
-  await waitForHistoryChange(session.page, before, since);
-}
-
-const timelineCount = () =>
-  document.querySelectorAll(
-    "button[data-history-feature-id], button[data-history-sketch-id]",
-  ).length;
-
-async function addPlane(session: Session, timed: boolean) {
-  const { page } = session;
-  await page.locator('button[data-tool-id="plane"]').click();
-  await partsTree(page)
-    .locator('[data-parts-tree-target="construction:construction_plane-xy"]')
-    .click();
-  const commit = page.getByRole("button", { name: "Commit", exact: true });
-  await commit.waitFor();
-  await page.waitForFunction(
-    () => {
-      const button = Array.from(document.querySelectorAll("button")).find(
-        (element) => element.textContent?.trim() === "Commit",
-      );
-      return (
-        button !== undefined &&
-        !button.disabled &&
-        button.getAttribute("data-disabled") !== "true"
-      );
-    },
-    undefined,
-    { polling: 10, timeout: SAMPLE_TIMEOUT_MS },
-  );
-  const countBefore = await page.evaluate(timelineCount);
-  const act = () => commit.click();
-  const reflected = () =>
-    waitInPage(
-      page,
-      (count: number) =>
-        document.querySelectorAll(
-          "button[data-history-feature-id], button[data-history-sketch-id]",
-        ).length > count,
-      countBefore,
-    );
-  if (timed) return timedSample(session, act, reflected);
-  const before = await historySignature(page);
-  const since = now();
-  await act();
-  await reflected();
-  await waitForHistoryChange(page, before, since);
-  return null;
-}
-
-// ---------------------------------------------- debug-platform driven rows
-
-/** `window.__cadaraDebug.getState()[field]` contains `text` (TEST builds only). */
-const debugStateContains = ({ field, text }: { field: string; text: string }) =>
-  String(
-    ((
-      window as unknown as {
-        __cadaraDebug?: { getState(): Record<string, unknown> | null };
-      }
-    ).__cadaraDebug?.getState() ?? {})[field] ?? "",
-  ).includes(text);
-
-const toolbarButton = (page: Page, tooltip: string) =>
-  page.locator(
-    `button[aria-label="${tooltip}"], button[data-tool-tooltip="${tooltip}"]`,
-  );
-
-/**
- * Presses a tool by tooltip: its own button, or (narrow toolbars collapse
- * whole islands into one dropdown) the island that hides it, then its menu
- * item; a tool family's dropdown trigger, then its primary variant.
- */
-async function activateTool(page: Page, tooltip: string) {
-  const direct = toolbarButton(page, tooltip);
-  const island = page.locator(
-    `button[data-toolbar-group-tools*="|${tooltip}|"]`,
-  );
-  await direct.or(island).first().waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-  if ((await direct.count()) > 0) {
-    await direct.first().click();
-  } else {
-    await island.click();
-    await page
-      .locator(`[role="menuitem"][data-tool-tooltip="${tooltip}"]`)
-      .click();
-  }
-  // A family trigger opens its variant menu: pick the variant with this tooltip.
-  const variant = page.locator(
-    `[role="menuitem"][data-tool-tooltip="${tooltip}"]`,
-  );
-  if (await variant.isVisible().catch(() => false)) await variant.click();
-}
-
-async function hasDebugBridge(page: Page) {
-  return page.evaluate(
-    () =>
-      typeof (window as unknown as { __cadaraDebug?: unknown })
-        .__cadaraDebug !== "undefined",
-  );
-}
-
-async function selectableTargets(page: Page, pattern: RegExp) {
-  return page.evaluate(
-    ({ source, flags }) => {
-      const matcher = new RegExp(source, flags);
-      const targets =
-        (
-          window as unknown as {
-            __cadaraDebug?: {
-              getState(): { selectableTargets?: string[] } | null;
-            };
-          }
-        ).__cadaraDebug?.getState()?.selectableTargets ?? [];
-      return targets.filter((target) => matcher.test(target));
-    },
-    { source: pattern.source, flags: pattern.flags },
-  );
-}
-
-/** Starts a sketch on the Top plane; the plane pick is the timed gesture. */
-async function enterTopSketch(session: Session, timed: boolean) {
-  const { page } = session;
-  await page.locator('button[data-tool-id="sketch"]').click();
-  const plane = partsTree(page).locator(
-    '[data-parts-tree-target="construction:construction_plane-xy"]',
-  );
-  await plane.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-  const act = () => plane.click();
-  const reflected = () =>
-    waitInPage(page, debugStateContains, {
-      field: "machineState",
-      text: "editingSketch",
-    });
-  // Entering a sketch is not an undoable action: no persisted signal.
-  if (timed) return timedSample(session, act, reflected, "none");
-  await act();
-  await reflected();
-  return null;
-}
-
-/** Canvas points of the drawn rectangle (viewport 1600x1000). */
-const RECTANGLE = [
-  { x: 700, y: 400 },
-  { x: 1000, y: 650 },
-] as const;
-
-async function glideClickCanvas(page: Page, point: { x: number; y: number }) {
-  const canvas = (await page.locator("main canvas").first().boundingBox())!;
-  await page.mouse.move(canvas.x + point.x, canvas.y + point.y, { steps: 8 });
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  );
-  await page.mouse.down();
-  await page.mouse.up();
-}
-
-/**
- * Draws one rectangle in the open sketch; the closing corner click is the
- * timed gesture (reflected: 4 entities staged; persisted: "Create Sketch
- * Geometry" in the undo strip). Leaves the Rectangle tool afterwards.
- */
-async function drawRectangle(session: Session, timed = true) {
-  const { page } = session;
-  await activateTool(page, "Create rectangle geometry.");
-  await glideClickCanvas(page, RECTANGLE[0]);
-  const act = () => glideClickCanvas(page, RECTANGLE[1]);
-  const reflected = () =>
-    waitInPage(page, debugStateContains, {
-      field: "sketchSession",
-      text: "4 entities staged",
-    });
-  let timing: SampleTiming | null = null;
-  if (timed) {
-    timing = await timedSample(session, act, reflected);
-  } else {
-    const before = await historySignature(page);
-    const since = now();
-    await act();
-    await reflected();
-    await waitForHistoryChange(page, before, since);
-  }
-  await page.keyboard.press("Escape");
-  return timing!;
-}
-
-/** Exits the open sketch; the machine returning to idle is the reflected signal. */
-async function exitSketch(session: Session, timed = false) {
-  const { page } = session;
-  const act = () => activateTool(page, "Exit the active sketch.");
-  const reflected = () =>
-    waitInPage(page, debugStateContains, {
-      field: "machineState",
-      text: "idle",
-    });
-  if (timed) return timedSample(session, act, reflected, "none");
-  await act();
-  await reflected();
-  return null;
-}
-
-/**
- * Reopens the last literal-depth extrude and fills a new depth (10% deeper
- * than the opened document's, or that original); resolves to its Commit
- * button.
- */
-function prepareDepthEdit(session: Session) {
-  const { page } = session;
-  const extrude = lastLiteralDepthExtrude(session.document);
-  if (!extrude) return "no extrude with a literal depth";
-  const label = `Select ${extrude}. Double-click to reopen.`;
-  let original: number | null = null;
-  return async (deeper: boolean) => {
-    await page
-      .getByRole("button", { name: label, exact: true })
-      .dblclick({ force: true });
-    const depth = page.locator("#extrude-depth");
-    await depth.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-    original ??= Number(await depth.inputValue());
-    const next = deeper ? original * 1.1 : original;
-    await depth.fill(String(Number(next.toFixed(4))));
-    return page.getByRole("button", { name: "Commit", exact: true });
-  };
-}
-
-async function waitForInspectorClosed(page: Page, inputId: string) {
-  return waitInPage(
-    page,
-    (id: string) => document.getElementById(id) === null,
-    inputId,
-  );
-}
-
-// One sample per call; `index` 0 is the first mutation after opening.
-type SampleRunner = (session: Session, index: number) => Promise<SampleTiming>;
-
 /** Returns the per-sample runner, or a skip reason when the fixture cannot express the kind. */
-async function prepareMutation(
+function prepareMutation(
   session: Session,
   kind: MutationKind,
-): Promise<SampleRunner | string> {
-  const { page } = session;
-  switch (kind) {
-    case "rename": {
-      const body = await firstBodyRow(page);
-      return async (_session, index) => {
-        const next = `${body.label} r${index}`;
-        const input = await renameBody(session, body.target, next);
-        return timedSample(
-          session,
-          () => input.press("Enter"),
-          () => waitForRowLabel(page, body.target, next),
-        );
-      };
-    }
-    case "colour": {
-      const body = await firstBodyRow(page);
-      const row = partsTree(page).locator(
-        `[data-parts-tree-target="${body.target}"]`,
-      );
-      return async () => {
-        await row.click({ button: "right" });
-        const group = page.getByRole("group", { name: "Body color" });
-        await group.waitFor();
-        const swatch = group
-          .locator('[role="menuitemradio"]:not([aria-checked="true"])')
-          .first();
-        const swatchName = (await swatch.getAttribute("aria-label"))!;
-        // No DOM signal shows the applied appearance (the menu closes before
-        // the mutation is dispatched), so reflected is null; the undo strip
-        // still times persistence.
-        const timing = await timedSample(session, () => swatch.click(), null);
-        // Proof the colour was applied: the reopened menu checks the swatch.
-        await row.click({ button: "right" });
-        await page
-          .getByRole("group", { name: "Body color" })
-          .locator(
-            `[role="menuitemradio"][aria-label="${swatchName}"][aria-checked="true"]`,
-          )
-          .waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-        await page.keyboard.press("Escape");
-        await page
-          .getByRole("group", { name: "Body color" })
-          .waitFor({ state: "detached" });
-        return timing;
-      };
-    }
-    case "extrudeDepth": {
-      const editDepth = prepareDepthEdit(session);
-      if (typeof editDepth === "string") return editDepth;
-      return async (_session, index) => {
-        const commit = await editDepth(index % 2 === 0);
-        return timedSample(
-          session,
-          () => commit.click(),
-          () => waitForInspectorClosed(page, "extrude-depth"),
-        );
-      };
-    }
-    // Undo/Redo of a geometric change: the history restores the document
-    // (cadara-jxe3), unlike the body rename that undo/redo time.
-    case "depthUndo":
-    case "depthRedo": {
-      const editDepth = prepareDepthEdit(session);
-      if (typeof editDepth === "string") return editDepth;
-      const undoButton = page.locator('button[data-tool-id="undo"]');
-      const redoButton = page.locator('button[data-tool-id="redo"]');
-      const untimed = async (act: () => Promise<void>) => {
-        const before = await historySignature(page);
-        const since = now();
-        await act();
-        await waitForHistoryChange(page, before, since);
-      };
-      return async (_session, index) => {
-        // Undo always returns to the original depth, so each edit deepens.
-        const commit = await editDepth(kind === "depthUndo" || index % 2 === 0);
-        await untimed(async () => {
-          await commit.click();
-          await waitForInspectorClosed(page, "extrude-depth");
-        });
-        if (kind === "depthUndo") {
-          return timedSample(session, () => undoButton.click(), null);
-        }
-        await untimed(() => undoButton.click());
-        return timedSample(session, () => redoButton.click(), null);
-      };
-    }
-    case "variableEdit": {
-      const name = session.fixture.variable!;
-      await page.locator("[data-workbench-variables-fab]").click();
-      const panel = page.locator("[data-workbench-variables-panel]");
-      const editButton = panel.getByRole("button", {
-        name: `Edit variable ${name}`,
-      });
-      await editButton.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-      const variableId = await editButton
-        .locator("xpath=ancestor::*[@data-variable-row][1]")
-        .getAttribute("data-variable-row");
-      const expression = panel.locator(
-        `[data-variable-expression="${variableId}"]`,
-      );
-      const original = Number.parseFloat(await expression.innerText());
-      return async (_session, index) => {
-        const next = String(
-          Number((index % 2 === 0 ? original * 1.1 : original).toFixed(4)),
-        );
-        await editButton.click();
-        await page.keyboard.press("F2");
-        const input = panel.getByLabel(`Variable value ${variableId}`);
-        await input.evaluate((element, value) => {
-          const setValue = Object.getOwnPropertyDescriptor(
-            HTMLInputElement.prototype,
-            "value",
-          )!.set!;
-          setValue.call(element, value);
-          element.dispatchEvent(new Event("input", { bubbles: true }));
-        }, next);
-        return timedSample(
-          session,
-          () => input.press("Enter"),
-          () =>
-            waitInPage(
-              page,
-              ({ id, value }: { id: string; value: string }) =>
-                document
-                  .querySelector(`[data-variable-expression="${id}"]`)
-                  ?.textContent?.trim() === value,
-              { id: variableId!, value: next },
-            ),
-        );
-      };
-    }
-    case "featureAdd":
-      return async () => (await addPlane(session, true))!;
-    case "featureDelete":
-      return async () => {
-        await addPlane(session, false);
-        const last = timelineItems(page).last();
-        await last.click({ button: "right", force: true });
-        const remove = page.getByRole("menuitem", {
-          name: "Delete",
-          exact: true,
-        });
-        await remove.waitFor();
-        const countBefore = await page.evaluate(timelineCount);
-        return timedSample(
-          session,
-          () => remove.click(),
-          () =>
-            waitInPage(
-              page,
-              (count: number) =>
-                document.querySelectorAll(
-                  "button[data-history-feature-id], button[data-history-sketch-id]",
-                ).length < count,
-              countBefore,
-            ),
-        );
-      };
-    case "cursorMove": {
-      const count = await timelineItems(page).count();
-      if (count < 2) return "timeline has fewer than two items";
-      const cursor = page.locator('[aria-label^="Timeline cursor "]');
-      return async (_session, index) => {
-        const rollBack = index % 2 === 0;
-        await timelineItems(page)
-          .nth(rollBack ? count - 2 : 0)
-          .click({ button: "right", force: true });
-        const item = page.getByRole("menuitem", {
-          name: rollBack ? "Roll History Here" : "Roll To End",
-          exact: true,
-        });
-        await item.waitFor();
-        const before = await cursor.getAttribute("aria-label");
-        // Cursor moves are not undoable actions: no persisted signal in the UI.
-        return timedSample(
-          session,
-          () => item.click(),
-          () =>
-            waitInPage(
-              page,
-              (label: string | null) =>
-                document
-                  .querySelector('[aria-label^="Timeline cursor "]')
-                  ?.getAttribute("aria-label") !== label,
-              before,
-            ),
-          "none",
-        );
-      };
-    }
-    case "undo":
-    case "redo": {
-      const body = await firstBodyRow(page);
-      const undoButton = page.locator('button[data-tool-id="undo"]');
-      const redoButton = page.locator('button[data-tool-id="redo"]');
-      // The undone action is an untimed body rename before every sample.
-      return async (_session, index) => {
-        const row = partsTree(page).locator(
-          `[data-parts-tree-target="${body.target}"]`,
-        );
-        const original = (await row.innerText()).trim();
-        const renamed = `${body.label} u${index}`;
-        await renameUntimed(session, body.target, renamed);
-        if (kind === "undo") {
-          return timedSample(
-            session,
-            () => undoButton.click(),
-            () => waitForRowLabel(page, body.target, original),
-          );
-        }
-        const before = await historySignature(page);
-        const since = now();
-        await undoButton.click();
-        await waitForRowLabel(page, body.target, original);
-        await waitForHistoryChange(page, before, since);
-        return timedSample(
-          session,
-          () => redoButton.click(),
-          () => waitForRowLabel(page, body.target, renamed),
-        );
-      };
-    }
-    case "sketchCreate":
-      return async () => {
-        const timing = await enterTopSketch(session, true);
-        await exitSketch(session);
-        return timing!;
-      };
-    case "sketchDraw":
-      return async () => {
-        await enterTopSketch(session, false);
-        const timing = await drawRectangle(session);
-        await exitSketch(session);
-        return timing;
-      };
-    case "sketchExit":
-      return async () => {
-        await enterTopSketch(session, false);
-        await drawRectangle(session, false);
-        return (await exitSketch(session, true))!;
-      };
-    case "chamferPreview":
-    case "chamferCommit": {
-      const edges = await selectableTargets(page, /^body_[^.]+\.edge_/);
-      if (edges.length === 0) return "no selectable body edge";
-      const openChamfer = async () => {
-        await activateTool(page, "Bevel selected edges.");
-        const distance = page.getByRole("spinbutton", { name: "Distance" });
-        await distance.waitFor({ timeout: SAMPLE_TIMEOUT_MS });
-        await distance.fill("0.25");
-      };
-      const cancelChamfer = async () => {
-        await page.getByRole("button", { name: "Cancel", exact: true }).click();
-        await waitInPage(page, debugStateContains, {
-          field: "machineState",
-          text: "idle",
-        });
-      };
-      const preview = () =>
-        waitInPage(page, debugStateContains, {
-          field: "featureSession",
-          text: "create:chamfer:previewReady",
-        });
-      const select = (id: string) =>
-        page.evaluate(
-          (id) =>
-            void (
-              window as unknown as {
-                __cadaraDebug: { selectTarget(id: string): boolean };
-              }
-            ).__cadaraDebug.selectTarget(id),
-          id,
-        );
-      const previewDiagnostics = () =>
-        page.evaluate(
-          () =>
-            (
-              window as unknown as {
-                __cadaraDebug: {
-                  getState(): { previewDiagnostics?: string } | null;
-                };
-              }
-            ).__cadaraDebug.getState()?.previewDiagnostics ?? "",
-        );
-      // Untimed setup: the first edge OCC chamfers cleanly (some enclosure
-      // edges reject the committed shape).
-      let edge: string | null = null;
-      for (const candidate of edges.slice(0, 12)) {
-        await openChamfer();
-        await select(candidate);
-        await preview();
-        const diagnostics = await previewDiagnostics();
-        await cancelChamfer();
-        await waitForOccQuiet(page);
-        if (!/\berror\b/i.test(diagnostics)) {
-          edge = candidate;
-          break;
-        }
-      }
-      if (!edge) return "no edge previews a clean chamfer";
-      return async () => {
-        await openChamfer();
-        const assertPreviewOk = async () => {
-          const diagnostics = await previewDiagnostics();
-          if (/\berror\b/i.test(diagnostics)) {
-            throw new Error(`chamfer preview failed: ${diagnostics}`);
-          }
-        };
-        if (kind === "chamferPreview") {
-          // The preview is not an undoable action: no persisted signal.
-          const timing = await timedSample(
-            session,
-            () => select(edge),
-            preview,
-            "none",
-          );
-          await assertPreviewOk();
-          await cancelChamfer();
-          return timing;
-        }
-        await select(edge);
-        await preview();
-        await assertPreviewOk();
-        const commit = page.getByRole("button", {
-          name: "Commit",
-          exact: true,
-        });
-        const countBefore = await page.evaluate(timelineCount);
-        const timing = await timedSample(
-          session,
-          () => commit.click(),
-          () =>
-            waitInPage(
-              page,
-              (count: number) =>
-                document.querySelectorAll(
-                  "button[data-history-feature-id], button[data-history-sketch-id]",
-                ).length > count,
-              countBefore,
-            ),
-        );
-        // Undo the chamfer so the next sample starts from the opened model.
-        const before = await historySignature(page);
-        const since = now();
-        await page.locator('button[data-tool-id="undo"]').click();
-        await waitForHistoryChange(page, before, since);
-        return timing;
-      };
-    }
-    case "save":
-      return async () => {
-        await page.getByRole("button", { name: "File", exact: true }).click();
-        await page.getByRole("menuitem", { name: "Save As" }).click();
-        const downloadCopy = page.getByRole("button", {
-          name: "Download a copy",
-        });
-        await downloadCopy.waitFor();
-        let download: Promise<Download> | null = null;
-        let written: Promise<number> | null = null;
-        // Reflected: the browser received the download; persisted: its file is written.
-        return timedSample(
-          session,
-          async () => {
-            download = page.waitForEvent("download", {
-              timeout: SAMPLE_TIMEOUT_MS,
-            });
-            await downloadCopy.click();
-          },
-          async () => {
-            const file = await download!;
-            const receivedAt = now();
-            written = file.path().then(() => now());
-            return receivedAt;
-          },
-          () => written!,
-        );
-      };
-  }
+): Promise<RowPreparation> {
+  if (isKindOf(DOCUMENT_ROW_KINDS, kind))
+    return prepareDocumentRow(session, kind);
+  if (isKindOf(FEATURE_ROW_KINDS, kind))
+    return prepareFeatureRow(session, kind);
+  if (isKindOf(SKETCH_ROW_KINDS, kind)) return prepareSketchRow(session, kind);
+  if (isKindOf(VIEWPORT_ROW_KINDS, kind))
+    return prepareViewportRow(session, kind);
+  throw new Error(`No row family prepares ${kind}.`);
+}
+
+function isKindOf<Kind extends string>(
+  kinds: readonly Kind[],
+  kind: string,
+): kind is Kind {
+  return (kinds as readonly string[]).includes(kind);
 }
 
 // ------------------------------------------------------------ CPU profiles
@@ -1382,28 +625,6 @@ interface CdpTarget {
   /** Epoch ms when Profiler.start was sent and acknowledged. */
   startCall?: { sentMs: number; ackedMs: number };
 }
-
-/**
- * Maps profile timestamps to epoch: epochMs = us / 1000 + offsetMs. A profile
- * starts while its Profiler.start call is in flight, so the offset is known
- * to +-uncertaintyMs (half the call's round trip). All targets share the
- * host's monotonic clock, so a sample uses its narrowest target bracket.
- */
-interface ProfileClock {
-  offsetMs: number;
-  uncertaintyMs: number;
-}
-
-type ProfiledTarget =
-  | { type: string; url: string; error: string }
-  | ({
-      type: string;
-      url: string;
-      file: string;
-      clock: ProfileClock;
-      /** Set once the sample's spans arrived (runRow). */
-      phaseBusyMs?: Record<string, number>;
-    } & ReturnType<typeof summarizeProfile>);
 
 type Profiler = Awaited<ReturnType<typeof connectProfiler>>;
 
@@ -1664,6 +885,8 @@ interface RowResult {
     persistedMs: LatencyStats | null;
     settledMs: LatencyStats | null;
     spans: Record<string, LatencyStats>;
+    /** Steady medians of the samples' row-specific `metrics`. */
+    metrics: Record<string, LatencyStats>;
   };
   profiles?: SampleProfile[];
 }
@@ -1700,7 +923,13 @@ async function runRow(
     openMs: null,
     first: null,
     steady: [],
-    stats: { reflectedMs: null, persistedMs: null, settledMs: null, spans: {} },
+    stats: {
+      reflectedMs: null,
+      persistedMs: null,
+      settledMs: null,
+      spans: {},
+      metrics: {},
+    },
   };
   if (kind === "variableEdit" && !fixture.variable) {
     row.skipped = "fixture has no benchmark variable";
@@ -1714,7 +943,7 @@ async function runRow(
   const { context, page, telemetry } = await createInstrumentedContext(browser);
   const session: Session = {
     page,
-    telemetry,
+    baseUrl,
     fixture,
     document,
     profiling: null,
@@ -1722,7 +951,9 @@ async function runRow(
   const timings: (SampleTiming & { load: number[] })[] = [];
   const profiles: SampleProfile[] = [];
   try {
-    row.openMs = round(await openFixture(page, fixture.name, document));
+    row.openMs = round(
+      await openFixture(page, baseUrl, fixture.name, document),
+    );
     debugBridgeAvailable ??= await hasDebugBridge(page);
     if (DEBUG_BRIDGE_KINDS.has(kind) && !debugBridgeAvailable) {
       row.skipped =
@@ -1751,7 +982,14 @@ async function runRow(
       const load = loadAverage();
       // Let late Sentry envelopes, frames and viewport work of this sample arrive.
       await delay(500);
-      const settledAt = await waitForRenderSettled(page, timing.startMs);
+      // A row that cleans up after its act records settled before that
+      // cleanup (settleBeforeCleanup); otherwise it is waited for here.
+      const settledAt =
+        timing.settledMs !== undefined
+          ? timing.settledMs === null
+            ? null
+            : timing.startMs + timing.settledMs
+          : await waitForRenderSettled(page, timing.startMs);
       if (profile) {
         profiles.push({
           sample,
@@ -1805,6 +1043,7 @@ async function runRow(
         row.steady.flatMap((sample) => sample.settledMs ?? []),
       ),
       spans: summarizeSpanPhases(row.steady.map((sample) => sample.spans)),
+      metrics: summarizeMetrics(row.steady.map((sample) => sample.metrics)),
     };
     for (const profile of profiles) {
       profile.phases = attributeSpans(telemetry.spans, profile.window);
@@ -1840,10 +1079,6 @@ async function runRow(
 let releaseInfo: string | null = null;
 /** Whether the served build exposes `window.__cadaraDebug` (read on first open). */
 let debugBridgeAvailable: boolean | null = null;
-
-function round(value: number) {
-  return Math.round(value * 10) / 10;
-}
 
 async function main() {
   mkdirSync(outDir, { recursive: true });
@@ -1964,14 +1199,19 @@ async function main() {
         persisted:
           "undo strip lists the action (MutationObserver timestamp); save: download file written; null when not undoable",
         settled:
-          "viewport data-render-idle set again (last transition after start); null when it never left idle",
+          "viewport data-render-idle set again (last transition after start); null when it never left idle; rows with untimed cleanup after the act record it before that cleanup, null while the act leaves an open sketch or feature dialog (render-idle needs an idle editor)",
         spans:
           "Sentry performance spans overlapping the sample window, clipped to it, by phase name; carriedInMs is the part from spans that started before the window. OCC worker client spans (op cad.occ.worker) are main-thread request->reply round trips including main-thread delivery delay, so their phase is 'OCC worker round trip (incl. main-thread delivery) <operation>'; per-thread CPU time inside a phase is profiles[].targets[].phaseBusyMs",
         frames:
-          "Long Animation Frames (>50 ms) starting in the sample window; null when the frame log could not be read (row.errors)",
+          "Long Animation Frames (>50 ms) starting in the sample window; null when the frame log could not be read (row.errors); a reload sample only has the frames after the reload",
+        metrics:
+          "row-specific measurements per sample, named with their unit (selections: measureReadoutMs; hoverViewport: per-step hover latency; orbit: rAF frame intervals during the drag; sketchDragPoint: per-move solved-point latency), steady medians in stats.metrics",
+        rankedCosts:
+          "rows with steady samples, costliest first: steady median of each sample's max(reflected, persisted, settled), with the span phase of the largest steady median",
         profiles:
           "CPU profiles from the sample start to persisted (window in profiles[].window); per-target error when a target could not be profiled; profiles[].phases are the spans clipped to that window and targets[].phaseBusyMs the target's non-idle sampled CPU ms inside each phase's spans (profile ticks mapped to epoch by the narrowest Profiler.start call bracket, targets[].clock; profiles[].clockUncertaintyMs is that mapping's +- error; a sampler gap is credited as busy when its closing sample is non-idle)",
       },
+      rankedCosts: rankRowCosts(rows),
       rows,
       profiledRows,
     };
@@ -1989,6 +1229,18 @@ async function main() {
         persistedMedian: row.stats.persistedMs?.median,
         persistedP95: row.stats.persistedMs?.p95,
         settledMedian: row.stats.settledMs?.median,
+      })),
+    );
+    console.log(
+      "[bench] ranked steady cost (median of max(reflected, persisted, settled))",
+    );
+    console.table(
+      result.rankedCosts.map((cost) => ({
+        fixture: cost.fixture,
+        mutation: cost.mutation,
+        steadyMedianMs: cost.steadyMedianMs,
+        dominantPhase: cost.dominantPhase?.name ?? null,
+        dominantPhaseMs: cost.dominantPhase?.medianMs ?? null,
       })),
     );
     for (const row of rows) printPhases(row, "");

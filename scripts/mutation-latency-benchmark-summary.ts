@@ -293,3 +293,76 @@ export function summarizeSpanPhases(
 function round(value: number) {
   return Math.round(value * 10) / 10;
 }
+
+/**
+ * Per-metric median of the samples' row-specific `metrics` (a sample
+ * without a value for a metric, or with null, is left out of that metric).
+ */
+export function summarizeMetrics(
+  samples: readonly (Record<string, number | null> | undefined)[],
+): Record<string, LatencyStats> {
+  const values = new Map<string, number[]>();
+  for (const metrics of samples) {
+    for (const [name, value] of Object.entries(metrics ?? {})) {
+      if (value === null) continue;
+      values.set(name, [...(values.get(name) ?? []), value]);
+    }
+  }
+  return Object.fromEntries(
+    [...values]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name, list]) => [name, summarizeLatencies(list)!]),
+  );
+}
+
+export interface RankedRowCost {
+  fixture: string;
+  mutation: string;
+  /** Steady median of each sample's max(reflected, persisted, settled). */
+  steadyMedianMs: number;
+  samples: number;
+  /** The span phase with the largest steady median, null without spans. */
+  dominantPhase: { name: string; medianMs: number } | null;
+}
+
+interface RankableRow {
+  fixture: string;
+  mutation: string;
+  steady: readonly {
+    reflectedMs: number | null;
+    persistedMs: number | null;
+    settledMs?: number | null;
+  }[];
+  stats: { spans: Record<string, LatencyStats> };
+}
+
+/**
+ * Rows with steady samples, costliest first: each sample costs the latest
+ * of its reflected, persisted and settled signals; a row costs the median.
+ */
+export function rankRowCosts(rows: readonly RankableRow[]): RankedRowCost[] {
+  return rows
+    .filter((row) => row.steady.length > 0)
+    .map((row) => {
+      const [name, phase] =
+        Object.entries(row.stats.spans).sort(
+          ([, left], [, right]) => right.median - left.median,
+        )[0] ?? [];
+      return {
+        fixture: row.fixture,
+        mutation: row.mutation,
+        steadyMedianMs: summarizeLatencies(
+          row.steady.map((sample) =>
+            Math.max(
+              sample.reflectedMs ?? 0,
+              sample.persistedMs ?? 0,
+              sample.settledMs ?? 0,
+            ),
+          ),
+        )!.median,
+        samples: row.steady.length,
+        dominantPhase: name && phase ? { name, medianMs: phase.median } : null,
+      };
+    })
+    .sort((left, right) => right.steadyMedianMs - left.steadyMedianMs);
+}
