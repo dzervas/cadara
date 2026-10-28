@@ -1126,7 +1126,7 @@ function sketchReadsUpstreamGeometry(
 
 /** The RestoredSketchInputs key of `sketch` itself. Keys are stable JSON:
  * stored documents do not keep object key order. */
-function createRestoredSketchKey(
+export function createRestoredSketchKey(
   document: Pick<AuthoredModelDocument, "documentId" | "settings" | "variables">,
   sketch: AuthoredModelDocument["sketches"][number],
 ) {
