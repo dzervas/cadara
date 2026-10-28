@@ -680,24 +680,40 @@ async function createReplacementScenario() {
   const namedBody = scenario.first.bodies[0]!;
   expect(namedBody.naming).toBeDefined();
   const replacementShape = scenario.first.bodies[0]!.shape;
-  const primary = new Error("injected history failure");
-  // Faces reconcile first (carrying or creating labels); the edge pass fails.
+  const primary = new Error("injected edge naming failure");
+  // History resolves before any naming is seeded; faces then reconcile first
+  // (carrying or creating labels) and the edge pass fails on its first label
+  // update, whether it carries (Modify) or deletes (Delete) the edge.
   const edgeType = scenario.oc.TopAbs_ShapeEnum.TopAbs_EDGE;
-  const failingHistory = {
-    Modified: (shape: { ShapeType(): unknown }) => {
-      if (shape.ShapeType() === edgeType) throw primary;
-      return new scenario.oc.TopTools_ListOfShape_1();
-    },
+  const history = {
+    Modified: () => new scenario.oc.TopTools_ListOfShape_1(),
     Generated: () => new scenario.oc.TopTools_ListOfShape_1(),
     IsDeleted: () => false,
   };
-  const reconcile = (previous: typeof unnamedBody) =>
-    reconcileReplacementSolidBody(scenario.oc, {
-      previous,
-      ownerFeatureId: "feature_naming_join" as FeatureId,
-      shape: replacementShape,
-      historySources: [failingHistory as never],
-    });
+  const reconcile = (previous: typeof unnamedBody) => {
+    const builder = scenario.oc.TNaming_Builder.prototype as unknown as Record<
+      "Modify" | "Delete",
+      (shape: { ShapeType(): unknown }, ...rest: unknown[]) => unknown
+    >;
+    const originals = { Modify: builder.Modify, Delete: builder.Delete };
+    for (const method of ["Modify", "Delete"] as const) {
+      builder[method] = function (this: unknown, shape, ...rest) {
+        if (shape.ShapeType() === edgeType) throw primary;
+        return originals[method].call(this, shape, ...rest);
+      };
+    }
+    try {
+      return reconcileReplacementSolidBody(scenario.oc, {
+        previous,
+        ownerFeatureId: "feature_naming_join" as FeatureId,
+        shape: replacementShape,
+        historySources: [history as never],
+      });
+    } finally {
+      builder.Modify = originals.Modify;
+      builder.Delete = originals.Delete;
+    }
+  };
   return {
     ...scenario,
     bodyId,

@@ -592,9 +592,29 @@ function createSelectorLabel(
   selection: OccShape,
   context: OccShape,
 ) {
+  return createChildSelectorLabel(parent, (label) =>
+    selectIntoSelectorLabel(oc, label, selection, context),
+  );
+}
+
+/** A selector selected on `selection` alone, as a re-select of a seeded selector leaves it. */
+function createDirectSelectorLabel(
+  oc: OpenCascadeInstance,
+  parent: OccLabel,
+  selection: OccShape,
+) {
+  return createChildSelectorLabel(parent, (label) =>
+    directlyReselectSelectorLabel(oc, label, selection),
+  );
+}
+
+function createChildSelectorLabel(
+  parent: OccLabel,
+  select: (label: OccLabel) => OccLabel,
+) {
   const label = parent.NewChild();
   try {
-    return selectIntoSelectorLabel(oc, label, selection, context);
+    return select(label);
   } catch (error) {
     // Not yet stored in any naming map; a label release is safe at any time.
     try {
@@ -669,9 +689,15 @@ function namingLabels(naming: {
   ];
 }
 
+/**
+ * Seeds naming for a body that carries none. `withSelectors: false` leaves
+ * out the selector labels, the expensive part (a context selection per
+ * subshape); only a reconciliation that never consults them may ask for that.
+ */
 function createInitialNamingState(
   oc: OpenCascadeInstance,
   body: TrackedTopologyInput,
+  { withSelectors }: { withSelectors: boolean } = { withSelectors: true },
 ): OccTopologyNamingBodyState {
   const document = createDocument(oc);
   const topologyLabelsByKey = new Map<string, OccLabel>();
@@ -684,7 +710,7 @@ function createInitialNamingState(
       body,
       bodyLabel,
       topologyLabelsByKey,
-      selectorLabelsByKey,
+      withSelectors ? selectorLabelsByKey : undefined,
     );
   } catch (error) {
     rethrowAfterReleasingLocalNaming(
@@ -709,12 +735,12 @@ function populateInitialNamingLabels(
   body: TrackedTopologyInput,
   bodyLabel: OccLabel,
   topologyLabelsByKey: Map<string, OccLabel>,
-  selectorLabelsByKey: Map<string, OccLabel>,
+  selectorLabelsByKey: Map<string, OccLabel> | undefined,
 ) {
   for (const [faceId, face] of body.facesById) {
     const key = topologyRefKey({ kind: "face", bodyId: body.bodyId, faceId });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, face));
-    selectorLabelsByKey.set(
+    selectorLabelsByKey?.set(
       key,
       createSelectorLabel(oc, bodyLabel, face, body.shape),
     );
@@ -723,7 +749,7 @@ function populateInitialNamingLabels(
   for (const [edgeId, edge] of body.edgesById) {
     const key = topologyRefKey({ kind: "edge", bodyId: body.bodyId, edgeId });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, edge));
-    selectorLabelsByKey.set(
+    selectorLabelsByKey?.set(
       key,
       createSelectorLabel(oc, bodyLabel, edge, body.shape),
     );
@@ -736,7 +762,7 @@ function populateInitialNamingLabels(
       vertexId,
     });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, vertex));
-    selectorLabelsByKey.set(
+    selectorLabelsByKey?.set(
       key,
       createSelectorLabel(oc, bodyLabel, vertex, body.shape),
     );
@@ -994,6 +1020,48 @@ function resolveFinalSuccessors(
   );
 }
 
+type OccInheritedResolution = ReturnType<typeof resolveFinalSuccessors>;
+
+/** The selector fallback runs for a subshape history neither keeps uniquely nor proves ambiguous. */
+function consultsSelector(resolution: OccInheritedResolution) {
+  return resolution.finalIndexes.length !== 1 && !resolution.ambiguous;
+}
+
+/** History-only successors of every previous subshape of one kind; naming state plays no part. */
+function resolveInheritedSuccessors<
+  Id extends FaceId | EdgeId | VertexId,
+  Shape extends OccFace | OccEdge | OccVertex,
+>(
+  oc: OpenCascadeInstance,
+  input: {
+    previousIds: readonly Id[];
+    previousShapesById: ReadonlyMap<Id, Shape>;
+    finalShapeMap: InstanceType<
+      OpenCascadeInstance["TopTools_IndexedMapOfShape"]
+    >;
+    historySources: readonly OccTopologyHistorySource[];
+    membership: OccSubshapeMembership;
+  },
+) {
+  const resolutionsById = new Map<Id, OccInheritedResolution>();
+  for (const previousId of input.previousIds) {
+    const previousShape = input.previousShapesById.get(previousId);
+    if (previousShape) {
+      resolutionsById.set(
+        previousId,
+        resolveFinalSuccessors(
+          oc,
+          previousShape,
+          input.finalShapeMap,
+          input.historySources,
+          input.membership,
+        ),
+      );
+    }
+  }
+  return resolutionsById;
+}
+
 function buildShapeMap(
   oc: OpenCascadeInstance,
   kind: "face" | "edge" | "vertex",
@@ -1102,12 +1170,13 @@ function reconcileKind<
     finalShapeMap: InstanceType<
       OpenCascadeInstance["TopTools_IndexedMapOfShape"]
     >;
-    historySources: readonly OccTopologyHistorySource[];
-    membership: OccSubshapeMembership;
+    inheritedResolutionsById: ReadonlyMap<Id, OccInheritedResolution>;
     previousContributingFeatureIdsById: ReadonlyMap<Id, readonly FeatureId[]>;
     ownerFeatureId: FeatureId | null;
     previousLabelsByKey: ReadonlyMap<string, OccLabel>;
     previousSelectorLabelsByKey: ReadonlyMap<string, OccLabel>;
+    /** Naming was seeded without selectors: a claimed subshape gets a direct selector. */
+    seededWithoutSelectors: boolean;
     nextLabelsByKey: Map<string, OccLabel>;
     nextSelectorLabelsByKey: Map<string, OccLabel>;
     bodyLabel: OccLabel;
@@ -1146,22 +1215,15 @@ function reconcileKind<
       previousId as never,
     );
     const key = topologyRefKey(target);
-    const inheritedResolution = resolveFinalSuccessors(
-      oc,
-      previousShape,
-      input.finalShapeMap,
-      input.historySources,
-      input.membership,
-    );
-    const selectorFinalIndexes =
-      inheritedResolution.finalIndexes.length === 1 || inheritedResolution.ambiguous
-        ? []
-        : resolveSelectorFinalSuccessors(
-            oc,
-            input.previousSelectorLabelsByKey.get(key),
-            input.validLabels,
-            input.finalShapeMap,
-          );
+    const inheritedResolution = input.inheritedResolutionsById.get(previousId)!;
+    const selectorFinalIndexes = consultsSelector(inheritedResolution)
+      ? resolveSelectorFinalSuccessors(
+          oc,
+          input.previousSelectorLabelsByKey.get(key),
+          input.validLabels,
+          input.finalShapeMap,
+        )
+      : [];
     const resolution =
       inheritedResolution.finalIndexes.length === 1
         ? inheritedResolution
@@ -1250,7 +1312,14 @@ function reconcileKind<
         key,
         selectorLabel
           ? directlyReselectSelectorLabel(oc, selectorLabel, shape)
-          : createSelectorLabel(oc, input.bodyLabel, shape, input.contextShape),
+          : input.seededWithoutSelectors
+            ? createDirectSelectorLabel(oc, input.bodyLabel, shape)
+            : createSelectorLabel(
+                oc,
+                input.bodyLabel,
+                shape,
+                input.contextShape,
+              ),
       );
     }
 
@@ -1589,13 +1658,98 @@ export function reconcileReplacementTopology(
     historySources: readonly OccTopologyHistorySource[];
   },
 ): OccTopologyReconciliationResult {
+  const shapeMaps: OccDisposable[] = [];
+  return releaseAfter(
+    () =>
+      withOccSubshapeMembership(oc, (membership) => {
+        const finalShapeMaps = {
+          face: buildShapeMap(oc, "face", input.replacement.shape),
+          edge: buildShapeMap(oc, "edge", input.replacement.shape),
+          vertex: buildShapeMap(oc, "vertex", input.replacement.shape),
+        };
+        shapeMaps.push(
+          finalShapeMaps.face,
+          finalShapeMaps.edge,
+          finalShapeMaps.vertex,
+        );
+        const resolve = <
+          Id extends FaceId | EdgeId | VertexId,
+          Shape extends OccFace | OccEdge | OccVertex,
+        >(
+          previousIds: readonly Id[],
+          previousShapesById: ReadonlyMap<Id, Shape>,
+          finalShapeMap: (typeof finalShapeMaps)["face"],
+        ) =>
+          resolveInheritedSuccessors(oc, {
+            previousIds,
+            previousShapesById,
+            finalShapeMap,
+            historySources: input.historySources,
+            membership,
+          });
+        return reconcileWithResolvedHistory(oc, input, {
+          finalShapeMaps,
+          inheritedResolutions: {
+            face: resolve(
+              input.previous.topology.faceIds,
+              input.previous.facesById,
+              finalShapeMaps.face,
+            ),
+            edge: resolve(
+              input.previous.topology.edgeIds,
+              input.previous.edgesById,
+              finalShapeMaps.edge,
+            ),
+            vertex: resolve(
+              input.previous.topology.vertexIds,
+              input.previous.verticesById,
+              finalShapeMaps.vertex,
+            ),
+          },
+        });
+      }),
+    () => shapeMaps,
+  );
+}
+
+interface ResolvedReplacementHistory {
+  finalShapeMaps: Record<
+    "face" | "edge" | "vertex",
+    InstanceType<OpenCascadeInstance["TopTools_IndexedMapOfShape"]>
+  >;
+  inheritedResolutions: {
+    face: ReadonlyMap<FaceId, OccInheritedResolution>;
+    edge: ReadonlyMap<EdgeId, OccInheritedResolution>;
+    vertex: ReadonlyMap<VertexId, OccInheritedResolution>;
+  };
+}
+
+function reconcileWithResolvedHistory(
+  oc: OpenCascadeInstance,
+  input: {
+    previous: OccTrackedBody;
+    replacement: TrackedTopologyInput;
+    historySources: readonly OccTopologyHistorySource[];
+  },
+  history: ResolvedReplacementHistory,
+): OccTopologyReconciliationResult {
   // Stored naming is borrowed from the input body, which keeps owning it (and
   // the labels this reconciliation leaves out). Seeded naming is local: its
   // document and body label transfer to the result, and every seeded label the
-  // result does not carry is released here.
+  // result does not carry is released here. A seed leaves out the selectors
+  // when history alone settles every previous subshape, since then no
+  // selector is consulted (seeding them was most of a boolean's naming cost).
+  const selectorsConsulted = [
+    ...history.inheritedResolutions.face.values(),
+    ...history.inheritedResolutions.edge.values(),
+    ...history.inheritedResolutions.vertex.values(),
+  ].some(consultsSelector);
   const seeded = input.previous.naming
     ? undefined
-    : createInitialNamingState(oc, input.previous);
+    : createInitialNamingState(oc, input.previous, {
+        withSelectors: selectorsConsulted,
+      });
+  const seededWithoutSelectors = seeded !== undefined && !selectorsConsulted;
   const previousNaming = input.previous.naming ?? seeded!;
   const borrowedLabels = new Set(seeded ? [] : namingLabels(previousNaming));
   const next = {
@@ -1612,15 +1766,14 @@ export function reconcileReplacementTopology(
   try {
     result = releaseAfter(
       () =>
-        withOccSubshapeMembership(oc, (membership) =>
-          reconcileWithNaming(
-            oc,
-            input,
-            previousNaming,
-            next,
-            temporaries,
-            membership,
-          ),
+        reconcileWithNaming(
+          oc,
+          input,
+          history,
+          previousNaming,
+          seededWithoutSelectors,
+          next,
+          temporaries,
         ),
       () => temporaries,
     );
@@ -1669,13 +1822,14 @@ function reconcileWithNaming(
     replacement: TrackedTopologyInput;
     historySources: readonly OccTopologyHistorySource[];
   },
+  history: ResolvedReplacementHistory,
   previousNaming: OccTopologyNamingBodyState,
+  seededWithoutSelectors: boolean,
   next: {
     topologyLabelsByKey: Map<string, OccLabel>;
     selectorLabelsByKey: Map<string, OccLabel>;
   },
   temporaries: OccDisposable[],
-  membership: OccSubshapeMembership,
 ): OccTopologyReconciliationResult {
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
   const bodyLabel = previousNaming.bodyLabel;
@@ -1685,12 +1839,6 @@ function reconcileWithNaming(
   const nextSelectorLabelsByKey = next.selectorLabelsByKey;
   const validLabels = createValidLabelMap(oc, previousNaming);
   temporaries.push(validLabels);
-  const faceShapeMap = buildShapeMap(oc, "face", input.replacement.shape);
-  temporaries.push(faceShapeMap);
-  const edgeShapeMap = buildShapeMap(oc, "edge", input.replacement.shape);
-  temporaries.push(edgeShapeMap);
-  const vertexShapeMap = buildShapeMap(oc, "vertex", input.replacement.shape);
-  temporaries.push(vertexShapeMap);
 
   const facesById = reconcileKind(oc, {
     kind: "face",
@@ -1699,14 +1847,14 @@ function reconcileWithNaming(
     previousShapesById: input.previous.facesById,
     freshIds: input.replacement.topology.faceIds,
     freshShapesById: input.replacement.facesById,
-    finalShapeMap: faceShapeMap,
-    historySources: input.historySources,
-    membership,
+    finalShapeMap: history.finalShapeMaps.face,
+    inheritedResolutionsById: history.inheritedResolutions.face,
     previousContributingFeatureIdsById:
       input.previous.faceContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    seededWithoutSelectors,
     nextLabelsByKey,
     nextSelectorLabelsByKey,
     bodyLabel,
@@ -1721,14 +1869,14 @@ function reconcileWithNaming(
     previousShapesById: input.previous.edgesById,
     freshIds: input.replacement.topology.edgeIds,
     freshShapesById: input.replacement.edgesById,
-    finalShapeMap: edgeShapeMap,
-    historySources: input.historySources,
-    membership,
+    finalShapeMap: history.finalShapeMaps.edge,
+    inheritedResolutionsById: history.inheritedResolutions.edge,
     previousContributingFeatureIdsById:
       input.previous.edgeContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    seededWithoutSelectors,
     nextLabelsByKey,
     nextSelectorLabelsByKey,
     bodyLabel,
@@ -1743,14 +1891,14 @@ function reconcileWithNaming(
     previousShapesById: input.previous.verticesById,
     freshIds: input.replacement.topology.vertexIds,
     freshShapesById: input.replacement.verticesById,
-    finalShapeMap: vertexShapeMap,
-    historySources: input.historySources,
-    membership,
+    finalShapeMap: history.finalShapeMaps.vertex,
+    inheritedResolutionsById: history.inheritedResolutions.vertex,
     previousContributingFeatureIdsById:
       input.previous.vertexContributingFeatureIdsById,
     ownerFeatureId: input.replacement.ownerFeatureId,
     previousLabelsByKey: previousNaming.topologyLabelsByKey,
     previousSelectorLabelsByKey: previousNaming.selectorLabelsByKey,
+    seededWithoutSelectors,
     nextLabelsByKey,
     nextSelectorLabelsByKey,
     bodyLabel,
