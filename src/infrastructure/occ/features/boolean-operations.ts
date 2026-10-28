@@ -404,22 +404,52 @@ function shapeTypeFor(oc: OpenCascadeInstance, kind: OccSubshapeKind) {
       : oc.TopAbs_ShapeEnum.TopAbs_VERTEX;
 }
 
-function countSubshapeMatches(
-  oc: OpenCascadeInstance,
-  result: OccShape,
-  kind: OccSubshapeKind,
-  source: OccShape,
+/**
+ * Whether `source` is a `kind` subshape of a shape, from one indexed subshape
+ * map per shape and kind, built on first use and kept until `release`. The map
+ * keys by IsSame, so a subshape is in it at most once: membership is exactly
+ * "one IsSame match". Mapping the whole result once per lookup made the
+ * history checks of a Boolean against a many-faced body quadratic.
+ */
+function createSubshapeMembership(oc: OpenCascadeInstance) {
+  type SubshapeMap = InstanceType<
+    OpenCascadeInstance["TopTools_IndexedMapOfShape"]
+  >;
+  const maps = new Map<OccShape, Map<OccSubshapeKind, SubshapeMap>>();
+  return {
+    contains(shape: OccShape, kind: OccSubshapeKind, source: OccShape) {
+      const byKind = maps.get(shape) ?? new Map<OccSubshapeKind, SubshapeMap>();
+      maps.set(shape, byKind);
+      let subshapes = byKind.get(kind);
+      if (!subshapes) {
+        subshapes = new oc.TopTools_IndexedMapOfShape_1();
+        byKind.set(kind, subshapes);
+        oc.TopExp.MapShapes_1(
+          shape,
+          shapeTypeFor(oc, kind) as never,
+          subshapes,
+        );
+      }
+      return subshapes.FindIndex(source) > 0;
+    },
+    release() {
+      releaseOccObjects(
+        [...maps.values()].flatMap((byKind) => [...byKind.values()]),
+      );
+    },
+  };
+}
+
+type OccSubshapeMembership = ReturnType<typeof createSubshapeMembership>;
+
+function releasingMembership<T>(
+  membership: OccSubshapeMembership,
+  run: () => T,
 ) {
-  const subshapes = new oc.TopTools_IndexedMapOfShape_1();
-  oc.TopExp.MapShapes_1(result, shapeTypeFor(oc, kind) as never, subshapes);
   try {
-    let matches = 0;
-    for (let index = 1; index <= subshapes.Size(); index += 1) {
-      if (subshapes.FindKey(index).IsSame(source)) matches += 1;
-    }
-    return matches;
+    return run();
   } finally {
-    subshapes.delete();
+    membership.release();
   }
 }
 
@@ -437,6 +467,7 @@ function uniqueModifiedSuccessor(
 
 function exactStageSuccessor(input: {
   oc: OpenCascadeInstance;
+  membership: OccSubshapeMembership;
   kind: OccSubshapeKind;
   source: OccShape;
   history: OccTopologyHistorySource;
@@ -448,24 +479,23 @@ function exactStageSuccessor(input: {
     input.source,
   );
   if (modified.length === 1) {
-    return countSubshapeMatches(
-      input.oc,
+    return input.membership.contains(
       input.history.resultShape!,
       input.kind,
       modified[0]!,
-    ) === 1
+    )
       ? { kind: "successor" as const, shape: modified[0]! }
       : { kind: "incomplete" as const };
   }
   if (modified.length > 1) return { kind: "incomplete" as const };
 
-  const exactMatches = countSubshapeMatches(
-    input.oc,
-    input.history.resultShape!,
-    input.kind,
-    input.source,
-  );
-  if (exactMatches === 1) {
+  if (
+    input.membership.contains(
+      input.history.resultShape!,
+      input.kind,
+      input.source,
+    )
+  ) {
     return { kind: "successor" as const, shape: input.source };
   }
   if (
@@ -517,30 +547,32 @@ export function selectBooleanResultWithCompleteHistory<
   unifiedShape: OccShape;
   unifyHistorySource: TUnifyHistory;
 }) {
-  const complete = everyOperandSubshape(
-    input.oc,
-    input.operands,
-    (kind, source) => {
+  const membership = createSubshapeMembership(input.oc);
+  const complete = releasingMembership(membership, () =>
+    everyOperandSubshape(input.oc, input.operands, (kind, source) => {
       const raw = exactStageSuccessor({
         oc: input.oc,
+        membership,
         kind,
         source,
         history: input.rawHistorySource,
         allowDeleted: true,
       });
       if (raw.kind === "deleted") return true;
-      const rawSuccessors = raw.kind === "successor"
-        ? [raw.shape]
-        : uniqueModifiedSuccessor(input.oc, input.rawHistorySource, source);
+      const rawSuccessors =
+        raw.kind === "successor"
+          ? [raw.shape]
+          : uniqueModifiedSuccessor(input.oc, input.rawHistorySource, source);
       if (rawSuccessors.length === 0) return false;
 
       const finalSuccessors: OccShape[] = [];
       for (const successor of rawSuccessors) {
-        if (countSubshapeMatches(input.oc, input.rawShape, kind, successor) !== 1) {
+        if (!membership.contains(input.rawShape, kind, successor)) {
           return false;
         }
         const unified = exactStageSuccessor({
           oc: input.oc,
+          membership,
           kind,
           source: successor,
           history: input.unifyHistorySource,
@@ -554,7 +586,7 @@ export function selectBooleanResultWithCompleteHistory<
       // Raw splits are unambiguous only if every exact branch is removed or
       // converges to the same final shape. Never choose one of many survivors.
       return finalSuccessors.length <= 1;
-    },
+    }),
   );
 
   return complete
@@ -616,28 +648,32 @@ function collectExactTargetSuccessors(input: {
       shape as OccShape,
     ] as [DurableRef, OccSubshapeKind, OccShape]),
   ];
-  for (const [source, kind, initial] of sources) {
-    let candidate = initial;
-    let complete = true;
-    for (const history of input.historySources) {
-      const successor = exactStageSuccessor({
-        oc: input.oc,
-        kind,
-        source: candidate,
-        history,
-        allowDeleted: false,
-      });
-      if (successor.kind !== "successor") {
-        complete = false;
-        break;
+  const membership = createSubshapeMembership(input.oc);
+  return releasingMembership(membership, () => {
+    for (const [source, kind, initial] of sources) {
+      let candidate = initial;
+      let complete = true;
+      for (const history of input.historySources) {
+        const successor = exactStageSuccessor({
+          oc: input.oc,
+          membership,
+          kind,
+          source: candidate,
+          history,
+          allowDeleted: false,
+        });
+        if (successor.kind !== "successor") {
+          complete = false;
+          break;
+        }
+        candidate = successor.shape;
       }
-      candidate = successor.shape;
+      if (!complete) continue;
+      const target = finalTargetForShape(kind, candidate);
+      if (target) successors.set(getOccDurableRefKey(source), target);
     }
-    if (!complete) continue;
-    const target = finalTargetForShape(kind, candidate);
-    if (target) successors.set(getOccDurableRefKey(source), target);
-  }
-  return successors;
+    return successors;
+  });
 }
 
 
