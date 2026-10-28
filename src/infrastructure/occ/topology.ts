@@ -750,12 +750,11 @@ function assertReleasableNativeTopologyPayload(
   nativePayload: OccNativeShimPayload,
   operation: string,
 ) {
-  const defersPre8Validation = String(bodyId).startsWith("body_feature_sweep-");
   const errorDiagnostic = nativePayload.diagnostics.find(
     (diagnostic) => diagnostic.severity === "error",
   );
 
-  if (errorDiagnostic && !defersPre8Validation) {
+  if (errorDiagnostic) {
     throw new Error(
       `Native topology payload for ${operation} ${bodyId} is not releasable: ${errorDiagnostic.message}`,
     );

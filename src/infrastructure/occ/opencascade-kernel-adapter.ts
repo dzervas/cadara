@@ -7342,14 +7342,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     // A new feature at the history tail is evaluated as the record its create
     // commits, with the region profiles that create stores (the modeling
     // service enriches them), the way that create evaluates it, so the create
-    // adopts this state instead of running the feature again. A sweep is
-    // still previewed under the preview id: native payload validation is
-    // skipped for bodies named body_feature_sweep-* (defersPre8Validation in
-    // topology.ts), so under the create's record an invalid sweep would
-    // preview as accepted (cadara-rk64).
+    // adopts this state instead of running the feature again.
     const tailFeature =
       !replacedFeature &&
-      request.definition.kind !== "sweep" &&
       isTailAppend(runtimeState.authoringState, previewInsertionIndex)
         ? createNewFeatureRecord(
             runtimeState.authoringState,
