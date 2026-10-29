@@ -6,6 +6,7 @@ import {
   type HTMLAttributes,
   type MouseEvent,
   type ReactNode,
+  type Ref,
 } from "react";
 import { ActionIcon, ScrollArea } from "@mantine/core";
 
@@ -78,6 +79,11 @@ interface FloatingPartsTreeProps {
   ) => void;
   /** Live viewport preview of an uncommitted custom colour; null ends it. */
   onBodyColorPreview?: (bodyId: BodyId, hex: string | null) => void;
+  /**
+   * The tree's `aside`, which carries `--workbench-measure-readout-height`
+   * (published by the measure readout).
+   */
+  ref?: Ref<HTMLElement>;
 }
 
 type BodyTarget = Extract<PrimitiveRef, { kind: "body" }>;
@@ -116,6 +122,7 @@ export const FloatingPartsTree = memo(function FloatingPartsTree({
   onToggleTargetVisibility,
   onBodyAppearanceChange,
   onBodyColorPreview,
+  ref,
 }: FloatingPartsTreeProps) {
   const { selection, selectionFilter, selectionCatalog } =
     useEditorStateSelector(selectSelectionState, shallowEqualRecords);
@@ -160,6 +167,7 @@ export const FloatingPartsTree = memo(function FloatingPartsTree({
 
   return (
     <aside
+      ref={ref}
       aria-label="Parts and objects"
       className="pointer-events-auto absolute flex flex-col select-none"
       style={{

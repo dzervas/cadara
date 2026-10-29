@@ -178,14 +178,14 @@ test("cadara-h026.4: with a long parts list the parts tree stops above the measu
   await expect(
     tree.getByText("Black socket-head screw 4", { exact: true }),
   ).toBeAttached({ timeout: 60_000 });
+  // The reserve lives on the tree, its only reader (on <main> it restyled
+  // the whole viewport subtree whenever the readout came or went).
   const readoutHeightVar = () =>
-    page
-      .locator("main")
-      .evaluate((main) =>
-        getComputedStyle(main)
-          .getPropertyValue("--workbench-measure-readout-height")
-          .trim(),
-      );
+    tree.evaluate((aside) =>
+      getComputedStyle(aside)
+        .getPropertyValue("--workbench-measure-readout-height")
+        .trim(),
+    );
   const treeAlone = (await tree.boundingBox())!;
 
   await workbench.activateTool(MEASURE_TOOL);
@@ -208,6 +208,14 @@ test("cadara-h026.4: with a long parts list the parts tree stops above the measu
     Math.abs(Number.parseFloat(await readoutHeightVar()) - panel.height),
     "the published reserve is the readout's height",
   ).toBeLessThanOrEqual(1);
+  expect(
+    await page
+      .locator("main")
+      .evaluate((main) =>
+        main.style.getPropertyValue("--workbench-measure-readout-height"),
+      ),
+    "the reserve is not published on <main>",
+  ).toBe("");
   expect(
     treeAlone.y + treeAlone.height,
     "without the reserve the tree would reach into the readout",

@@ -961,12 +961,15 @@ export function CadWorkbench({
   );
   // The readout sits under the parts tree's column (cadara-h026.4): publish
   // its height so the tree's max height stops above it; 0px when hidden.
+  // The property is set on the tree itself, its only reader: set on <main>
+  // it restyled the whole viewport subtree each time the readout appeared or
+  // went away (a sketch drag's start and release).
+  const partsTreeRef = useRef<HTMLElement>(null);
   const publishMeasurementPanelHeight = useCallback(
     (panel: HTMLDivElement | null) => {
-      const root = panel?.closest("main");
-      if (!panel || !root) return;
+      if (!panel) return;
       const publish = () =>
-        root.style.setProperty(
+        partsTreeRef.current?.style.setProperty(
           "--workbench-measure-readout-height",
           `${panel.offsetHeight}px`,
         );
@@ -975,7 +978,10 @@ export function CadWorkbench({
       publish();
       return () => {
         observer.disconnect();
-        root.style.setProperty("--workbench-measure-readout-height", "0px");
+        partsTreeRef.current?.style.setProperty(
+          "--workbench-measure-readout-height",
+          "0px",
+        );
       };
     },
     [],
@@ -1990,6 +1996,7 @@ export function CadWorkbench({
 
             <div className="contents" data-viewport-annotation-chrome="">
               <FloatingPartsTree
+                ref={partsTreeRef}
                 snapshot={snapshot}
                 hiddenTargetKeys={effectiveHiddenTargetKeys}
                 objectLabelOverrides={objectLabelOverrides}
