@@ -240,16 +240,18 @@ export function useWorkbenchProject() {
 
   const saveParts = useCallback(
     async (projectId: string, tabs: readonly WorkbenchTab[]) => {
-      const finish = pendingWrites.begin();
       try {
-        const repository = await context.getRepository();
-        const result = await repository.setParts(
-          projectId,
-          tabs.map((tab) => ({ docId: tab.documentId, name: tab.title })),
-        );
+        const result = await pendingWrites.persist(projectId, async () => {
+          const repository = await context.getRepository();
+          return repository.setParts(
+            projectId,
+            tabs.map((tab) => ({ docId: tab.documentId, name: tab.title })),
+          );
+        });
         if (!result.ok) report(new Error(result.diagnostic.message));
-      } finally {
-        finish();
+        else setFailure(null);
+      } catch (error) {
+        report(error);
       }
     },
     [context, pendingWrites, report],

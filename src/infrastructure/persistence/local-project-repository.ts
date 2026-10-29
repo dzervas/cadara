@@ -154,9 +154,27 @@ export class LocalProjectRepository {
     const handle = await this.handle(projectId);
     const next = this.checked(handle);
     change(next);
+    return this.write(handle, next);
+  }
+
+  private async write(
+    handle: AutomergeHandleLike<ProjectManifest>,
+    next: ProjectManifest,
+  ) {
     const parsed = parseProjectManifest(next);
     if (!parsed.ok) throw new Error(parsed.diagnostic.message);
-    handle.change(change);
+    const current = this.checked(handle);
+    const changed = Object.fromEntries(
+      Object.entries(parsed.value).filter(
+        ([key, value]) =>
+          JSON.stringify(current[key as keyof ProjectManifest]) !==
+          JSON.stringify(value),
+      ),
+    );
+    // Only plain values from the immutable snapshot cross into the change proxy.
+    handle.change((draft) => {
+      Object.assign(draft, changed);
+    });
     await (
       await this.documents.getAutomergeRepository()
     ).flush?.([handle.documentId]);
@@ -169,7 +187,16 @@ export class LocalProjectRepository {
     seed?: AuthoredModelDocument,
   ) {
     return this.run(async () => {
+      const handle = await this.handle(projectId);
+      const next = this.checked(handle);
+      next.entries.push({ ...entry, kind: "part" });
+      const parsed = parseProjectManifest(next);
+      if (!parsed.ok) throw new Error(parsed.diagnostic.message);
       if (seed) {
+        if (this.urls.get(entry.docId))
+          throw new Error(
+            "This part document already exists; link it without a seed.",
+          );
         const initialized = await this.documents.initialize({
           documentId: entry.docId,
           document: seed,
@@ -177,9 +204,7 @@ export class LocalProjectRepository {
         if (!initialized.ok)
           throw new Error(initialized.status.diagnostic.message);
       }
-      return this.edit(projectId, (draft) => {
-        draft.entries.push({ ...entry, kind: "part" });
-      });
+      return this.write(handle, parsed.value);
     });
   }
 

@@ -1,4 +1,9 @@
 import { expect, test } from "vitest";
+import { mergeDiscoveredWorkbenchProjectTabs } from "@/core/workspace/workbench-project-tabs";
+import {
+  reduceWorkbenchTabs,
+  type WorkbenchTab,
+} from "@/core/workspace/workbench-tabs";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { Repo } from "@automerge/automerge-repo";
 import * as Automerge from "@automerge/automerge";
@@ -239,5 +244,193 @@ test("database-local catalogs stay independent when peer channels share part poi
   } finally {
     await first.repo.shutdown();
     await second.repo.shutdown();
+  }
+});
+
+test("rejected duplicate parts leave their URL mapping and historical views unchanged", async () => {
+  const { repo, urls, documents, projects } = setup();
+  try {
+    const seed = await createSeedAuthoredModelDocument();
+    const project = unwrap(await projects.create("Enclosure", []));
+    unwrap(
+      await projects.addPart(
+        project.projectId,
+        { name: "Base", docId: seed.documentId },
+        seed,
+      ),
+    );
+    const versioned = unwrap(
+      await projects.recordVersion(project.projectId, "Original"),
+    );
+    const originalUrl = urls.get(seed.documentId)!;
+    const part = await repo.find<CollaborativeDocument>(originalUrl);
+    const originalHeads = Automerge.getHeads(part.doc());
+    const original = materializeCollaborativeDocument(part.doc());
+    expect(
+      (
+        await documents.mutate({
+          documentId: seed.documentId,
+          expected: original,
+          document: { ...original, name: "Edited base" },
+        })
+      ).ok,
+    ).toBe(true);
+    const editedHeads = Automerge.getHeads(part.doc());
+    const rejected = await projects.addPart(
+      project.projectId,
+      { name: "Duplicate", docId: seed.documentId },
+      { ...seed, name: "Replacement" },
+    );
+    expect(rejected.ok).toBe(false);
+    expect(urls.get(seed.documentId)).toBe(originalUrl);
+    const current = await repo.find<CollaborativeDocument>(
+      urls.get(seed.documentId)!,
+    );
+    expect(Automerge.getHeads(current.doc())).toEqual(editedHeads);
+    expect(materializeCollaborativeDocument(current.doc()).name).toBe(
+      "Edited base",
+    );
+    const historic = Automerge.view(
+      current.doc(),
+      versioned.versions[0].heads[seed.documentId],
+    );
+    expect(Automerge.getHeads(historic)).toEqual(originalHeads);
+    expect(materializeCollaborativeDocument(historic)).toEqual(original);
+
+    const other = unwrap(await projects.create("Other project", []));
+    expect(
+      (
+        await projects.addPart(
+          other.projectId,
+          { name: "Existing", docId: seed.documentId },
+          seed,
+        )
+      ).ok,
+    ).toBe(false);
+    expect(urls.get(seed.documentId)).toBe(originalUrl);
+    expect(
+      unwrap(
+        await projects.addPart(other.projectId, {
+          name: "Linked",
+          docId: seed.documentId,
+        }),
+      ).entries[0].docId,
+    ).toBe(seed.documentId);
+    expect(
+      (
+        await projects.addPart(
+          "missing-project",
+          { name: "Orphan", docId: "doc_orphan" },
+          { ...seed, documentId: "doc_orphan" },
+        )
+      ).ok,
+    ).toBe(false);
+    expect(urls.get("doc_orphan")).toBeNull();
+    expect(
+      (
+        await projects.addPart(
+          other.projectId,
+          { name: "", docId: "doc_invalid" },
+          { ...seed, documentId: "doc_invalid" },
+        )
+      ).ok,
+    ).toBe(false);
+    expect(urls.get("doc_invalid")).toBeNull();
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test("setParts on a mixed-document manifest preserves plain readme and discussion entries", async () => {
+  const { repo, projects } = setup();
+  try {
+    let project = unwrap(
+      await projects.create("Enclosure", [
+        { name: "Base", kind: "part", docId: "doc_base" },
+      ]),
+    );
+    project = unwrap(
+      await projects.addReadme(project.projectId, "Build notes", "# Printing"),
+    );
+    project = unwrap(await projects.ensureDiscussion(project.projectId));
+    const otherEntries = project.entries.filter(
+      (entry) => entry.kind !== "part",
+    );
+    project = unwrap(
+      await projects.setParts(project.projectId, [
+        { name: "Lid", docId: "doc_lid" },
+        { name: "Housing", docId: "doc_base" },
+      ]),
+    );
+    expect(project.entries).toEqual([
+      { name: "Lid", kind: "part", docId: "doc_lid" },
+      { name: "Housing", kind: "part", docId: "doc_base" },
+      ...otherEntries,
+    ]);
+    project = unwrap(
+      await projects.setParts(project.projectId, [
+        { name: "Housing", docId: "doc_base" },
+      ]),
+    );
+    expect(unwrap(await projects.open(project.projectId)).entries).toEqual([
+      { name: "Housing", kind: "part", docId: "doc_base" },
+      ...otherEntries,
+    ]);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test("a document opened during discovery joins the manifest and survives repository reopen", async () => {
+  const { repo, urls, documents, projects } = setup();
+  try {
+    const seed = await createSeedAuthoredModelDocument();
+    const project = unwrap(
+      await projects.create("Enclosure", [
+        { name: "Base", kind: "part", docId: seed.documentId },
+      ]),
+    );
+    const first: WorkbenchTab = {
+      title: "Base",
+      documentId: seed.documentId,
+      storageKind: "browser",
+      storageDescriptor: null,
+    };
+    const pending = { tabs: [first], activeDocumentId: first.documentId };
+    const second = {
+      ...seed,
+      documentId: "doc_opened" as const,
+      name: "Opened part",
+    };
+    expect(
+      (
+        await documents.initialize({
+          documentId: second.documentId,
+          document: second,
+        })
+      ).ok,
+    ).toBe(true);
+    const opened = reduceWorkbenchTabs(pending, {
+      type: "open",
+      tab: { ...first, documentId: second.documentId, title: second.name },
+      activate: true,
+    });
+    const merged = mergeDiscoveredWorkbenchProjectTabs(project, opened);
+    unwrap(
+      await projects.setParts(
+        project.projectId,
+        merged.tabs.map((tab) => ({ docId: tab.documentId, name: tab.title })),
+      ),
+    );
+    const reopened = unwrap(
+      await new LocalProjectRepository(documents, urls).open(project.projectId),
+    );
+    expect(reopened.entries).toEqual([
+      { name: "Base", kind: "part", docId: seed.documentId },
+      { name: second.name, kind: "part", docId: second.documentId },
+    ]);
+    expect(merged.activeDocumentId).toBe(second.documentId);
+  } finally {
+    await repo.shutdown();
   }
 });

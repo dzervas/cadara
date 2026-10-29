@@ -191,3 +191,29 @@ test("pending manifest writes share the part leave guard until both sources sett
   expect(f.leaveListeners.size).toBe(0);
   finishAfterStop();
 });
+
+test.each(["diagnostic", "rejected"] as const)("failed manifest flush (%s) guards leaving until a successful persistence retry", async (failureMode) => {
+  const pending = new PendingLocalWrites();
+  const f = createGuardFixture(pending);
+  const stop = f.guard.start();
+  const failedWrite = pending.persist("enclosure", async () => {
+    if (failureMode === "rejected") throw new Error("Manifest flush failed");
+    return { ok: false, diagnostic: { reasonCode: "project-persistence-failed", message: "Manifest flush failed" } };
+  });
+  if (failureMode === "rejected") await expect(failedWrite).rejects.toThrow("Manifest flush failed");
+  else expect((await failedWrite).ok).toBe(false);
+  expect(pending.getPendingWriteCount()).toBe(0);
+  expect(pending.getFailure()).toBe("Manifest flush failed");
+  expect(f.leaveListeners.size).toBe(1);
+  expect(f.attemptLeave().prevented).toBe(true);
+  expect(f.guard.getNotice()).toEqual({ kind: "unsaved-project", message: "Manifest flush failed", leaveBlocked: true });
+
+  await pending.persist("other-project", async () => ({ ok: true, value: null }));
+  expect(f.leaveListeners.size, "saving another manifest cannot clear the failed project's dirty state").toBe(1);
+  await pending.persist("enclosure", async () => ({ ok: true, value: null }));
+  expect(pending.getFailure()).toBeNull();
+  expect(f.leaveListeners.size).toBe(0);
+  expect(f.attemptLeave().prevented).toBe(false);
+  expect(f.guard.getNotice()).toEqual({ kind: "none" });
+  stop();
+});

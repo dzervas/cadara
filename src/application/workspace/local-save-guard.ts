@@ -1,4 +1,5 @@
 import { createAppError, type ErrorReporter } from "@/contracts/errors";
+import type { ProjectResult } from "@/contracts/modeling/project-manifest";
 import type {
   LocalSaveFailure,
   LocalSaveStatus,
@@ -14,13 +15,34 @@ export interface LocalSaveGuardSource extends LocalSaveStatusSource {
   getLocalSaveFailures(): readonly LocalSaveFailure[];
 }
 
-/** Pending project manifest writes share the document guard without inventing a document failure. */
+/** Manifest writes and their unsaved failures share the part guard without a fake document failure. */
 export class PendingLocalWrites {
   private count = 0;
+  private readonly failures = new Map<string, string>();
   private readonly listeners = new Set<() => void>();
 
   getPendingWriteCount() {
     return this.count;
+  }
+  getFailure() {
+    return this.failures.values().next().value ?? null;
+  }
+  async persist<T>(projectId: string, write: () => Promise<ProjectResult<T>>) {
+    const finish = this.begin();
+    try {
+      const result = await write();
+      if (result.ok) this.failures.delete(projectId);
+      else this.failures.set(projectId, result.diagnostic.message);
+      return result;
+    } catch (error) {
+      this.failures.set(
+        projectId,
+        error instanceof Error ? error.message : String(error),
+      );
+      throw error;
+    } finally {
+      finish();
+    }
   }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -61,7 +83,8 @@ export type LocalSaveNotice =
   /** The user stayed on the page while a change was still being saved. */
   | { kind: "saving-after-leave-attempt" }
   /** An accepted change exists in memory only. */
-  | { kind: "unsaved"; failure: LocalSaveFailure; leaveBlocked: boolean };
+  | { kind: "unsaved"; failure: LocalSaveFailure; leaveBlocked: boolean }
+  | { kind: "unsaved-project"; message: string; leaveBlocked: boolean };
 
 const NO_NOTICE: LocalSaveNotice = { kind: "none" };
 
@@ -144,8 +167,10 @@ export class LocalSaveGuard {
       status.saving || (this.pendingWrites?.getPendingWriteCount() ?? 0) > 0;
     const failure = status.failure;
     const unsaved = failure?.target === "repository" ? failure : null;
-    this.setListening(saving || unsaved !== null);
-    if (!saving && unsaved === null) this.leaveBlocked = false;
+    const projectFailure = this.pendingWrites?.getFailure() ?? null;
+    this.setListening(saving || unsaved !== null || projectFailure !== null);
+    if (!saving && unsaved === null && projectFailure === null)
+      this.leaveBlocked = false;
     for (const entry of this.source.getLocalSaveFailures()) {
       if (this.reportedFailures.has(entry)) continue;
       this.reportedFailures.add(entry);
@@ -155,9 +180,15 @@ export class LocalSaveGuard {
     const next: LocalSaveNotice =
       unsaved && unsaved !== this.dismissedFailure
         ? { kind: "unsaved", failure: unsaved, leaveBlocked: this.leaveBlocked }
-        : saving && this.leaveBlocked
-          ? { kind: "saving-after-leave-attempt" }
-          : NO_NOTICE;
+        : projectFailure !== null
+          ? {
+              kind: "unsaved-project",
+              message: projectFailure,
+              leaveBlocked: this.leaveBlocked,
+            }
+          : saving && this.leaveBlocked
+            ? { kind: "saving-after-leave-attempt" }
+            : NO_NOTICE;
     if (isSameNotice(next, this.notice)) return;
     this.notice = next;
     for (const listener of this.noticeListeners) listener();
@@ -208,6 +239,8 @@ export class LocalSaveGuard {
 
 function isSameNotice(a: LocalSaveNotice, b: LocalSaveNotice) {
   if (a.kind !== b.kind) return false;
+  if (a.kind === "unsaved-project" && b.kind === "unsaved-project")
+    return a.message === b.message && a.leaveBlocked === b.leaveBlocked;
   if (a.kind !== "unsaved" || b.kind !== "unsaved") return true;
   return a.failure === b.failure && a.leaveBlocked === b.leaveBlocked;
 }

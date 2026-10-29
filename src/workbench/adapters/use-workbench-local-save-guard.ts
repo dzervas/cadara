@@ -55,6 +55,12 @@ function getLocalSaveNotification(
         title: "Saving your latest change",
         message: LOCAL_SAVE_PENDING_MESSAGE,
       };
+    case "unsaved-project":
+      return {
+        type: "error",
+        title: "Project changes could not be saved",
+        message: `${notice.message} Leaving before project persistence succeeds will lose the latest project changes.`,
+      };
     case "unsaved":
       return {
         type: "error",

@@ -33,6 +33,10 @@ import {
   type WorkbenchTabsAction,
   type WorkbenchTabsState,
 } from "@/core/workspace/workbench-tabs";
+import {
+  createWorkbenchProjectTabs,
+  mergeDiscoveredWorkbenchProjectTabs,
+} from "@/core/workspace/workbench-project-tabs";
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
@@ -152,24 +156,11 @@ function ProjectWorkbenchApp({
   const projectTabs = useCallback((): WorkbenchTabsState => {
     if (!project) return projects.initialTabs;
     const cached = tabsStorage?.load();
-    const tabs = project.entries
-      .filter((entry) => entry.kind === "part")
-      .map((entry) => ({
-        ...createDefaultWorkbenchTab(entry.docId),
-        ...(cached?.ok
-          ? cached.state?.tabs.find((tab) => tab.documentId === entry.docId)
-          : undefined),
-        title: entry.name,
-      }));
-    const active = cached?.ok
-      ? cached.state?.activeDocumentId
-      : projects.initialTabs.activeDocumentId;
-    return {
-      tabs,
-      activeDocumentId:
-        tabs.find((tab) => tab.documentId === active)?.documentId ??
-        tabs[0].documentId,
-    };
+    return createWorkbenchProjectTabs(
+      project,
+      cached?.ok ? cached.state : null,
+      projects.initialTabs,
+    );
   }, [project, projects.initialTabs, tabsStorage]);
   const [tabsState, tabsDispatch] = useReducer(
     (
@@ -185,7 +176,10 @@ function ProjectWorkbenchApp({
     projectTabs,
   );
   if (project && !projectApplied) {
-    tabsDispatch({ type: "restoreProject", state: projectTabs() });
+    tabsDispatch({
+      type: "restoreProject",
+      state: mergeDiscoveredWorkbenchProjectTabs(project, tabsState),
+    });
     setProjectApplied(true);
   }
   const restoredBindingDocumentIdsRef = useRef(new Set<DocumentId>());

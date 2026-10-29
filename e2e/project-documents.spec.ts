@@ -108,3 +108,63 @@ test("a local project retains part identities and renamed tabs across reload and
     page.locator(`[data-document-id="${secondId}"] [data-document-tab-title]`),
   ).toHaveText("Lid");
 });
+
+test("File New during project discovery retains both parts after discovery and reload", async ({
+  page,
+}) => {
+  let releaseDiscovery!: () => void;
+  const discoveryBlocked = new Promise<void>((resolve) => {
+    releaseDiscovery = resolve;
+  });
+  let discoveryRequested = false;
+  await page.route(
+    "**/src/infrastructure/persistence/local-project-repository.ts*",
+    async (route) => {
+      discoveryRequested = true;
+      await discoveryBlocked;
+      await route.continue();
+    },
+  );
+  try {
+    await page.goto("/app?cadTestMode=1");
+    await ready(page);
+    await expect.poll(() => discoveryRequested, { timeout: 30_000 }).toBe(true);
+    await expect(page.locator("[data-document-tab]")).toHaveCount(0);
+    await page.getByRole("button", { name: "File", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Created a new document." }),
+    ).toBeVisible();
+    releaseDiscovery();
+    await expect(page.locator("[data-document-tab]")).toHaveCount(2, {
+      timeout: 30_000,
+    });
+    await settledTabs(page, ["Workspace", "Workspace"]);
+    const ids = await page
+      .locator("[data-document-tab]")
+      .evaluateAll((tabs) =>
+        tabs.map((tab) => tab.getAttribute("data-document-id")),
+      );
+    expect(new Set(ids).size).toBe(2);
+    const activeId = await page
+      .locator('[data-document-tab][aria-selected="true"]')
+      .getAttribute("data-document-id");
+    await page.reload();
+    await ready(page);
+    await expect(page.locator("[data-document-tab]")).toHaveCount(2, {
+      timeout: 30_000,
+    });
+    await expect(
+      page.locator('[data-document-tab][aria-selected="true"]'),
+    ).toHaveAttribute("data-document-id", activeId!);
+    expect(
+      await page
+        .locator("[data-document-tab]")
+        .evaluateAll((tabs) =>
+          tabs.map((tab) => tab.getAttribute("data-document-id")),
+        ),
+    ).toEqual(ids);
+  } finally {
+    releaseDiscovery();
+  }
+});
