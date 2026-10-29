@@ -14,10 +14,16 @@ import type {
   SketchEntityId,
   SketchId,
 } from "@/contracts/shared/ids";
-import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
+import {
+  ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  type AdvancedSolidFeatureKind,
+} from "@/contracts/modeling/advanced-solid";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import type { OccAuthoringFeatureRecord } from "@/infrastructure/occ/authoring-state";
-import { createFeatureRebuildFailureDiagnostic } from "@/infrastructure/occ/opencascade-kernel-adapter";
+import {
+  createFeaturePreviewFailureDiagnostic,
+  createFeatureRebuildFailureDiagnostic,
+} from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { tagRebuildSlot } from "@/infrastructure/occ/features/shared";
 
 // Lane: logic (docs/testing.md — src/infrastructure/occ non-UI behavioral coverage).
@@ -404,3 +410,86 @@ test("a requireRegion cause names its region exactly, even when another selected
   );
   expect(diagnostic.target).toEqual(longer);
 });
+
+// A preview and a create of the same failing feature report one diagnostic
+// code and message, for every advanced feature kind: the preview used to
+// report any advanced-feature failure as advanced-feature-unsupported-kernel-case
+// while the create derived occ-rebuild-failure for a native validation
+// failure. Seam: the two exported mappings, fed the same feature and throw.
+const everyAdvancedSolidKind: Record<AdvancedSolidFeatureKind, true> = {
+  combine: true,
+  sweep: true,
+  loft: true,
+  wrap: true,
+  thicken: true,
+  enclose: true,
+  split: true,
+  deleteSolid: true,
+  faceBlend: true,
+  chamfer: true,
+  hole: true,
+  externalThread: true,
+  mirror: true,
+  transform: true,
+  linearPattern: true,
+  circularPattern: true,
+};
+const advancedSolidKinds = Object.keys(
+  everyAdvancedSolidKind,
+) as AdvancedSolidFeatureKind[];
+
+const advancedFailures = [
+  [
+    "a native validation failure",
+    () =>
+      new Error(
+        "Native topology payload for tracked solid body body_feature_x-1 is not releasable: Native OCC validation rejected the committed solid shape.",
+      ),
+    "occ-rebuild-failure",
+  ],
+  [
+    "an unsupported kernel case",
+    () =>
+      new Error(
+        "advanced-feature-unsupported-kernel-case: OCC sweep does not support guide curves yet.",
+      ),
+    "advanced-feature-unsupported-kernel-case",
+  ],
+  [
+    "a sketch profile build failure",
+    pathGap,
+    "profile-vertex-gap-exceeds-join",
+  ],
+] as const;
+
+test.each(
+  advancedSolidKinds.flatMap((kind) =>
+    advancedFailures.map(
+      ([failure, error, code]) => [kind, failure, error, code] as const,
+    ),
+  ),
+)(
+  "a preview of a %s feature reports %s with its create's code and message",
+  (kind, _failure, error, code) => {
+    const sweep = makeSweepFeature(profileRegion.sketchId);
+    const feature = {
+      ...sweep,
+      definition: { ...sweep.definition, kind } as FeatureDefinition,
+    };
+    const created = createFeatureRebuildFailureDiagnostic(
+      feature,
+      error(),
+      affectedTargets,
+      [sketchA],
+    );
+    const previewed = createFeaturePreviewFailureDiagnostic(feature, error(), [
+      sketchA,
+    ]);
+
+    expect([previewed.code, previewed.message]).toEqual([
+      created.code,
+      created.message,
+    ]);
+    expect(previewed.code).toBe(code);
+  },
+);

@@ -165,10 +165,10 @@ const errorsOf = <TDiagnostic extends { severity: string }>(
 // face swept along its first edge) in both, with the same message, and the
 // create leaves the document as it was. The create used to skip that
 // validation for sweep bodies and commit the invalid solid the preview had
-// rejected (cadara-rk64). The codes differ by path for every advanced
-// feature: a preview reports any failure as
-// advanced-feature-unsupported-kernel-case, a create as occ-rebuild-failure.
-test("an invalid sweep is rejected by its tail preview and by its create with the same message (cadara-rk64)", async () => {
+// rejected (cadara-rk64). Both report it as occ-rebuild-failure: the preview
+// used to report any advanced-feature failure as
+// advanced-feature-unsupported-kernel-case (cadara-6p72).
+test("an invalid sweep is rejected by its tail preview and by its create with the same code and message (cadara-rk64)", async () => {
   const source = await loadBracket();
   const session = await open(source);
   try {
@@ -183,10 +183,13 @@ test("an invalid sweep is rejected by its tail preview and by its create with th
     const preview = await session.preview(sweep, null);
     const previewErrors = errorsOf(preview.diagnostics);
     expect(
-      previewErrors.map(({ message }) => message),
+      previewErrors.map(({ code, message }) => [code, message]),
       "the preview rejects the invalid sweep",
     ).toEqual([
-      "Native topology payload for tracked solid body body_feature_sweep-1 is not releasable: Native OCC validation rejected the committed solid shape.",
+      [
+        "occ-rebuild-failure",
+        "Native topology payload for tracked solid body body_feature_sweep-1 is not releasable: Native OCC validation rejected the committed solid shape.",
+      ],
     ]);
     expect(preview.render.records, "and renders nothing").toEqual([]);
 
@@ -200,9 +203,9 @@ test("an invalid sweep is rejected by its tail preview and by its create with th
       "rejected",
     );
     expect(
-      errorsOf(created.diagnostics).map(({ message }) => message),
-      "with the preview's message",
-    ).toEqual(previewErrors.map(({ message }) => message));
+      errorsOf(created.diagnostics).map(({ code, message }) => [code, message]),
+      "with the preview's code and message",
+    ).toEqual(previewErrors.map(({ code, message }) => [code, message]));
     const after = await session.snapshot();
     expect(
       [after.document.revisionId, after.document.features.length],

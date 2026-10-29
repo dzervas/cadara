@@ -97,10 +97,7 @@ import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
 } from "@/contracts/modeling/geometry-assets";
-import {
-  ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
-  isAdvancedSolidFeatureKind,
-} from "@/contracts/modeling/advanced-solid";
+import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
   DocumentId,
@@ -855,25 +852,44 @@ function createRegionProfileFailureDiagnostic(
   });
 }
 
-function createAdvancedUnsupportedDiagnostic(
-  featureId: FeatureId,
-  message: string,
+/**
+ * Diagnostic for a preview whose feature evaluation threw. The code comes from
+ * the same derivation a create's rebuild uses, for every feature kind, so a
+ * failure the preview reports keeps its code when the create reports it: only
+ * an `advanced-feature-unsupported-kernel-case:` throw carries that code, and
+ * a native validation or kernel failure stays `occ-rebuild-failure`.
+ */
+export function createFeaturePreviewFailureDiagnostic(
+  feature: OccAuthoringFeatureRecord,
+  error: unknown,
+  sketches: readonly SketchSnapshotRecord[],
 ): ModelingDiagnostic {
-  return createDiagnostic(
-    "advanced-feature-unsupported-kernel-case",
-    "error",
-    message,
-    { kind: "feature", featureId },
-    {
-      kind: "advancedFeatureValidation",
-      diagnostic: {
-        code: "advanced-feature-unsupported-kernel-case",
-        severity: "error",
-        message,
-        role: null,
-        target: null,
+  const code = deriveRebuildFailureCode(error);
+  const featureTarget = {
+    kind: "feature" as const,
+    featureId: feature.featureId,
+  };
+  // T10 plan §2.9: the edited feature's profile field shows a region cause on
+  // the region it names.
+  return (
+    createRegionProfileFailureDiagnostic(
+      feature,
+      code,
+      error,
+      [featureTarget],
+      sketches,
+    ) ??
+    createDiagnostic(
+      code,
+      "error",
+      error instanceof Error ? error.message : "OCC preview rebuild failed.",
+      featureTarget,
+      {
+        kind: "rebuildFailure",
+        affectedFeatureIds: [feature.featureId],
+        affectedTargets: [featureTarget],
       },
-    },
+    )
   );
 }
 
@@ -7661,40 +7677,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
                 currentRevisionId,
               ),
             ]),
-        isAdvancedSolidFeatureKind(request.definition.kind)
-          ? createAdvancedUnsupportedDiagnostic(
-              previewFeatureId,
-              error instanceof Error
-                ? error.message
-                : `OCC adapter does not implement ${request.definition.kind} yet.`,
-            )
-          : // T10 plan §2.9: the edited feature's profile field shows a
-            // region cause on the region it names.
-            (createRegionProfileFailureDiagnostic(
-              {
-                ...previewFeature,
-                label: replacedFeature?.label ?? previewFeature.label,
-              },
-              deriveRebuildFailureCode(error),
-              error,
-              [{ kind: "feature", featureId: previewFeatureId }],
-              runtimeState.authoringState.sketches,
-            ) ??
-            createDiagnostic(
-              deriveRebuildFailureCode(error),
-              "error",
-              error instanceof Error
-                ? error.message
-                : "OCC preview rebuild failed.",
-              { kind: "feature", featureId: previewFeatureId },
-              {
-                kind: "rebuildFailure",
-                affectedFeatureIds: [previewFeatureId],
-                affectedTargets: [
-                  { kind: "feature", featureId: previewFeatureId },
-                ],
-              },
-            )),
+        createFeaturePreviewFailureDiagnostic(
+          {
+            ...previewFeature,
+            label: replacedFeature?.label ?? previewFeature.label,
+          },
+          error,
+          runtimeState.authoringState.sketches,
+        ),
       ];
 
       return {
