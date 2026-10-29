@@ -797,6 +797,44 @@ namespace {
     );
   }
 
+  /**
+   * The payload of a transaction whose committed shape is only a tool body for
+   * a following transaction (a shell before its boolean): the caller reads
+   * nothing but the validation diagnostics, so the topology records and the
+   * serialised mesh are left out. The shape is still cleaned and meshed at the
+   * identity budget exactly like CadaraBuildCommittedTopologyJson, so the tool
+   * the next transaction receives is in the same state (Boolean bounding boxes
+   * read face triangulations).
+   */
+  std::string CadaraBuildToolBodyValidationJson(
+    const TopoDS_Shape& shape,
+    const std::string& bodyId,
+    const std::string& topologyToken
+  ) {
+    if (!shape.IsNull()) {
+      BRepTools::Clean(shape, true);
+      CadaraMeshShapeForPayload(
+        shape,
+        kCadaraIdentityMeshLinearDeflection,
+        kCadaraIdentityMeshAngularDeflection,
+        kCadaraIdentityMeshLinearDeflection
+      );
+    }
+    std::ostringstream out;
+    out
+      << "{\"schemaVersion\":\"occ-native-topology-payload/v1alpha1\""
+      << ",\"source\":\"occt7-shim\""
+      << ",\"bodyId\":\"" << CadaraEscapeJson(bodyId) << "\""
+      << ",\"topologyToken\":\"" << CadaraEscapeJson(topologyToken) << "\""
+      << ",\"counts\":{\"faces\":" << CadaraShapeCount(shape, TopAbs_FACE)
+      << ",\"edges\":" << CadaraShapeCount(shape, TopAbs_EDGE)
+      << ",\"vertices\":" << CadaraShapeCount(shape, TopAbs_VERTEX)
+      << "},\"diagnostics\":";
+    CadaraAppendValidationDiagnostics(out, shape, bodyId);
+    out << "}";
+    return out.str();
+  }
+
   std::string CadaraBuildUnsupportedHistoryJson(
     const std::string& operation,
     const std::string& bodyId
@@ -2246,7 +2284,8 @@ namespace {
     const std::string& topologyToken,
     const double linearDeflection,
     const double angularDeflection,
-    const TopoDS_Shape& previousShape
+    const TopoDS_Shape& previousShape,
+    const bool toolBodyPayload = false
   ) {
     Message_ProgressRange progress;
     builder.Build(progress);
@@ -2279,7 +2318,9 @@ namespace {
     );
     return CadaraNativeFeatureTransactionResult(
       preparedShape,
-      CadaraBuildCommittedTopologyJson(preparedShape, bodyId, topologyToken),
+      toolBodyPayload
+        ? CadaraBuildToolBodyValidationJson(preparedShape, bodyId, topologyToken)
+        : CadaraBuildCommittedTopologyJson(preparedShape, bodyId, topologyToken),
       CadaraBuildFeatureHistoryJson(builder, operation, bodyId, previousTopologyToken, topologyToken, previousShape, preparedShape),
       true
     );
@@ -2308,4 +2349,119 @@ namespace {
       rightOperand
     ).PayloadJson();
 }
+
+  /**
+   * BRepOffsetAPI_MakeThickSolid by join (skin, arc joins) removing the given
+   * faces. With toolBodyPayload the payload carries only validation
+   * diagnostics (CadaraBuildToolBodyValidationJson): the result feeds a
+   * following Boolean that re-identifies the body.
+   */
+  CadaraNativeFeatureTransactionResult CadaraBuildShellTransactionResult(
+    const TopoDS_Shape& shape,
+    const std::string& faceIdsCsv,
+    const double signedThickness,
+    const std::string& bodyId,
+    const std::string& previousTopologyToken,
+    const std::string& topologyToken,
+    const double linearDeflection,
+    const double angularDeflection,
+    const bool toolBodyPayload
+  ) {
+    if (signedThickness == 0.0) {
+      const TopoDS_Shape emptyShape;
+      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+        emptyShape,
+        bodyId,
+        topologyToken,
+        linearDeflection,
+        angularDeflection,
+        true,
+        CadaraDiagnosticJson(
+          "occ-native-feature-transaction-invalid-parameter",
+          "error",
+          "Native OCC shell feature transaction requires a non-zero signed thickness.",
+          bodyId,
+          "featureTransaction",
+          "operation",
+          "shell"
+        )
+      ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
+    }
+
+    const std::vector<std::string> faceIds = CadaraSplitTargetIds(faceIdsCsv);
+    if (faceIds.empty()) {
+      const TopoDS_Shape emptyShape;
+      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+        emptyShape,
+        bodyId,
+        topologyToken,
+        linearDeflection,
+        angularDeflection,
+        true,
+        CadaraDiagnosticJson(
+          "occ-native-feature-transaction-missing-target",
+          "error",
+          "Native OCC shell feature transaction requires at least one removable face.",
+          bodyId,
+          "featureTransaction",
+          "operation",
+          "shell"
+        )
+      ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
+    }
+
+    TopTools_ListOfShape closingFaces;
+    for (const std::string& faceId : faceIds) {
+      TopoDS_Face face;
+      if (!CadaraFindFaceById(shape, bodyId, previousTopologyToken, faceId, face)) {
+        const TopoDS_Shape emptyShape;
+        return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
+          emptyShape,
+          bodyId,
+          topologyToken,
+          linearDeflection,
+          angularDeflection,
+          true,
+          CadaraDiagnosticJson(
+            "occ-native-feature-transaction-missing-target",
+            "error",
+            "Native OCC shell feature transaction could not resolve a removable face.",
+            bodyId,
+            "featureTransaction",
+            "faceId",
+            faceId
+          )
+        ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
+      }
+
+      closingFaces.Append(face);
+    }
+
+    BRepOffsetAPI_MakeThickSolid shell;
+    Message_ProgressRange progress;
+    shell.MakeThickSolidByJoin(
+      shape,
+      closingFaces,
+      signedThickness,
+      linearDeflection,
+      BRepOffset_Skin,
+      false,
+      false,
+      GeomAbs_Arc,
+      false,
+      progress
+    );
+
+    return CadaraBuildLocalOperationTransactionResult(
+      shell,
+      "shell",
+      bodyId,
+      previousTopologyToken,
+      topologyToken,
+      linearDeflection,
+      angularDeflection,
+      shape,
+      toolBodyPayload
+    );
+  }
 }

@@ -64,6 +64,7 @@ mainBuild:
     - symbol: CadaraNativeFeatureTransactionResult
     - symbol: CadaraNativeNeutralCurveQuery
     - symbol: CadaraNativeShapeSetCheckpoint
+    - symbol: CadaraNativeToolBodyTransaction
     - symbol: CadaraNativeTopologyMeshBuffers
     - symbol: CadaraNativeTopologyProbe
     - symbol: ChFi3d_FilletShape
@@ -222,6 +223,10 @@ additionalCppCode: |
 
   class CadaraExecuteNativeFeatureTransaction {
   #include "/src/occ-native-shims/cadara-execute-native-feature-transaction.inc"
+  };
+
+  class CadaraNativeToolBodyTransaction {
+  #include "/src/occ-native-shims/cadara-native-tool-body-transaction.inc"
   };
 
   class CadaraBuildNativeExactBrepPayload {

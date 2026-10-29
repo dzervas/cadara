@@ -507,6 +507,11 @@ run("registry-abi-and-declarations-approved-extension", (out) => {
       (out.approvedTopologyMeshBuffersDeclarationClasses === 0),
     "Registry and declarations must agree on the approved topology mesh-buffer builder",
   );
+  assert(
+    (out.approvedToolBodyTransactionAbiEntries === 0) ===
+      (out.approvedToolBodyTransactionDeclarationClasses === 0),
+    "Registry and declarations must agree on the approved tool-body transaction",
+  );
 });
 
 // Audited inventory: every binding returning T* yields a borrowed alias that must
@@ -663,6 +668,28 @@ function meshedBox(i = 0) {
   new oc.BRepMesh_IncrementalMesh_2(shape, 0.01, false, 0.5, false).delete();
   builder.delete();
   return shape;
+}
+/** The box shelled 0.1 inside with its first face removed. */
+function toolBodyShell(box) {
+  const faceId = JSON.parse(
+    oc.CadaraBuildNativeTopologyPayload.BuildJson(
+      box,
+      "body_lifetime",
+      "t0001",
+      0.1,
+      0.5,
+    ),
+  ).topology.find((record) => record.kind === "face").id;
+  return oc.CadaraNativeToolBodyTransaction.BuildShellWithHistory(
+    box,
+    faceId,
+    -0.1,
+    "body_lifetime",
+    "t0001",
+    "t0002",
+    0.001,
+    0.5,
+  );
 }
 const document = () =>
   new oc.TDocStd_Document(
@@ -858,6 +885,21 @@ const slopeCases = [
           0.5,
         ),
       );
+      s.delete();
+    },
+  },
+  {
+    // A tool-body transaction result owns its committed shape and payloads.
+    name: "CadaraNativeToolBodyTransaction shell results",
+    reps: 500,
+    deleted: (i) => {
+      const s = meshedBox(i);
+      toolBodyShell(s).delete();
+      s.delete();
+    },
+    retained: (i, keep) => {
+      const s = meshedBox(i);
+      keep.push(toolBodyShell(s));
       s.delete();
     },
   },

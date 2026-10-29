@@ -640,100 +640,16 @@ public:
     const double linearDeflection,
     const double angularDeflection
   ) {
-    if (signedThickness == 0.0) {
-      const TopoDS_Shape emptyShape;
-      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
-        emptyShape,
-        bodyId,
-        topologyToken,
-        linearDeflection,
-        angularDeflection,
-        true,
-        CadaraDiagnosticJson(
-          "occ-native-feature-transaction-invalid-parameter",
-          "error",
-          "Native OCC shell feature transaction requires a non-zero signed thickness.",
-          bodyId,
-          "featureTransaction",
-          "operation",
-          "shell"
-        )
-      ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
-    }
-
-    const std::vector<std::string> faceIds = CadaraSplitTargetIds(faceIdsCsv);
-    if (faceIds.empty()) {
-      const TopoDS_Shape emptyShape;
-      return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
-        emptyShape,
-        bodyId,
-        topologyToken,
-        linearDeflection,
-        angularDeflection,
-        true,
-        CadaraDiagnosticJson(
-          "occ-native-feature-transaction-missing-target",
-          "error",
-          "Native OCC shell feature transaction requires at least one removable face.",
-          bodyId,
-          "featureTransaction",
-          "operation",
-          "shell"
-        )
-      ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
-    }
-
-    TopTools_ListOfShape closingFaces;
-    for (const std::string& faceId : faceIds) {
-      TopoDS_Face face;
-      if (!CadaraFindFaceById(shape, bodyId, previousTopologyToken, faceId, face)) {
-        const TopoDS_Shape emptyShape;
-        return CadaraNativeFeatureTransactionResult(emptyShape, CadaraBuildTopologyJson(
-          emptyShape,
-          bodyId,
-          topologyToken,
-          linearDeflection,
-          angularDeflection,
-          true,
-          CadaraDiagnosticJson(
-            "occ-native-feature-transaction-missing-target",
-            "error",
-            "Native OCC shell feature transaction could not resolve a removable face.",
-            bodyId,
-            "featureTransaction",
-            "faceId",
-            faceId
-          )
-        ), CadaraBuildUnsupportedHistoryJson("shell", bodyId), false);
-      }
-
-      closingFaces.Append(face);
-    }
-
-    BRepOffsetAPI_MakeThickSolid shell;
-    Message_ProgressRange progress;
-    shell.MakeThickSolidByJoin(
+    return CadaraBuildShellTransactionResult(
       shape,
-      closingFaces,
+      faceIdsCsv,
       signedThickness,
-      linearDeflection,
-      BRepOffset_Skin,
-      false,
-      false,
-      GeomAbs_Arc,
-      false,
-      progress
-    );
-
-    return CadaraBuildLocalOperationTransactionResult(
-      shell,
-      "shell",
       bodyId,
       previousTopologyToken,
       topologyToken,
       linearDeflection,
       angularDeflection,
-      shape
+      false
     );
   }
 

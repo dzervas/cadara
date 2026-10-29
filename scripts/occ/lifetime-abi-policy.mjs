@@ -40,6 +40,13 @@ const SHIM_CLASS_EXTENSIONS = [
     label: "Topology mesh-buffer builder",
     ...readExtension("./topology-mesh-buffers-extension.json"),
   },
+  {
+    // Shell transaction with a diagnostics-only tool-body payload (cadara-dx2k.20).
+    className: "CadaraNativeToolBodyTransaction",
+    key: "ToolBodyTransaction",
+    label: "Tool-body transaction",
+    ...readExtension("./tool-body-transaction-extension.json"),
+  },
 ];
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const assert = (condition, message) => {

@@ -127,6 +127,23 @@ export interface OpenCascadeNativeTopologyKernelHost {
       angularDeflection: number,
     ) => OpenCascadeNativeFeatureTransactionResult;
   };
+  /**
+   * Feature transactions whose committed shape only feeds a following Boolean:
+   * the payload keeps counts and validation diagnostics, no topology records
+   * or mesh. Absent from kernels built before it.
+   */
+  CadaraNativeToolBodyTransaction?: {
+    BuildShellWithHistory?: (
+      shape: unknown,
+      faceIdsCsv: string,
+      signedThickness: number,
+      bodyId: string,
+      previousTopologyToken: string,
+      topologyToken: string,
+      linearDeflection: number,
+      angularDeflection: number,
+    ) => OpenCascadeNativeFeatureTransactionResult;
+  };
   CadaraBuildNativeExactBrepPayload?: {
     BuildJson?: (
       shape: unknown,

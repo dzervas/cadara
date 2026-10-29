@@ -421,3 +421,69 @@ test("lifetime policy rejects a partial or altered topology mesh-buffer builder 
     );
   }
 });
+
+// cadara-dx2k.20: the tool-body transaction is a third whole shim class added
+// after v8, held to the same all-or-nothing inventory.
+const toolBodyExtension = JSON.parse(
+  readFileSync("scripts/occ/tool-body-transaction-extension.json", "utf8"),
+) as { abi: string[]; declaration: string; instanceEntry: string };
+const withoutToolBody = declarations
+  .replace(toolBodyExtension.declaration + "\n\n", "")
+  .replace("  " + toolBodyExtension.instanceEntry + "\n", "");
+const withToolBody =
+  toolBodyExtension.declaration +
+  "\n\n" +
+  withoutToolBody.replace(
+    "export type OpenCascadeInstance = {FS: typeof FS} & {",
+    "export type OpenCascadeInstance = {FS: typeof FS} & {\n  " +
+      toolBodyExtension.instanceEntry,
+  );
+
+test("lifetime policy accepts declarations with or without the approved tool-body transaction", () => {
+  expect(
+    withoutToolBody,
+    "premise: the production declarations carry the class",
+  ).not.toBe(declarations);
+  for (const candidate of [withoutToolBody, withToolBody]) {
+    const result = checkDeclarations(candidate);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  }
+});
+
+test("lifetime policy rejects an altered or partial tool-body transaction declaration", () => {
+  for (const [changed, message] of [
+    [
+      withToolBody.replace(
+        "signedThickness: Standard_Real",
+        "signedThickness: Standard_Integer",
+      ),
+      "Tool-body transaction declaration must equal the approved inventory",
+    ],
+    [
+      withToolBody.replace(toolBodyExtension.instanceEntry, ""),
+      "Tool-body transaction instance entry must match the approved declaration",
+    ],
+  ] as const) {
+    expect(changed).not.toBe(withToolBody);
+    const result = checkDeclarations(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(message);
+  }
+});
+
+test("lifetime policy rejects a partial or altered tool-body transaction registry", () => {
+  for (const changed of [
+    toolBodyExtension.abi.slice(1),
+    toolBodyExtension.abi.map((line) =>
+      line.replace(") iiiidiiidd", ") iiiiiiiidd"),
+    ),
+  ]) {
+    expect(changed).not.toEqual(toolBodyExtension.abi);
+    const result = checkAbi(changed);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Tool-body transaction registry must equal the approved inventory",
+    );
+  }
+});

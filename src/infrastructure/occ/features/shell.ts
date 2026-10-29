@@ -655,7 +655,10 @@ function buildNativeShellFeatureShape(
 
   const nativeHost =
     context.oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  // The shell is only the Boolean's tool: the Boolean transaction identifies
+  // the output body, so its payload needs nothing but validation diagnostics.
   const builder =
+    nativeHost.CadaraNativeToolBodyTransaction?.BuildShellWithHistory ??
     nativeHost.CadaraExecuteNativeFeatureTransaction
       ?.BuildShellCommittedShapeTransactionWithHistory;
 

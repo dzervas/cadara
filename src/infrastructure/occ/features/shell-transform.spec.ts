@@ -470,19 +470,27 @@ test("executeShellFeature uses native shell transaction before replacement boole
     "feature_native_shell_history_seed" as FeatureId,
   );
   const nativeHost = oc as unknown as OpenCascadeNativeTopologyKernelHost;
+  // Kernels with the tool-body transaction build a Boolean's shell tool there.
+  const toolBodyHost = nativeHost.CadaraNativeToolBodyTransaction;
+  const featureHost = nativeHost.CadaraExecuteNativeFeatureTransaction;
   const nativeBuilder =
-    nativeHost.CadaraExecuteNativeFeatureTransaction
-      ?.BuildShellCommittedShapeTransactionWithHistory;
+    toolBodyHost?.BuildShellWithHistory ??
+    featureHost?.BuildShellCommittedShapeTransactionWithHistory;
   let nativeCallCount = 0;
   expect(
     typeof nativeBuilder,
     "Expected custom OCC runtime to expose native shell transactions.",
   ).toBe("function");
-  nativeHost.CadaraExecuteNativeFeatureTransaction!.BuildShellCommittedShapeTransactionWithHistory =
-    (...args) => {
-      nativeCallCount += 1;
-      return nativeBuilder(...args);
-    };
+  const countingBuilder: NonNullable<typeof nativeBuilder> = (...args) => {
+    nativeCallCount += 1;
+    return nativeBuilder!(...args);
+  };
+  if (toolBodyHost?.BuildShellWithHistory) {
+    toolBodyHost.BuildShellWithHistory = countingBuilder;
+  } else {
+    featureHost!.BuildShellCommittedShapeTransactionWithHistory =
+      countingBuilder;
+  }
   const faceId = body.topology.faceIds[0];
   expect(
     faceId != null,

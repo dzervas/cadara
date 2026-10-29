@@ -21,12 +21,14 @@ test("production custom OCC preserves neutral curve parameters, contacts and exa
   expect(failures, JSON.stringify(failures, null, 2)).toEqual([]);
   expect(result.summary).toEqual({ pass: 13, error: 0 });
   // The probe's exit status also covers the mesh budget
-  // (scripts/occ/topology-mesh-budget-conformance.mjs) and the mesh-buffer
-  // builder (scripts/occ/topology-mesh-buffers-conformance.mjs); their own
-  // messages say when the assets predate the shim.
+  // (scripts/occ/topology-mesh-budget-conformance.mjs), the mesh-buffer
+  // builder (scripts/occ/topology-mesh-buffers-conformance.mjs) and the
+  // tool-body transaction (scripts/occ/tool-body-transaction-conformance.mjs);
+  // their own messages say when the assets predate the shim.
   for (const conformance of [
     result.topologyMeshBudget,
     result.topologyMeshBuffers,
+    result.toolBodyTransaction,
   ]) {
     expect(
       conformance.cases

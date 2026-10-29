@@ -1,0 +1,9 @@
+{
+  "abi": [
+    "class CadaraNativeToolBodyTransaction base=-",
+    "ctor CadaraNativeToolBodyTransaction(CadaraNativeToolBodyTransaction*) ii",
+    "static CadaraNativeToolBodyTransaction.BuildShellWithHistory(CadaraNativeFeatureTransactionResult, TopoDS_Shape, std::string, double, std::string, std::string, std::string, double, double) iiiidiiidd"
+  ],
+  "declaration": "export declare class CadaraNativeToolBodyTransaction {\n  constructor();\n  static BuildShellWithHistory(shape: TopoDS_Shape, faceIdsCsv: string, signedThickness: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;\n  delete(): void;\n}",
+  "instanceEntry": "CadaraNativeToolBodyTransaction: typeof CadaraNativeToolBodyTransaction;"
+}

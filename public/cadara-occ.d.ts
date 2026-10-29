@@ -4664,6 +4664,12 @@ export declare class CadaraExecuteNativeFeatureTransaction {
   delete(): void;
 }
 
+export declare class CadaraNativeToolBodyTransaction {
+  constructor();
+  static BuildShellWithHistory(shape: TopoDS_Shape, faceIdsCsv: string, signedThickness: Standard_Real, bodyId: string, previousTopologyToken: string, topologyToken: string, linearDeflection: Standard_Real, angularDeflection: Standard_Real): CadaraNativeFeatureTransactionResult;
+  delete(): void;
+}
+
 export declare class CadaraBuildNativeExactBrepPayload {
   constructor();
   static EntrypointName(): string;
@@ -5341,6 +5347,7 @@ export type OpenCascadeInstance = {FS: typeof FS} & {
   CadaraBuildNativeTopologyPayload: typeof CadaraBuildNativeTopologyPayload;
   CadaraNativeTopologyMeshBuffers: typeof CadaraNativeTopologyMeshBuffers;
   CadaraExecuteNativeFeatureTransaction: typeof CadaraExecuteNativeFeatureTransaction;
+  CadaraNativeToolBodyTransaction: typeof CadaraNativeToolBodyTransaction;
   CadaraBuildNativeExactBrepPayload: typeof CadaraBuildNativeExactBrepPayload;
   CadaraBuildNativeMeshExportPayload: typeof CadaraBuildNativeMeshExportPayload;
   CadaraNativeShapeSetCheckpoint: typeof CadaraNativeShapeSetCheckpoint;

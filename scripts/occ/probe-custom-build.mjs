@@ -12,6 +12,7 @@ import { runNativeSemanticDispatcherConformance } from "./native-semantic-confor
 import { runShapeSetCheckpointConformance } from "./shape-set-checkpoint-conformance.mjs";
 import { runTopologyMeshBudgetConformance } from "./topology-mesh-budget-conformance.mjs";
 import { runTopologyMeshBuffersConformance } from "./topology-mesh-buffers-conformance.mjs";
+import { runToolBodyTransactionConformance } from "./tool-body-transaction-conformance.mjs";
 
 const directory = resolve(
   process.argv[2] ?? fileURLToPath(new URL("../../public", import.meta.url)),
@@ -46,6 +47,7 @@ const nativeDispatcher = runNativeSemanticDispatcherConformance(oc);
 const shapeSetCheckpoint = runShapeSetCheckpointConformance(oc);
 const topologyMeshBudget = runTopologyMeshBudgetConformance(oc);
 const topologyMeshBuffers = runTopologyMeshBuffersConformance(oc);
+const toolBodyTransaction = runToolBodyTransactionConformance(oc);
 const result = {
   runtime: process.version,
   directory,
@@ -56,6 +58,7 @@ const result = {
   shapeSetCheckpoint,
   topologyMeshBudget,
   topologyMeshBuffers,
+  toolBodyTransaction,
 };
 // The same rebuild must include the independently owned native precision correction.
 const expectedX = 0.12345678901234566;
@@ -101,6 +104,7 @@ if (
   shapeSetCheckpoint.summary.error ||
   topologyMeshBudget.summary.error ||
   topologyMeshBuffers.summary.error ||
+  toolBodyTransaction.summary.error ||
   JSON.stringify(rawExpectedFailures) !== JSON.stringify(expectedRawFailures) ||
   !result.nativePrecision.pass
 ) {
