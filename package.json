@@ -44,7 +44,9 @@
     "test:e2e:real-captures:diagnostic": "bun ./scripts/require-onshape-captures.ts && PLAYWRIGHT_REAL_CAPTURES=1 PLAYWRIGHT_DIAGNOSTICS=1 playwright test e2e/onshape-import-parametric.spec.ts e2e/onshape-variable-rebuild.spec.ts --workers=1",
     "test:e2e:all": "bun run test:e2e && bun run test:e2e:real-captures",
     "test:all": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy && bun run test:e2e",
-    "test:all:acceptance": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy:acceptance && bun run test:e2e:all"
+    "test:all:acceptance": "bun run lint && bun run build && bun run typecheck:specs && bun run test && bun run test:heavy:acceptance && bun run test:e2e:all",
+    "build:contracts": "bun scripts/build-contracts.mjs",
+    "prepare": "bun run build:contracts"
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.5",
@@ -104,5 +106,19 @@
     "workbox-strategies": "^7.4.1",
     "workbox-window": "^7.4.1",
     "wrangler": "^4.145.0"
+  },
+  "exports": {
+    "./contracts": {
+      "types": "./dist/contracts/types/public-contracts.d.ts",
+      "import": "./dist/contracts/public-contracts.js"
+    },
+    "./contracts/documents": {
+      "types": "./dist/contracts/types/public-document-types.d.ts",
+      "import": "./dist/contracts/public-document-types.js"
+    },
+    "./contracts/*": {
+      "types": "./dist/contracts/types/contracts/*.d.ts",
+      "import": "./dist/contracts/contracts/*.js"
+    }
   }
 }

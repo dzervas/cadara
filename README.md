@@ -36,3 +36,43 @@ native documents, preview meshes, and manifests, grouped by model. Rebuild
 scripts in `landing/scripts/` keep intermediate recipes and logs in OS temporary
 directories, not the served model folder. A complete model rebuild takes many
 minutes; it is not part of the normal web build.
+
+## Contracts for Bun consumers
+
+Pin the public repository to a commit. Bun requires explicit trust to run a git
+package's `prepare` script ([lifecycle documentation](https://bun.sh/docs/pm/lifecycle)):
+
+```json
+{
+  "dependencies": { "cadara": "github:dzervas/cadara#<sha>" },
+  "trustedDependencies": ["cadara"]
+}
+```
+
+Run `bun install` with lifecycle scripts enabled (no `--ignore-scripts` or
+`install.ignoreScripts = true` in the consumer). Preparation compiles the
+contracts and their Typia validators into `dist/contracts`; the consumer needs
+neither a Typia plugin nor CADara's Bun preload.
+
+```ts
+import { parseAuthoredModelDocument } from "cadara/contracts";
+import type { CollaborativeDocument } from "cadara/contracts/documents";
+import type { AuthoredModelDocument } from "cadara/contracts/modeling/authored-document";
+
+const result = parseAuthoredModelDocument(JSON.parse(savedCadaraJson));
+if (!result.ok) throw new Error(JSON.stringify(result.diagnostic));
+```
+
+`cadara/contracts/*` mirrors every production module under `src/contracts`
+(without `.ts`; directory entries use `/index`). New contract modules are picked
+up automatically at build time. The root subpath offers the authored-document
+parser and its document/result types. `cadara/contracts/documents` is a separate,
+type-only entry for the core-owned collaborative storage document; the runtime
+contracts surface never imports core, application, or infrastructure modules.
+
+For a local `file:` dependency, first run `bun run build:contracts` in the CADara
+checkout: Bun does not run `prepare` for `file:` packages, and this repository's
+`bunfig.toml` disables lifecycle scripts on its own installs. Generated JS and
+portable declarations are not committed. The web build replaces `dist/`, so
+re-run `build:contracts` after building the web app if using this checkout as a
+local dependency. The separately built `cadara-cli` package is unchanged.
