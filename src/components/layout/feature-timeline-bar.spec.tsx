@@ -912,6 +912,14 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
       target: { kind: "feature", featureId: "feature_fillet-1" as FeatureId },
       detail: null,
     },
+    {
+      code: "sketch-support-unresolved",
+      severity: "error",
+      message: `${sketchHistoryItem!.label} placement is invalid: its supporting face no longer exists on Body 1.`,
+      repairGuidance: `Use Change Sketch Plane on ${sketchHistoryItem!.label} to place it on an existing face or plane.`,
+      target: { kind: "sketch", sketchId: sketchHistoryItem!.sketchId },
+      detail: null,
+    },
   ];
   const erroredTimelineMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
@@ -934,8 +942,14 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   expect(
     erroredTimelineMarkup.match(/data-feature-error="true"/g)?.length,
-    "Timeline should mark every feature with a feature-scoped diagnostic as errored.",
-  ).toBe(2);
+    "Timeline should mark every feature with a feature-scoped diagnostic, and every sketch with a sketch-scoped one, as errored.",
+  ).toBe(3);
+  expect(
+    erroredTimelineMarkup.includes(
+      `aria-label="Repair ${sketchHistoryItem!.label}. Use Change Sketch Plane on ${sketchHistoryItem!.label} to place it on an existing face or plane."`,
+    ),
+    "A sketch whose placement no longer resolves should name its repair on its timeline item.",
+  ).toBeTruthy();
   expect(
     erroredTimelineMarkup.includes(
       'aria-label="Repair Extrude 1. Edit Extrude 1 and choose a valid profile selection."',

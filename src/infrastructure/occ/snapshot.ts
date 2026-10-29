@@ -12,6 +12,7 @@ import type {
   SnapshotEntityRecord,
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
+import { createUnresolvedSketchSupportModelingDiagnostics } from "@/contracts/modeling/diagnostics";
 import type {
   RenderMeshGeometry,
   RenderPoint3D,
@@ -971,7 +972,17 @@ export function buildOccSnapshotDiagnostics(
   state: OccAuthoringState,
   extraDiagnostics: readonly ModelingDiagnostic[],
 ): ModelingDiagnostic[] {
-  return [...state.diagnostics, ...extraDiagnostics];
+  return [
+    ...state.diagnostics,
+    ...extraDiagnostics,
+    ...createUnresolvedSketchSupportModelingDiagnostics(
+      state.sketches,
+      (bodyId) =>
+        state.bodies.find((body) => body.bodyId === bodyId)?.label ??
+        state.bodyLabels.get(bodyId) ??
+        bodyId,
+    ),
+  ];
 }
 
 function buildConstructionRenderRecords(
@@ -1863,8 +1874,21 @@ function buildEdgeRenderRecord(
     buildEdgePolylineFromTriangulation(state, edge, faces) ??
     buildEdgePolylineFromPolygon3D(state, edge) ??
     sampleCurveByParameters(state, edge, DEFAULT_EDGE_SAMPLE_COUNT);
+  // A degenerate edge (e.g. a zero-length edge a chamfer leaves behind)
+  // samples to one repeated point. Normalization refuses consecutive
+  // duplicates, which would fail the whole document snapshot, so repeats are
+  // dropped and an edge with fewer distinct points than a polyline needs is
+  // not drawn.
+  const points = polyline?.points.filter(
+    (point, index, all) =>
+      index === 0 || String(point) !== String(all[index - 1]),
+  );
 
-  if (!polyline || polyline.points.length < 2) {
+  if (
+    !polyline ||
+    !points ||
+    new Set(points.map(String)).size < (polyline.isClosed ? 3 : 2)
+  ) {
     return null;
   }
 
@@ -1884,7 +1908,7 @@ function buildEdgeRenderRecord(
     },
     geometry: {
       kind: "polyline",
-      points: polyline.points,
+      points,
       isClosed: polyline.isClosed,
     },
   };

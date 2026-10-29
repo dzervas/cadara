@@ -33,6 +33,7 @@ import type { FeatureId } from "@/contracts/shared/ids";
 import {
   getModelingDiagnosticRepairMessage,
   isFeatureScopedModelingDiagnostic,
+  isSketchScopedModelingDiagnostic,
 } from "@/contracts/modeling/diagnostics";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import {
@@ -166,24 +167,26 @@ function getHistoryItemDescription(item: DocumentHistoryItemRecord) {
   return item.description;
 }
 
-function getFeatureDiagnosticsById(diagnostics: readonly ModelingDiagnostic[]) {
-  const byFeatureId = new Map<
-    FeatureHistoryItem["featureId"],
-    ModelingDiagnostic[]
-  >();
+/** The diagnostics owned by each history item, keyed by its feature or sketch id. */
+function getHistoryItemDiagnosticsById(
+  diagnostics: readonly ModelingDiagnostic[],
+) {
+  const byItemId = new Map<string, ModelingDiagnostic[]>();
 
   for (const diagnostic of diagnostics) {
-    if (!isFeatureScopedModelingDiagnostic(diagnostic)) {
+    const itemId = isFeatureScopedModelingDiagnostic(diagnostic)
+      ? diagnostic.featureId
+      : isSketchScopedModelingDiagnostic(diagnostic)
+        ? diagnostic.target.sketchId
+        : null;
+    if (itemId === null) {
       continue;
     }
 
-    byFeatureId.set(diagnostic.featureId, [
-      ...(byFeatureId.get(diagnostic.featureId) ?? []),
-      diagnostic,
-    ]);
+    byItemId.set(itemId, [...(byItemId.get(itemId) ?? []), diagnostic]);
   }
 
-  return byFeatureId;
+  return byItemId;
 }
 
 function getSketchHistoryIcon(kind: SketchHistoryItem["kind"]) {
@@ -715,8 +718,8 @@ export function FeatureTimelineBar({
     () => new Set(historyHighlightFeatureIds),
     [historyHighlightFeatureIds],
   );
-  const diagnosticsByFeatureId = useMemo(
-    () => getFeatureDiagnosticsById(snapshot?.document.diagnostics ?? []),
+  const diagnosticsByHistoryItemId = useMemo(
+    () => getHistoryItemDiagnosticsById(snapshot?.document.diagnostics ?? []),
     [snapshot],
   );
   const cursor = snapshot?.document.cursor ?? { kind: "empty" as const };
@@ -859,13 +862,12 @@ export function FeatureTimelineBar({
         const isHistoryHighlighted =
           item.kind === "feature" &&
           historyHighlightFeatureIdSet.has(item.featureId);
-        const itemFeatureDiagnostics =
-          item.kind === "feature"
-            ? (diagnosticsByFeatureId.get(item.featureId) ?? [])
-            : [];
-        const primaryFeatureDiagnostic = itemFeatureDiagnostics[0] ?? null;
-        const repairMessage = primaryFeatureDiagnostic
-          ? getModelingDiagnosticRepairMessage(primaryFeatureDiagnostic)
+        const primaryDiagnostic =
+          diagnosticsByHistoryItemId.get(
+            item.kind === "feature" ? item.featureId : item.sketchId,
+          )?.[0] ?? null;
+        const repairMessage = primaryDiagnostic
+          ? getModelingDiagnosticRepairMessage(primaryDiagnostic)
           : null;
         const menuItems: WorkbenchContextMenuEntry[] =
           getDocumentHistoryMenuEntryDescriptors({
@@ -989,10 +991,10 @@ export function FeatureTimelineBar({
             <WorkbenchIcon name="layers" className="h-3.5 w-3.5" />
           ),
           menuItems,
-          ariaLabel: primaryFeatureDiagnostic
+          ariaLabel: primaryDiagnostic
             ? `Repair ${item.label}. ${repairMessage}`
             : `Select ${item.label}. Double-click to reopen.`,
-          title: primaryFeatureDiagnostic
+          title: primaryDiagnostic
             ? (repairMessage ?? getHistoryItemDescription(item))
             : `${getHistoryItemDescription(item)}. Double-click to reopen authoring in place`,
           isSelected,
@@ -1003,14 +1005,14 @@ export function FeatureTimelineBar({
           isHighlighted: isHistoryHighlighted,
           isSuppressed: item.kind === "feature" && item.suppressed,
           errorMessage: repairMessage,
-          dataFeatureError: primaryFeatureDiagnostic ? "true" : undefined,
+          dataFeatureError: primaryDiagnostic ? "true" : undefined,
           dataDerivedHighlighted: isHistoryHighlighted ? "true" : undefined,
           dataHistoryFeatureId:
             item.kind === "feature" ? item.featureId : undefined,
           dataHistorySketchId:
             item.kind === "sketch" ? item.sketchId : undefined,
           dataDeleteSupported: "true",
-          dataRepairGuidance: primaryFeatureDiagnostic
+          dataRepairGuidance: primaryDiagnostic
             ? (repairMessage ?? undefined)
             : undefined,
           onPointerDown: (event) => handleItemPointerDown(event, item, index),
@@ -1020,7 +1022,9 @@ export function FeatureTimelineBar({
               return;
             }
 
-            if (primaryFeatureDiagnostic) {
+            // A sketch's own diagnostic is repaired from its menu (Change
+            // Sketch Plane), not by reopening the sketch.
+            if (primaryDiagnostic && item.kind === "feature") {
               onReopenTarget(target);
               return;
             }
@@ -1036,7 +1040,7 @@ export function FeatureTimelineBar({
       }),
     [
       cursorIndex,
-      diagnosticsByFeatureId,
+      diagnosticsByHistoryItemId,
       documentCursorActionsDisabled,
       getPositionCursor,
       historyHighlightFeatureIdSet,

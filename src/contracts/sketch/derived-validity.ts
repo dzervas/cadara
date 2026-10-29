@@ -103,15 +103,31 @@ export const SKETCH_VALIDATION_FAILED: SketchSolveDiagnostic = {
   target: null,
 };
 
+/** The face a face sketch is placed on no longer exists in its history position. */
+export const SKETCH_SUPPORT_UNRESOLVED_CODE = "sketch-support-unresolved";
+
+/**
+ * Why a face sketch has no placement: its supporting face (or the body
+ * holding it) no longer resolves, e.g. after an edit earlier in the history
+ * replaced that face. The sketch keeps its authored definition and frame;
+ * Change Sketch Plane repairs it.
+ */
+export const UNRESOLVED_SKETCH_SUPPORT: SketchSolveDiagnostic = {
+  code: SKETCH_SUPPORT_UNRESOLVED_CODE,
+  severity: "error",
+  message: "Sketch placement is invalid: its supporting face no longer exists.",
+  target: null,
+};
+
 /**
  * What a committed sketch's derivation produced: either its authored values
- * did not resolve (no solve ran), or it was validated, solved and its
- * regions derived (`diagnostics`: projection, validation, solve and region
- * diagnostics, in that order).
+ * or its face support did not resolve (no solve ran), or it was validated,
+ * solved and its regions derived (`diagnostics`: projection, validation,
+ * solve and region diagnostics, in that order).
  */
 export type CommittedSketchDerivation =
   | {
-      readonly kind: "unresolvedValues";
+      readonly kind: "unresolvedValues" | "unresolvedSupport";
       readonly diagnostics: readonly SketchSolveDiagnostic[];
     }
   | {

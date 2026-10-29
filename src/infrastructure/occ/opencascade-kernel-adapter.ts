@@ -130,6 +130,8 @@ import type {
 } from "@/contracts/sketch/schema";
 import {
   deriveCommittedSketchValidity,
+  SKETCH_SUPPORT_UNRESOLVED_CODE,
+  UNRESOLVED_SKETCH_SUPPORT,
   type CommittedSketchDerivation,
 } from "@/contracts/sketch/derived-validity";
 import { solveAndDeriveSketchWithOffsets } from "@/application/solver/offset-publication-round";
@@ -2875,18 +2877,27 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     };
   }
 
+  /**
+   * `plane` placed on its support in `state`, or null when its supporting
+   * face no longer resolves there (an edit earlier in the history replaced
+   * it): the sketch then has no placement, which is a sketch diagnostic, not
+   * a restore failure.
+   */
   private resolveRebuiltSketchPlane(
     document: AuthoredModelDocument,
     plane: SketchPlaneDefinition,
     state: OccAuthoringState,
-  ): SketchPlaneDefinition {
+  ): SketchPlaneDefinition | null {
     const rebuilt = structuredClone(plane);
     if (plane.support.kind !== "face") return rebuilt;
 
-    const extracted = extractPlanarFaceData(
-      state.oc,
-      this.requireLiveFace(state, plane.support.bodyId, plane.support.faceId),
+    const face = this.findLiveFace(
+      state,
+      plane.support.bodyId,
+      plane.support.faceId,
     );
+    if (!face) return null;
+    const extracted = extractPlanarFaceData(state.oc, face);
     const live = extracted.frame;
     releaseOccObjects([extracted.plane]);
 
@@ -2928,11 +2939,13 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     sourceState: OccAuthoringState,
   ): Promise<SketchSnapshotRecord> {
     const sketchId = sketch.sketchId;
-    const plane = this.resolveRebuiltSketchPlane(
+    const placed = this.resolveRebuiltSketchPlane(
       document,
       sketch.plane,
       sourceState,
     );
+    // An unplaced sketch keeps its authored frame for display and repair.
+    const plane = placed ?? structuredClone(sketch.plane);
     const definition = normalizeSketchDefinitionForSketchId(
       structuredClone(sketch.definition),
       sketchId,
@@ -2941,15 +2954,10 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       definition,
       variables: document.variables,
     });
-    if (!resolvedDefinition.ok) {
-      const { solvedSnapshot, derivedValidity } = deriveCommittedSketchValidity(
-        {
-          kind: "unresolvedValues",
-          diagnostics: resolvedDefinition.diagnostics.map(
-            mapModelingDiagnosticToSketchDiagnostic,
-          ),
-        },
-      );
+    // A sketch without a placement or resolved values is not solved.
+    const buildUnsolvedRecord = (derivation: CommittedSketchDerivation) => {
+      const { solvedSnapshot, derivedValidity } =
+        deriveCommittedSketchValidity(derivation);
       return buildSketchSnapshotRecord(
         {
           contractVersion: CONTRACT_VERSION,
@@ -2972,6 +2980,20 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         derivedValidity,
         [],
       );
+    };
+    if (placed === null) {
+      return buildUnsolvedRecord({
+        kind: "unresolvedSupport",
+        diagnostics: [UNRESOLVED_SKETCH_SUPPORT],
+      });
+    }
+    if (!resolvedDefinition.ok) {
+      return buildUnsolvedRecord({
+        kind: "unresolvedValues",
+        diagnostics: resolvedDefinition.diagnostics.map(
+          mapModelingDiagnosticToSketchDiagnostic,
+        ),
+      });
     }
     const correlation = createRestoreSolverCorrelation(
       sketchId,
@@ -3718,7 +3740,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         authored.plane,
         state,
       );
-      if (JSON.stringify(placed) !== JSON.stringify(authored.plane)) return;
+      if (
+        placed === null ||
+        JSON.stringify(placed) !== JSON.stringify(authored.plane)
+      )
+        return;
     }
     this.restoredSketchInputs.set(record, inputs);
   }
@@ -4003,6 +4029,16 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
 
     return plane;
+  }
+
+  private findLiveFace(
+    state: OccAuthoringState,
+    bodyId: BodyId,
+    faceId: `face_${string}`,
+  ) {
+    return state.bodies
+      .find((entry) => entry.bodyId === bodyId)
+      ?.facesById.get(faceId);
   }
 
   private requireLiveFace(
@@ -7486,10 +7522,14 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             ? nativeTopologyResult.payload
             : undefined,
       });
+      // An unplaced sketch's own diagnostic is the document's, not the
+      // previewed feature's (a consumer of it reports its own).
       const previewDiagnostics = filterPreviewInvalidationDiagnostics(
         runtimeState.authoringState,
         previewState,
-        snapshot.document.diagnostics,
+        snapshot.document.diagnostics.filter(
+          (diagnostic) => diagnostic.code !== SKETCH_SUPPORT_UNRESOLVED_CODE,
+        ),
       );
       const diagnostics =
         request.baseRevisionId === currentRevisionId
