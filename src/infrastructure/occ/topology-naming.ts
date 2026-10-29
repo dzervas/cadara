@@ -691,14 +691,16 @@ function namingLabels(naming: {
 }
 
 /**
- * Seeds naming for a body that carries none. `withSelectors: false` leaves
- * out the selector labels, the expensive part (a context selection per
- * subshape); only a reconciliation that never consults them may ask for that.
+ * Seeds naming for a body that carries none: a primitive label per subshape
+ * and, for the subshapes `seededSelectorKeys` names, a selector label right
+ * after its primitive label (the eager order). Selectors are the expensive
+ * part (a context selection per subshape); see reconcileWithResolvedHistory
+ * for when a seed may leave some or all of them out.
  */
 function createInitialNamingState(
   oc: OpenCascadeInstance,
   body: TrackedTopologyInput,
-  { withSelectors }: { withSelectors: boolean } = { withSelectors: true },
+  seededSelectorKeys: "all" | ReadonlySet<string> = "all",
 ): OccTopologyNamingBodyState {
   const document = createDocument(oc);
   const topologyLabelsByKey = new Map<string, OccLabel>();
@@ -711,7 +713,10 @@ function createInitialNamingState(
       body,
       bodyLabel,
       topologyLabelsByKey,
-      withSelectors ? selectorLabelsByKey : undefined,
+      selectorLabelsByKey,
+      seededSelectorKeys === "all"
+        ? () => true
+        : (key) => seededSelectorKeys.has(key),
     );
   } catch (error) {
     rethrowAfterReleasingLocalNaming(
@@ -736,24 +741,29 @@ function populateInitialNamingLabels(
   body: TrackedTopologyInput,
   bodyLabel: OccLabel,
   topologyLabelsByKey: Map<string, OccLabel>,
-  selectorLabelsByKey: Map<string, OccLabel> | undefined,
+  selectorLabelsByKey: Map<string, OccLabel>,
+  seedsSelector: (key: string) => boolean,
 ) {
   for (const [faceId, face] of body.facesById) {
     const key = topologyRefKey({ kind: "face", bodyId: body.bodyId, faceId });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, face));
-    selectorLabelsByKey?.set(
-      key,
-      createSelectorLabel(oc, bodyLabel, face, body.shape),
-    );
+    if (seedsSelector(key)) {
+      selectorLabelsByKey.set(
+        key,
+        createSelectorLabel(oc, bodyLabel, face, body.shape),
+      );
+    }
   }
 
   for (const [edgeId, edge] of body.edgesById) {
     const key = topologyRefKey({ kind: "edge", bodyId: body.bodyId, edgeId });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, edge));
-    selectorLabelsByKey?.set(
-      key,
-      createSelectorLabel(oc, bodyLabel, edge, body.shape),
-    );
+    if (seedsSelector(key)) {
+      selectorLabelsByKey.set(
+        key,
+        createSelectorLabel(oc, bodyLabel, edge, body.shape),
+      );
+    }
   }
 
   for (const [vertexId, vertex] of body.verticesById) {
@@ -763,10 +773,12 @@ function populateInitialNamingLabels(
       vertexId,
     });
     topologyLabelsByKey.set(key, createPrimitiveLabel(oc, bodyLabel, vertex));
-    selectorLabelsByKey?.set(
-      key,
-      createSelectorLabel(oc, bodyLabel, vertex, body.shape),
-    );
+    if (seedsSelector(key)) {
+      selectorLabelsByKey.set(
+        key,
+        createSelectorLabel(oc, bodyLabel, vertex, body.shape),
+      );
+    }
   }
 }
 
@@ -1028,6 +1040,206 @@ function consultsSelector(resolution: OccInheritedResolution) {
   return resolution.finalIndexes.length !== 1 && !resolution.ambiguous;
 }
 
+/** Naming keys of the previous subshapes whose reconciliation runs a selector Solve. */
+function collectConsultedSelectorKeys(
+  bodyId: BodyId,
+  resolutions: ResolvedReplacementHistory["inheritedResolutions"],
+) {
+  const keys = new Set<string>();
+  for (const [faceId, resolution] of resolutions.face) {
+    if (consultsSelector(resolution)) {
+      keys.add(topologyRefKey({ kind: "face", bodyId, faceId }));
+    }
+  }
+  for (const [edgeId, resolution] of resolutions.edge) {
+    if (consultsSelector(resolution)) {
+      keys.add(topologyRefKey({ kind: "edge", bodyId, edgeId }));
+    }
+  }
+  for (const [vertexId, resolution] of resolutions.vertex) {
+    if (consultsSelector(resolution)) {
+      keys.add(topologyRefKey({ kind: "vertex", bodyId, vertexId }));
+    }
+  }
+  return keys;
+}
+
+/**
+ * Whether a reconciliation whose result naming is released unread may seed
+ * selectors for its consulted subshapes only, and build no selector for its
+ * result subshapes, while every TNaming_Selector::Solve it runs returns what
+ * it returns after the eager seed (a selector per subshape, result selectors
+ * built). Ids, contributors and invalidations read the naming only through
+ * those Solve results. Argument, against the TNaming sources of the pinned
+ * kernel (OCCT commit bb368e27, the opencascade.js 2.0.0-beta.b5ff984 build):
+ *
+ * (a) A selector writes only on its own label and the children it inserts
+ *     (TNaming_Selector::Select, TNaming_Naming::Name/Insert/BuildNS and the
+ *     TNaming_Name solvers build on those labels), and every named shape it
+ *     writes is SELECTED with old == new on every node: each
+ *     TNaming_Builder::Select call on that path is Select(S, S).
+ *     TNaming_NewShapeIterator and TNaming_OldShapeIterator skip such nodes
+ *     (SelectSameShape requires new != old), and TNaming_Tool::NamedShape
+ *     skips SELECTED attributes.
+ * (b) Every seed name under this guard is IDENTITY or ORIENTATION (see (c)).
+ *     Those solve through TNaming_NamingTool::CurrentShape of their
+ *     arguments: the argument's own nodes and naming children, modification
+ *     chains followed with TNaming_NewShapeIterator, and Valid membership of
+ *     the argument and modification labels. The arguments are primitive
+ *     labels or the selector's own children. The modifications are the body
+ *     and primitive labels' Modify/Delete, which both seeds receive alike
+ *     (claims and invalidations follow from equal Solve results). The reads
+ *     after a Solve (resolveSelectorFinalSuccessors) use the same chains plus
+ *     TNaming_Tool::NamedShape. So unconsulted seed selectors, re-selected
+ *     claims and fresh result selectors cannot change a Solve. The Valid map
+ *     differs only in selector labels, which are never an argument or
+ *     modification label of another selector.
+ * (c) A consulted selector is named as in the eager seed. The seed keeps the
+ *     eager order (each selector right after its primitive label; faces, then
+ *     edges, then vertices), so at each selection the primitive labels are
+ *     the same and the selector labels present are a subset of the eager
+ *     ones. Select reads sibling labels only in IsSpecificCase: is the
+ *     current shape of any named child of the context's label not an
+ *     occurrence in the context? With no modification yet, a seed selector's
+ *     current shape is the Selection it stored (type migration needs a
+ *     compound result, which IDENTITY and ORIENTATION names do not produce),
+ *     which is also the shape of its primitive label, created before it in
+ *     both seeds. The guard makes every primitive face and edge an
+ *     occurrence, so IsSpecificCase is false in both. IsSpecificCase2 is
+ *     false because the selection is the primitive label's own shape object.
+ *     Then TNaming_Selector::IsIdentified finds the subshape's own primitive
+ *     label, giving IDENTITY for vertices (no orientation kept), faces (each
+ *     occurs once: RepeatabilityInContext 1) and edges occurring once. An
+ *     edge occurring twice gets ORIENTATION of its primitive label and of its
+ *     TNaming::FindUniqueContext face. That face is found because every edge
+ *     occurrence lies in a face of a shell, and it is named by its primitive
+ *     label, which exists because faces are seeded first and every face is
+ *     stored. The Select_2 fallback of selectIntoSelectorLabel (context =
+ *     selection) names IDENTITY of the primitive label as well. Every shape
+ *     these names bind in TNaming_UsedShapes is already
+ *     bound by a primitive label. The general BuildName path, which this
+ *     argument does not cover, is never taken.
+ *
+ * Guard: the context is a solid whose faces all lie in shells and whose
+ * edges all lie in faces. Each face occurs exactly once and as stored
+ * (orientation and location), and every face is stored. Every edge
+ * occurrence is a stored edge, and every stored edge occurs as stored.
+ * Bodies tracked from TopExp::MapShapes of the solid satisfy the occurrence
+ * conditions by construction. Any other body keeps the eager seed.
+ */
+function admitsConsultedSelectorSeed(
+  oc: OpenCascadeInstance,
+  body: TrackedTopologyInput,
+) {
+  const shapeTypes = oc.TopAbs_ShapeEnum;
+  return (
+    body.shape.ShapeType() === shapeTypes.TopAbs_SOLID &&
+    !exploresAny(
+      oc,
+      body.shape,
+      shapeTypes.TopAbs_FACE,
+      shapeTypes.TopAbs_SHELL,
+    ) &&
+    !exploresAny(
+      oc,
+      body.shape,
+      shapeTypes.TopAbs_EDGE,
+      shapeTypes.TopAbs_FACE,
+    ) &&
+    storedSubshapesMatchOccurrences(
+      oc,
+      body.shape,
+      shapeTypes.TopAbs_FACE,
+      [...body.facesById.values()],
+      { eachOccursOnce: true },
+    ) &&
+    storedSubshapesMatchOccurrences(
+      oc,
+      body.shape,
+      shapeTypes.TopAbs_EDGE,
+      [...body.edgesById.values()],
+      { eachOccursOnce: false },
+    )
+  );
+}
+
+type OccShapeType = OpenCascadeInstance["TopAbs_ShapeEnum"]["TopAbs_FACE"];
+
+/** Whether `shape` has a subshape of `type` outside every subshape of `avoided` type. */
+function exploresAny(
+  oc: OpenCascadeInstance,
+  shape: OccShape,
+  type: OccShapeType,
+  avoided: OccShapeType,
+) {
+  const explorer = new oc.TopExp_Explorer_2(
+    shape,
+    type as never,
+    avoided as never,
+  );
+  return releaseAfter(
+    () => explorer.More(),
+    () => [explorer],
+  );
+}
+
+/**
+ * Whether every `type` occurrence in `context` is a stored subshape (by
+ * IsSame) and every stored subshape occurs exactly as stored (IsEqual:
+ * orientation and location too). `eachOccursOnce` also rejects a subshape
+ * occurring twice or with a different orientation.
+ */
+function storedSubshapesMatchOccurrences(
+  oc: OpenCascadeInstance,
+  context: OccShape,
+  type: OccShapeType,
+  stored: readonly OccShape[],
+  { eachOccursOnce }: { eachOccursOnce: boolean },
+) {
+  const storedMap = new oc.TopTools_IndexedMapOfShape_1();
+  const explorer = new oc.TopExp_Explorer_2(
+    context,
+    type as never,
+    oc.TopAbs_ShapeEnum.TopAbs_SHAPE as never,
+  );
+  return releaseAfter(
+    () => {
+      for (const shape of stored) {
+        storedMap.Add(shape);
+      }
+      if (storedMap.Size() !== stored.length) {
+        return false;
+      }
+      const occurringAsStored = new Set<number>();
+      for (; explorer.More(); explorer.Next()) {
+        const occurrence = explorer.Current();
+        const matches = releaseAfter(
+          () => {
+            const index = storedMap.FindIndex(occurrence);
+            if (index === 0) {
+              return false;
+            }
+            if (stored[index - 1]!.IsEqual(occurrence)) {
+              if (eachOccursOnce && occurringAsStored.has(index)) {
+                return false;
+              }
+              occurringAsStored.add(index);
+              return true;
+            }
+            return !eachOccursOnce;
+          },
+          () => [occurrence],
+        );
+        if (!matches) {
+          return false;
+        }
+      }
+      return occurringAsStored.size === stored.length;
+    },
+    () => [explorer, storedMap],
+  );
+}
+
 /** History-only successors of every previous subshape of one kind; naming state plays no part. */
 function resolveInheritedSuccessors<
   Id extends FaceId | EdgeId | VertexId,
@@ -1162,6 +1374,11 @@ interface ReconcileKindNaming {
   previousSelectorLabelsByKey: ReadonlyMap<string, OccLabel>;
   /** Naming was seeded without selectors: a claimed subshape gets a direct selector. */
   seededWithoutSelectors: boolean;
+  /**
+   * False when the result naming is released unread: claimed and fresh
+   * result subshapes get no selector (primitive labels are still updated).
+   */
+  buildsResultSelectors: boolean;
   nextLabelsByKey: Map<string, OccLabel>;
   nextSelectorLabelsByKey: Map<string, OccLabel>;
   bodyLabel: OccLabel;
@@ -1317,19 +1534,21 @@ function reconcileKind<
       modifyLabel(oc, label, previousShape, shape);
       naming.nextLabelsByKey.set(key, label);
       const selectorLabel = naming.previousSelectorLabelsByKey.get(key);
-      naming.nextSelectorLabelsByKey.set(
-        key,
-        selectorLabel
-          ? directlyReselectSelectorLabel(oc, selectorLabel, shape)
-          : naming.seededWithoutSelectors
-            ? createDirectSelectorLabel(oc, naming.bodyLabel, shape)
-            : createSelectorLabel(
-                oc,
-                naming.bodyLabel,
-                shape,
-                naming.contextShape,
-              ),
-      );
+      if (naming.buildsResultSelectors) {
+        naming.nextSelectorLabelsByKey.set(
+          key,
+          selectorLabel
+            ? directlyReselectSelectorLabel(oc, selectorLabel, shape)
+            : naming.seededWithoutSelectors
+              ? createDirectSelectorLabel(oc, naming.bodyLabel, shape)
+              : createSelectorLabel(
+                  oc,
+                  naming.bodyLabel,
+                  shape,
+                  naming.contextShape,
+                ),
+        );
+      }
     }
 
     resultById.set(id, shape);
@@ -1354,15 +1573,17 @@ function reconcileKind<
         key,
         createPrimitiveLabel(oc, naming.bodyLabel, freshShape),
       );
-      naming.nextSelectorLabelsByKey.set(
-        key,
-        createSelectorLabel(
-          oc,
-          naming.bodyLabel,
-          freshShape,
-          naming.contextShape,
-        ),
-      );
+      if (naming.buildsResultSelectors) {
+        naming.nextSelectorLabelsByKey.set(
+          key,
+          createSelectorLabel(
+            oc,
+            naming.bodyLabel,
+            freshShape,
+            naming.contextShape,
+          ),
+        );
+      }
     }
     resultById.set(freshId, freshShape);
     contributingFeatureIdsById.set(
@@ -1758,11 +1979,11 @@ function reconcileWithResolvedHistory(
   // result does not carry is released here. A seed leaves out the selectors
   // when history alone settles every previous subshape, since then no
   // selector is consulted (seeding them was most of a boolean's naming cost).
-  const selectorsConsulted = [
-    ...history.inheritedResolutions.face.values(),
-    ...history.inheritedResolutions.edge.values(),
-    ...history.inheritedResolutions.vertex.values(),
-  ].some(consultsSelector);
+  const consultedSelectorKeys = collectConsultedSelectorKeys(
+    input.previous.bodyId,
+    history.inheritedResolutions,
+  );
+  const selectorsConsulted = consultedSelectorKeys.size > 0;
   if (
     !input.previous.naming &&
     !selectorsConsulted &&
@@ -1774,11 +1995,26 @@ function reconcileWithResolvedHistory(
     // updated as before: its document outlives this reconciliation.
     return reconcileSubshapes(oc, input, history, undefined, []);
   }
+  // The caller drops the result's naming and some selector is consulted:
+  // seed only the consulted selectors and build no result selectors, when
+  // admitsConsultedSelectorSeed proves every Solve unchanged by that. The
+  // whole seed is then released here and the result carries no naming.
+  const consultedSeedOnly =
+    !input.previous.naming &&
+    selectorsConsulted &&
+    input.resultNamingDiscarded === true &&
+    admitsConsultedSelectorSeed(oc, input.previous);
   const seeded = input.previous.naming
     ? undefined
-    : createInitialNamingState(oc, input.previous, {
-        withSelectors: selectorsConsulted,
-      });
+    : createInitialNamingState(
+        oc,
+        input.previous,
+        consultedSeedOnly
+          ? consultedSelectorKeys
+          : selectorsConsulted
+            ? "all"
+            : new Set(),
+      );
   const seededWithoutSelectors = seeded !== undefined && !selectorsConsulted;
   const previousNaming = input.previous.naming ?? seeded!;
   const borrowedLabels = new Set(seeded ? [] : namingLabels(previousNaming));
@@ -1800,7 +2036,12 @@ function reconcileWithResolvedHistory(
           oc,
           input,
           history,
-          { previous: previousNaming, seededWithoutSelectors, next },
+          {
+            previous: previousNaming,
+            seededWithoutSelectors,
+            buildsResultSelectors: !consultedSeedOnly,
+            next,
+          },
           temporaries,
         ),
       () => temporaries,
@@ -1823,6 +2064,12 @@ function reconcileWithResolvedHistory(
     );
   }
 
+  if (consultedSeedOnly) {
+    // Every label is local (the seed and its fresh primitive labels); no
+    // attribute handle is pending, so labels and document go together.
+    releaseOccObjects([...localLabels(), seeded!.document]);
+    return { ...result, naming: undefined };
+  }
   if (seeded) {
     const carried = new Set(namingLabels(next));
     const dropped = namingLabels(seeded).filter(
@@ -1852,6 +2099,7 @@ function reconcileSubshapes(
     | {
         previous: OccTopologyNamingBodyState;
         seededWithoutSelectors: boolean;
+        buildsResultSelectors: boolean;
         next: {
           topologyLabelsByKey: Map<string, OccLabel>;
           selectorLabelsByKey: Map<string, OccLabel>;
@@ -1875,6 +2123,7 @@ function reconcileSubshapes(
       previousLabelsByKey: naming.previous.topologyLabelsByKey,
       previousSelectorLabelsByKey: naming.previous.selectorLabelsByKey,
       seededWithoutSelectors: naming.seededWithoutSelectors,
+      buildsResultSelectors: naming.buildsResultSelectors,
       nextLabelsByKey: naming.next.topologyLabelsByKey,
       nextSelectorLabelsByKey: naming.next.selectorLabelsByKey,
       bodyLabel: naming.previous.bodyLabel,

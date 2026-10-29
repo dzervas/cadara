@@ -4,8 +4,10 @@
 // replacement reconciled from a body without naming (every restored or
 // rebuilt body) therefore builds no naming when history settles every
 // previous subshape: no seed and no context selection of its fresh
-// subshapes. The rebuilt ids, contributors and invalidations must equal a
-// rebuild whose naming is built (the body carries stored naming).
+// subshapes. When some previous subshape consults the selector fallback, only
+// those selectors are seeded and the result gets none. The rebuilt ids,
+// contributors and invalidations must equal a rebuild whose naming is built
+// (the body carries stored naming).
 import { expect, test } from "vitest";
 
 import {
@@ -182,7 +184,7 @@ test("a rebuilt cut that history settles builds no naming for the replacement th
   ).toEqual(named.outcome);
 });
 
-test("a rebuilt cut that consults the selector fallback still seeds and selects, and equals the rebuild with stored naming", async () => {
+test("a rebuilt cut that consults the selector fallback seeds only the consulted selectors, and equals the rebuild with stored naming", async () => {
   // A corner notch deletes the vertical corner edge and its vertices, so
   // their selectors are consulted.
   const tools = [
@@ -204,8 +206,8 @@ test("a rebuilt cut that consults the selector fallback still seeds and selects,
   ).toBeGreaterThan(0);
   expect(
     unnamed.counts.Select_1,
-    "the seed selects the previous subshapes in context before reconciling",
-  ).toBeGreaterThan(named.counts.Select_1);
+    "only the consulted previous subshapes are selected in context, nothing for the dropped result naming",
+  ).toBe(unnamed.counts.Solve);
   expect(
     unnamed.outcome,
     "ids, contributors, stage claims and invalidations equal the rebuild with stored naming",
