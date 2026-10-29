@@ -247,3 +247,23 @@ test("a restored document's feature rebuild reports measured progress under prep
   ]);
   service.dispose();
 });
+
+test("a repository-backed open starts reading the stored document before the kernel answers its seed snapshot", async () => {
+  const preloaded: string[] = [];
+  class PreloadingRepository extends MemoryDocumentRepository {
+    async preload(documentId: string) {
+      preloaded.push(documentId);
+    }
+  }
+  const adapter = new PausedSnapshotAdapter();
+  adapter.paused = true;
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+    documentRepository: new PreloadingRepository(),
+  });
+  const restore = service.getHistoryRestoreState();
+  await vi.waitFor(() => expect(preloaded).toEqual(["doc_workspace"]));
+  adapter.gate.resolve();
+  expect((await restore).kind).not.toBe("failed");
+  service.dispose();
+});

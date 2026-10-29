@@ -3,10 +3,13 @@ import {
   type OccWorkerClientOptions,
 } from "@/infrastructure/occ/worker-client";
 import type { GeometryAssetResolver } from "@/contracts/modeling/adapter";
+import {
+  canUseOccModuleWorker,
+  createOccModuleWorker,
+  takeStartedOccModuleWorker,
+} from "@/infrastructure/occ/occ-module-worker";
 
-export function canUseOccModuleWorker() {
-  return typeof Worker !== "undefined" && typeof URL !== "undefined";
-}
+export { canUseOccModuleWorker };
 
 export function createBrowserOccWorkerClient(options: {
   assetResolver?: GeometryAssetResolver;
@@ -17,12 +20,9 @@ export function createBrowserOccWorkerClient(options: {
     return null;
   }
 
-  const createWorker = () => new Worker(new URL("./worker.ts", import.meta.url), {
-    type: "module",
-  });
   return new OccWorkerClient({
-    worker: createWorker(),
-    createWorker,
+    worker: takeStartedOccModuleWorker() ?? createOccModuleWorker(),
+    createWorker: createOccModuleWorker,
     onFatalError: options.onFatalError,
     onEngineDownloadProgress: options.onEngineDownloadProgress,
     assetResolver: options.assetResolver,

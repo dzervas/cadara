@@ -1526,7 +1526,13 @@ export function createModelingService(
   }
 
   async function restoreRepositoryBackedDocument() {
-    const seedDocument = await getSeedAuthoredDocument();
+    // The seed comes from the kernel, whose first answer waits for its runtime
+    // to boot; a stored document is read meanwhile (only a missing one needs
+    // the seed).
+    const [seedDocument] = await Promise.all([
+      getSeedAuthoredDocument(),
+      documentRepository!.preload?.(currentDocumentId),
+    ]);
     const loadResult = await documentRepository!.load({
       documentId: currentDocumentId,
       seedDocument,

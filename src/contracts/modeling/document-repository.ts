@@ -86,6 +86,10 @@ export interface DocumentRepositoryChangeEvent {
 }
 
 export interface DocumentRepository {
+  /** Starts reading the stored copy of the document and resolves without
+   * waiting for that read, so the load that follows overlaps it with
+   * preparing its seed document. That load reports any failure of the read. */
+  preload?(documentId: DocumentId): Promise<void>;
   /** Also explicitly retries unresolved durability in the current editing session. */
   load(input: {
     documentId: DocumentId;

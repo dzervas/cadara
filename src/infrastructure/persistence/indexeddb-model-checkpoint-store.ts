@@ -4,6 +4,7 @@ import type {
   ModelCheckpointStore,
 } from "@/infrastructure/persistence/model-checkpoint-store";
 import { OCC_ASSET_VERSION } from "@/infrastructure/occ/asset-version";
+import type { NativeTopologyPayloadCheckpointRecord } from "@/infrastructure/occ/native-topology-payload-checkpoint";
 import { validateModelCheckpointShapeRecords } from "@/infrastructure/modeling/model-checkpoint-file-store.runtime-schema";
 
 /**
@@ -13,8 +14,9 @@ import { validateModelCheckpointShapeRecords } from "@/infrastructure/modeling/m
  *
  * IndexedDB, not OPFS: the document repository and its geometry assets
  * already live there, and an entry is a few megabytes of strings (2 MB for
- * the bracket example, 13 MB for the enclosure), which one structured-clone
- * put stores atomically. Two object stores share the key: `entries` holds the
+ * the bracket example, 13 MB for the enclosure) plus the bodies' display
+ * payloads as typed arrays (0.1-0.5 MB), which one structured-clone put
+ * stores atomically. Two object stores share the key: `entries` holds the
  * members, `usage` a small `{ key, bytes, usedAt }` record per entry, so
  * retention lists entries without loading them. Entries are this origin's own
  * writes, but they outlive the build that wrote them, so a read still checks
@@ -78,7 +80,34 @@ function memberBytes(checkpoint: ModelCheckpoint) {
     checkpoint.graph.length +
     checkpoint.brep.length +
     checkpoint.exportedDocument.length +
-    JSON.stringify(checkpoint.shapes).length
+    JSON.stringify(checkpoint.shapes).length +
+    (checkpoint.nativeTopologyPayloads ?? []).reduce(
+      (sum, record) =>
+        sum +
+        record.payload.length +
+        record.positions.byteLength +
+        record.triangleIndices.byteLength,
+      0,
+    )
+  );
+}
+
+function isNativeTopologyPayloadRecord(
+  value: unknown,
+): value is NativeTopologyPayloadCheckpointRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Partial<
+    Record<keyof NativeTopologyPayloadCheckpointRecord, unknown>
+  >;
+  return (
+    typeof record.bodyId === "string" &&
+    typeof record.topologyToken === "string" &&
+    (record.lodTierId === "startup" ||
+      record.lodTierId === "normal" ||
+      record.lodTierId === "fine") &&
+    typeof record.payload === "string" &&
+    record.positions instanceof Float64Array &&
+    record.triangleIndices instanceof Uint32Array
   );
 }
 
@@ -103,7 +132,23 @@ function parseModelCheckpointRecord(
   }
   const shapes = validateModelCheckpointShapeRecords(record.shapes);
   if (!shapes.success) return "invalid shape records.";
-  return { graph, shapes: shapes.data, brep, exportedDocument };
+  const { nativeTopologyPayloads } = record;
+  if (nativeTopologyPayloads === undefined) {
+    return { graph, shapes: shapes.data, brep, exportedDocument };
+  }
+  if (
+    !Array.isArray(nativeTopologyPayloads) ||
+    !nativeTopologyPayloads.every(isNativeTopologyPayloadRecord)
+  ) {
+    return "invalid display payload records.";
+  }
+  return {
+    graph,
+    shapes: shapes.data,
+    brep,
+    exportedDocument,
+    nativeTopologyPayloads,
+  };
 }
 
 function requestResult<T>(request: IDBRequest<T>) {
@@ -247,6 +292,14 @@ export function createIndexedDbModelCheckpointStore(options: {
     async publish(key, checkpoint) {
       const expected = await store.compatibility();
       if (expected === null) return;
+      // The display payloads are an optional part: an entry too large with
+      // them is stored without them.
+      if (
+        checkpoint.nativeTopologyPayloads &&
+        memberBytes(checkpoint) > BROWSER_MODEL_CHECKPOINT_MAX_ENTRY_BYTES
+      ) {
+        checkpoint = { ...checkpoint, nativeTopologyPayloads: undefined };
+      }
       const bytes = memberBytes(checkpoint);
       if (bytes > BROWSER_MODEL_CHECKPOINT_MAX_ENTRY_BYTES) {
         report({ kind: "bypass", reason: "checkpoint-exceeds-entry-bound" });
@@ -259,6 +312,9 @@ export function createIndexedDbModelCheckpointStore(options: {
         shapes: checkpoint.shapes,
         brep: checkpoint.brep,
         exportedDocument: checkpoint.exportedDocument,
+        ...(checkpoint.nativeTopologyPayloads
+          ? { nativeTopologyPayloads: checkpoint.nativeTopologyPayloads }
+          : {}),
       };
       const usage: ModelCheckpointUsageRecord = { key, bytes, usedAt: now() };
       try {

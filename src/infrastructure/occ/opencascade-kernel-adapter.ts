@@ -230,6 +230,11 @@ import {
 import { createOccExportCapabilities } from "@/infrastructure/occ/occ-export-capabilities";
 import { getNativeTopologyDisplayPayloadBuilder, type NativeTopologyDisplayPayloadBuilder, type OpenCascadeNativeTopologyMeshBuffersHost } from "@/infrastructure/occ/native-topology-mesh-buffers";
 import { createNativeTopologyDiagnostic, createOccNativeReferenceInvalidationsFromHistoryPayload, createOccNativeExactBrepPayloadFromShimPayload, createOccNativeMeshExportPayloadFromShimPayload, createOccNativeTopologyPayloadFromShimPayloads, parseNativeFeatureTransactionHistoryJson, parseNativeShimPayloadJson, type OccNativeShimPayload, type OpenCascadeNativeTopologyKernelHost, type OccNativeMeshExportPayload, type OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
+import {
+  decodeNativeTopologyPayloadCheckpointRecord,
+  encodeNativeTopologyPayloadCheckpointRecord,
+  type NativeTopologyPayloadCheckpointRecord,
+} from "@/infrastructure/occ/native-topology-payload-checkpoint";
 import { type OccNativeExactBrepPayload } from "@/contracts/modeling/kernel-payloads";
 import type { OccNativeTopologyWorkerResult } from "@/contracts/modeling/kernel-worker-result";
 import {
@@ -2599,6 +2604,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         state: pending.state,
         partial: pending.partial,
         exportDocument: createAuthoredModelDocumentFromAuthoringState,
+        nativeTopologyPayloads: this.collectNativeTopologyPayloadCheckpointRecords(
+          pending.state,
+        ),
       });
     });
   }
@@ -3269,16 +3277,22 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         ),
     });
     if (hydrated) {
-      this.recordColdEvaluatedCheckpoints(hydrated);
+      this.recordColdEvaluatedCheckpoints(hydrated.state);
       // Same identity counters as the cold restore: the document's revision,
       // never lowering the kernel's high-water mark.
       this.replaceRuntimeState({
-        authoringState: hydrated,
+        authoringState: hydrated.state,
         revisionSequence: Math.max(
           this.revisionHighWater,
           parseRevisionSequence(document.revisionId),
         ),
       });
+      this.adoptNativeTopologyPayloadCheckpoints(
+        hydrated.state,
+        hydrated.nativeTopologyPayloads,
+        (reason) =>
+          store.report({ kind: "degraded", key: checkpointKey.key, reason }),
+      );
       store.report({ kind: "hit", key: checkpointKey.key });
       return;
     }
@@ -3311,6 +3325,9 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       state: restored.authoringState,
       partial,
       exportDocument: createAuthoredModelDocumentFromAuthoringState,
+      nativeTopologyPayloads: this.collectNativeTopologyPayloadCheckpointRecords(
+        restored.authoringState,
+      ),
     });
   }
 
@@ -4677,6 +4694,68 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       cached.body.topology === body.topology
       ? cached.nativePayload
       : null;
+  }
+
+  /**
+   * cadara-dx2k.15: the display payloads a model checkpoint stored, so the
+   * first snapshot of the hydrated state meshes no body. A record binds only
+   * to the hydrated body with its body id and topology token, the identity
+   * the per-tier cache is keyed by; a record that binds to no body or does not
+   * decode is reported and skipped, and the snapshot meshes that body again.
+   */
+  private adoptNativeTopologyPayloadCheckpoints(
+    state: OccAuthoringState,
+    records: readonly NativeTopologyPayloadCheckpointRecord[],
+    reportDegraded: (reason: string) => void,
+  ) {
+    for (const record of records) {
+      const body = state.bodies.find(
+        (candidate) =>
+          candidate.bodyId === record.bodyId &&
+          candidate.topologyToken === record.topologyToken &&
+          candidate.topologyPresentation !== "bodyOnlyMesh",
+      );
+      if (!body) {
+        reportDegraded(
+          `display-payload-unbound: body ${record.bodyId} has another topology.`,
+        );
+        continue;
+      }
+      let nativePayload: OccNativeShimPayload;
+      try {
+        nativePayload = decodeNativeTopologyPayloadCheckpointRecord(record);
+      } catch (error) {
+        reportDegraded(
+          `display-payload-invalid: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        continue;
+      }
+      this.nativeTopologyBodyPayloadCache.set(
+        this.createNativeTopologyBodyPayloadCacheKey({
+          bodyId: body.bodyId,
+          topologyToken: body.topologyToken,
+          lodTierId: record.lodTierId,
+        }),
+        {
+          body,
+          bodyId: body.bodyId,
+          topologyToken: body.topologyToken,
+          lodTierId: record.lodTierId,
+          nativePayload,
+        },
+      );
+    }
+  }
+
+  /** The cached display payloads of `state`'s own bodies, for its checkpoint. */
+  private collectNativeTopologyPayloadCheckpointRecords(
+    state: OccAuthoringState,
+  ) {
+    const bodies = new Set(state.bodies);
+    return [...this.nativeTopologyBodyPayloadCache.values()]
+      .filter((cached) => bodies.has(cached.body))
+      .map(encodeNativeTopologyPayloadCheckpointRecord)
+      .filter((record) => record !== null);
   }
 
   private buildNativeTopologyBodyPayload(

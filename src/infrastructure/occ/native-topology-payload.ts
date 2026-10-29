@@ -968,8 +968,11 @@ export function recallNativeTopologyRecords(shape: object, bodyId: string) {
 }
 
 export function parseNativeShimPayloadJson(json: string): OccNativeShimPayload {
-  const parsed = JSON.parse(json) as unknown;
-  const result = nativeShimPayloadValidator(parsed);
+  return parseNativeShimPayload(JSON.parse(json) as unknown);
+}
+
+export function parseNativeShimPayload(value: unknown): OccNativeShimPayload {
+  const result = nativeShimPayloadValidator(value);
   if (!result.success) {
     throw new Error(
       result.errors[0]?.description ??

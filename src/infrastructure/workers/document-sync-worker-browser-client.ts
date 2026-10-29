@@ -39,6 +39,30 @@ export function createBrowserDocumentSyncWorkerClient(
   });
 }
 
+let startedClient: DocumentSyncWorkerClient | null = null;
+
+/**
+ * Starts the app's document sync worker before the editor bundle loads: a
+ * reload's repository read is its longest step, and the worker's own module
+ * evaluation would otherwise wait for the editor's. The app takes this client
+ * with takeStartedBrowserDocumentSyncWorkerClient.
+ */
+export function startBrowserDocumentSyncWorkerClient(
+  options: BrowserDocumentSyncWorkerClientOptions = {},
+) {
+  startedClient ??= createBrowserDocumentSyncWorkerClient(options);
+}
+
+/** The started client, or a new one when none was started; the caller owns it. */
+export function takeStartedBrowserDocumentSyncWorkerClient(
+  options: BrowserDocumentSyncWorkerClientOptions = {},
+) {
+  const client =
+    startedClient ?? createBrowserDocumentSyncWorkerClient(options);
+  startedClient = null;
+  return client;
+}
+
 function createDefaultWorker(): BrowserDocumentSyncWorkerLike {
   return new Worker(new URL("./document-sync.worker.ts", import.meta.url), {
     type: "module",

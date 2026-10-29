@@ -16,6 +16,7 @@ import {
   encodeOccAuthoringCheckpoint,
 } from "@/infrastructure/occ/authoring-checkpoint";
 import type { OccAuthoringState } from "@/infrastructure/occ/authoring-state";
+import type { NativeTopologyPayloadCheckpointRecord } from "@/infrastructure/occ/native-topology-payload-checkpoint";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
   OccShapeSetCheckpointUnavailableError,
@@ -160,7 +161,8 @@ function differingAuthoredInputs(
  * returns it only after it re-exports the recorded document and the authored
  * inputs of `document`. Every rejected candidate is released (through
  * `release`, the adapter's ownership graph) before the caller runs the cold
- * path.
+ * path. The entry's stored display payloads come back unchecked: the caller
+ * binds each to a hydrated body by id and topology token.
  */
 export async function hydrateModelCheckpoint(input: {
   store: ModelCheckpointStore;
@@ -170,7 +172,10 @@ export async function hydrateModelCheckpoint(input: {
   assetResolver: GeometryAssetResolver | undefined;
   exportDocument: (state: OccAuthoringState) => AuthoredModelDocument;
   release: (candidate: OccAuthoringState) => void;
-}): Promise<OccAuthoringState | null> {
+}): Promise<{
+  state: OccAuthoringState;
+  nativeTopologyPayloads: readonly NativeTopologyPayloadCheckpointRecord[];
+} | null> {
   const { store, key } = input;
   const checkpoint = await store.read(key);
   if (!checkpoint) return null;
@@ -215,7 +220,10 @@ export async function hydrateModelCheckpoint(input: {
     });
     return null;
   }
-  return candidate;
+  return {
+    state: candidate,
+    nativeTopologyPayloads: checkpoint.nativeTopologyPayloads ?? [],
+  };
 }
 
 /** Publishes only a complete, fully evaluated state; anything else stays uncached. */
@@ -226,6 +234,8 @@ export async function publishModelCheckpoint(input: {
   /** The rebuild stopped early or deferred features. */
   partial: boolean;
   exportDocument: (state: OccAuthoringState) => AuthoredModelDocument;
+  /** The state's body display payloads built so far (see ModelCheckpoint). */
+  nativeTopologyPayloads?: NativeTopologyPayloadCheckpointRecord[];
 }) {
   const { store, key, state } = input;
   if (
@@ -246,6 +256,9 @@ export async function publishModelCheckpoint(input: {
         state,
         input.exportDocument(state),
       ),
+      ...(input.nativeTopologyPayloads?.length
+        ? { nativeTopologyPayloads: input.nativeTopologyPayloads }
+        : {}),
     };
   } catch (error) {
     if (error instanceof OccCheckpointUnsupportedError) {

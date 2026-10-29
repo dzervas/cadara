@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import { WorkbenchApp } from "@/workbench/bootstrap/workbench-app";
-import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
+import { takeStartedBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
 import {
   createBrowserOccKernelAdapter,
   releaseBrowserOccDocument,
@@ -38,7 +38,7 @@ function App() {
     () =>
       typeof window === "undefined"
         ? null
-        : createBrowserDocumentSyncWorkerClient({
+        : takeStartedBrowserDocumentSyncWorkerClient({
             search: window.location.search,
           }),
     [],

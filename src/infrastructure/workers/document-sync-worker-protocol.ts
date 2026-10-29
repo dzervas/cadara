@@ -27,6 +27,12 @@ export interface DocumentSyncWorkerFailurePayload {
 
 export type DocumentSyncWorkerRequest =
   | {
+      kind: "preload";
+      requestId: RequestId;
+      documentId: DocumentId;
+      storageKey?: string | null;
+    }
+  | {
       kind: "load";
       requestId: RequestId;
       documentId: DocumentId;
@@ -123,6 +129,10 @@ export type DocumentSyncWorkerRequest =
     };
 
 export type DocumentSyncWorkerResponse =
+  | {
+      kind: "preloadStarted";
+      requestId: RequestId;
+    }
   | {
       kind: "loaded";
       requestId: RequestId;

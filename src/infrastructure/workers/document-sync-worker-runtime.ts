@@ -236,6 +236,12 @@ export function createDocumentSyncWorkerMessageHandler(
   ) {
     try {
       switch (request.kind) {
+        case "preload": {
+          adoptStorageKey(request.documentId, request.storageKey);
+          await options.repository.preload?.(request.documentId);
+          postMessage({ kind: "preloadStarted", requestId: request.requestId });
+          return;
+        }
         case "load": {
           adoptStorageKey(request.documentId, request.storageKey);
           const loadResult = await options.repository.load({

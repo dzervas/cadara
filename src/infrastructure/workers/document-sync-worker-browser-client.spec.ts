@@ -4,7 +4,11 @@ import type {
   DocumentSyncWorkerRequest,
   DocumentSyncWorkerResponse,
 } from "@/infrastructure/workers/document-sync-worker-protocol";
-import { createBrowserDocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-browser-client";
+import {
+  createBrowserDocumentSyncWorkerClient,
+  startBrowserDocumentSyncWorkerClient,
+  takeStartedBrowserDocumentSyncWorkerClient,
+} from "@/infrastructure/workers/document-sync-worker-browser-client";
 import type { DocumentSyncWorkerLike } from "@/infrastructure/workers/document-sync-worker-client";
 
 test("createBrowserDocumentSyncWorkerClient bootstraps the worker search string and owns worker lifecycle through the exported seam", async () => {
@@ -102,6 +106,30 @@ test("createBrowserDocumentSyncWorkerClient appends a session scoped local-histo
     ),
     "Browser worker bootstrap should reuse the same session scoped local-history key across refreshes in one tab.",
   ).toBe(firstScope);
+});
+
+// cadara-dx2k.15: the entry starts the worker before the editor bundle loads.
+test("the app takes the worker the entry started, once; later takes start their own", () => {
+  const started = new FakeBrowserWorker();
+  startBrowserDocumentSyncWorkerClient({
+    search: "?document=abc",
+    createWorker: () => started,
+  });
+  expect(started.bootstrapMessages).toHaveLength(1);
+
+  const unused = new FakeBrowserWorker();
+  const taken = takeStartedBrowserDocumentSyncWorkerClient({
+    createWorker: () => unused,
+  });
+  expect(unused.bootstrapMessages, "no second worker").toHaveLength(0);
+  taken.dispose();
+  expect(started.terminated, "the taker owns the started worker").toBe(true);
+
+  const fresh = new FakeBrowserWorker();
+  takeStartedBrowserDocumentSyncWorkerClient({
+    createWorker: () => fresh,
+  }).dispose();
+  expect(fresh.bootstrapMessages).toHaveLength(1);
 });
 
 class FakeBrowserWorker implements DocumentSyncWorkerLike {

@@ -42,6 +42,13 @@ export class WorkerBackedDocumentRepository
     this.urlStore = options.urlStore ?? null;
   }
 
+  preload(documentId: DocumentId) {
+    return this.client.preload({
+      documentId,
+      storageKey: this.storageKey(documentId),
+    });
+  }
+
   async load(
     input: Parameters<DocumentRepository["load"]>[0],
   ): Promise<DocumentRepositoryLoadResult> {

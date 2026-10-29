@@ -53,6 +53,13 @@ export function createInstrumentedDocumentRepository<
     });
 
   const wrapped: DocumentRepository = {
+    ...(repository.preload
+      ? {
+          preload(documentId: DocumentId) {
+            return repository.preload!(documentId);
+          },
+        }
+      : {}),
     load(input) {
       return measure(
         "load",

@@ -472,3 +472,84 @@ test("a reloaded document whose features are listed in repository key order adop
   cold.adapter.dispose();
   warm.adapter.dispose();
 }, 1_800_000);
+
+// cadara-dx2k.15: a stored-document open publishes the display payloads its
+// first snapshot built, so the reload's first snapshot meshes no body. A
+// stored payload binds to its body by id and topology token only; one that
+// matches no body or does not decode is reported and that body is meshed.
+async function countMeshBuilds<T>(action: () => Promise<T>) {
+  const host = (await occ!) as unknown as {
+    CadaraNativeTopologyMeshBuffers: { Build: (...args: unknown[]) => unknown };
+  };
+  const build = host.CadaraNativeTopologyMeshBuffers.Build;
+  let builds = 0;
+  host.CadaraNativeTopologyMeshBuffers.Build = (...args) => {
+    builds += 1;
+    return build(...args);
+  };
+  try {
+    const result = await action();
+    return { result, builds };
+  } finally {
+    host.CadaraNativeTopologyMeshBuffers.Build = build;
+  }
+}
+
+for (const name of ["bracket", "wheel", "enclosure"]) {
+  test(`a reloaded ${name}'s first snapshot reads its stored display payloads and equals the cold one`, async () => {
+    const source = await load(name);
+    const { store, entries, events } = memoryStore();
+    const cold = await open(source, "doc_cold", store, "openStoredDocument");
+    const [entry] = [...entries.values()];
+    const payloads = entry!.nativeTopologyPayloads ?? [];
+    const coldBodies = (await cold.snapshot()).document.bodies;
+    expect(payloads.map((record) => record.bodyId).sort()).toEqual(
+      coldBodies.map((body) => body.bodyId).sort(),
+    );
+    evidence.push({
+      name,
+      displayPayloadTiers: [...new Set(payloads.map((r) => r.lodTierId))],
+      displayPayloadBytes: payloads.reduce(
+        (sum, r) =>
+          sum +
+          r.payload.length +
+          r.positions.byteLength +
+          r.triangleIndices.byteLength,
+        0,
+      ),
+      checkpointCharacters: entry!.brep.length + entry!.graph.length,
+    });
+
+    const { result: warm, builds } = await countMeshBuilds(() =>
+      open(source, "doc_warm", store, "openStoredDocument"),
+    );
+    expect(events.slice(2).map((event) => event.kind)).toEqual(["hit"]);
+    expect(builds, "the first snapshot meshes no body").toBe(0);
+    await expectSame(cold, warm, "open");
+    warm.adapter.dispose();
+
+    // A payload whose token names another topology, and one whose mesh is
+    // truncated, are never shown: those bodies are meshed again.
+    const [first, second] = payloads;
+    entries.set([...entries.keys()][0]!, {
+      ...entry!,
+      nativeTopologyPayloads: [
+        { ...first!, topologyToken: `${first!.topologyToken}-other` },
+        ...(second
+          ? [{ ...second, positions: second.positions.subarray(3) }]
+          : []),
+        ...payloads.slice(2),
+      ],
+    });
+    const { result: fallback, builds: rebuilt } = await countMeshBuilds(() =>
+      open(source, "doc_warm", store, "openStoredDocument"),
+    );
+    expect(rebuilt).toBe(second ? 2 : 1);
+    expect(events.filter((event) => event.kind === "degraded").length).toBe(
+      second ? 2 : 1,
+    );
+    await expectSame(cold, fallback, "open with refused display payloads");
+    fallback.adapter.dispose();
+    cold.adapter.dispose();
+  }, 1_800_000);
+}

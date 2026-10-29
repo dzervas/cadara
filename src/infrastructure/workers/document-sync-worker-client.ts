@@ -55,6 +55,15 @@ export class DocumentSyncWorkerClient {
     this.worker.addEventListener("message", this.handleMessage);
   }
 
+  async preload(
+    input: Omit<
+      Extract<DocumentSyncWorkerRequest, { kind: "preload" }>,
+      "kind" | "requestId"
+    >,
+  ) {
+    await this.request("preload", "preloadStarted", input);
+  }
+
   async load(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "load" }>,

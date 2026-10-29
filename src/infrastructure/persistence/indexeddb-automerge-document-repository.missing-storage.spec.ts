@@ -647,3 +647,47 @@ test("an edit in a tab whose document another tab reset is one unsaved repositor
     service.dispose();
   }
 });
+
+// cadara-dx2k.15: a reload preloads the remembered document while the kernel
+// boots; the load that follows takes that read instead of starting another.
+test("a preloaded remembered document is read once, before its load, and restores", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, url } = await seedOnce(storage);
+  const reader = await tab(storage);
+  reader.urls.set(seed.documentId, url);
+  const finds: string[] = [];
+  const find = reader.repo.find.bind(reader.repo);
+  reader.repo.find = ((id: AutomergeUrl) => {
+    finds.push(id);
+    return find(id);
+  }) as typeof reader.repo.find;
+
+  await reader.repository.preload(seed.documentId);
+  expect(finds, "the read starts without waiting for a load").toEqual([url]);
+  const restored = await reader.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+
+  expect(restored.ok && restored.status.kind).toBe("restored");
+  expect(finds).toEqual([url]);
+});
+
+test("a preloaded remembered URL whose storage is gone fails its load as missing storage", async () => {
+  const storage = new SharedMemoryStorage();
+  const { seed, url } = await seedOnce(storage);
+  await storage.removeRange([url.slice("automerge:".length)]);
+  const reader = await tab(storage);
+  reader.urls.set(seed.documentId, url);
+
+  await reader.repository.preload(seed.documentId);
+  const restored = await reader.repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+
+  expect(restored).toMatchObject({
+    ok: false,
+    status: { diagnostic: { reasonCode: "automerge-document-missing" } },
+  });
+});

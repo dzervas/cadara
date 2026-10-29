@@ -1,4 +1,5 @@
 import type { OccCheckpointShapeRecord } from "@/infrastructure/occ/authoring-checkpoint";
+import type { NativeTopologyPayloadCheckpointRecord } from "@/infrastructure/occ/native-topology-payload-checkpoint";
 
 /**
  * cadara-3sq.6: an optional, disposable store of evaluated native checkpoints
@@ -13,6 +14,12 @@ export interface ModelCheckpoint {
   brep: string;
   /** The authored document exported from the state, with the document id as a placeholder. */
   exportedDocument: string;
+  /**
+   * The state's body display payloads the open had built when it published
+   * (cadara-dx2k.15). Optional: a store may drop them, and the first snapshot
+   * then meshes the bodies again.
+   */
+  nativeTopologyPayloads?: NativeTopologyPayloadCheckpointRecord[];
 }
 
 export type ModelCheckpointEvent =

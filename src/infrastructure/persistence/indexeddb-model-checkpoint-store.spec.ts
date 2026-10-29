@@ -217,6 +217,52 @@ describe("IndexedDB model checkpoint store", () => {
     });
   });
 
+  // cadara-dx2k.15: the bodies' display payloads stored beside the state.
+  it("round-trips display payloads, refuses malformed ones and drops them before refusing a large entry", async () => {
+    const { factory, databases } = fakeIndexedDb();
+    const { store, events } = makeStore(factory);
+    const withPayloads: ModelCheckpoint = {
+      ...checkpoint("a"),
+      nativeTopologyPayloads: [
+        {
+          bodyId: "body_1",
+          topologyToken: "token_1",
+          lodTierId: "startup",
+          payload: "{}",
+          positions: Float64Array.of(0.1, -0, 3),
+          triangleIndices: Uint32Array.of(0, 0, 0),
+        },
+      ],
+    };
+    await store.publish(KEY_A, withPayloads);
+    expect(await store.read(KEY_A)).toEqual(withPayloads);
+
+    const entries = [...databases.values()][0]!.tables.get("entries")!;
+    const record = entries.get(KEY_A) as Record<string, unknown>;
+    entries.set(KEY_A, {
+      ...record,
+      nativeTopologyPayloads: [{ bodyId: "body_1", positions: [0.1] }],
+    });
+    expect(await store.read(KEY_A)).toBeNull();
+    expect(events.at(-1)).toMatchObject({
+      kind: "degraded",
+      reason: "corrupt-entry: invalid display payload records.",
+    });
+
+    const large = {
+      ...withPayloads,
+      nativeTopologyPayloads: [
+        {
+          ...withPayloads.nativeTopologyPayloads![0]!,
+          positions: new Float64Array(8 * 1024 * 1024 + 1),
+        },
+      ],
+    };
+    await store.publish(KEY_B, large);
+    expect(events.at(-1)).toMatchObject({ kind: "published", key: KEY_B });
+    expect(await store.read(KEY_B)).toEqual(checkpoint("a"));
+  });
+
   it("evicts the least recently read entries above its bound, never the one just published", async () => {
     const { factory, databases } = fakeIndexedDb();
     const entry = checkpoint("a", 100);

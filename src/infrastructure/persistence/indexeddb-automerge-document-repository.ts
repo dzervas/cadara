@@ -3,7 +3,7 @@ import {
   storeGeometryAssetInputsForManifest,
 } from "@/application/modeling/geometry-asset-persistence";
 import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
-import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
+import { initializeWasm, Repo } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { getActorId, getMissingDeps } from "@automerge/automerge/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
@@ -67,9 +67,18 @@ export interface AutomergeRepositoryLike {
   delete(id: AutomergeUrl): void;
   flush?(documents?: string[]): Promise<void>;
 }
+/** The Automerge module's bytes. initializeBase64Wasm decodes them with a
+ * callback per byte, about 170 ms of a reload's critical path for 2.7 MB. */
+function decodeAutomergeWasm() {
+  const binary = atob(automergeWasmBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
 let wasm: Promise<void> | undefined;
 function prepare() {
-  wasm ??= initializeBase64Wasm(automergeWasmBase64).catch((error: unknown) => {
+  wasm ??= initializeWasm(decodeAutomergeWasm()).catch((error: unknown) => {
     wasm = undefined;
     throw error;
   });
@@ -114,6 +123,14 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   /** Released by releaseSupersededHandle until a load or initialize installs a handle. */
   private readonly supersededDocuments = new Set<DocumentId>();
   private readonly queues = new Map<DocumentId, Promise<unknown>>();
+  /** Reads started by preload; the next load of the same URL takes its handle. */
+  private readonly preloads = new Map<
+    DocumentId,
+    {
+      url: AutomergeUrl;
+      handle: Promise<AutomergeHandleLike<CollaborativeDocument>>;
+    }
+  >();
   private readonly options: IndexedDbAutomergeDocumentRepositoryOptions;
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
     this.options = options;
@@ -158,10 +175,23 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     this.queues.set(documentId, next);
     return next;
   }
+  async preload(documentId: DocumentId) {
+    const url = this.urlStore.get(documentId);
+    if (!url || this.handles.has(documentId) || this.preloads.has(documentId))
+      return;
+    const handle = this.getRepo().then((repo) =>
+      repo.find<CollaborativeDocument>(url),
+    );
+    // The load that takes this handle awaits it and reports its failure.
+    handle.catch(() => undefined);
+    this.preloads.set(documentId, { url, handle });
+  }
   load(
     input: Parameters<DocumentRepository["load"]>[0],
   ): Promise<DocumentRepositoryLoadResult> {
     return this.enqueue(input.documentId, async () => {
+      const preload = this.preloads.get(input.documentId);
+      this.preloads.delete(input.documentId);
       try {
         const repo = await this.getRepo();
         // Never flushes a released handle's pending durability retry.
@@ -173,7 +203,9 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         let handle = existing;
         if (!handle) {
           try {
-            handle = await repo.find<CollaborativeDocument>(url!);
+            handle = await (preload?.url === url
+              ? preload.handle
+              : repo.find<CollaborativeDocument>(url!));
           } catch (error) {
             // automerge-repo 2.5 reports missing chunks (and no peer holding
             // them) only through this message.
