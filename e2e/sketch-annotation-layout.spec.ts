@@ -407,6 +407,14 @@ async function pan(
     steps: 12,
   });
   await page.mouse.up({ button: "middle" });
+  // OrbitControls damps per rendered frame, so under GPU contention the pan
+  // tail still moves the camera after a fixed frame wait, and a chip read
+  // there can leave the canvas (and the DOM) before it is measured. Drain the
+  // tail, then let the annotation layer follow the final camera.
+  expect(
+    await page.evaluate(() => window.__cadFlushCameraDamping?.()),
+    "the pan's damping tail settled",
+  ).toBe(true);
   await workbench.waitForAnimationFrames(20);
 }
 
