@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Bvh } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -21,6 +22,7 @@ import {
 } from "@/components/cad/sketch-display-style";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
 import { ScreenSpacePointMarker } from "@/components/cad/screen-space-point-marker";
+import { createSketchDisplayBvhMountKey } from "@/components/cad/three-cad-viewport-helpers";
 import { isProjectedSketchDisplayPointTarget } from "@/components/cad/three-cad-viewport-pick-candidates";
 import { createReferenceImageDataUrl } from "@/core/reference-image/rendering";
 import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
@@ -29,7 +31,41 @@ import {
   bindRenderableObject,
   createMarkerPickProxy,
   excludeRenderableObjectFromRaycastPicking,
+  unbindRenderableObject,
 } from "@/infrastructure/viewport/render-picking";
+
+/**
+ * The sketch session's half of the viewport pick root. `Bvh` indexes the
+ * meshes it holds when it mounts, so it remounts when the display structure
+ * changes, not when a renderable only gains or loses its pick target (the
+ * region fills going stale when a drag starts): the nodes rebind their
+ * mounted objects instead.
+ */
+export function SketchDisplayBvhLayer({
+  renderables,
+  applyStyles,
+  palette,
+  markerContext,
+}: {
+  renderables: readonly SketchSessionDisplayRenderable[];
+  applyStyles: boolean;
+  palette: SketchRenderingPalette;
+  markerContext: SketchMarkerDisplayContext;
+}) {
+  return (
+    <Bvh key={`sketch:${createSketchDisplayBvhMountKey(renderables)}`} enabled>
+      {renderables.map((renderable) => (
+        <SketchDisplayRenderableNode
+          key={renderable.id}
+          renderable={renderable}
+          applyStyles={applyStyles}
+          palette={palette}
+          markerContext={markerContext}
+        />
+      ))}
+    </Bvh>
+  );
+}
 
 interface SketchDisplayRenderableNodeProps {
   renderable: SketchSessionDisplayRenderable;
@@ -165,7 +201,11 @@ export function SketchDisplayMeshNode({
   return (
     <mesh
       ref={(value) => {
-        if (value && renderable.target) {
+        if (!value) {
+          return;
+        }
+        unbindRenderableObject(value);
+        if (renderable.target) {
           bindRenderableObject(
             value,
             null,
@@ -616,7 +656,11 @@ export function SketchDisplayMarkerNode({
   return (
     <group
       ref={(value) => {
-        if (value && renderable.target) {
+        if (!value) {
+          return;
+        }
+        unbindRenderableObject(value);
+        if (renderable.target) {
           bindRenderableObject(
             value,
             null,

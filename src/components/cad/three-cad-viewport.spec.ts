@@ -16,6 +16,7 @@ import {
   combineViewportBvhSceneKeys,
   createDocumentBvhSceneKey,
   createRenderIdleTracker,
+  createSketchDisplayBvhMountKey,
   createSketchDisplayBvhSceneKey,
   createViewportBvhSceneKey,
   createViewportInvalidationKey,
@@ -1852,4 +1853,32 @@ test("the document BVH key ignores the sketch session: a region going stale at d
   expect(combineViewportBvhSceneKeys("", "")).toBe(
     createViewportBvhSceneKey([], []),
   );
+  // The sketch half's `Bvh` does not remount for the stale fill (its node
+  // unbinds the mounted mesh instead); a structural change still remounts it.
+  expect(
+    createSketchDisplayBvhMountKey([staleRegion]),
+    "the sketch BVH mount key ignores the pick target",
+  ).toBe(createSketchDisplayBvhMountKey([region]));
+  expect(
+    createSketchDisplayBvhMountKey([
+      {
+        ...region,
+        geometry: {
+          kind: "mesh",
+          vertexPositions: [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+          ],
+          vertexNormals: null,
+          triangleIndices: [
+            [0, 1, 2],
+            [0, 2, 3],
+          ],
+        },
+      } as never,
+    ]),
+    "a re-triangulated fill remounts the sketch BVH",
+  ).not.toBe(createSketchDisplayBvhMountKey([region]));
 });

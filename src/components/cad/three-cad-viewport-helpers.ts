@@ -273,23 +273,47 @@ export function createDocumentBvhSceneKey(
     .join("|");
 }
 
-/** The sketch session half of `createViewportBvhSceneKey`. */
+/**
+ * The sketch session half of `createViewportBvhSceneKey`: the display
+ * structure and each renderable's pick target, so the cached pick bindings
+ * and the render-idle proof follow a target change.
+ */
 export function createSketchDisplayBvhSceneKey(
   sketchDisplayRenderables: readonly SketchSessionDisplayRenderable[],
 ) {
   return sketchDisplayRenderables
-    .map((renderable) => {
-      return [
-        "sketch",
-        renderable.id,
-        renderable.linePattern,
-        renderable.semanticClass ?? "default",
+    .map((renderable) =>
+      [
+        getSketchDisplayStructureToken(renderable),
         renderable.target ? JSON.stringify(renderable.target) : "none",
-        getSketchStructuralGeometryToken(renderable.geometry),
-        renderable.textureFill?.sourceKey ?? "no-texture",
-      ].join(":");
-    })
+      ].join(":"),
+    )
     .join("|");
+}
+
+/**
+ * The key the sketch session's `Bvh` subtree remounts on: the display
+ * structure only. A renderable that only gains or loses its pick target (a
+ * region fill going stale when a drag starts, current again after it) keeps
+ * its mounted object, and its node rebinds that object for picking.
+ */
+export function createSketchDisplayBvhMountKey(
+  sketchDisplayRenderables: readonly SketchSessionDisplayRenderable[],
+) {
+  return sketchDisplayRenderables.map(getSketchDisplayStructureToken).join("|");
+}
+
+function getSketchDisplayStructureToken(
+  renderable: SketchSessionDisplayRenderable,
+) {
+  return [
+    "sketch",
+    renderable.id,
+    renderable.linePattern,
+    renderable.semanticClass ?? "default",
+    getSketchStructuralGeometryToken(renderable.geometry),
+    renderable.textureFill?.sourceKey ?? "no-texture",
+  ].join(":");
 }
 
 export function createViewportInvalidationKey(input: {

@@ -62,7 +62,7 @@ import {
 } from "@/components/cad/three-cad-viewport-view-cube";
 import { DocumentRenderableNode } from "@/components/cad/three-cad-viewport-document-nodes";
 import { ViewportInitialCameraFraming } from "@/components/cad/viewport-initial-camera-framing";
-import { SketchDisplayRenderableNode } from "@/components/cad/three-cad-viewport-sketch-nodes";
+import { SketchDisplayBvhLayer } from "@/components/cad/three-cad-viewport-sketch-nodes";
 import {
   collectProjectedSketchCurveCandidates,
   collectProjectedSketchDisplayPointCandidates,
@@ -4036,7 +4036,8 @@ function ThreeCadViewportScene({
         />
         {/* `Bvh` indexes the meshes it holds when it mounts, so each half
             remounts when its own meshes change, the document half not on a
-            sketch session change. */}
+            sketch session change, the sketch half not on a pick target
+            change. */}
         <ViewportPickRoot
           rootRef={pickRootRef}
           commitToken={pickRootCommitToken}
@@ -4052,17 +4053,12 @@ function ThreeCadViewportScene({
               />
             ))}
           </Bvh>
-          <Bvh key={`sketch:${sketchDisplayBvhSceneKey}`} enabled>
-            {sketchDisplayRenderables.map((renderable) => (
-              <SketchDisplayRenderableNode
-                key={renderable.id}
-                renderable={renderable}
-                applyStyles={sketchDisplayStylesEnabled}
-                palette={sketchRenderingPalette}
-                markerContext={sketchMarkerContext}
-              />
-            ))}
-          </Bvh>
+          <SketchDisplayBvhLayer
+            renderables={sketchDisplayRenderables}
+            applyStyles={sketchDisplayStylesEnabled}
+            palette={sketchRenderingPalette}
+            markerContext={sketchMarkerContext}
+          />
         </ViewportPickRoot>
         <MeasurementWitnessLayer witnesses={measurementWitnesses} />
         {activeSectionView ? (

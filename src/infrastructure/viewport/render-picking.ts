@@ -1381,6 +1381,23 @@ export function bindRenderableObject(
   }
 }
 
+/**
+ * Undoes `bindRenderableObject` and `excludeRenderableObjectFromRaycastPicking`
+ * on an object that stays mounted after its renderable lost (or changed) its
+ * pick target: `collectBindings` then no longer picks or highlights it,
+ * exactly as a freshly mounted unbound object.
+ */
+export function unbindRenderableObject(object: THREE.Object3D) {
+  object.name = "";
+  delete object.userData.target;
+  delete object.userData.semanticClass;
+  delete object.userData.renderableOrigin;
+  delete object.userData.pickPriority;
+  delete object.userData.renderableRecord;
+  delete object.userData.pickId;
+  delete object.userData.pickExcluded;
+}
+
 export function bindFaceHoverPerimeterObject(
   object: THREE.Object3D,
   target: PrimitiveRef,
