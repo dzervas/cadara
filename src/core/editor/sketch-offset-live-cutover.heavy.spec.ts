@@ -5,6 +5,7 @@ import { defaultEditorExtensionDependencies } from "@/composition/editor-extensi
 // kernel-free query and certifier; plus the persistence boundary
 // (normalization, runtime schema), the solver's shell residual / U-G2 and
 // the authored-action history.
+import { readRenderMeshPoints } from "@/contracts/render/render-mesh-geometry";
 import { describe, expect, test, vi } from "vitest";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
@@ -2828,7 +2829,9 @@ describe("T08b-g5b consumers and region wiring", () => {
     if (fill.geometry.kind !== "mesh") throw new Error("fill is not a mesh");
     // The source loop's chord lies on y = 0; the outward shell runs 0.01 below.
     const lowest = Math.min(
-      ...fill.geometry.vertexPositions.map((point) => point[1]),
+      ...readRenderMeshPoints(fill.geometry.vertexPositions).map(
+        (point) => point[1],
+      ),
     );
     expect(lowest).toBeLessThan(-0.009);
     expect(lowest).toBeGreaterThan(-0.011);

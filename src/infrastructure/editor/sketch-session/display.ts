@@ -1,5 +1,6 @@
 import { getSketchSessionDisplaySolvedSnapshot, getStableSketchSessionDisplayKey } from "../../../core/editor/sketch-session/solved-snapshot";
 import type { SketchPoint } from "@/contracts/modeling/schema";
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import type { ReferenceImageOperationState } from "@/contracts/reference-image/schema";
 import type {
   ReferenceId,
@@ -1009,10 +1010,14 @@ export function createDisplayRenderableForRegion(
     target: validity === "current" ? region.target : null,
     geometry: {
       kind: "mesh",
-      vertexPositions: triangulated.points.map((point) =>
-        mapSketchPointToWorld(session.plane, point),
+      vertexPositions: Float32Array.from(
+        triangulated.points.flatMap((point) =>
+          mapSketchPointToWorld(session.plane, point),
+        ),
       ),
-      vertexNormals: triangulated.points.map(() => session.plane.frame.normal),
+      vertexNormals: Float32Array.from(
+        triangulated.points.flatMap(() => session.plane.frame.normal),
+      ),
       triangleIndices: triangulated.triangleIndices,
     },
     sketchPlaneFrame: session.plane.frame,
@@ -1043,7 +1048,8 @@ export function triangulateSketchRegionLoops(
   region: RegionRecord,
 ): {
   points: SketchPoint[];
-  triangleIndices: Array<readonly [number, number, number]>;
+  /** a, b, c indices into `points` per triangle. */
+  triangleIndices: Uint32Array;
 } | null {
   const outerLoop = region.loops.find((loop) => loop.role === "outer");
   if (!outerLoop) {
@@ -1067,10 +1073,12 @@ export function triangulateSketchRegionLoops(
   }
   const [outerPoints, ...innerPoints] = loops;
 
-  const triangleIndices = ShapeUtils.triangulateShape(
-    outerPoints!.map(pointToVector2),
-    innerPoints.map((loop) => loop.map(pointToVector2)),
-  ).map((triangle) => [triangle[0]!, triangle[1]!, triangle[2]!] as const);
+  const triangleIndices = Uint32Array.from(
+    ShapeUtils.triangulateShape(
+      outerPoints!.map(pointToVector2),
+      innerPoints.map((loop) => loop.map(pointToVector2)),
+    ).flatMap((triangle) => [triangle[0]!, triangle[1]!, triangle[2]!]),
+  );
 
   if (triangleIndices.length === 0) {
     return null;
@@ -1246,15 +1254,14 @@ export function createDisplayRenderableForReferenceImageOperation(
       session.sketchId ?? ("sketch_draft" as SketchId),
       operation.operationId,
     ),
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: corners,
       vertexNormals: corners.map(() => session.plane.frame.normal),
       triangleIndices: [
         [0, 1, 2],
         [0, 2, 3],
       ],
-    },
+    }),
     sketchPlaneFrame: session.plane.frame,
     linePattern: "solid",
     role: "local",

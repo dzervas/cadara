@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 
 import {
@@ -49,8 +50,7 @@ function makeRenderable(
         target: { kind: "body", bodyId: "body_1" },
         pickId: "pick_body-1",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -58,7 +58,7 @@ function makeRenderable(
         ],
         vertexNormals: null,
         triangleIndices,
-      },
+      }),
     },
   } as ViewportRenderableRecord;
 }

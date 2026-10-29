@@ -227,7 +227,7 @@ test("OCC bakedBody materializes resolved baked-mesh assets as durable bodies an
   expect(bodyRecords).toHaveLength(1);
   expect(
     bodyRecords[0]?.geometry.kind === "mesh" &&
-      bodyRecords[0].geometry.triangleIndices.length,
+      bodyRecords[0].geometry.triangleIndices.length / 3,
   ).toBe(4);
   expect(
     snapshot.document.references.filter((reference) =>
@@ -315,7 +315,7 @@ test("OCC bakedBody materializes declared source components without topology inf
           : null,
       triangleCount:
         record.geometry.kind === "mesh"
-          ? record.geometry.triangleIndices.length
+          ? record.geometry.triangleIndices.length / 3
           : null,
       vertexNormals:
         record.geometry.kind === "mesh"

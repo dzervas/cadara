@@ -159,21 +159,24 @@ export type RenderSemanticBinding =
 
 /**
  * Triangle-mesh export suitable for real kernel tessellation backends.
- * `vertexPositions` must be non-empty.
- * `triangleIndices` must reference only entries in `vertexPositions`, and one
- * render record must use a consistent winding convention across all triangles.
+ * The arrays are flat typed arrays, the layout the GPU upload takes, so the
+ * producer writes them once and no consumer repacks them.
+ * `vertexPositions` must be non-empty and hold x, y, z per vertex.
+ * `triangleIndices` holds a, b, c per triangle and must reference only
+ * vertices of `vertexPositions`; one render record must use a consistent
+ * winding convention across all triangles.
  * `vertexNormals` may be null when the exporter delegates shading normals to
  * the consumer; otherwise it must align 1:1 with `vertexPositions`.
  */
 export interface RenderMeshGeometry {
   /** Stable discriminant for triangle-mesh render records. */
   kind: "mesh";
-  /** Vertex positions in document modeling units. */
-  vertexPositions: readonly RenderPoint3D[];
-  /** Per-vertex normals aligned with `vertexPositions`, if the backend provides them. */
-  vertexNormals: readonly RenderPoint3D[] | null;
-  /** Triangle index triplets into `vertexPositions`. */
-  triangleIndices: readonly (readonly [number, number, number])[];
+  /** x, y, z per vertex in document modeling units. */
+  vertexPositions: Float32Array;
+  /** x, y, z per vertex aligned with `vertexPositions`, if the backend provides them. */
+  vertexNormals: Float32Array | null;
+  /** a, b, c vertex indices per triangle. */
+  triangleIndices: Uint32Array;
 }
 
 /**

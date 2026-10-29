@@ -3,13 +3,11 @@ import { readFile } from "node:fs/promises";
 import { expect, test } from "vitest";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
-import type { RenderPoint3D } from "@/contracts/render/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
-import {
-  parseNativeShimPayloadJson,
-  type OccNativeShimPayload,
-  type OpenCascadeNativeTopologyKernelHost,
+import type {
+  OccNativeShimPayload,
+  OpenCascadeNativeTopologyKernelHost,
 } from "@/infrastructure/occ/native-topology-payload";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import {
@@ -63,13 +61,25 @@ async function loadFixture() {
 
 // Coordinates (including winding and duplicate triangles), not local vertex
 // indices or totals: a collision must not move triangles to another face.
+/** `positions`: x, y, z per vertex; `triangleIndices`: a, b, c per triangle. */
 function triangleCoordinates(
-  positions: readonly RenderPoint3D[],
-  triangles: readonly (readonly [number, number, number])[],
+  positions: ArrayLike<number>,
+  triangleIndices: ArrayLike<number>,
+  keepTriangle: (triangle: number) => boolean = () => true,
 ) {
-  return triangles
-    .map((triangle) => JSON.stringify(triangle.map((i) => positions[i]!)))
-    .sort();
+  const triangles: string[] = [];
+  for (let triangle = 0; triangle < triangleIndices.length / 3; triangle += 1) {
+    if (!keepTriangle(triangle)) continue;
+    triangles.push(
+      JSON.stringify(
+        [0, 1, 2].map((corner) => {
+          const vertex = triangleIndices[triangle * 3 + corner]!;
+          return [0, 1, 2].map((axis) => positions[vertex * 3 + axis]!);
+        }),
+      ),
+    );
+  }
+  return triangles.sort();
 }
 
 test("history-preserved landing wheel retains every face-bound triangle at startup, normal and fine", async () => {
@@ -141,8 +151,11 @@ test("history-preserved landing wheel retains every face-bound triangle at start
           )!;
           expect(publicFace).toBeDefined();
           if (publicFace.id !== nativeFace.id) differingIds++;
-          const expectedTriangles = mesh.triangleIndices!.filter(
-            (_, i) => mesh.triangleFaceBindings![i] === nativeFace.id,
+          const expectedTriangles = triangleCoordinates(
+            mesh.positions!,
+            mesh.triangleIndices!,
+            (triangle) =>
+              mesh.triangleFaceBindings![triangle] === nativeFace.id,
           );
           expect(expectedTriangles.length).toBeGreaterThan(0);
           const record = records.find(
@@ -161,7 +174,7 @@ test("history-preserved landing wheel retains every face-bound triangle at start
                 : [],
               `${tier} ${body.bodyId} native ${nativeFace.id} -> durable ${publicFace.id}`,
             )
-            .toEqual(triangleCoordinates(mesh.positions!, expectedTriangles));
+            .toEqual(expectedTriangles);
         }
       }
       expect(
@@ -205,12 +218,15 @@ test("adapter snapshot rejects an unmatched face binding instead of dropping its
   const builder = oc.CadaraBuildNativeTopologyPayload!;
   const original = builder.BuildJson!;
   builder.BuildJson = (...args) => {
-    const raw = parseNativeShimPayloadJson(original(...args));
+    // Edited as printed: the parsed payload's mesh arrays are typed arrays.
+    const raw = JSON.parse(original(...args)) as {
+      mesh: { triangleFaceBindings: string[] };
+    };
     return JSON.stringify({
       ...raw,
       mesh: {
         ...raw.mesh,
-        triangleFaceBindings: raw.mesh!.triangleFaceBindings!.map((id, i) =>
+        triangleFaceBindings: raw.mesh.triangleFaceBindings.map((id, i) =>
           i === 0 ? "face_unmatched_regression" : id,
         ),
       },

@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import type {
   RenderableEntityRecord,
@@ -243,11 +244,10 @@ function meshRecord(
       topology: "face",
       semanticClass,
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: vertices,
       vertexNormals: null,
       triangleIndices: triangles,
-    },
+    }),
   };
 }

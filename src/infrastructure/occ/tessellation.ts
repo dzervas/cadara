@@ -108,22 +108,23 @@ export function selectBodyLodTier(
 export function selectViewportLodTierForRenderables(
   input: ViewportLodSelectionInput,
 ): OccTessellationTierId {
-  const pointsByBodyId = new Map<BodyId, RenderPoint3D[]>();
+  // x, y, z per point of each body.
+  const coordinatesByBodyId = new Map<BodyId, number[]>();
 
   for (const renderable of input.renderables) {
     if (!renderable.ownerBodyId) {
       continue;
     }
 
-    const points = pointsByBodyId.get(renderable.ownerBodyId) ?? [];
-    points.push(...collectGeometryPoints(renderable));
-    pointsByBodyId.set(renderable.ownerBodyId, points);
+    const coordinates = coordinatesByBodyId.get(renderable.ownerBodyId) ?? [];
+    appendGeometryCoordinates(coordinates, renderable);
+    coordinatesByBodyId.set(renderable.ownerBodyId, coordinates);
   }
 
   let selectedTier: OccTessellationTierId = "startup";
 
-  for (const points of pointsByBodyId.values()) {
-    const bounds = getPointBounds(points);
+  for (const coordinates of coordinatesByBodyId.values()) {
+    const bounds = getPointBounds(coordinates);
     if (!bounds) {
       continue;
     }
@@ -139,38 +140,44 @@ export function selectViewportLodTierForRenderables(
   return selectedTier;
 }
 
-function collectGeometryPoints(
+function appendGeometryCoordinates(
+  coordinates: number[],
   renderable: RenderableEntityRecord,
-): RenderPoint3D[] {
+) {
   switch (renderable.geometry.kind) {
     case "mesh":
-      return [...renderable.geometry.vertexPositions];
+      for (const value of renderable.geometry.vertexPositions) {
+        coordinates.push(value);
+      }
+      return;
     case "polyline":
-      return [...renderable.geometry.points];
+      for (const point of renderable.geometry.points) {
+        coordinates.push(point[0], point[1], point[2]);
+      }
+      return;
     case "marker":
-      return [renderable.geometry.position];
+      coordinates.push(...renderable.geometry.position);
+      return;
   }
 }
 
-function getPointBounds(points: readonly RenderPoint3D[]) {
-  if (points.length === 0) {
+function getPointBounds(coordinates: readonly number[]) {
+  if (coordinates.length === 0) {
     return null;
   }
 
   const min: [number, number, number] = [
-    points[0]![0],
-    points[0]![1],
-    points[0]![2],
+    coordinates[0]!,
+    coordinates[1]!,
+    coordinates[2]!,
   ];
   const max: [number, number, number] = [...min];
 
-  for (const point of points) {
-    min[0] = Math.min(min[0], point[0]);
-    min[1] = Math.min(min[1], point[1]);
-    min[2] = Math.min(min[2], point[2]);
-    max[0] = Math.max(max[0], point[0]);
-    max[1] = Math.max(max[1], point[1]);
-    max[2] = Math.max(max[2], point[2]);
+  for (let offset = 0; offset < coordinates.length; offset += 3) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, coordinates[offset + axis]!);
+      max[axis] = Math.max(max[axis]!, coordinates[offset + axis]!);
+    }
   }
 
   const center: RenderPoint3D = [
@@ -178,7 +185,17 @@ function getPointBounds(points: readonly RenderPoint3D[]) {
     (min[1] + max[1]) / 2,
     (min[2] + max[2]) / 2,
   ];
-  const radius = Math.max(...points.map((point) => distance(point, center)));
+  let radius = 0;
+  for (let offset = 0; offset < coordinates.length; offset += 3) {
+    radius = Math.max(
+      radius,
+      Math.hypot(
+        coordinates[offset]! - center[0],
+        coordinates[offset + 1]! - center[1],
+        coordinates[offset + 2]! - center[2],
+      ),
+    );
+  }
 
   return {
     center,

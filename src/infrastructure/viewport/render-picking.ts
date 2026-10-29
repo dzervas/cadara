@@ -158,16 +158,41 @@ export function applyWireMaterialDepthPolicy<
   return material;
 }
 
+/**
+ * The GPU geometry of a render mesh. Positions and normals are uploaded as
+ * they are. The index is copied: three-mesh-bvh reorders a geometry's index
+ * in place when it builds the tree, and the snapshot's triangle order must
+ * stay as delivered for picking, measurement and mesh reuse.
+ */
+export function createRenderMeshBufferGeometry(mesh: RenderMeshGeometry) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.BufferAttribute(mesh.vertexPositions, 3),
+  );
+  geometry.setIndex(new THREE.BufferAttribute(mesh.triangleIndices.slice(), 1));
+  if (mesh.vertexNormals) {
+    geometry.setAttribute(
+      "normal",
+      new THREE.BufferAttribute(mesh.vertexNormals, 3),
+    );
+  } else {
+    geometry.computeVertexNormals();
+  }
+  return geometry;
+}
+
 export function createMeshBoundaryLineSegmentsGeometry(
   geometry: RenderMeshGeometry,
 ) {
   const boundaryEdges = collectMeshBoundaryEdges(geometry);
   const positions = new Float32Array(boundaryEdges.length * 2 * 3);
+  const vertexPositions = geometry.vertexPositions;
 
   boundaryEdges.forEach(([start, end], edgeIndex) => {
     const offset = edgeIndex * 6;
-    positions.set(start, offset);
-    positions.set(end, offset + 3);
+    positions.set(vertexPositions.subarray(start * 3, start * 3 + 3), offset);
+    positions.set(vertexPositions.subarray(end * 3, end * 3 + 3), offset + 3);
   });
 
   const bufferGeometry = new THREE.BufferGeometry();
@@ -179,73 +204,74 @@ export function createMeshBoundaryLineSegmentsGeometry(
   return bufferGeometry;
 }
 
+/**
+ * The mesh's boundary edges (used by one triangle) as vertex index pairs, in
+ * the order their first use appears. Vertices at the same position are one
+ * vertex here, so a seam that duplicates vertices is not a boundary.
+ */
 function collectMeshBoundaryEdges(geometry: RenderMeshGeometry) {
-  const edges = new Map<
-    string,
-    {
-      count: number;
-      start: RenderMeshGeometry["vertexPositions"][number];
-      end: RenderMeshGeometry["vertexPositions"][number];
-    }
-  >();
+  const positions = geometry.vertexPositions;
+  const vertexCount = positions.length / 3;
+  const { weldedIds, weldedCount } = weldRenderMeshVertices(positions);
 
-  for (const [a, b, c] of geometry.triangleIndices) {
-    addMeshEdge(
-      edges,
-      geometry.vertexPositions[a],
-      geometry.vertexPositions[b],
-    );
-    addMeshEdge(
-      edges,
-      geometry.vertexPositions[b],
-      geometry.vertexPositions[c],
-    );
-    addMeshEdge(
-      edges,
-      geometry.vertexPositions[c],
-      geometry.vertexPositions[a],
-    );
+  // Edge key (welded end ids) -> edge slot; slots are in first-use order.
+  const slotByKey = new Map<number, number>();
+  const counts: number[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  const indices = geometry.triangleIndices;
+  const addEdge = (start: number, end: number) => {
+    if (start >= vertexCount || end >= vertexCount) {
+      return;
+    }
+    const startId = weldedIds[start]!;
+    const endId = weldedIds[end]!;
+    const key =
+      Math.min(startId, endId) * weldedCount + Math.max(startId, endId);
+    const slot = slotByKey.get(key);
+    if (slot !== undefined) {
+      counts[slot]! += 1;
+      return;
+    }
+    slotByKey.set(key, counts.length);
+    counts.push(1);
+    starts.push(start);
+    ends.push(end);
+  };
+  for (let offset = 0; offset + 2 < indices.length; offset += 3) {
+    const a = indices[offset]!;
+    const b = indices[offset + 1]!;
+    const c = indices[offset + 2]!;
+    addEdge(a, b);
+    addEdge(b, c);
+    addEdge(c, a);
   }
 
-  return [...edges.values()]
-    .filter((edge) => edge.count === 1)
-    .map((edge) => [edge.start, edge.end] as const);
+  const boundary: (readonly [number, number])[] = [];
+  counts.forEach((count, slot) => {
+    if (count === 1) boundary.push([starts[slot]!, ends[slot]!]);
+  });
+  return boundary;
 }
 
-function addMeshEdge(
-  edges: Map<
-    string,
-    {
-      count: number;
-      start: RenderMeshGeometry["vertexPositions"][number];
-      end: RenderMeshGeometry["vertexPositions"][number];
-    }
-  >,
-  start: RenderMeshGeometry["vertexPositions"][number] | undefined,
-  end: RenderMeshGeometry["vertexPositions"][number] | undefined,
-) {
-  if (!start || !end) {
-    return;
+/** One id per vertex, from 0; vertices at equal positions share it. */
+function weldRenderMeshVertices(positions: Float32Array) {
+  const vertexCount = positions.length / 3;
+  const order = new Uint32Array(vertexCount);
+  for (let vertex = 0; vertex < vertexCount; vertex += 1)
+    order[vertex] = vertex;
+  const compare = (left: number, right: number) =>
+    positions[left * 3]! - positions[right * 3]! ||
+    positions[left * 3 + 1]! - positions[right * 3 + 1]! ||
+    positions[left * 3 + 2]! - positions[right * 3 + 2]!;
+  order.sort(compare);
+  const weldedIds = new Uint32Array(vertexCount);
+  let id = 0;
+  for (let rank = 1; rank < vertexCount; rank += 1) {
+    if (compare(order[rank - 1]!, order[rank]!) !== 0) id += 1;
+    weldedIds[order[rank]!] = id;
   }
-
-  const startKey = getRenderPointKey(start);
-  const endKey = getRenderPointKey(end);
-  const key =
-    startKey < endKey ? `${startKey}|${endKey}` : `${endKey}|${startKey}`;
-  const existing = edges.get(key);
-
-  if (existing) {
-    existing.count += 1;
-    return;
-  }
-
-  edges.set(key, { count: 1, start, end });
-}
-
-function getRenderPointKey(
-  point: RenderMeshGeometry["vertexPositions"][number],
-) {
-  return `${point[0]}:${point[1]}:${point[2]}`;
+  return { weldedIds, weldedCount: vertexCount === 0 ? 0 : id + 1 };
 }
 
 /**

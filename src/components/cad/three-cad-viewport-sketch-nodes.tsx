@@ -30,6 +30,7 @@ import {
   applyWireMaterialDepthPolicy,
   bindRenderableObject,
   createMarkerPickProxy,
+  createRenderMeshBufferGeometry,
   excludeRenderableObjectFromRaycastPicking,
   unbindRenderableObject,
 } from "@/infrastructure/viewport/render-picking";
@@ -137,20 +138,7 @@ export function SketchDisplayMeshNode({
       throw new Error("Display renderable is missing mesh geometry.");
     }
 
-    const nextGeometry = new THREE.BufferGeometry();
-    nextGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3),
-    );
-    nextGeometry.setIndex(geometryData.triangleIndices.flat());
-    if (geometryData.vertexNormals) {
-      nextGeometry.setAttribute(
-        "normal",
-        new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
-      );
-    } else {
-      nextGeometry.computeVertexNormals();
-    }
+    const nextGeometry = createRenderMeshBufferGeometry(geometryData);
     if (renderable.textureFill) {
       nextGeometry.setAttribute(
         "uv",

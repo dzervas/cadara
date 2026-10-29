@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect, assert } from "vitest";
 import * as THREE from "three";
 
@@ -21,6 +22,7 @@ import {
   createRenderableLineMaterial,
   createRenderableMarkerMaterial,
   createRenderableMeshMaterial,
+  createRenderMeshBufferGeometry,
   createProjectedPickCandidate,
   dropFaceHiddenProjectedVertexCandidates,
   getVisibleMarkerRadius,
@@ -88,8 +90,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
       topology: "face",
       semanticClass: "bodyFace",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [0, 0, 0],
         [1, 0, 0],
@@ -106,7 +107,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         [0, 1, 2],
         [0, 2, 3],
       ],
-    },
+    }),
   };
 
   const edgeRenderable: RenderableEntityRecord = {
@@ -155,26 +156,10 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
   };
 
   function createBoundMesh(renderable: RenderableEntityRecord) {
-    const geometry = new THREE.BufferGeometry();
     if (renderable.geometry.kind !== "mesh") {
       throw new Error("Expected mesh renderable.");
     }
-
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(
-        renderable.geometry.vertexPositions.flat(),
-        3,
-      ),
-    );
-    geometry.setIndex(renderable.geometry.triangleIndices.flat());
-    geometry.setAttribute(
-      "normal",
-      new THREE.Float32BufferAttribute(
-        renderable.geometry.vertexNormals?.flat() ?? [0, 0, 1],
-        3,
-      ),
-    );
+    const geometry = createRenderMeshBufferGeometry(renderable.geometry);
 
     const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
     bindRenderableObject(
@@ -386,8 +371,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "construction",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -399,7 +383,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const sketchRenderable: RenderableEntityRecord = {
       id: "renderable_sketch_curve",
@@ -457,8 +441,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "construction",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -470,7 +453,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const regionRenderable: RenderableEntityRecord = {
       id: "renderable_region",
@@ -484,8 +467,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -497,7 +479,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const construction = createBoundObject(constructionRenderable);
     const region = createBoundObject(regionRenderable);
@@ -527,8 +509,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -540,7 +521,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const sketchRenderable: RenderableEntityRecord = {
       id: "renderable_sketch_curve_boundary",
@@ -605,8 +586,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -618,7 +598,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const secondRegionRenderable: RenderableEntityRecord = {
       ...firstRegionRenderable,
@@ -976,6 +956,43 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
   }
 
   {
+    // A cylinder-like seam: vertices 4 and 5 repeat 0 and 3 at the same
+    // positions, so the shared seam edge is not a boundary. The outline
+    // comes in first-use order, each edge as its first triangle runs it.
+    const seamGeometry = createMeshBoundaryLineSegmentsGeometry(
+      createRenderMeshGeometry({
+        vertexPositions: [
+          [0, 0, 0],
+          [1, 0, 0],
+          [1, 1, 0],
+          [0, 1, 0],
+          [0, 0, 0],
+          [0, 1, 0],
+          [-1, 0, 0],
+          [-1, 1, 0],
+        ],
+        triangleIndices: [
+          [0, 1, 2],
+          [0, 2, 3],
+          [6, 4, 5],
+          [6, 5, 7],
+        ],
+      }),
+    );
+    expect(Array.from(seamGeometry.getAttribute("position").array)).toEqual(
+      [
+        [0, 0, 0, 1, 0, 0],
+        [1, 0, 0, 1, 1, 0],
+        [1, 1, 0, 0, 1, 0],
+        [-1, 0, 0, 0, 0, 0],
+        [0, 1, 0, -1, 1, 0],
+        [-1, 1, 0, -1, 0, 0],
+      ].flat(),
+    );
+    seamGeometry.dispose();
+  }
+
+  {
     const invisible = createInvisiblePickMaterial();
     assertEqual(
       invisible.opacity,
@@ -1014,8 +1031,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -1027,7 +1043,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const material = createRenderableMeshMaterial(regionRenderable, "document");
     expect(
@@ -1053,8 +1069,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "construction",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -1071,7 +1086,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 1, 2],
           [0, 2, 3],
         ],
-      },
+      }),
     };
     const material = createRenderableMeshMaterial(
       constructionRenderable,
@@ -1236,8 +1251,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "construction",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -1249,7 +1263,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const regionRenderable: RenderableEntityRecord = {
       id: "renderable_region_same_layer_boundary",
@@ -1267,8 +1281,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [2, 0, 0],
@@ -1280,7 +1293,7 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
     const construction = createBoundObject(constructionRenderable);
     const region = createBoundObject(regionRenderable);
@@ -1409,7 +1422,9 @@ test("src/infrastructure/viewport/render-picking.spec.ts", async () => {
         semanticClass: "body",
       },
     };
-    const resolved = resolvePickTarget([createIntersection(createBoundMesh(bodyRenderable), 1)]);
+    const resolved = resolvePickTarget([
+      createIntersection(createBoundMesh(bodyRenderable), 1),
+    ]);
     assertDeepEqual(
       resolved?.target,
       bodyRenderable.binding.target,

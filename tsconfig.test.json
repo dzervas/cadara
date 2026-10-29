@@ -123,7 +123,6 @@
     "src/infrastructure/occ/features/pattern.spec.ts",
     "src/infrastructure/occ/features/shell-transform.spec.ts",
     "src/infrastructure/occ/memory.isolated.spec.ts",
-    "src/infrastructure/occ/mesh-transport.spec.ts",
     "src/infrastructure/occ/native-topology-payload.spec.ts",
     "src/infrastructure/occ/neutral-curve-query.heavy.spec.ts",
     "src/infrastructure/occ/runtime.spec.ts",

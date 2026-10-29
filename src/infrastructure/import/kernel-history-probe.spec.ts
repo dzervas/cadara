@@ -878,7 +878,7 @@ test("kernel history probe derives body-only checkpoint signatures from render m
                 ownerBodyId: bodyId,
                 geometry: {
                   kind: "mesh",
-                  vertexPositions: [[0, 0, 0], [2, 4, 6]],
+                  vertexPositions: new Float32Array([0, 0, 0, 2, 4, 6]),
                 },
               }],
             },

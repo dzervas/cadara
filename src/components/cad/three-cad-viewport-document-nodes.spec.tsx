@@ -7,6 +7,7 @@
  * so rebuilding them recompiled every program and re-uploaded every buffer.
  * A colour change replaces only the material.
  */
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { act } from "@react-three/fiber";
 import { createRef } from "react";
 import * as THREE from "three";
@@ -25,8 +26,7 @@ const palette: SketchRenderingPalette = {
   regionFill: 0x334455,
 };
 
-const geometry: RenderableEntityRecord["geometry"] = {
-  kind: "mesh",
+const geometry: RenderableEntityRecord["geometry"] = createRenderMeshGeometry({
   vertexPositions: [
     [0, 0, 0],
     [1, 0, 0],
@@ -34,7 +34,7 @@ const geometry: RenderableEntityRecord["geometry"] = {
   ],
   vertexNormals: null,
   triangleIndices: [[0, 1, 2]],
-};
+});
 
 function faceEntry(label: string, bodyColor: number): ViewportRenderableRecord {
   return {

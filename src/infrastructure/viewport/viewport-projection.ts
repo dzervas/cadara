@@ -459,8 +459,17 @@ function collectBodyRenderablePoints(
 
     switch (renderable.geometry.kind) {
       case "mesh":
-        for (const point of renderable.geometry.vertexPositions) {
-          points.push(toVector3(point));
+        for (
+          let offset = 0;
+          offset < renderable.geometry.vertexPositions.length;
+          offset += 3
+        ) {
+          points.push(
+            new THREE.Vector3().fromArray(
+              renderable.geometry.vertexPositions,
+              offset,
+            ),
+          );
         }
         break;
       case "polyline":

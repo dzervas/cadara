@@ -3,10 +3,6 @@ import { describe, expect, test } from "vitest";
 
 import { deriveMeasurementViewModel } from "@/core/measure/measurement";
 import { createOccAuthoringState } from "@/infrastructure/occ/authoring-state";
-import {
-  packWorkspaceSnapshotRenderMeshes,
-  unpackWorkspaceSnapshotRenderMeshes,
-} from "@/infrastructure/occ/mesh-transport";
 import { type OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
 import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
 import { OCC_TESSELLATION_TIERS } from "@/infrastructure/occ/tessellation";
@@ -14,7 +10,7 @@ import { trackNewSolidBody } from "@/infrastructure/occ/topology";
 
 // Logic lane (seam: `deriveMeasurementViewModel` on the product's own body
 // meshes: an OCC solid tracked as a body, the snapshot's face meshes at the
-// fine tier, through the worker's Float32 mesh transport). T17h review R-2
+// fine tier, as the float32 arrays the snapshot carries). T17h review R-2
 // and A-1: the mesher emits zero-area triangles at poles, apexes and fillet
 // corners (two coincident corners), which the T17h closed-shell check first
 // counted as an extra use of their edge (no Volume row for a sphere, cone or
@@ -61,14 +57,10 @@ function measuredVolume(oc: Oc, shape: Shape) {
     false,
   );
   mesher.delete();
-  const snapshot = unpackWorkspaceSnapshotRenderMeshes(
-    packWorkspaceSnapshotRenderMeshes(
-      buildOccWorkspaceSnapshot(
-        createOccAuthoringState(oc, { bodies: [body] }),
-        [],
-        { lodTierId: "fine" },
-      ),
-    ).snapshot,
+  const snapshot = buildOccWorkspaceSnapshot(
+    createOccAuthoringState(oc, { bodies: [body] }),
+    [],
+    { lodTierId: "fine" },
   );
   const value = deriveMeasurementViewModel({
     source: "measureTool",

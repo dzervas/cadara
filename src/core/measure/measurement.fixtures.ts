@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import type {
   WorkspaceSnapshot,
   SnapshotEntityRecord,
@@ -624,15 +625,14 @@ function createFaceRenderable(
       topology: "face",
       semanticClass: top ? "planarFace" : "bodyFace",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [...points],
       vertexNormals: null,
       triangleIndices: [
         [0, 1, 2],
         [0, 2, 3],
       ],
-    },
+    }),
   };
 }
 

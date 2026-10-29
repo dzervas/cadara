@@ -1,8 +1,8 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { GetDocumentSnapshotResponse } from "@/contracts/modeling/schema";
-import { packWorkspaceSnapshotRenderMeshes } from "@/infrastructure/occ/mesh-transport";
 import {
   OccWorkerClient,
   type OccWorkerLike,
@@ -142,7 +142,7 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
     await promise;
   }
 
-  async function testSnapshotResponsesAreUnpacked() {
+  async function testSnapshotResponsesDeliverTypedArrayMeshes() {
     const worker = new FakeOccWorker();
     const client = new OccWorkerClient({ worker });
     const meshRecord = {
@@ -157,8 +157,7 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
         topology: "face",
         semanticClass: "bodyFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -170,7 +169,7 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     } as RenderableEntityRecord;
     const snapshotResponse = {
       contractVersion: "modeling-contract/v1alpha1",
@@ -194,29 +193,29 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
       "Snapshot queries should use the worker getDocumentSnapshot operation.",
     ).toBeTruthy();
 
-    const packed = packWorkspaceSnapshotRenderMeshes(snapshotResponse.snapshot);
+    // postMessage delivers a structured clone of the worker's snapshot.
     worker.emit({
       kind: "invoked",
       requestId: request.requestId,
       operation: "getDocumentSnapshot",
-      payload: {
-        contractVersion: snapshotResponse.contractVersion,
-        snapshot: packed.snapshot,
-      },
+      payload: structuredClone(snapshotResponse),
     });
 
     const response = await promise;
     const geometry = response.snapshot.document.render.records[0]?.geometry;
 
     expect(
-      geometry?.kind,
-      "Worker snapshot responses should be unpacked back into public mesh records.",
-    ).toBe("mesh");
+      geometry?.kind === "mesh" &&
+        geometry.vertexPositions instanceof Float32Array &&
+        geometry.triangleIndices instanceof Uint32Array,
+      "Worker snapshot meshes arrive as the typed arrays the viewport uploads.",
+    ).toBeTruthy();
+    expect(geometry).toEqual(meshRecord.geometry);
   }
 
   // cadara-lyi: a label/appearance-only revision resends identical meshes;
   // they keep the previous snapshot's geometry objects, so the viewport keeps
-  // its GPU geometry. A changed mesh is unpacked again.
+  // its GPU geometry. A changed mesh takes the delivered geometry.
   async function testUnchangedSnapshotMeshesKeepTheirGeometry() {
     const worker = new FakeOccWorker();
     const client = new OccWorkerClient({ worker });
@@ -232,12 +231,11 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
         topology: "face",
         semanticClass: "bodyFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [[0, 0, 0], [x, 0, 0], [0, 1, 0]],
         vertexNormals: null,
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     });
     const receive = async (records: RenderableEntityRecord[]) => {
       const promise = client.getDocumentSnapshot({
@@ -249,12 +247,10 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
         kind: "invoked",
         requestId: request.requestId,
         operation: "getDocumentSnapshot",
-        payload: {
+        payload: structuredClone({
           contractVersion: "modeling-contract/v1alpha1",
-          snapshot: packWorkspaceSnapshotRenderMeshes({
-            document: { render: { records } },
-          } as never).snapshot,
-        },
+          snapshot: { document: { render: { records } } },
+        }) as never,
       });
       const geometries = (await promise).snapshot.document.render.records.map(
         (record) => record.geometry,
@@ -271,11 +267,12 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
       unchangedAgain,
       "An identical mesh must reuse the previous snapshot's geometry object.",
     ).toBe(unchanged);
-    expect(changedAgain, "A changed mesh must be unpacked again.").not.toBe(
-      changed,
-    );
+    expect(
+      changedAgain,
+      "A changed mesh must take the delivered geometry.",
+    ).not.toBe(changed);
     expect(changedAgain).toMatchObject({
-      vertexPositions: [[0, 0, 0], [2, 0, 0], [0, 1, 0]],
+      vertexPositions: new Float32Array([0, 0, 0, 2, 0, 0, 0, 1, 0]),
     });
   }
 
@@ -757,7 +754,7 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
   await testSetBodyAppearanceRoundTripsThroughTheWorker();
   await testNeutralCurveQueriesRoundTripThroughTheWorker();
   await testDeriveSketchRegionsRoundTripsThroughTheWorker();
-  await testSnapshotResponsesAreUnpacked();
+  await testSnapshotResponsesDeliverTypedArrayMeshes();
   await testUnchangedSnapshotMeshesKeepTheirGeometry();
   await testWarmupFailuresSurfaceToCaller();
   await testExportCapabilitiesCreateCloneSafeWorkerRequests();

@@ -558,7 +558,7 @@ async function evaluateHistoryProbeInKernelSession(
       finalTessellation: {
         points: finalSnapshot.document.render.records.flatMap((record) =>
           record.geometry.kind === "mesh"
-            ? record.geometry.vertexPositions.flatMap((point) => [...point])
+            ? Array.from(record.geometry.vertexPositions)
             : [],
         ),
       },

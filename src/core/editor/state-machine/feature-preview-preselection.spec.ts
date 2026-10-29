@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { test, expect } from "vitest";
 import {
@@ -442,8 +443,7 @@ function boxMesh(
       topology: "face",
       semanticClass: "bodyFace",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [min[0], min[1], min[2]],
         [max[0], min[1], min[2]],
@@ -461,7 +461,7 @@ function boxMesh(
         [4, 6, 5],
         [4, 7, 6],
       ],
-    },
+    }),
   };
 }
 
@@ -481,8 +481,7 @@ function squareMesh(
   return {
     ...box,
     binding: { ...box.binding, semanticClass: "planarFace" },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [min[0], min[1], z],
         [max[0], min[1], z],
@@ -494,6 +493,6 @@ function squareMesh(
         [0, 1, 2],
         [0, 2, 3],
       ],
-    },
+    }),
   };
 }

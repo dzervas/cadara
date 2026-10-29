@@ -9,6 +9,11 @@ import {
 
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import {
+  getRenderMeshTriangleCount,
+  readRenderMeshPoint,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import type { SketchPlaneDefinition } from "@/contracts/shared/sketch-plane";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 
@@ -135,10 +140,15 @@ function createFaceBackedSketchPlane(
 function createSketchPlaneFrameFromFaceMesh(
   geometry: Extract<RenderableEntityRecord["geometry"], { kind: "mesh" }>,
 ): SketchPlaneDefinition["frame"] | null {
-  for (const triangle of geometry.triangleIndices) {
-    const p0 = geometry.vertexPositions[triangle[0]];
-    const p1 = geometry.vertexPositions[triangle[1]];
-    const p2 = geometry.vertexPositions[triangle[2]];
+  for (
+    let index = 0;
+    index < getRenderMeshTriangleCount(geometry);
+    index += 1
+  ) {
+    const triangle = readRenderMeshTriangle(geometry.triangleIndices, index);
+    const p0 = readRenderMeshPoint(geometry.vertexPositions, triangle[0]);
+    const p1 = readRenderMeshPoint(geometry.vertexPositions, triangle[1]);
+    const p2 = readRenderMeshPoint(geometry.vertexPositions, triangle[2]);
 
     if (!p0 || !p1 || !p2) {
       continue;
@@ -183,7 +193,9 @@ function getFaceNormal(
   p1: Vec3,
   p2: Vec3,
 ) {
-  const vertexNormal = geometry.vertexNormals?.[triangle[0]];
+  const vertexNormal =
+    geometry.vertexNormals &&
+    readRenderMeshPoint(geometry.vertexNormals, triangle[0]);
   const normalizedVertexNormal = vertexNormal ? normalize(vertexNormal) : null;
 
   if (normalizedVertexNormal) {

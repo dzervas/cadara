@@ -19,6 +19,7 @@ import {
 } from "@/infrastructure/occ/native-topology-mesh-buffers";
 import {
   parseNativeShimPayloadJson,
+  type OccNativeShimPayload,
   type OpenCascadeNativeTopologyKernelHost,
 } from "@/infrastructure/occ/native-topology-payload";
 import {
@@ -33,6 +34,27 @@ type DisplayBuild = Parameters<
     >["Build"]
   >
 >;
+
+/** The payload with its mesh arrays as BuildJson prints them (triples). */
+function asBuildJsonShape(payload: OccNativeShimPayload) {
+  const triples = (values: ArrayLike<number> | undefined) =>
+    values &&
+    Array.from({ length: values.length / 3 }, (_, index) => [
+      values[index * 3]!,
+      values[index * 3 + 1]!,
+      values[index * 3 + 2]!,
+    ]);
+  return payload.mesh
+    ? {
+        ...payload,
+        mesh: {
+          ...payload.mesh,
+          positions: triples(payload.mesh.positions),
+          triangleIndices: triples(payload.mesh.triangleIndices),
+        },
+      }
+    : payload;
+}
 
 const landingModel = async (name: string) =>
   JSON.parse(
@@ -125,7 +147,10 @@ test.each(["bracket", "wheel", "enclosure"])(
             linear,
             angular,
             triangles: json.mesh?.triangleCount ?? 0,
-            mismatches: compareMeshBuffersPayload(json, buffers),
+            mismatches: compareMeshBuffersPayload(
+              asBuildJsonShape(json),
+              asBuildJsonShape(buffers),
+            ),
           };
         },
       );

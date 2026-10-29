@@ -10,6 +10,7 @@ import {
   bindFaceHoverPerimeterObject,
   bindRenderableObject,
   createMeshBoundaryLineSegmentsGeometry,
+  createRenderMeshBufferGeometry,
   createMarkerPickProxy,
   createRenderableLineMaterial,
   createRenderableMarkerMaterial,
@@ -73,21 +74,7 @@ export function DocumentMeshNode({
       throw new Error(`Renderable ${renderable.id} is missing mesh geometry.`);
     }
 
-    const nextGeometry = new THREE.BufferGeometry();
-    nextGeometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(geometryData.vertexPositions.flat(), 3),
-    );
-    nextGeometry.setIndex(geometryData.triangleIndices.flat());
-    if (geometryData.vertexNormals) {
-      nextGeometry.setAttribute(
-        "normal",
-        new THREE.Float32BufferAttribute(geometryData.vertexNormals.flat(), 3),
-      );
-    } else {
-      nextGeometry.computeVertexNormals();
-    }
-    return nextGeometry;
+    return createRenderMeshBufferGeometry(geometryData);
   }, [geometryData, renderable.id]);
   const { materialSource, materialOptions, seededDatumPlane } =
     useDocumentMaterialInputs(entry, palette);

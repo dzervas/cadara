@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect, assert } from "vitest";
@@ -256,8 +257,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
                 topology: "face",
                 semanticClass: "planarFace",
               },
-              geometry: {
-                kind: "mesh",
+              geometry: createRenderMeshGeometry({
                 vertexPositions: [
                   [0, 0, 0],
                   [4, 0, 0],
@@ -269,7 +269,7 @@ test("src/contracts/editor/state-machine.spec.ts", async () => {
                   [0, 0, 1],
                 ],
                 triangleIndices: [[0, 1, 2]],
-              },
+              }),
             },
           ],
         },

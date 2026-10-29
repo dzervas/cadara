@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { describe, test, expect } from "vitest";
 import * as THREE from "three";
 
@@ -982,12 +983,11 @@ test("T11c review A-1/R-3: screen-space sketch point markers are not also ray-pi
       topology: null,
       semanticClass: "construction",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [],
       vertexNormals: [],
       triangleIndices: [],
-    },
+    }),
   } as unknown as RenderableEntityRecord;
   const planeMesh = new THREE.Mesh();
   bindRenderableObject(

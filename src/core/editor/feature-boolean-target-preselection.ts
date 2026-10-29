@@ -1,7 +1,13 @@
 import type {
   RenderableEntityRecord,
+  RenderMeshGeometry,
   RenderPoint3D,
 } from "@/contracts/render/schema";
+import {
+  getRenderMeshTriangleCount,
+  readRenderMeshPoint,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import type { BodyId } from "@/contracts/shared/ids";
 import type {
   FeatureBooleanOperation,
@@ -365,15 +371,12 @@ function createPlaneSample(
     return [];
   }
 
-  const normal = findMeshNormal(
-    record.geometry.vertexPositions,
-    record.geometry.triangleIndices,
-  );
+  const normal = findMeshNormal(record.geometry);
   if (!normal) {
     return [];
   }
 
-  const point = record.geometry.vertexPositions[0];
+  const point = readRenderMeshPoint(record.geometry.vertexPositions, 0);
   if (!point) {
     return [];
   }
@@ -397,20 +400,26 @@ function boundsFromRenderable(record: RenderableEntityRecord): Bounds3 | null {
     return null;
   }
 
-  return boundsFromPoints(record.geometry.vertexPositions);
+  return boundsFromCoordinates(record.geometry.vertexPositions);
 }
 
-function boundsFromPoints(points: readonly RenderPoint3D[]): Bounds3 {
-  const first = points[0]!;
+/** Bounds of a non-empty x, y, z per point array. */
+function boundsFromCoordinates(coordinates: Float32Array): Bounds3 {
   const bounds: Bounds3 = {
-    min: [first[0], first[1], first[2]],
-    max: [first[0], first[1], first[2]],
+    min: [coordinates[0]!, coordinates[1]!, coordinates[2]!],
+    max: [coordinates[0]!, coordinates[1]!, coordinates[2]!],
   };
 
-  for (const point of points.slice(1)) {
+  for (let offset = 3; offset < coordinates.length; offset += 3) {
     for (const axis of [0, 1, 2] as const) {
-      bounds.min[axis] = Math.min(bounds.min[axis], point[axis]);
-      bounds.max[axis] = Math.max(bounds.max[axis], point[axis]);
+      bounds.min[axis] = Math.min(
+        bounds.min[axis],
+        coordinates[offset + axis]!,
+      );
+      bounds.max[axis] = Math.max(
+        bounds.max[axis],
+        coordinates[offset + axis]!,
+      );
     }
   }
 
@@ -468,14 +477,19 @@ function dominantNormalAxis(normal: [number, number, number]) {
   return absolute[1] >= absolute[2] ? 1 : 2;
 }
 
-function findMeshNormal(
-  points: readonly RenderPoint3D[],
-  triangles: readonly (readonly [number, number, number])[],
-) {
-  for (const [aIndex, bIndex, cIndex] of triangles) {
-    const a = points[aIndex];
-    const b = points[bIndex];
-    const c = points[cIndex];
+function findMeshNormal(geometry: RenderMeshGeometry) {
+  for (
+    let index = 0;
+    index < getRenderMeshTriangleCount(geometry);
+    index += 1
+  ) {
+    const [aIndex, bIndex, cIndex] = readRenderMeshTriangle(
+      geometry.triangleIndices,
+      index,
+    );
+    const a = readRenderMeshPoint(geometry.vertexPositions, aIndex);
+    const b = readRenderMeshPoint(geometry.vertexPositions, bIndex);
+    const c = readRenderMeshPoint(geometry.vertexPositions, cIndex);
     if (!a || !b || !c) {
       continue;
     }

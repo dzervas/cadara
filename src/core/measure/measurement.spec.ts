@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
@@ -808,14 +809,13 @@ function holedPrismSnapshot(input: {
         topology: "face",
         semanticClass: "bodyFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: kept.flat(),
         vertexNormals: null,
         triangleIndices: kept.map(
           (_, index) => [index * 3, index * 3 + 1, index * 3 + 2] as const,
         ),
-      },
+      }),
     };
   });
   return {

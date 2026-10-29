@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 
 import {
@@ -50,8 +51,7 @@ test("src/infrastructure/occ/tessellation.spec.ts", () => {
     binding: {
       target: { kind: "face", bodyId: "body_1", faceId: "face_1" },
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [-1, -1, 0],
         [1, -1, 0],
@@ -63,7 +63,7 @@ test("src/infrastructure/occ/tessellation.spec.ts", () => {
         [0, 1, 2],
         [0, 2, 3],
       ],
-    },
+    }),
   } as RenderableEntityRecord;
 
   expect(

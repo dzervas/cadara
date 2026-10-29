@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { defaultEditorExtensionDependencies } from "@/composition/editor-extension-dependencies";
 /**
  * cadara-h026.3: the measurement readout of the plain selection, with no
@@ -469,12 +470,11 @@ describe("pairs without a distance, degenerate modes and what the kernel is aske
           topology: "face",
           semanticClass: "bodyFace",
         },
-        geometry: {
-          kind: "mesh",
+        geometry: createRenderMeshGeometry({
           vertexPositions,
           vertexNormals: null,
           triangleIndices,
-        },
+        }),
       };
     };
     const dense = withRenderables([

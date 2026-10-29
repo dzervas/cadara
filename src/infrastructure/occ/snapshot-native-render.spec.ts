@@ -416,7 +416,7 @@ test("src/infrastructure/occ/snapshot-native-render.spec.ts", async () => {
         (total, record) =>
           total +
           (record.geometry.kind === "mesh"
-            ? record.geometry.triangleIndices.length
+            ? record.geometry.triangleIndices.length / 3
             : 0),
         0,
       );
@@ -520,7 +520,7 @@ test("src/infrastructure/occ/snapshot-native-render.spec.ts", async () => {
       (total, record) =>
         total +
         (record.geometry.kind === "mesh"
-          ? record.geometry.triangleIndices.length
+          ? record.geometry.triangleIndices.length / 3
           : 0),
       0,
     );
@@ -570,7 +570,7 @@ test("src/infrastructure/occ/snapshot-native-render.spec.ts", async () => {
     for (const incomplete of [
       { positions: undefined },
       { triangleIndices: undefined },
-      { triangleIndices: [] },
+      { triangleIndices: new Uint32Array() },
     ]) {
       expect(() =>
         buildOccWorkspaceSnapshot(state, [], {
@@ -587,6 +587,52 @@ test("src/infrastructure/occ/snapshot-native-render.spec.ts", async () => {
         }),
       ).toThrow(/missing triangle geometry/);
     }
+
+    // The per-face split writes typed arrays straight from the native mesh:
+    // each face's vertices are numbered in the order its triangles first use
+    // them, also when faces' triangles interleave and share nodes (node 3 is
+    // first used by face B, then by face A).
+    const [faceA, faceB] = body.topology.faceIds as [FaceId, FaceId];
+    const interleaved = buildOccWorkspaceSnapshot(state, [], {
+      nativeTopologyPayload: {
+        ...nativeTopologyPayload,
+        bodies: nativeTopologyPayload.bodies.map((payload) => ({
+          ...payload,
+          renderMeshSummary: {
+            ...payload.renderMeshSummary!,
+            nodeCount: 5,
+            triangleCount: 4,
+            positions: new Float64Array([
+              0, 0, 0, 1, 0, 0, 1, 1, 0, 0.1, 1, 0, 0, 0.5, 2,
+            ]),
+            triangleIndices: new Uint32Array([
+              0, 1, 2, 2, 3, 4, 2, 1, 3, 4, 3, 0,
+            ]),
+            triangleFaceBindings: [faceA, faceB, faceA, faceB],
+          },
+        })),
+      },
+    });
+    const faceGeometry = (faceId: FaceId) =>
+      interleaved.document.render.records.find(
+        (record) =>
+          record.binding.target.kind === "face" &&
+          record.binding.target.faceId === faceId,
+      )?.geometry;
+    expect(faceGeometry(faceA)).toEqual({
+      kind: "mesh",
+      vertexPositions: new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0.1, 1, 0]),
+      vertexNormals: null,
+      triangleIndices: new Uint32Array([0, 1, 2, 2, 1, 3]),
+    });
+    expect(faceGeometry(faceB)).toEqual({
+      kind: "mesh",
+      vertexPositions: new Float32Array([
+        1, 1, 0, 0.1, 1, 0, 0, 0.5, 2, 0, 0, 0,
+      ]),
+      vertexNormals: null,
+      triangleIndices: new Uint32Array([0, 1, 2, 2, 1, 3]),
+    });
 
     builder.delete?.();
   }

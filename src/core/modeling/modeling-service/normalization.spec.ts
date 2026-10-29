@@ -708,19 +708,17 @@ test("T17d B4: failedDerivationReasons cross the worker transport and runtime va
   const recordIndex = workspace.document.sketches.findIndex(
     (entry) => entry.sketchId === commit.sketchId,
   );
-  const transported = normalizeWorkspaceSnapshot(
-    JSON.parse(JSON.stringify(workspace)),
-  );
+  const transported = normalizeWorkspaceSnapshot(structuredClone(workspace));
   expect(
     transported.document.sketches[recordIndex]!.sketch.solvedSnapshot
       .failedDerivationReasons,
   ).toEqual(reasons);
-  const forged = JSON.parse(JSON.stringify(workspace));
+  const forged = structuredClone(workspace);
   forged.document.sketches[
     recordIndex
-  ].sketch.solvedSnapshot.failedDerivationReasons = {
+  ]!.sketch.solvedSnapshot!.failedDerivationReasons = {
     [derivationId!]: ["axisBent"],
-  };
+  } as never;
   expect(() => normalizeWorkspaceSnapshot(forged)).toThrow();
 }, 120_000);
 
@@ -747,7 +745,11 @@ test("snapshot normalization validates meshes and keeps an exact valid mesh's id
   const forged = structuredClone(workspace);
   const geometry = forged.document.render.records[meshIndex]!.geometry;
   if (geometry.kind !== "mesh") throw new Error("Expected a mesh.");
-  geometry.triangleIndices = [[0, 1, geometry.vertexPositions.length]];
+  geometry.triangleIndices = new Uint32Array([
+    0,
+    1,
+    geometry.vertexPositions.length / 3,
+  ]);
   expect(() => normalizeWorkspaceSnapshot(forged)).toThrow(
     "Mesh triangle indices must reference existing vertex positions.",
   );

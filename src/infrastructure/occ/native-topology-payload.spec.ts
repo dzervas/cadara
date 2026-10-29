@@ -724,11 +724,11 @@ test("src/infrastructure/occ/native-topology-payload.spec.ts", async () => {
     expect(
       nativeTopology.mesh?.positions?.length,
       "Native topology payload should include flat render mesh positions.",
-    ).toBe(24);
+    ).toBe(24 * 3);
     expect(
       nativeTopology.mesh?.triangleIndices?.length,
       "Native topology payload should include flat render mesh triangle indices.",
-    ).toBe(12);
+    ).toBe(12 * 3);
     expect(
       nativeTopology.mesh?.triangleFaceBindings?.length,
       "Native topology payload should bind every render triangle to a face.",
@@ -752,7 +752,7 @@ test("src/infrastructure/occ/native-topology-payload.spec.ts", async () => {
     expect(
       topologyPayload.bodies[0]?.renderMeshSummary?.positions?.length,
       "Converted native topology payload should retain render mesh positions from the shim payload.",
-    ).toBe(24);
+    ).toBe(24 * 3);
     expect(
       nativeExactBrep.cadaraBrep != null,
       "Native exact B-rep shim should return Cadara B-rep records directly.",
@@ -837,7 +837,7 @@ test("src/infrastructure/occ/native-topology-payload.spec.ts", async () => {
     expect(
       meshPayload.meshSummary?.triangleIndices?.length,
       "Converted native mesh export payload should retain flat triangle indices from the shim payload.",
-    ).toBe(12);
+    ).toBe(12 * 3);
     (shape as { delete?: () => void }).delete?.();
     boxBuilder.delete?.();
   }
@@ -1204,7 +1204,7 @@ test("src/infrastructure/occ/native-topology-payload.spec.ts", async () => {
     expect(
       nativeTopology.mesh?.triangleIndices?.length,
       "Native boolean transaction result payload should mesh the committed shape.",
-    ).toBe(12);
+    ).toBe(12 * 3);
     expect(
       nativeHistory.status,
       "Pre-8 native boolean transaction history should report available native successor records when the boolean builder provides history.",
@@ -1405,10 +1405,18 @@ test("src/infrastructure/occ/native-topology-payload.spec.ts", async () => {
     const center: Point3 = [0.5, 1, 1.5];
     let outwardTriangleCount = 0;
 
-    for (const triangle of triangleIndices ?? []) {
-      const first = positions?.[triangle[0]];
-      const second = positions?.[triangle[1]];
-      const third = positions?.[triangle[2]];
+    const point = (node: number): Point3 | undefined =>
+      positions && node * 3 + 2 < positions.length
+        ? [
+            positions[node * 3]!,
+            positions[node * 3 + 1]!,
+            positions[node * 3 + 2]!,
+          ]
+        : undefined;
+    for (let index = 0; index < (triangleIndices?.length ?? 0); index += 3) {
+      const first = point(triangleIndices![index]!);
+      const second = point(triangleIndices![index + 1]!);
+      const third = point(triangleIndices![index + 2]!);
 
       expect(
         first != null && second != null && third != null,

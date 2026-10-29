@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { test, expect } from "vitest";
 import { createAuthoredModelDocumentFromSnapshot } from "@/contracts/modeling/authored-document";
@@ -3483,8 +3484,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         topology: "face",
         semanticClass: "planarFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -3496,7 +3496,7 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     } as const;
 
     const faceObject = new THREE.Object3D();
@@ -3554,12 +3554,11 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
         topology: "face",
         semanticClass: "planarFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [],
         vertexNormals: null,
         triangleIndices: [],
-      },
+      }),
     } as const;
 
     let meshRejected = false;
@@ -3649,16 +3648,15 @@ test("src/domain/modeling/mock-kernel-adapter.spec.ts", async () => {
   // feature records, replacing the deleted `normalizeFeatures`.
   async function testFeatureSnapshotValidatorPreservesMirrorAndTransformDefinitions() {
     const adapter = new MockKernelAdapter();
-    const workspace = JSON.parse(
-      JSON.stringify(
-        (
-          await adapter.getDocumentSnapshot({
-            contractVersion: "modeling-contract/v1alpha1",
-            documentId: "doc_workspace",
-          })
-        ).snapshot,
-      ),
-    );
+    // Worker transport is a structured clone.
+    const workspace = structuredClone(
+      (
+        await adapter.getDocumentSnapshot({
+          contractVersion: "modeling-contract/v1alpha1",
+          documentId: "doc_workspace",
+        })
+      ).snapshot,
+    ) as { document: { features: unknown } };
     workspace.document.features = [
       {
         ownerDocumentId: "doc_workspace",

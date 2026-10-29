@@ -11,6 +11,12 @@ import type {
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import {
+  getRenderMeshTriangleCount,
+  readRenderMeshPoint,
+  readRenderMeshPoints,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
+import {
   projectedSplineIsClosed,
   type ProjectedSketchArcGeometry,
   type ProjectedSketchCircleGeometry,
@@ -2858,12 +2864,19 @@ function getMeshArea(geometry: RenderMeshGeometry) {
 }
 
 function trianglesFromMesh(geometry: RenderMeshGeometry) {
-  return geometry.triangleIndices.flatMap((indices) => {
-    const first = geometry.vertexPositions[indices[0]];
-    const second = geometry.vertexPositions[indices[1]];
-    const third = geometry.vertexPositions[indices[2]];
-    return first && second && third ? [{ first, second, third }] : [];
-  });
+  const triangles: Triangle[] = [];
+  for (
+    let index = 0;
+    index < getRenderMeshTriangleCount(geometry);
+    index += 1
+  ) {
+    const [a, b, c] = readRenderMeshTriangle(geometry.triangleIndices, index);
+    const first = readRenderMeshPoint(geometry.vertexPositions, a);
+    const second = readRenderMeshPoint(geometry.vertexPositions, b);
+    const third = readRenderMeshPoint(geometry.vertexPositions, c);
+    if (first && second && third) triangles.push({ first, second, third });
+  }
+  return triangles;
 }
 
 function collectMeshBoundaryEdges(geometry: RenderMeshGeometry) {
@@ -2876,26 +2889,19 @@ function collectMeshBoundaryEdges(geometry: RenderMeshGeometry) {
     }
   >();
 
-  for (const [
-    firstIndex,
-    secondIndex,
-    thirdIndex,
-  ] of geometry.triangleIndices) {
-    addBoundaryEdge(
-      edges,
-      geometry.vertexPositions[firstIndex],
-      geometry.vertexPositions[secondIndex],
+  const points = readRenderMeshPoints(geometry.vertexPositions);
+  for (
+    let index = 0;
+    index < getRenderMeshTriangleCount(geometry);
+    index += 1
+  ) {
+    const [firstIndex, secondIndex, thirdIndex] = readRenderMeshTriangle(
+      geometry.triangleIndices,
+      index,
     );
-    addBoundaryEdge(
-      edges,
-      geometry.vertexPositions[secondIndex],
-      geometry.vertexPositions[thirdIndex],
-    );
-    addBoundaryEdge(
-      edges,
-      geometry.vertexPositions[thirdIndex],
-      geometry.vertexPositions[firstIndex],
-    );
+    addBoundaryEdge(edges, points[firstIndex], points[secondIndex]);
+    addBoundaryEdge(edges, points[secondIndex], points[thirdIndex]);
+    addBoundaryEdge(edges, points[thirdIndex], points[firstIndex]);
   }
 
   return [...edges.values()]
@@ -3015,7 +3021,8 @@ function getClosedMeshVolume(meshes: readonly RenderMeshGeometry[]) {
   const corners: number[] = [];
   for (const mesh of meshes) {
     // Each face vertex is welded once (its exact position).
-    const ids = mesh.vertexPositions.map((point) => {
+    const points = readRenderMeshPoints(mesh.vertexPositions);
+    const ids = points.map((point) => {
       const key = getPointKey(point);
       let id = vertexIds.get(key);
       if (id === undefined) {
@@ -3024,16 +3031,20 @@ function getClosedMeshVolume(meshes: readonly RenderMeshGeometry[]) {
       }
       return id;
     });
-    for (const [first, second, third] of mesh.triangleIndices) {
+    for (let index = 0; index < getRenderMeshTriangleCount(mesh); index += 1) {
+      const [first, second, third] = readRenderMeshTriangle(
+        mesh.triangleIndices,
+        index,
+      );
       const a = ids[first];
       const b = ids[second];
       const c = ids[third];
       if (a === undefined || b === undefined || c === undefined) continue;
       if (a === b || b === c || c === a) continue;
       kept.push({
-        first: mesh.vertexPositions[first]!,
-        second: mesh.vertexPositions[second]!,
-        third: mesh.vertexPositions[third]!,
+        first: points[first]!,
+        second: points[second]!,
+        third: points[third]!,
       });
       corners.push(a, b, c);
     }

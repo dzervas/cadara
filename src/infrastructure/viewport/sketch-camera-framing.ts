@@ -125,9 +125,10 @@ function collectRenderableWorldPoints(
 
   for (const renderable of renderables) {
     if (renderable.geometry.kind === "mesh") {
-      points.push(
-        ...renderable.geometry.vertexPositions.map((point) => toVector3(point)),
-      );
+      const positions = renderable.geometry.vertexPositions;
+      for (let offset = 0; offset < positions.length; offset += 3) {
+        points.push(new THREE.Vector3().fromArray(positions, offset));
+      }
       continue;
     }
 

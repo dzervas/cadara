@@ -69,9 +69,9 @@ import type {
   ProjectSketchExternalReferencesResponse,
 } from "@/contracts/solver/schema";
 import {
-  createRenderMeshUnpackCache,
-  unpackWorkspaceSnapshotRenderMeshes,
-} from "@/infrastructure/occ/mesh-transport";
+  createRenderMeshIdentityCache,
+  keepUnchangedSnapshotRenderMeshes,
+} from "@/infrastructure/occ/render-mesh-identity-cache";
 import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import { validateOccWorkerRestoreProgressMessage } from "@/infrastructure/occ/worker-restore-progress.runtime-schema";
 import {
@@ -272,7 +272,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   private readonly assetResolver: GeometryAssetResolver | undefined;
   private readonly requestTimeoutMs: number | null;
   private readonly pending = new Map<RequestId, PendingRequest>();
-  private readonly renderMeshes = createRenderMeshUnpackCache();
+  private readonly renderMeshes = createRenderMeshIdentityCache();
   private requestSequence = 0;
   private terminalError: Error | null = null;
   private disposed = false;
@@ -775,7 +775,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     if (operation === "getDocumentSnapshot" && payload) {
       return {
         ...(payload as GetDocumentSnapshotResponse),
-        snapshot: unpackWorkspaceSnapshotRenderMeshes(
+        snapshot: keepUnchangedSnapshotRenderMeshes(
           (payload as GetDocumentSnapshotResponse).snapshot,
           this.renderMeshes,
         ),

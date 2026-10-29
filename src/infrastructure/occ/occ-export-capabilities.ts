@@ -142,21 +142,25 @@ function collectTrianglesFromNativeBodyPayload(
       );
     }
 
-    return triangleIndices.map((triangle) => {
-      const first = positions[triangle[0]];
-      const second = positions[triangle[1]];
-      const third = positions[triangle[2]];
+    const nodeCount = positions.length / 3;
+    const readPosition = (node: number): MeshPoint => [
+      positions[node * 3]!,
+      positions[node * 3 + 1]!,
+      positions[node * 3 + 2]!,
+    ];
+    return Array.from({ length: triangleIndices.length / 3 }, (_, index) => {
+      const triangle = triangleIndices.subarray(index * 3, index * 3 + 3);
 
-      if (!first || !second || !third) {
+      if (triangle.some((node) => node >= nodeCount)) {
         throw new Error(
           `Native mesh triangle references missing vertex index ${triangle.join(",")}.`,
         );
       }
 
       const vertices: [MeshPoint, MeshPoint, MeshPoint] = [
-        first,
-        second,
-        third,
+        readPosition(triangle[0]!),
+        readPosition(triangle[1]!),
+        readPosition(triangle[2]!),
       ];
 
       return {

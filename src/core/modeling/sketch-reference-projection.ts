@@ -4,6 +4,7 @@ import type {
   RenderableEntityRecord,
   RenderPoint3D,
 } from "@/contracts/render/schema";
+import { readRenderMeshPoints } from "@/contracts/render/render-mesh-geometry";
 import type {
   DerivableSketchDefinition,
   SketchPoint2D,
@@ -567,17 +568,17 @@ function projectModelEdge(
       );
 }
 
-function boundaryEdgesFromTriangles(
-  triangles: readonly (readonly [number, number, number])[],
-) {
+/** `triangleIndices`: a, b, c per triangle. */
+function boundaryEdgesFromTriangles(triangleIndices: Uint32Array) {
   const edges = new Map<string, readonly [number, number]>();
   const counts = new Map<string, number>();
 
-  for (const triangle of triangles) {
+  for (let offset = 0; offset + 2 < triangleIndices.length; offset += 3) {
+    const triangle = triangleIndices.subarray(offset, offset + 3);
     const pairs = [
-      [triangle[0], triangle[1]],
-      [triangle[1], triangle[2]],
-      [triangle[2], triangle[0]],
+      [triangle[0]!, triangle[1]!],
+      [triangle[1]!, triangle[2]!],
+      [triangle[2]!, triangle[0]!],
     ] as const;
     for (const [left, right] of pairs) {
       const key = left < right ? `${left}:${right}` : `${right}:${left}`;
@@ -611,13 +612,9 @@ function projectModelFace(
     );
   }
 
+  const meshPoints = readRenderMeshPoints(meshGeometry.vertexPositions);
   if (
-    !canUseExistingGeometry(
-      reference.reference,
-      meshGeometry.vertexPositions,
-      plane,
-      tolerances,
-    )
+    !canUseExistingGeometry(reference.reference, meshPoints, plane, tolerances)
   ) {
     return failedReference(
       reference.referenceId,
@@ -644,14 +641,8 @@ function projectModelFace(
         `face-edge-${index + 1}`,
       ),
       kind: "lineSegment",
-      startPosition: projectWorldPoint(
-        plane,
-        meshGeometry.vertexPositions[startIndex]!,
-      ),
-      endPosition: projectWorldPoint(
-        plane,
-        meshGeometry.vertexPositions[endIndex]!,
-      ),
+      startPosition: projectWorldPoint(plane, meshPoints[startIndex]!),
+      endPosition: projectWorldPoint(plane, meshPoints[endIndex]!),
     }),
   );
 

@@ -2004,12 +2004,16 @@ test("segmented provider actions apply two checkpoints with rematch, closure, fa
             ownerBodyId: body.id,
             geometry: {
               kind: "mesh",
-              vertexPositions: [
-                body.low,
-                [body.high[0], body.low[1], body.low[2]],
-                [body.low[0], body.high[1], body.low[2]],
-                body.high,
-              ],
+              vertexPositions: new Float32Array([
+                ...body.low,
+                body.high[0],
+                body.low[1],
+                body.low[2],
+                body.low[0],
+                body.high[1],
+                body.low[2],
+                ...body.high,
+              ]),
             },
           })),
         },

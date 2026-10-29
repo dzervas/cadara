@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { act, createRoot } from "@react-three/fiber";
 import { createRef } from "react";
 import * as THREE from "three";
@@ -31,12 +32,11 @@ function body(points: Point[]): ViewportRenderableRecord {
       topology: "face",
       semanticClass: "bodyFace",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: points,
       vertexNormals: null,
       triangleIndices: [[0, 1, 2]],
-    },
+    }),
   };
   return { origin: "document", renderable };
 }

@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
@@ -47,8 +48,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
       topology: "face",
       semanticClass: "bodyFace",
     },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [0, 0, 0],
         [1, 0, 0],
@@ -60,7 +60,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         [0, 0, 1],
       ],
       triangleIndices: [[0, 1, 2]],
-    },
+    }),
   };
 
   const committedEdge: RenderableEntityRecord = {
@@ -137,8 +137,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
         topology: null,
         semanticClass: "region",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -150,7 +149,7 @@ test("src/app/viewport-renderables.spec.ts", async () => {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
   }
 
@@ -704,15 +703,14 @@ test("T17d2 (T17d review R-1): every committed curve and point of a sketch that 
 });
 
 test("cadara-01k: body faces carry their body's display colour (a picker preview wins for its body); edges, previews and other bodies' faces keep theirs", () => {
-  const mesh = {
-    kind: "mesh" as const,
+  const mesh = createRenderMeshGeometry({
     vertexPositions: [
       [0, 0, 0],
       [1, 0, 0],
       [0, 1, 0],
     ] as [number, number, number][],
     triangleIndices: [[0, 1, 2]] as [number, number, number][],
-  };
+  });
   const face = (bodyId: "body_a" | "body_b"): RenderableEntityRecord => ({
     id: `face_${bodyId}`,
     label: `Face ${bodyId}`,

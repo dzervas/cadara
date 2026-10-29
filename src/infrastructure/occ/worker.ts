@@ -6,9 +6,9 @@ import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
 } from "@/contracts/modeling/geometry-assets";
+import type { GetDocumentSnapshotResponse } from "@/contracts/modeling/schema";
 import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/ids";
 import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
-import { packWorkspaceSnapshotRenderMeshes } from "@/infrastructure/occ/mesh-transport";
 import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
 import { createEngineDownloadInstantiateWasm } from "@/infrastructure/occ/engine-download";
 import { OCC_WASM_BYTE_LENGTH } from "@/infrastructure/occ/asset-version";
@@ -69,12 +69,6 @@ interface OccWorkerGlobalScope {
     type: "message",
     listener: (event: MessageEvent<OccWorkerRequest>) => void,
   ): void;
-}
-
-interface PackedSnapshotOperationResult {
-  contractVersion: "modeling-contract/v1alpha1";
-  snapshot: ReturnType<typeof packWorkspaceSnapshotRenderMeshes>["snapshot"];
-  transferList: Transferable[];
 }
 
 const workerScope = self as unknown as OccWorkerGlobalScope;
@@ -378,15 +372,10 @@ async function handleWorkerOperation(
     case "getDocumentSnapshot": {
       const workerAdapter = getWorkerAdapter(operation.request.documentId);
       workerAdapter.setSnapshotLodTier(operation.lodTierId ?? "startup");
-      const response = await workerAdapter.getDocumentSnapshot(
-        operation.request,
-      );
-      const packed = packWorkspaceSnapshotRenderMeshes(response.snapshot);
-      return {
-        contractVersion: response.contractVersion,
-        snapshot: packed.snapshot,
-        transferList: packed.transferList,
-      } satisfies PackedSnapshotOperationResult;
+      // Render meshes are typed arrays, which postMessage copies natively.
+      // They are not transferred: the adapter keeps some render records
+      // (sketch regions) for later snapshots.
+      return workerAdapter.getDocumentSnapshot(operation.request);
     }
     case "refineSnapshotLod":
       throw new Error(
@@ -538,26 +527,13 @@ async function handleOccWorkerRequest(request: OccWorkerRequest) {
         request.operation,
       );
       if (runtimeAborted) return;
-      if (
-        request.operation.kind === "getDocumentSnapshot" &&
-        result &&
-        typeof result === "object" &&
-        "snapshot" in result &&
-        "transferList" in result
-      ) {
-        const snapshotResult = result as PackedSnapshotOperationResult;
-        postOccWorkerMessage(
-          {
-            kind: "invoked",
-            requestId: request.requestId,
-            operation: request.operation.kind,
-            payload: {
-              contractVersion: snapshotResult.contractVersion,
-              snapshot: snapshotResult.snapshot,
-            },
-          },
-          snapshotResult.transferList,
-        );
+      if (request.operation.kind === "getDocumentSnapshot") {
+        postOccWorkerMessage({
+          kind: "invoked",
+          requestId: request.requestId,
+          operation: request.operation.kind,
+          payload: result as GetDocumentSnapshotResponse,
+        });
         publishPendingModelCheckpointAfterSnapshot(
           request.operation.request.documentId,
         );

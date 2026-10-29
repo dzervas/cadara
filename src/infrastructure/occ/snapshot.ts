@@ -28,6 +28,7 @@ import {
   tessellateCubicSpans,
   solvedCubicSpans,
 } from "@/contracts/sketch/spline-geometry";
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { describeFeatureTreeNode } from "@/core/modeling/feature-description";
 import type {
   BodyId,
@@ -1036,15 +1037,14 @@ function buildConstructionRenderRecords(
           topology: null,
           semanticClass: "construction",
         },
-        geometry: {
-          kind: "mesh",
+        geometry: createRenderMeshGeometry({
           vertexPositions: points,
           vertexNormals: [normal, normal, normal, normal],
           triangleIndices: [
             [0, 1, 2],
             [0, 2, 3],
           ],
-        },
+        }),
       } satisfies RenderableEntityRecord,
       {
         id: `${createRenderableId(target)}_outline` as RenderableId,
@@ -1089,18 +1089,17 @@ function buildMeshGeometryFromFace(
     const triangleCount = triangulation.NbTriangles();
     const hasNormals = triangulation.HasNormals();
     const isReversed = getFaceOrientationIsReversed(state, face);
-    const vertexPositions = new Array<RenderPoint3D>(nodeCount);
-    const vertexNormals = hasNormals
-      ? new Array<RenderPoint3D>(nodeCount)
-      : null;
-    const triangleIndices = new Array<readonly [number, number, number]>(
-      triangleCount,
-    );
+    const vertexPositions = new Float32Array(nodeCount * 3);
+    const vertexNormals = hasNormals ? new Float32Array(nodeCount * 3) : null;
+    const triangleIndices = new Uint32Array(triangleCount * 3);
 
     for (let index = 1; index <= nodeCount; index += 1) {
-      vertexPositions[index - 1] = consumeTransformedRenderPoint(
-        triangulation.Node(index),
-        transformation,
+      vertexPositions.set(
+        consumeTransformedRenderPoint(
+          triangulation.Node(index),
+          transformation,
+        ),
+        (index - 1) * 3,
       );
 
       if (vertexNormals) {
@@ -1119,14 +1118,17 @@ function buildMeshGeometryFromFace(
           },
         );
 
-        vertexNormals[index - 1] = isReversed
-          ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
-          : baseNormal;
+        vertexNormals.set(
+          isReversed
+            ? [-baseNormal[0], -baseNormal[1], -baseNormal[2]]
+            : baseNormal,
+          (index - 1) * 3,
+        );
       }
     }
 
     for (let index = 1; index <= triangleCount; index += 1) {
-      triangleIndices[index - 1] = readWithSnapshotTemporaries(
+      const triangle = readWithSnapshotTemporaries(
         (ownTriangle): readonly [number, number, number] => {
           const triangle = ownTriangle(triangulation.Triangle(index));
           const first = triangle.Value(1) - 1;
@@ -1136,6 +1138,7 @@ function buildMeshGeometryFromFace(
           return isReversed ? [first, third, second] : [first, second, third];
         },
       );
+      triangleIndices.set(triangle, (index - 1) * 3);
     }
 
     return {
@@ -1186,12 +1189,7 @@ function buildFaceRenderRecord(
       topology: "face",
       semanticClass: semantics.render,
     },
-    geometry: {
-      kind: "mesh",
-      vertexPositions: geometry.vertexPositions,
-      vertexNormals: geometry.vertexNormals,
-      triangleIndices: geometry.triangleIndices,
-    },
+    geometry: { kind: "mesh", ...geometry },
   };
 }
 
@@ -1208,23 +1206,21 @@ function buildBodyOnlyMeshRenderRecord(
     (typeof meshTriangles)[number][number],
     number
   >();
-  const vertexPositions: RenderPoint3D[] = [];
-  const triangleIndices: Array<readonly [number, number, number]> = [];
+  const vertexPositions: number[] = [];
+  const triangleIndices = new Uint32Array(meshTriangles.length * 3);
   const indexPoint = (point: (typeof meshTriangles)[number][number]) => {
     const existing = vertexIndexByPoint.get(point);
     if (existing !== undefined) return existing;
-    const index = vertexPositions.length;
+    const index = vertexPositions.length / 3;
     vertexIndexByPoint.set(point, index);
-    vertexPositions.push([point[0], point[1], point[2]]);
+    vertexPositions.push(point[0], point[1], point[2]);
     return index;
   };
-  for (const triangle of meshTriangles) {
-    triangleIndices.push([
-      indexPoint(triangle[0]),
-      indexPoint(triangle[1]),
-      indexPoint(triangle[2]),
-    ]);
-  }
+  meshTriangles.forEach((triangle, index) => {
+    triangleIndices[index * 3] = indexPoint(triangle[0]);
+    triangleIndices[index * 3 + 1] = indexPoint(triangle[1]);
+    triangleIndices[index * 3 + 2] = indexPoint(triangle[2]);
+  });
   const target = { kind: "body", bodyId: body.bodyId } as const;
   return {
     id: createRenderableId(target),
@@ -1240,7 +1236,7 @@ function buildBodyOnlyMeshRenderRecord(
     },
     geometry: {
       kind: "mesh",
-      vertexPositions,
+      vertexPositions: new Float32Array(vertexPositions),
       vertexNormals: null,
       triangleIndices,
     },
@@ -1256,6 +1252,13 @@ function getNativeTopologyBodyPayload(
   );
 }
 
+/**
+ * Splits a body's native mesh into one mesh per durable face, written
+ * straight into typed arrays: every face's vertices and triangles are views
+ * into one positions and one index allocation for the body. Each face's
+ * vertices are numbered in the order its triangles (in native order) first
+ * use them.
+ */
 function buildNativeFaceMeshGeometries(
   mesh: OccNativeShimMeshSummary,
   body: OccTrackedBody,
@@ -1264,12 +1267,9 @@ function buildNativeFaceMeshGeometries(
   const positions = mesh.positions;
   const triangleIndices = mesh.triangleIndices;
   const triangleFaceBindings = mesh.triangleFaceBindings;
+  const triangleCount = triangleIndices ? triangleIndices.length / 3 : 0;
 
-  if (
-    !positions ||
-    !triangleIndices ||
-    triangleIndices.length !== mesh.triangleCount
-  ) {
+  if (!positions || !triangleIndices || triangleCount !== mesh.triangleCount) {
     if (
       mesh.triangleCount > 0 ||
       triangleIndices?.length ||
@@ -1281,10 +1281,7 @@ function buildNativeFaceMeshGeometries(
     }
     return new Map<FaceId, RenderMeshGeometry>();
   }
-  if (
-    !triangleFaceBindings ||
-    triangleFaceBindings.length !== triangleIndices.length
-  ) {
+  if (!triangleFaceBindings || triangleFaceBindings.length !== triangleCount) {
     throw new Error(
       `Native render mesh on body ${body.bodyId} requires one durable face binding per triangle.`,
     );
@@ -1296,73 +1293,124 @@ function buildNativeFaceMeshGeometries(
       .filter((record) => record.kind === "face")
       .map((record) => record.id),
   );
-  const geometryByFaceId = new Map<
-    FaceId,
-    {
-      vertexPositions: RenderPoint3D[];
-      nativeVertexToLocalIndex: Map<number, number>;
-      triangleIndices: Array<readonly [number, number, number]>;
-    }
-  >();
+  const nodeCount = positions.length / 3;
 
-  for (let index = 0; index < triangleIndices.length; index += 1) {
-    const faceId = triangleFaceBindings[index] as FaceId | undefined;
-    const triangle = triangleIndices[index]!;
+  // Each triangle's face slot (faces in order of first use), checked.
+  const faceIds: FaceId[] = [];
+  const faceSlotById = new Map<string, number>();
+  const triangleFaceSlots = new Uint32Array(triangleCount);
+  const faceTriangleCounts: number[] = [];
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const faceId = triangleFaceBindings[triangle] as FaceId | undefined;
     // Native and durable namespaces can overlap with different meanings. Do not
     // alias or guess here: a malformed payload must fail, not lose/misbind faces.
     if (!faceId || !durableFaceIds.has(faceId) || !payloadFaceIds.has(faceId)) {
       throw new Error(
-        `Native render mesh triangle ${index} on body ${body.bodyId} references unmatched durable face ID ${String(faceId)}.`,
+        `Native render mesh triangle ${triangle} on body ${body.bodyId} references unmatched durable face ID ${String(faceId)}.`,
       );
     }
+    let slot = faceSlotById.get(faceId);
+    if (slot === undefined) {
+      slot = faceIds.length;
+      faceSlotById.set(faceId, slot);
+      faceIds.push(faceId);
+      faceTriangleCounts.push(0);
+    }
+    triangleFaceSlots[triangle] = slot;
+    faceTriangleCounts[slot]! += 1;
+  }
 
-    const geometry =
-      geometryByFaceId.get(faceId) ??
-      (() => {
-        const next = {
-          vertexPositions: [] as RenderPoint3D[],
-          nativeVertexToLocalIndex: new Map<number, number>(),
-          triangleIndices: [] as Array<readonly [number, number, number]>,
-        };
-        geometryByFaceId.set(faceId, next);
-        return next;
-      })();
-    const getLocalVertexIndex = (nativeIndex: number) => {
-      const existing = geometry.nativeVertexToLocalIndex.get(nativeIndex);
-      if (existing !== undefined) {
-        return existing;
+  // The triangles grouped by face, native order within a face.
+  const faceTriangleStarts = new Uint32Array(faceIds.length);
+  for (let slot = 1; slot < faceIds.length; slot += 1) {
+    faceTriangleStarts[slot] =
+      faceTriangleStarts[slot - 1]! + faceTriangleCounts[slot - 1]!;
+  }
+  const trianglesByFace = new Uint32Array(triangleCount);
+  const faceTrianglesPlaced = new Uint32Array(faceIds.length);
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const slot = triangleFaceSlots[triangle]!;
+    trianglesByFace[faceTriangleStarts[slot]! + faceTrianglesPlaced[slot]!] =
+      triangle;
+    faceTrianglesPlaced[slot]! += 1;
+  }
+
+  // A face's triangles are contiguous in trianglesByFace, so a node belongs
+  // to the current face exactly when its stamp is the face's slot + 1.
+  const nodeFaceStamp = new Uint32Array(nodeCount);
+  const faceVertexCounts = new Uint32Array(faceIds.length);
+  for (let slot = 0; slot < faceIds.length; slot += 1) {
+    const end = faceTriangleStarts[slot]! + faceTriangleCounts[slot]!;
+    for (let at = faceTriangleStarts[slot]!; at < end; at += 1) {
+      for (let corner = 0; corner < 3; corner += 1) {
+        const node = triangleIndices[trianglesByFace[at]! * 3 + corner]!;
+        if (node >= nodeCount) {
+          throw new Error(
+            `Native render mesh triangle references missing vertex index ${node}.`,
+          );
+        }
+        if (nodeFaceStamp[node] !== slot + 1) {
+          nodeFaceStamp[node] = slot + 1;
+          faceVertexCounts[slot]! += 1;
+        }
       }
+    }
+  }
 
-      const position = positions[nativeIndex];
-      if (!position) {
-        throw new Error(
-          `Native render mesh triangle references missing vertex index ${nativeIndex}.`,
-        );
+  const faceVertexStarts = new Uint32Array(faceIds.length);
+  for (let slot = 1; slot < faceIds.length; slot += 1) {
+    faceVertexStarts[slot] =
+      faceVertexStarts[slot - 1]! + faceVertexCounts[slot - 1]!;
+  }
+  const lastSlot = faceIds.length - 1;
+  const vertexTotal =
+    lastSlot < 0
+      ? 0
+      : faceVertexStarts[lastSlot]! + faceVertexCounts[lastSlot]!;
+  const vertexPositions = new Float32Array(vertexTotal * 3);
+  const localTriangleIndices = new Uint32Array(triangleCount * 3);
+  const nodeLocalIndex = new Uint32Array(nodeCount);
+  nodeFaceStamp.fill(0);
+  for (let slot = 0; slot < faceIds.length; slot += 1) {
+    let localVertexCount = 0;
+    const end = faceTriangleStarts[slot]! + faceTriangleCounts[slot]!;
+    for (let at = faceTriangleStarts[slot]!; at < end; at += 1) {
+      for (let corner = 0; corner < 3; corner += 1) {
+        const node = triangleIndices[trianglesByFace[at]! * 3 + corner]!;
+        if (nodeFaceStamp[node] !== slot + 1) {
+          nodeFaceStamp[node] = slot + 1;
+          nodeLocalIndex[node] = localVertexCount;
+          const target = (faceVertexStarts[slot]! + localVertexCount) * 3;
+          vertexPositions[target] = positions[node * 3]!;
+          vertexPositions[target + 1] = positions[node * 3 + 1]!;
+          vertexPositions[target + 2] = positions[node * 3 + 2]!;
+          localVertexCount += 1;
+        }
+        localTriangleIndices[at * 3 + corner] = nodeLocalIndex[node]!;
       }
-
-      const localIndex = geometry.vertexPositions.length;
-      geometry.nativeVertexToLocalIndex.set(nativeIndex, localIndex);
-      geometry.vertexPositions.push([position[0], position[1], position[2]]);
-      return localIndex;
-    };
-
-    geometry.triangleIndices.push([
-      getLocalVertexIndex(triangle[0]),
-      getLocalVertexIndex(triangle[1]),
-      getLocalVertexIndex(triangle[2]),
-    ]);
+    }
   }
 
   return new Map(
-    [...geometryByFaceId].map(([faceId, geometry]) => [
-      faceId,
-      {
-        kind: "mesh" as const,
-        vertexPositions: geometry.vertexPositions,
-        vertexNormals: null,
-        triangleIndices: geometry.triangleIndices,
-      },
-    ]),
+    faceIds.map((faceId, slot): [FaceId, RenderMeshGeometry] => {
+      const vertexStart = faceVertexStarts[slot]! * 3;
+      const triangleStart = faceTriangleStarts[slot]! * 3;
+      return [
+        faceId,
+        {
+          kind: "mesh",
+          vertexPositions: vertexPositions.subarray(
+            vertexStart,
+            vertexStart + faceVertexCounts[slot]! * 3,
+          ),
+          vertexNormals: null,
+          triangleIndices: localTriangleIndices.subarray(
+            triangleStart,
+            triangleStart + faceTriangleCounts[slot]! * 3,
+          ),
+        },
+      ];
+    }),
   );
 }
 

@@ -95,16 +95,21 @@ test("the mesh-buffer builder reads the mesh after the native calls and frees th
     triangleCount: 2,
     linearDeflection: 0.1,
     angularDeflection: 0.5,
-    positions: [
-      [0, 0, 0],
-      [1, 0, 0],
-      [1, 1, 0],
-      [Math.fround(0.1), 1, 0],
-    ],
-    triangleIndices: [
-      [0, 1, 2],
-      [0, 2, 3],
-    ],
+    positions: new Float64Array([
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      Math.fround(0.1),
+      1,
+      0,
+    ]),
+    triangleIndices: new Uint32Array([0, 1, 2, 0, 2, 3]),
     triangleFaceBindings: ["face_body_a_g2", "face_body_a_g1"],
   });
   expect(result.delete).toHaveBeenCalledTimes(1);

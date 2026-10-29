@@ -22,12 +22,8 @@ function makePayload(): OccNativeShimPayload {
       triangleCount: 1,
       linearDeflection: 0.1,
       angularDeflection: 0.5,
-      positions: [
-        [0, 0, 0],
-        [1, 0, 0],
-        [0, 1, 0],
-      ],
-      triangleIndices: [[0, 1, 2]],
+      positions: new Float64Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+      triangleIndices: new Uint32Array([0, 1, 2]),
       triangleFaceBindings: ["face_native"],
     },
   };

@@ -1,3 +1,7 @@
+import {
+  readRenderMeshPoints,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { readFileSync } from "node:fs";
@@ -672,12 +676,11 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe("mesh");
     if (regionRenderable.geometry.kind !== "mesh") throw new Error("Expected region mesh.");
 
-    const xs = regionRenderable.geometry.vertexPositions.map(
-      (point) => point[0],
+    const points = readRenderMeshPoints(
+      regionRenderable.geometry.vertexPositions,
     );
-    const ys = regionRenderable.geometry.vertexPositions.map(
-      (point) => point[1],
-    );
+    const xs = points.map((point) => point[0]);
+    const ys = points.map((point) => point[1]);
     return {
       minX: Math.min(...xs),
       maxX: Math.max(...xs),
@@ -715,11 +718,19 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   }
 
   function getMeshArea(geometry: ReturnType<typeof getLiveRegionMesh>) {
-    return geometry.triangleIndices.reduce(
-      (area, triangle) =>
-        area + getTriangleArea(geometry.vertexPositions, triangle),
-      0,
-    );
+    const points = readRenderMeshPoints(geometry.vertexPositions);
+    let area = 0;
+    for (
+      let index = 0;
+      index < geometry.triangleIndices.length / 3;
+      index += 1
+    ) {
+      area += getTriangleArea(
+        points,
+        readRenderMeshTriangle(geometry.triangleIndices, index),
+      );
+    }
+    return area;
   }
 
   function getConnectedEntityIds(
@@ -1248,7 +1259,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
 
     const geometry = getLiveRegionMesh(session);
     expect(
-      geometry.triangleIndices.length,
+      geometry.triangleIndices.length / 3,
       "Six-point concave live region should triangulate into four triangles.",
     ).toBe(4);
     expect(

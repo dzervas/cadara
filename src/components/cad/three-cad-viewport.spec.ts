@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 
 import {
@@ -201,8 +202,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
     const renderable = {
       id: "renderable_sketch_reference_image_0",
       label: "Reference image",
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [1, 0, 0],
@@ -219,7 +219,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
           [0, 1, 2],
           [0, 2, 3],
         ],
-      },
+      }),
       target: {
         kind: "sketchOperation",
         sketchId: "sketch_primary",
@@ -1717,18 +1717,15 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
   // A sketch drag or in-sketch edit rebuilds the renderable lists on every
   // update while the document's mesh geometry objects stay the same.
   let vertexReads = 0;
-  const vertexPositions = [
-    [0, 0, 0],
-    [1, 0, 0],
-    [1, 1, 0],
-  ];
+  const vertexPositions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0]);
   const geometry = {
     kind: "mesh" as const,
     get vertexPositions() {
       vertexReads += 1;
       return vertexPositions;
     },
-    triangleIndices: [[0, 1, 2]],
+    vertexNormals: null,
+    triangleIndices: new Uint32Array([0, 1, 2]),
   };
   const record = (meshGeometry: typeof geometry | object) =>
     ({
@@ -1762,19 +1759,22 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
     readsAfterFirst,
   );
 
-  const sameContent = {
-    kind: "mesh" as const,
-    vertexPositions: vertexPositions.map((position) => [...position]),
+  const sameContent = createRenderMeshGeometry({
+    vertexPositions: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+    ],
     triangleIndices: [[0, 1, 2]],
-  };
-  const moved = {
-    ...sameContent,
+  });
+  const moved = createRenderMeshGeometry({
     vertexPositions: [
       [0, 0, 1],
       [1, 0, 1],
       [1, 1, 1],
     ],
-  };
+    triangleIndices: [[0, 1, 2]],
+  });
   expect(
     createViewportBvhSceneKey([record(sameContent)], []),
     "A new geometry object with equal content keeps the key.",
@@ -1804,15 +1804,14 @@ test("the document BVH key ignores the sketch session: a region going stale at d
           topology: null,
           semanticClass: "bodyFace",
         },
-        geometry: {
-          kind: "mesh",
+        geometry: createRenderMeshGeometry({
           vertexPositions: [
             [0, 0, 0],
             [1, 0, 0],
             [1, 1, 0],
           ],
           triangleIndices: [[0, 1, 2]],
-        },
+        }),
       },
     },
   ] as never;
@@ -1820,8 +1819,7 @@ test("the document BVH key ignores the sketch session: a region going stale at d
     id: "renderable_sketch_region_region_1_0",
     label: "Region 1",
     target: { kind: "region", sketchId: "sketch_1", regionId: "region_1" },
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [0, 0, 0],
         [1, 0, 0],
@@ -1829,7 +1827,7 @@ test("the document BVH key ignores the sketch session: a region going stale at d
       ],
       vertexNormals: null,
       triangleIndices: [[0, 1, 2]],
-    },
+    }),
     linePattern: "solid",
     role: "local",
     semanticClass: "region",

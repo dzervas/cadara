@@ -356,14 +356,32 @@ export interface OccNativeMeshExportPayload {
   diagnostics: readonly OccNativeTopologyDiagnostic[];
 }
 
+/**
+ * A native payload's mesh. Positions and triangle indices are flat typed
+ * arrays, read once from the native result and split per face from there.
+ * Positions are float64, so both payload builders' values (float32 mesh
+ * buffers, BuildJson decimals) are kept exactly.
+ */
 export interface OccNativeShimMeshSummary {
   nodeCount: OccNativeNonNegativeInteger;
   triangleCount: OccNativeNonNegativeInteger;
   linearDeflection: OccNativePositiveNumber;
   angularDeflection: OccNativePositiveNumber;
+  /** x, y, z per node. */
+  positions?: Float64Array;
+  /** a, b, c node indices per triangle. */
+  triangleIndices?: Uint32Array;
+  /** The owning face id per triangle. */
+  triangleFaceBindings?: readonly OccNativeNonEmptyString[];
+}
+
+/** `OccNativeShimMeshSummary` as BuildJson prints it. */
+interface OccNativeShimMeshSummaryJson extends Omit<
+  OccNativeShimMeshSummary,
+  "positions" | "triangleIndices"
+> {
   positions?: readonly (readonly [number, number, number])[];
   triangleIndices?: readonly OccNativeTriangleIndex[];
-  triangleFaceBindings?: readonly OccNativeNonEmptyString[];
 }
 
 export interface OccNativeShimVertexPointRecord {
@@ -411,14 +429,19 @@ export interface OccNativeShimPayload {
 
 type OccNativeShimPayloadRaw = Omit<
   OccNativeShimPayload,
-  "topology" | "edgeVertices" | "vertexPoints" | "faceEdges" | "diagnostics"
+  | "topology"
+  | "edgeVertices"
+  | "vertexPoints"
+  | "faceEdges"
+  | "diagnostics"
+  | "mesh"
 > &
   Partial<
     Pick<
       OccNativeShimPayload,
       "topology" | "edgeVertices" | "vertexPoints" | "faceEdges" | "diagnostics"
     >
-  >;
+  > & { mesh?: OccNativeShimMeshSummaryJson };
 
 type OccNativeFeatureTransactionHistoryPayloadRaw = Omit<
   OccNativeFeatureTransactionHistoryPayload,
@@ -577,21 +600,8 @@ function packMeshSummaryBuffers(
 
   assertNativeMeshFaceBindings(mesh, faceIds);
   const buffers: OccNativeTransferableBuffer[] = [];
-  const positions = new Float32Array((mesh.positions?.length ?? 0) * 3);
-  mesh.positions?.forEach((point, index) => {
-    positions[index * 3] = point[0];
-    positions[index * 3 + 1] = point[1];
-    positions[index * 3 + 2] = point[2];
-  });
-
-  const triangleIndices = new Uint32Array(
-    (mesh.triangleIndices?.length ?? 0) * 3,
-  );
-  mesh.triangleIndices?.forEach((triangle, index) => {
-    triangleIndices[index * 3] = triangle[0];
-    triangleIndices[index * 3 + 1] = triangle[1];
-    triangleIndices[index * 3 + 2] = triangle[2];
-  });
+  const positions = new Float32Array(mesh.positions ?? []);
+  const triangleIndices = mesh.triangleIndices ?? new Uint32Array();
 
   const faceIndexById = new Map(
     faceIds.map((faceId, index) => [faceId, index]),
@@ -877,34 +887,51 @@ export function assertNativeShimMeshSummaryInvariants(
     return;
   }
 
-  mesh.positions?.forEach((point, index) => {
-    assertPoint3(point, `${path}.positions.${index}`);
-  });
-  mesh.triangleIndices?.forEach((triangle, index) => {
-    if (mesh.positions && mesh.positions.length > 0) {
-      const maxIndex = mesh.positions.length - 1;
-      if (
-        triangle[0] > maxIndex ||
-        triangle[1] > maxIndex ||
-        triangle[2] > maxIndex
-      ) {
+  const positions = mesh.positions;
+  if (positions) {
+    for (let index = 0; index < positions.length; index += 1) {
+      assertFiniteNumber(
+        positions[index]!,
+        `${path}.positions.${Math.floor(index / 3)}.${index % 3}`,
+      );
+    }
+  }
+  const triangleIndices = mesh.triangleIndices;
+  if (triangleIndices && positions && positions.length > 0) {
+    const nodeCount = positions.length / 3;
+    for (let index = 0; index < triangleIndices.length; index += 1) {
+      if (triangleIndices[index]! >= nodeCount) {
         throw invariantFailure(
-          `${path}.triangleIndices.${index}`,
+          `${path}.triangleIndices.${Math.floor(index / 3)}`,
           "must reference existing mesh positions.",
         );
       }
     }
-  });
+  }
   if (
-    mesh.triangleIndices &&
+    triangleIndices &&
     mesh.triangleFaceBindings &&
-    mesh.triangleFaceBindings.length !== mesh.triangleIndices.length
+    mesh.triangleFaceBindings.length * 3 !== triangleIndices.length
   ) {
     throw invariantFailure(
       `${path}.triangleFaceBindings`,
       "must align 1:1 with triangle indices.",
     );
   }
+}
+
+function readNativeShimMeshSummaryJson(
+  mesh: OccNativeShimMeshSummaryJson,
+): OccNativeShimMeshSummary {
+  const { positions, triangleIndices, triangleFaceBindings, ...counts } = mesh;
+  return {
+    ...counts,
+    ...(positions ? { positions: new Float64Array(positions.flat()) } : {}),
+    ...(triangleIndices
+      ? { triangleIndices: new Uint32Array(triangleIndices.flat()) }
+      : {}),
+    ...(triangleFaceBindings ? { triangleFaceBindings } : {}),
+  };
 }
 
 function assertNativeShimPayloadInvariants(payload: OccNativeShimPayload) {
@@ -981,14 +1008,18 @@ export function parseNativeShimPayload(value: unknown): OccNativeShimPayload {
     );
   }
 
+  const mesh = result.data.mesh;
+  // The JSON mesh, when present, is replaced in place (the payload keeps the
+  // built key order), so no JSON mesh remains.
   const payload = {
     ...result.data,
+    ...(mesh ? { mesh: readNativeShimMeshSummaryJson(mesh) } : {}),
     topology: result.data.topology ?? [],
     edgeVertices: result.data.edgeVertices ?? [],
     vertexPoints: result.data.vertexPoints ?? [],
     faceEdges: result.data.faceEdges ?? [],
     diagnostics: result.data.diagnostics ?? [],
-  };
+  } as OccNativeShimPayload;
   assertNativeShimPayloadInvariants(payload);
   return payload;
 }

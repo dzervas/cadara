@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import * as THREE from "three";
 import { bindRenderableObject, updateWorkspaceHighlight } from "@/infrastructure/viewport/render-picking";
@@ -67,8 +68,7 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
   const styledMeshRenderable = {
     id: "renderable_sketch_mesh_1",
     label: "Styled region",
-    geometry: {
-      kind: "mesh",
+    geometry: createRenderMeshGeometry({
       vertexPositions: [
         [0, 0, 0],
         [1, 0, 0],
@@ -76,7 +76,7 @@ test("src/components/cad/three-cad-viewport-style.spec.ts", () => {
       ],
       vertexNormals: null,
       triangleIndices: [[0, 1, 2]],
-    },
+    }),
     target: null,
     linePattern: "solid",
     role: "local",

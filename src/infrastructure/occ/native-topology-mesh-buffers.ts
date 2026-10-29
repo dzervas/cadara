@@ -120,11 +120,11 @@ export function buildNativeShimPayloadFromMeshBuffers(
     const positionStart = buffers.PositionsAddress() / 4;
     const triangleStart = buffers.TriangleIndicesAddress() / 4;
     const faceIndexStart = buffers.TriangleFaceIndicesAddress() / 4;
-    const positionValues = host.HEAPF32.subarray(
-      positionStart,
-      positionStart + nodeCount * 3,
+    // Copied out of wasm memory, which the result's delete() frees.
+    const positions = Float64Array.from(
+      host.HEAPF32.subarray(positionStart, positionStart + nodeCount * 3),
     );
-    const triangleValues = host.HEAPU32.subarray(
+    const triangleIndices = host.HEAPU32.slice(
       triangleStart,
       triangleStart + triangleCount * 3,
     );
@@ -137,26 +137,8 @@ export function buildNativeShimPayloadFromMeshBuffers(
     for (const record of payload.topology) {
       if (record.kind === "face") faceIdByIndex.set(record.index, record.id);
     }
-    const positions = new Array<readonly [number, number, number]>(nodeCount);
-    for (let node = 0; node < nodeCount; node += 1) {
-      const offset = node * 3;
-      positions[node] = [
-        positionValues[offset]!,
-        positionValues[offset + 1]!,
-        positionValues[offset + 2]!,
-      ];
-    }
-    const triangleIndices = new Array<readonly [number, number, number]>(
-      triangleCount,
-    );
     const triangleFaceBindings = new Array<string>(triangleCount);
     for (let triangle = 0; triangle < triangleCount; triangle += 1) {
-      const offset = triangle * 3;
-      triangleIndices[triangle] = [
-        triangleValues[offset]!,
-        triangleValues[offset + 1]!,
-        triangleValues[offset + 2]!,
-      ];
       const faceId = faceIdByIndex.get(faceIndices[triangle]!);
       if (faceId === undefined) {
         throw new Error(

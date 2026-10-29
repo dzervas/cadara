@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import { literalResolvedDefinition } from "@/contracts/sketch/region-extraction.fixtures";
 import type {
@@ -660,8 +661,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
             faceId: "face_side_1",
           },
         },
-        geometry: {
-          kind: "mesh",
+        geometry: createRenderMeshGeometry({
           vertexPositions: [
             [0, 0, 0],
             [1, 0, 0],
@@ -669,7 +669,7 @@ test("src/contracts/shared/contract-examples.spec.ts", async () => {
           ],
           vertexNormals: null,
           triangleIndices: [[0, 1, 2]],
-        },
+        }),
       },
     ],
   };

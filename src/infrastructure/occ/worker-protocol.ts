@@ -16,7 +16,6 @@ import type { DocumentExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
 import type { NeutralCurveJoinRequest, NeutralCurveJoinResult, NeutralCurveQueryRequest, NeutralCurveQueryResult, NeutralCurveSelfIntersectionRequest } from "@/contracts/modeling/neutral-curve-query";
 import type { DeriveSketchRegionsRequest, DeriveSketchRegionsResponse, ProjectSketchExternalReferencesRequest, ProjectSketchExternalReferencesResponse, QuerySketchEditIntersectionsRequest, QuerySketchEditIntersectionsResponse, QuerySketchSnapIntersectionsRequest, QuerySketchSnapIntersectionsResponse } from "@/contracts/solver/schema";
-import type { PackedWorkspaceSnapshot } from "@/infrastructure/occ/mesh-transport";
 import type { OccNativeExactBrepPayload, OccNativeTopologyCapabilityProbeResult } from "@/contracts/modeling/kernel-payloads";
 import type { OccNativeMeshExportPayload, OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
 import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
@@ -276,15 +275,6 @@ export type OccWorkerOperationResult =
   | { diagnostic: DocumentExportDiagnostic }
   | DocumentExportDiagnostic;
 
-export type OccWorkerResponsePayload =
-  | OccWorkerOperationResult
-  | {
-      contractVersion: GetDocumentSnapshotResponse["contractVersion"];
-      snapshot:
-        | GetDocumentSnapshotResponse["snapshot"]
-        | PackedWorkspaceSnapshot;
-    };
-
 export type OccWorkerRequest =
   | {
       kind: "invoke";
@@ -309,7 +299,7 @@ export type OccWorkerResponse =
       kind: "invoked";
       requestId: RequestId;
       operation: OccWorkerOperation["kind"];
-      payload?: OccWorkerResponsePayload;
+      payload?: OccWorkerOperationResult;
     }
   | {
       kind: "resolveGeometryAsset";

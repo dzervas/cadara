@@ -1,5 +1,6 @@
 import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import {
+  assertNativeShimMeshSummaryInvariants,
   parseNativeShimPayload,
   type OccNativeShimPayload,
 } from "@/infrastructure/occ/native-topology-payload";
@@ -11,8 +12,8 @@ import {
  * the body it was built for by body id and topology token: a hydrated body
  * with another token never takes it.
  *
- * The mesh positions and triangle indices are typed arrays: as nested JS
- * arrays they would dominate the stored entry's structured clone. Positions
+ * The mesh positions and triangle indices are stored as the payload's typed
+ * arrays: inside the JSON they would dominate the stored entry. Positions
  * are float64, so both payload builders' values (float32 buffers, BuildJson
  * decimals) come back unchanged.
  */
@@ -44,18 +45,9 @@ export function encodeNativeTopologyPayloadCheckpointRecord(entry: {
       ...entry.nativePayload,
       mesh: { ...mesh, positions: [], triangleIndices: [] },
     }),
-    positions: Float64Array.from(mesh.positions.flat()),
-    triangleIndices: Uint32Array.from(mesh.triangleIndices.flat()),
+    positions: mesh.positions,
+    triangleIndices: mesh.triangleIndices,
   };
-}
-
-function triples<T extends number>(values: ArrayLike<T>) {
-  const result = new Array<readonly [T, T, T]>(values.length / 3);
-  for (let index = 0; index < result.length; index += 1) {
-    const offset = index * 3;
-    result[index] = [values[offset]!, values[offset + 1]!, values[offset + 2]!];
-  }
-  return result;
 }
 
 /**
@@ -85,7 +77,21 @@ export function decodeNativeTopologyPayloadCheckpointRecord(
       `The stored display payload of body ${record.bodyId} does not match its record.`,
     );
   }
-  mesh.positions = triples(record.positions);
-  mesh.triangleIndices = triples(record.triangleIndices);
-  return parseNativeShimPayload(raw);
+  // The stored JSON holds empty arrays in their place; the payload is
+  // validated without them and checked again with the stored arrays.
+  delete mesh.positions;
+  delete mesh.triangleIndices;
+  const payload = parseNativeShimPayload(raw);
+  const { triangleFaceBindings, ...counts } = payload.mesh!;
+  const decoded: OccNativeShimPayload = {
+    ...payload,
+    mesh: {
+      ...counts,
+      positions: record.positions,
+      triangleIndices: record.triangleIndices,
+      ...(triangleFaceBindings ? { triangleFaceBindings } : {}),
+    },
+  };
+  assertNativeShimMeshSummaryInvariants(decoded.mesh, "mesh");
+  return decoded;
 }

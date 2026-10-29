@@ -1,6 +1,11 @@
 import * as THREE from "three";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import {
+  getRenderMeshTriangleCount,
+  readRenderMeshPoint,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import type { SectionViewSession, Vec3 } from "@/core/section-view/session";
 import {
   add,
@@ -116,19 +121,28 @@ function buildSectionCapsForGroup(
 
     const geometry = renderable.geometry;
 
-    return geometry.triangleIndices.flatMap((triangle) => {
-      const p0 = geometry.vertexPositions[triangle[0]];
-      const p1 = geometry.vertexPositions[triangle[1]];
-      const p2 = geometry.vertexPositions[triangle[2]];
+    const triangleSegments: (readonly [Vec3, Vec3])[] = [];
+    for (
+      let index = 0;
+      index < getRenderMeshTriangleCount(geometry);
+      index += 1
+    ) {
+      const triangle = readRenderMeshTriangle(geometry.triangleIndices, index);
+      const p0 = readRenderMeshPoint(geometry.vertexPositions, triangle[0]);
+      const p1 = readRenderMeshPoint(geometry.vertexPositions, triangle[1]);
+      const p2 = readRenderMeshPoint(geometry.vertexPositions, triangle[2]);
 
       if (!p0 || !p1 || !p2) {
-        return [];
+        continue;
       }
 
       const points = collectSectionTrianglePoints([p0, p1, p2], section);
 
-      return points.length === 2 ? [[points[0], points[1]] as const] : [];
-    });
+      if (points.length === 2) {
+        triangleSegments.push([points[0]!, points[1]!] as const);
+      }
+    }
+    return triangleSegments;
   });
 
   const loops = buildSectionLoops(segments);
@@ -405,10 +419,19 @@ export function getSectionRenderableBounds(
   renderables.forEach((renderable) => {
     switch (renderable.geometry.kind) {
       case "mesh":
-        renderable.geometry.vertexPositions.forEach((point) => {
-          bounds.expandByPoint(new THREE.Vector3(point[0], point[1], point[2]));
+        for (
+          let offset = 0;
+          offset < renderable.geometry.vertexPositions.length;
+          offset += 3
+        ) {
+          bounds.expandByPoint(
+            new THREE.Vector3().fromArray(
+              renderable.geometry.vertexPositions,
+              offset,
+            ),
+          );
           hasGeometry = true;
-        });
+        }
         break;
       case "polyline":
         renderable.geometry.points.forEach((point) => {

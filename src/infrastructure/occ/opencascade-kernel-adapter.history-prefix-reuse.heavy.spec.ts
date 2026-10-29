@@ -73,6 +73,7 @@ vi.mock("@/infrastructure/occ/sketch-profile", async (importOriginal) => {
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import { createExpressionAuthoredValue } from "@/contracts/modeling/authored-values";
+import { readRenderMeshPoints } from "@/contracts/render/render-mesh-geometry";
 import type {
   FeatureDefinition,
   WorkspaceSnapshot,
@@ -416,7 +417,7 @@ async function enclosureWithTopFaceSketch() {
       (record) =>
         record.binding.target.kind === "face" &&
         record.geometry.kind === "mesh" &&
-        record.geometry.vertexPositions.every(
+        readRenderMeshPoints(record.geometry.vertexPositions).every(
           ([, , z]) => Math.abs(z - topZ) < 1e-6,
         ),
     );
@@ -1256,8 +1257,8 @@ async function enclosureSessionWithTailFaceSketch() {
       if (binding.target.kind !== "face" || geometry.kind !== "mesh") {
         return [];
       }
-      const z = geometry.vertexPositions[0]![2];
-      return geometry.vertexPositions.every(
+      const z = geometry.vertexPositions[2]!;
+      return readRenderMeshPoints(geometry.vertexPositions).every(
         (position) => Math.abs(position[2] - z) < 1e-9,
       )
         ? [{ support: binding.target, z }]

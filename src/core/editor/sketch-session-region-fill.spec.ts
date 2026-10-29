@@ -1,3 +1,7 @@
+import {
+  readRenderMeshPoints,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import { beforeAll, describe, expect, test } from "vitest";
 
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
@@ -94,18 +98,19 @@ function regionFill(session: SketchSessionState) {
 
 /** Σ triangle areas of the fill mesh (xy sketch plane: z = 0). */
 function meshArea(geometry: ReturnType<typeof regionFill>["geometry"]) {
-  return geometry.triangleIndices.reduce((sum, [i, j, k]) => {
-    const [a, b, c] = [i, j, k].map(
-      (index) => geometry.vertexPositions[index]!,
-    );
-    return (
-      sum +
+  const points = readRenderMeshPoints(geometry.vertexPositions);
+  let sum = 0;
+  for (let index = 0; index < geometry.triangleIndices.length / 3; index += 1) {
+    const [a, b, c] = readRenderMeshTriangle(
+      geometry.triangleIndices,
+      index,
+    ).map((vertex) => points[vertex]!);
+    sum +=
       Math.abs(
         (b![0] - a![0]) * (c![1] - a![1]) - (c![0] - a![0]) * (b![1] - a![1]),
-      ) /
-        2
-    );
-  }, 0);
+      ) / 2;
+  }
+  return sum;
 }
 
 /**
@@ -140,12 +145,17 @@ describe("in-sketch region fill: the owner's tessellation of the exact boundary 
       ((r * r) / 2) *
       (quarter - FILL_SAMPLES * Math.sin(quarter / FILL_SAMPLES));
     const area = meshArea(regionFill(session).geometry);
+    // The fill's vertices are float32 (the render mesh contract), so its
+    // area matches the chord polygon up to float32 rounding of the vertices.
+    const float32Tolerance = exact * 2 ** -20;
     expect(
       Math.abs(area - (exact - deficit)),
-      "The fill is exactly the inscribed chord polygon of the exact arcs.",
-    ).toBeLessThan(1e-12);
+      "The fill is the inscribed chord polygon of the exact arcs.",
+    ).toBeLessThan(float32Tolerance);
     expect(exact - area).toBeGreaterThan(0);
-    expect(exact - area).toBeLessThanOrEqual(deficit * (1 + 1e-9));
+    expect(exact - area).toBeLessThanOrEqual(
+      deficit * (1 + 1e-9) + float32Tolerance,
+    );
   }, 60_000);
 
   test("spline lobe: the fill covers the exact area within the chord bound", async () => {
@@ -210,7 +220,11 @@ describe("in-sketch region fill: the owner's tessellation of the exact boundary 
     const current = regionFill(published);
     expect(current.renderable.regionValidity).toBe("current");
     const top = (geometry: typeof current.geometry) =>
-      Math.max(...geometry.vertexPositions.map((point) => point[1]));
+      Math.max(
+        ...readRenderMeshPoints(geometry.vertexPositions).map(
+          (point) => point[1],
+        ),
+      );
     expect(
       top(current.geometry),
       "The republished fill follows the edited arch.",

@@ -12,6 +12,7 @@ import { act } from "@react-three/fiber";
 import { createRef } from "react";
 import * as THREE from "three";
 import { expect, test } from "vitest";
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 
 import type { SketchMarkerDisplayContext } from "@/components/cad/sketch-display-style";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
@@ -41,16 +42,16 @@ const regionTarget = {
   regionId: "region_1",
 } as const;
 
-const regionGeometry = {
-  kind: "mesh",
-  vertexPositions: [
-    [0, 0, 0],
-    [1, 0, 0],
-    [1, 1, 0],
-  ],
+const regionPoints: readonly [number, number, number][] = [
+  [0, 0, 0],
+  [1, 0, 0],
+  [1, 1, 0],
+];
+const regionGeometry = createRenderMeshGeometry({
+  vertexPositions: regionPoints,
   vertexNormals: null,
   triangleIndices: [[0, 1, 2]],
-} as const;
+});
 
 function region(
   validity: "current" | "stale",
@@ -131,14 +132,17 @@ test("a region fill going stale is unbound from picking without remounting the s
   expect(commits.at(-1)?.targetToObjects.get(regionKey)).toEqual([mounted]);
 
   await render([
-    region("current", {
-      ...regionGeometry,
-      vertexPositions: [...regionGeometry.vertexPositions, [0, 1, 0]],
-      triangleIndices: [
-        [0, 1, 2],
-        [0, 2, 3],
-      ],
-    }),
+    region(
+      "current",
+      createRenderMeshGeometry({
+        vertexPositions: [...regionPoints, [0, 1, 0]],
+        vertexNormals: null,
+        triangleIndices: [
+          [0, 1, 2],
+          [0, 2, 3],
+        ],
+      }),
+    ),
   ]);
   expect(bvhGroup(), "a re-triangulated fill remounts the sketch BVH").not.toBe(
     mountedBvh,

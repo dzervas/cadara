@@ -27,10 +27,24 @@ const request = {
 
 // Measure the sagitta of actual base-cap boundary chords, not the nominal
 // deflection. Ignore interior diagonals and side triangles of the cylinder.
+/** `coordinates`: x, y, z per vertex; `triangleIndices`: a, b, c per triangle. */
 function rimMetrics(
-  positions: readonly RenderPoint3D[],
-  triangles: readonly (readonly [number, number, number])[],
+  coordinates: ArrayLike<number>,
+  triangleIndices: ArrayLike<number>,
 ) {
+  const positions = Array.from(
+    { length: coordinates.length / 3 },
+    (_, vertex): RenderPoint3D => [
+      coordinates[vertex * 3]!,
+      coordinates[vertex * 3 + 1]!,
+      coordinates[vertex * 3 + 2]!,
+    ],
+  );
+  const triangles = Array.from(
+    { length: triangleIndices.length / 3 },
+    (_, triangle) =>
+      [0, 1, 2].map((corner) => triangleIndices[triangle * 3 + corner]!),
+  );
   const edges = new Map<
     string,
     { a: RenderPoint3D; b: RenderPoint3D; count: number }
@@ -194,7 +208,7 @@ for (const profile of ["circle", "split diameter"] as const) {
               5,
             );
             return {
-              triangles: mesh.triangleIndices!,
+              triangles: Array.from(mesh.triangleIndices!),
               ...rimMetrics(mesh.positions!, mesh.triangleIndices!),
               topology: body.topology,
               identity: body.identity,
@@ -232,7 +246,7 @@ for (const profile of ["circle", "split diameter"] as const) {
           return {
             triangles: records.flatMap((record) =>
               record.geometry.kind === "mesh"
-                ? record.geometry.triangleIndices
+                ? Array.from(record.geometry.triangleIndices)
                 : [],
             ),
             chordError: Math.max(...rims.map((rim) => rim.chordError)),

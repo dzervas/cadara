@@ -38,21 +38,23 @@ function deriveBodyMeshSignature(
   snapshot: WorkspaceSnapshot,
   bodyId: BodyId,
 ): HistoryProbeTopologySignature | null {
-  const points = snapshot.document.render.records.flatMap((record) =>
-    record.ownerBodyId === bodyId && record.geometry.kind === "mesh"
-      ? record.geometry.vertexPositions
-      : [],
-  );
-  if (points.length === 0) return null;
-
   const low: [number, number, number] = [Infinity, Infinity, Infinity];
   const high: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-  for (const point of points) {
-    for (const axis of [0, 1, 2] as const) {
-      low[axis] = Math.min(low[axis], point[axis]);
-      high[axis] = Math.max(high[axis], point[axis]);
+  let hasPoints = false;
+  for (const record of snapshot.document.render.records) {
+    if (record.ownerBodyId !== bodyId || record.geometry.kind !== "mesh") {
+      continue;
+    }
+    const positions = record.geometry.vertexPositions;
+    hasPoints ||= positions.length > 0;
+    for (let offset = 0; offset < positions.length; offset += 3) {
+      for (const axis of [0, 1, 2] as const) {
+        low[axis] = Math.min(low[axis], positions[offset + axis]!);
+        high[axis] = Math.max(high[axis], positions[offset + axis]!);
+      }
     }
   }
+  if (!hasPoints) return null;
 
   return {
     entityClass: "body",

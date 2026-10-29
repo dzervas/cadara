@@ -1,3 +1,8 @@
+import {
+  createRenderMeshGeometry,
+  readRenderMeshPoints,
+  readRenderMeshTriangle,
+} from "@/contracts/render/render-mesh-geometry";
 import { test, expect, assert } from "vitest";
 import * as THREE from "three";
 
@@ -44,12 +49,11 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
         topology: "face",
         semanticClass: "bodyFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: vertices,
         vertexNormals: vertices.map(() => [0, 0, 1] as const),
         triangleIndices: triangles,
-      },
+      }),
     };
   }
 
@@ -150,17 +154,24 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
     for (const face of boxFaces) {
       if (face.geometry.kind !== "mesh") continue;
       const vertexOffset = vertexPositions.length;
-      vertexPositions.push(...face.geometry.vertexPositions);
-      triangleIndices.push(
-        ...face.geometry.triangleIndices.map(
-          (triangle) =>
-            [
-              triangle[0] + vertexOffset,
-              triangle[1] + vertexOffset,
-              triangle[2] + vertexOffset,
-            ] as const,
-        ),
+      vertexPositions.push(
+        ...readRenderMeshPoints(face.geometry.vertexPositions),
       );
+      for (
+        let index = 0;
+        index < face.geometry.triangleIndices.length / 3;
+        index += 1
+      ) {
+        const triangle = readRenderMeshTriangle(
+          face.geometry.triangleIndices,
+          index,
+        );
+        triangleIndices.push([
+          triangle[0] + vertexOffset,
+          triangle[1] + vertexOffset,
+          triangle[2] + vertexOffset,
+        ]);
+      }
     }
     const bodyOnlyMesh: RenderableEntityRecord = {
       ...boxFaces[0]!,
@@ -172,12 +183,11 @@ test("src/infrastructure/section-view/rendering.spec.ts", () => {
         topology: null,
         semanticClass: "body",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions,
         vertexNormals: null,
         triangleIndices,
-      },
+      }),
     };
     expect(
       createSectionCapRenderables([bodyOnlyMesh], createSection("positive")).length > 0,

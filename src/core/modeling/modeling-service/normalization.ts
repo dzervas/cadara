@@ -31,6 +31,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import type {
   RenderExport,
+  RenderMeshGeometry,
   RenderableEntityRecord,
 } from "@/contracts/render/schema";
 import {
@@ -1269,27 +1270,25 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
     const geometry: RenderableEntityRecord["geometry"] = (() => {
       switch (entry.geometry.kind) {
         case "mesh": {
+          const vertexPositions = entry.geometry.vertexPositions;
+          const vertexNormals = entry.geometry.vertexNormals;
+          const triangleIndices = entry.geometry.triangleIndices;
           if (
-            !Array.isArray(entry.geometry.vertexPositions) ||
-            !Array.isArray(entry.geometry.triangleIndices) ||
-            !(
-              entry.geometry.vertexNormals === null ||
-              Array.isArray(entry.geometry.vertexNormals)
-            )
+            !(vertexPositions instanceof Float32Array) ||
+            !(triangleIndices instanceof Uint32Array) ||
+            !(vertexNormals === null || vertexNormals instanceof Float32Array)
           ) {
             throw new Error("Invalid mesh geometry payload.");
           }
 
-          if (entry.geometry.vertexPositions.length === 0) {
+          if (vertexPositions.length === 0) {
             throw new Error(
               "Mesh geometry must contain at least one vertex position.",
             );
           }
-
-          const vertexPositions = entry.geometry.vertexPositions;
-          const vertexNormals = entry.geometry.vertexNormals;
-          const triangleIndices = entry.geometry.triangleIndices;
-
+          if (vertexPositions.length % 3 !== 0) {
+            throw new Error("Invalid mesh vertex position payload.");
+          }
           if (
             vertexNormals !== null &&
             vertexNormals.length !== vertexPositions.length
@@ -1298,59 +1297,29 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
               "Mesh vertex normals must align 1:1 with vertex positions.",
             );
           }
-
-          for (const point of vertexPositions) {
-            if (
-              !Array.isArray(point) ||
-              point.length !== 3 ||
-              point.some((component) => typeof component !== "number")
-            ) {
-              throw new Error("Invalid mesh vertex position payload.");
-            }
+          if (triangleIndices.length % 3 !== 0) {
+            throw new Error("Invalid mesh triangle index payload.");
           }
-          for (const normal of vertexNormals ?? []) {
-            if (
-              !Array.isArray(normal) ||
-              normal.length !== 3 ||
-              normal.some((component) => typeof component !== "number")
-            ) {
-              throw new Error("Invalid mesh vertex normal payload.");
-            }
-          }
-          for (const triangle of triangleIndices) {
-            if (
-              !Array.isArray(triangle) ||
-              triangle.length !== 3 ||
-              triangle.some(
-                (index) =>
-                  typeof index !== "number" || !Number.isInteger(index),
-              )
-            ) {
-              throw new Error("Invalid mesh triangle index payload.");
-            }
 
-            if (
-              triangle.some(
-                (index) => index < 0 || index >= vertexPositions.length,
-              )
-            ) {
+          const vertexCount = vertexPositions.length / 3;
+          for (let index = 0; index < triangleIndices.length; index += 1) {
+            if (triangleIndices[index]! >= vertexCount) {
               throw new Error(
                 "Mesh triangle indices must reference existing vertex positions.",
               );
             }
           }
 
-          const mesh = {
-            kind: "mesh" as const,
-            vertexPositions: vertexPositions as [number, number, number][],
-            vertexNormals: vertexNormals as [number, number, number][] | null,
-            triangleIndices: triangleIndices as [number, number, number][],
-          };
           // An exact, validated mesh keeps its identity across snapshots, so
           // unchanged meshes do not rebuild viewport geometry (cadara-lyi).
           return Object.keys(entry.geometry).length === 4
-            ? (entry.geometry as typeof mesh)
-            : mesh;
+            ? (entry.geometry as unknown as RenderMeshGeometry)
+            : {
+                kind: "mesh" as const,
+                vertexPositions,
+                vertexNormals,
+                triangleIndices,
+              };
         }
         case "polyline": {
           if (

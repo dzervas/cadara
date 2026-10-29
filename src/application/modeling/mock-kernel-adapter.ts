@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { remapPublishedRegionStyles } from "@/core/sketch-styles/region-style-publication";
 import { resolveRegionProfile } from "@/contracts/sketch/region-selector";
 import type {
@@ -351,15 +352,14 @@ function createConstructionPlaneRenderRecords(): RenderableEntityRecord[] {
         topology: null,
         semanticClass: "construction",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: plane.vertices,
         vertexNormals: [plane.normal, plane.normal, plane.normal, plane.normal],
         triangleIndices: [
           [0, 1, 2],
           [0, 2, 3],
         ],
-      },
+      }),
     },
     {
       id: `renderable_construction_${plane.id}_outline` as RenderableId,
@@ -703,8 +703,7 @@ function createMockBakedBodyArtifacts(input: {
         topology: "face" as const,
         semanticClass: "bodyFace" as const,
       },
-      geometry: {
-        kind: "mesh" as const,
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [0, 0, 0],
           [10, 0, 0],
@@ -716,7 +715,7 @@ function createMockBakedBodyArtifacts(input: {
           [0, 0, 1],
         ],
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     } satisfies RenderableEntityRecord,
   };
 }
@@ -1524,10 +1523,18 @@ function transformMockRenderableGeometry(
   transformPoint: (point: MockPoint3) => MockPoint3,
 ): RenderableEntityRecord["geometry"] {
   if (geometry.kind === "mesh") {
-    return {
-      ...geometry,
-      vertexPositions: geometry.vertexPositions.map(transformPoint),
-    };
+    const vertexPositions = new Float32Array(geometry.vertexPositions.length);
+    for (let offset = 0; offset < vertexPositions.length; offset += 3) {
+      vertexPositions.set(
+        transformPoint([
+          geometry.vertexPositions[offset]!,
+          geometry.vertexPositions[offset + 1]!,
+          geometry.vertexPositions[offset + 2]!,
+        ]),
+        offset,
+      );
+    }
+    return { ...geometry, vertexPositions };
   }
   if (geometry.kind === "polyline") {
     return { ...geometry, points: geometry.points.map(transformPoint) };
@@ -1541,8 +1548,7 @@ function transformMockRenderableGeometry(
 function createMockPatternFallbackMesh(
   offset: MockPoint3,
 ): RenderableEntityRecord["geometry"] {
-  return {
-    kind: "mesh",
+  return createRenderMeshGeometry({
     vertexPositions: [
       translatePoint([0, 0, 0], offset),
       translatePoint([1, 0, 0], offset),
@@ -1554,7 +1560,7 @@ function createMockPatternFallbackMesh(
       [0, 0, 1],
     ],
     triangleIndices: [[0, 1, 2]],
-  };
+  });
 }
 
 function createMockPatternBodyArtifacts(input: {
@@ -1756,8 +1762,7 @@ function createPreviewRenderableSet(
         topology: "face",
         semanticClass: "planarFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: [
           [-4, -3, 12],
           [4, -3, 12],
@@ -1774,7 +1779,7 @@ function createPreviewRenderableSet(
           [0, 1, 2],
           [0, 2, 3],
         ],
-      },
+      }),
     },
     {
       id: `renderable_${targetKey}_edge` as RenderableId,
@@ -4615,8 +4620,7 @@ async function buildSnapshot(
             topology: "face",
             semanticClass: "planarFace",
           },
-          geometry: {
-            kind: "mesh",
+          geometry: createRenderMeshGeometry({
             vertexPositions: [
               [-4, -3, 12],
               [4, -3, 12],
@@ -4633,7 +4637,7 @@ async function buildSnapshot(
               [0, 1, 2],
               [0, 2, 3],
             ],
-          },
+          }),
         },
         {
           id: "renderable_edge_outer_0" as RenderableId,

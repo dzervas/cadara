@@ -1,3 +1,4 @@
+import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 import { assert, expect, test } from "vitest";
 
 import * as THREE from "three";
@@ -59,12 +60,11 @@ test("src/infrastructure/viewport/viewport-projection.spec.ts", () => {
         topology: "face",
         semanticClass: "bodyFace",
       },
-      geometry: {
-        kind: "mesh",
+      geometry: createRenderMeshGeometry({
         vertexPositions: points,
         vertexNormals: null,
         triangleIndices: [[0, 1, 2]],
-      },
+      }),
     };
   }
 

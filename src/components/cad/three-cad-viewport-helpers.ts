@@ -37,6 +37,10 @@ import {
   type PickResolutionOptions,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import {
+  getRenderMeshTriangleCount,
+  getRenderMeshVertexCount,
+} from "@/contracts/render/render-mesh-geometry";
 
 export const WORKSPACE_SCAFFOLD_RENDER_ORDER = 0;
 const MEASURE_LINE_PICK_THRESHOLD = 0.12;
@@ -575,7 +579,7 @@ export function getSketchStructuralGeometryToken(
 ) {
   switch (geometry.kind) {
     case "mesh":
-      return `mesh:${geometry.vertexPositions.length}:${geometry.triangleIndices.length}`;
+      return `mesh:${getRenderMeshVertexCount(geometry)}:${getRenderMeshTriangleCount(geometry)}`;
     case "polyline":
       return `polyline:${geometry.isClosed ? "closed" : "open"}:${geometry.points.length}`;
     case "marker":
@@ -607,10 +611,10 @@ function serializeGeometryToken(geometry: ViewportGeometry) {
     case "mesh":
       return [
         "mesh",
-        geometry.vertexPositions.flat().join(","),
-        geometry.triangleIndices.flat().join(","),
+        geometry.vertexPositions.join(","),
+        geometry.triangleIndices.join(","),
         geometry.vertexNormals
-          ? geometry.vertexNormals.flat().join(",")
+          ? geometry.vertexNormals.join(",")
           : "auto-normals",
       ].join(":");
     case "polyline":
