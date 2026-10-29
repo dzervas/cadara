@@ -282,7 +282,9 @@ export function executeFeatureReplayFeature(
   }
 
   let state: ReplayState = {
-    context,
+    // Each replayed source reconciles the previous source's result, naming
+    // included, so no replacement's naming may be skipped.
+    context: { ...context, namingDiscardedOutputSlots: undefined },
     producedBodyIds: [],
     historyInvalidations: new Map(),
   };

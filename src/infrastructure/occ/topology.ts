@@ -1773,6 +1773,8 @@ export function reconcileReplacementSolidBody(
     shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
     historySources: readonly OccTopologyHistorySource[];
     meshExportFallback?: OccTrackedBody["meshExportFallback"];
+    /** The caller drops the result body's OCAF naming; see reconcileReplacementTopology. */
+    resultNamingDiscarded?: boolean;
   },
 ) {
   const replacement = buildTrackedSolidBody(oc, {
@@ -1790,6 +1792,7 @@ export function reconcileReplacementSolidBody(
       previous: input.previous,
       replacement,
       historySources: input.historySources,
+      resultNamingDiscarded: input.resultNamingDiscarded,
     });
   } catch (error) {
     try {

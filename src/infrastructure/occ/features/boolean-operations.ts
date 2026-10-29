@@ -1966,6 +1966,8 @@ export function resolveReplacementBodies(
           ownerFeatureId,
           shape: solids[0]!,
           historySources,
+          resultNamingDiscarded:
+            context.namingDiscardedOutputSlots?.has(bodyId) === true,
         })
       : {
           body: trackReplacementSolidBody(context.oc, {

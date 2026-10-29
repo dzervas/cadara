@@ -1438,14 +1438,22 @@ export function applyOccFeatureToAuthoringState(
     beforeFeatureId: feature.featureId,
   });
 
+  const previousTopologyLineage = getPreviousFeatureTopologyLineage(
+    state.previousFeatureTopologyLineage,
+    feature.featureId,
+  );
   const result = executeOccFeature(
     {
       ...state,
       previousTopologyStage,
-      previousTopologyLineage: getPreviousFeatureTopologyLineage(
-        state.previousFeatureTopologyLineage,
-        feature.featureId,
-      ),
+      previousTopologyLineage,
+      // reconcileFeatureTopologyStage re-identifies exactly these slots.
+      namingDiscardedOutputSlots: new Set([
+        ...(previousTopologyStage?.outputs.keys() ?? []),
+        ...(previousTopologyLineage?.outputs.map(
+          (output) => output.outputSlot,
+        ) ?? []),
+      ]),
       topologyProvenanceIndex,
     },
     feature.featureId,

@@ -76,6 +76,13 @@ export interface OccFeatureExecutionContext {
   previousTopologyStage: OccFeatureTopologyStage | null;
   /** Persisted exact output slots from the last evaluation of this feature. */
   previousTopologyLineage?: import("@/contracts/modeling/authored-document").AuthoredFeatureTopologyLineage | null;
+  /**
+   * Output slots whose OCAF naming the stage reconciliation drops after this
+   * feature (they have a previous stage or persisted lineage). A body this
+   * feature replaces once and returns in such a slot needs no result naming;
+   * an executor that reconciles one body several times must not pass this on.
+   */
+  namingDiscardedOutputSlots?: ReadonlySet<BodyId>;
   /** Transient exact lineage resolver for live topology consumed by this feature. */
   topologyProvenanceIndex: OccTopologyProvenanceIndex;
   /** Earlier authored feature definitions available to exact operation replay. */
