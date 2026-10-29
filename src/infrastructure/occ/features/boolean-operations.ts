@@ -758,7 +758,16 @@ function sameTopologyTargetKind(target: DurableRef, successor: DurableRef) {
   );
 }
 
+/**
+ * Public ids of the current body's subshapes, keyed by the native ids the
+ * shim's history records name them by. A native record's `index` is the
+ * subshape's position in `TopExp::MapShapes(current.shape, kind)`; the tracked
+ * id lists are in no such order (naming reconciliation and relabelling reorder
+ * them), so each index resolves to the tracked id whose shape IsSame the
+ * subshape at that index.
+ */
 function createNativeCurrentTargetAliases(
+  oc: OpenCascadeInstance,
   current: OccTrackedBody,
   nativeTopology: readonly OccNativeShimTopologyRecord[] | null,
 ) {
@@ -768,13 +777,38 @@ function createNativeCurrentTargetAliases(
     return aliases;
   }
 
+  const publicIdsByIndex = <Id extends string>(
+    shapeType: unknown,
+    shapesById: ReadonlyMap<Id, unknown>,
+  ) => {
+    const subshapes = new oc.TopTools_IndexedMapOfShape_1();
+    try {
+      oc.TopExp.MapShapes_1(current.shape, shapeType as never, subshapes);
+      const ids = new Map<number, Id>();
+      for (const [id, shape] of shapesById) {
+        const index = subshapes.FindIndex(shape as never);
+        if (index > 0) ids.set(index, id);
+      }
+      return ids;
+    } finally {
+      subshapes.delete();
+    }
+  };
+  const shapeTypes = oc.TopAbs_ShapeEnum;
+  const faceIds = publicIdsByIndex(shapeTypes.TopAbs_FACE, current.facesById);
+  const edgeIds = publicIdsByIndex(shapeTypes.TopAbs_EDGE, current.edgesById);
+  const vertexIds = publicIdsByIndex(
+    shapeTypes.TopAbs_VERTEX,
+    current.verticesById,
+  );
+
   for (const record of nativeTopology) {
     if (record.bodyId !== current.bodyId) {
       continue;
     }
 
     if (record.kind === "face") {
-      const faceId = current.topology.faceIds[record.index - 1];
+      const faceId = faceIds.get(record.index);
       if (faceId) {
         aliases.set(
           getOccDurableRefKey({
@@ -793,7 +827,7 @@ function createNativeCurrentTargetAliases(
     }
 
     if (record.kind === "edge") {
-      const edgeId = current.topology.edgeIds[record.index - 1];
+      const edgeId = edgeIds.get(record.index);
       if (edgeId) {
         aliases.set(
           getOccDurableRefKey({
@@ -812,7 +846,7 @@ function createNativeCurrentTargetAliases(
     }
 
     if (record.kind === "vertex") {
-      const vertexId = current.topology.vertexIds[record.index - 1];
+      const vertexId = vertexIds.get(record.index);
       if (vertexId) {
         aliases.set(
           getOccDurableRefKey({
@@ -1006,15 +1040,13 @@ function collectNativeGeneratedClaims(input: {
 function collectNativeHistoryResolution(input: {
   current: OccTrackedBody;
   history: OccNativeFeatureTransactionHistoryPayload;
-  currentTopology?: readonly OccNativeShimTopologyRecord[] | null;
+  currentTargetAliases?: ReadonlyMap<string, DurableRef>;
 }) {
   const preservedTargetsBySuccessorKey = new Map<string, DurableRef>();
   const successorTargetsByPreviousKey = new Map<string, DurableRef>();
   const invalidations = new Map<string, OccReferenceInvalidationRecord>();
-  const currentTargetAliases = createNativeCurrentTargetAliases(
-    input.current,
-    input.currentTopology ?? null,
-  );
+  const currentTargetAliases =
+    input.currentTargetAliases ?? new Map<string, DurableRef>();
   const claims: OccNativeSuccessorClaim[] = [];
   const generatedClaims: OccNativeGeneratedClaim[] = [];
   const generatedSourceKeysByTargetKey = new Map<string, string>();
@@ -1251,7 +1283,89 @@ function rewriteNativeSubtopologyRef(
   const vertexId = aliases.vertexIdsByNativeId.get(target.vertexId);
   return vertexId ? { ...target, vertexId } : null;
 }
+
+/**
+ * A previous subshape that history reports deleted, yet the result still
+ * contains as the identical `TopoDS` shape, IS that result subshape and keeps
+ * its id. `BRepFilletAPI` answers `IsDeleted` for every edge and vertex a
+ * fillet/chamfer did not modify, so its native history reports untouched
+ * topology as deleted; without this claim the result renames it to its fresh
+ * geometric id and every reference to it is lost.
+ */
+function claimIdenticalDeletedSubshapes(
+  oc: OpenCascadeInstance,
+  input: {
+    current: OccTrackedBody;
+    replacement: OccTrackedBody;
+    preservedTargetsBySuccessorKey: Map<string, DurableRef>;
+    invalidations: Map<string, OccReferenceInvalidationRecord>;
+  },
+) {
+  const claimKind = <Id extends FaceId | EdgeId | VertexId>(
+    kind: "face" | "edge" | "vertex",
+    shapeType: unknown,
+    previousShapesById: ReadonlyMap<Id, unknown>,
+    resultShapesById: ReadonlyMap<Id, unknown>,
+  ) => {
+    const resultSubshapes = new oc.TopTools_IndexedMapOfShape_1();
+    try {
+      oc.TopExp.MapShapes_1(
+        input.replacement.shape,
+        shapeType as never,
+        resultSubshapes,
+      );
+      const resultIdsByIndex = new Map<number, Id>();
+      for (const [id, shape] of resultShapesById) {
+        const index = resultSubshapes.FindIndex(shape as never);
+        if (index > 0) resultIdsByIndex.set(index, id);
+      }
+      for (const [previousId, previousShape] of previousShapesById) {
+        const previous = topologyRefFor(kind, input.current.bodyId, previousId);
+        const previousKey = getOccDurableRefKey(previous);
+        if (
+          input.invalidations.get(previousKey)?.reason !==
+          OCC_REFERENCE_INVALIDATION_REASONS.topologyDeleted
+        ) {
+          continue;
+        }
+        const resultId = resultIdsByIndex.get(
+          resultSubshapes.FindIndex(previousShape as never),
+        );
+        if (!resultId) continue;
+        const successorKey = getOccDurableRefKey(
+          topologyRefFor(kind, input.replacement.bodyId, resultId),
+        );
+        if (input.preservedTargetsBySuccessorKey.has(successorKey)) continue;
+        input.preservedTargetsBySuccessorKey.set(successorKey, previous);
+        input.invalidations.delete(previousKey);
+      }
+    } finally {
+      resultSubshapes.delete();
+    }
+  };
+  const shapeTypes = oc.TopAbs_ShapeEnum;
+  claimKind(
+    "face",
+    shapeTypes.TopAbs_FACE,
+    input.current.facesById,
+    input.replacement.facesById,
+  );
+  claimKind(
+    "edge",
+    shapeTypes.TopAbs_EDGE,
+    input.current.edgesById,
+    input.replacement.edgesById,
+  );
+  claimKind(
+    "vertex",
+    shapeTypes.TopAbs_VERTEX,
+    input.current.verticesById,
+    input.replacement.verticesById,
+  );
+}
+
 function reconcileNativeHistoryReplacement(
+  oc: OpenCascadeInstance,
   current: OccTrackedBody,
   replacement: OccTrackedBody,
   history: OccNativeFeatureTransactionHistoryPayload,
@@ -1275,7 +1389,17 @@ function reconcileNativeHistoryReplacement(
   } = collectNativeHistoryResolution({
     current,
     history,
-    currentTopology,
+    currentTargetAliases: createNativeCurrentTargetAliases(
+      oc,
+      current,
+      currentTopology,
+    ),
+  });
+  claimIdenticalDeletedSubshapes(oc, {
+    current,
+    replacement,
+    preservedTargetsBySuccessorKey,
+    invalidations,
   });
   const faces = assignNativeHistoryIds<FaceId>({
     kind: "face",
@@ -1506,6 +1630,7 @@ export function resolveNativeFeatureTransactionReplacement(
       : null;
   }
   const reconciled = reconcileNativeHistoryReplacement(
+    context.oc,
     current,
     replacement,
     history,
