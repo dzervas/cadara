@@ -33,6 +33,11 @@ export type DocumentSyncWorkerRequest =
       storageKey?: string | null;
     }
   | {
+      kind: "settleLoad";
+      requestId: RequestId;
+      documentId: DocumentId;
+    }
+  | {
       kind: "load";
       requestId: RequestId;
       documentId: DocumentId;
@@ -134,9 +139,16 @@ export type DocumentSyncWorkerResponse =
       requestId: RequestId;
     }
   | {
+      kind: "loadSettled";
+      requestId: RequestId;
+    }
+  | {
       kind: "loaded";
       requestId: RequestId;
       result: DocumentRepositoryLoadResult;
+      /** The successful result's document normalized in the worker, so the
+       * open does not ask for it in another round trip. */
+      normalized?: DocumentSyncNormalizeResult;
     }
   | {
       kind: "mutated";
@@ -205,6 +217,8 @@ export type DocumentSyncWorkerResponse =
       kind: "documentChanged";
       subscriptionId: DocumentSyncSubscriptionId;
       event: DocumentRepositoryChangeEvent;
+      /** The event's document normalized in the worker (see `loaded`). */
+      normalized?: DocumentSyncNormalizeResult;
     }
   | {
       kind: "writeStatusChanged";

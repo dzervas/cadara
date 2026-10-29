@@ -668,6 +668,69 @@ test("worker-backed writes carry the shared URL store's current URL and only see
   }
 });
 
+// cadara-dx2k.17: the open's critical path makes no normalize round trip to
+// the document-sync worker for a load result or a change event the worker
+// already normalized, and settleLoad reaches the worker.
+test("a load result and a change event normalized in the worker resolve without a normalize request; settleLoad is forwarded", async () => {
+  const seed = await createSeedAuthoredModelDocument();
+  const worker = new FakeDocumentSyncWorker();
+  const repository = createWorkerBackedDocumentRepository({
+    client: new DocumentSyncWorkerClient({ worker }),
+    urlStore: createMemoryUrlStore(),
+  });
+  const metadata = {
+    actorId: "actor",
+    documentId: seed.documentId,
+    heads: ["head_load"],
+    source: "restore" as const,
+  };
+  const normalizedDocument = { ...seed, name: "Normalized in the worker" };
+  const events: string[] = [];
+  repository.subscribe(seed.documentId, (event) =>
+    events.push(event.document.name),
+  );
+  const subscribe = worker.takePosted("subscribe");
+  worker.emit({
+    kind: "subscribed",
+    requestId: subscribe.requestId,
+    subscriptionId: subscribe.subscriptionId,
+  });
+
+  const load = repository.load({
+    documentId: seed.documentId,
+    seedDocument: seed,
+  });
+  const loadRequest = worker.takePosted("load");
+  worker.emit({
+    kind: "documentChanged",
+    subscriptionId: subscribe.subscriptionId,
+    event: {
+      document: seed,
+      status: { kind: "restored", documentId: seed.documentId },
+      metadata,
+    },
+    normalized: { document: normalizedDocument, diagnostics: [], metadata },
+  });
+  worker.emit({
+    kind: "loaded",
+    requestId: loadRequest.requestId,
+    result: {
+      ok: true,
+      document: seed,
+      status: { kind: "restored", documentId: seed.documentId },
+      metadata,
+    },
+    normalized: { document: normalizedDocument, diagnostics: [], metadata },
+  });
+  const loaded = await load;
+  await flushAsync();
+  expect(loaded.ok && loaded.document).toEqual(normalizedDocument);
+  expect(events).toEqual([normalizedDocument.name]);
+
+  repository.settleLoad(seed.documentId);
+  expect(worker.takePosted("settleLoad").documentId).toBe(seed.documentId);
+});
+
 function createMemoryUrlStore(): DocumentRepositoryUrlStore {
   const values = new Map<string, string>();
   return {

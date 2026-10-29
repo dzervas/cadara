@@ -267,3 +267,28 @@ test("a repository-backed open starts reading the stored document before the ker
   expect((await restore).kind).not.toBe("failed");
   service.dispose();
 });
+
+// cadara-dx2k.17: a reload answered from the repository's cache defers the
+// stored copy's full read until the open is shown; the service says when.
+test("a repository-backed open settles the repository's load once, after its first snapshot is answered", async () => {
+  const settled: string[] = [];
+  class SettlingRepository extends MemoryDocumentRepository {
+    settleLoad(documentId: string) {
+      settled.push(documentId);
+    }
+  }
+  const adapter = new PausedSnapshotAdapter();
+  adapter.paused = true;
+  const service = createModelingService(adapter, {
+    currentDocumentId: "doc_workspace",
+    documentRepository: new SettlingRepository(),
+  });
+  const snapshot = service.getCurrentDocumentSnapshot();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(settled, "not before the snapshot is answered").toEqual([]);
+  adapter.gate.resolve();
+  await snapshot;
+  await service.getCurrentDocumentSnapshot();
+  expect(settled).toEqual(["doc_workspace"]);
+  service.dispose();
+});

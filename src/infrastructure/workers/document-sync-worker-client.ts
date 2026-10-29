@@ -1,5 +1,5 @@
 import type { RequestId } from "@/contracts/shared/ids";
-import type { DocumentSyncSubscriptionId, DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import type { DocumentSyncNormalizeResult, DocumentSyncSubscriptionId, DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 
 export interface DocumentSyncWorkerLike {
@@ -38,6 +38,7 @@ export class DocumentSyncWorkerClient {
         DocumentSyncWorkerResponse,
         { kind: "documentChanged" }
       >["event"],
+      normalized?: DocumentSyncNormalizeResult,
     ) => void
   >();
   private readonly writeStatusListeners = new Set<
@@ -70,9 +71,20 @@ export class DocumentSyncWorkerClient {
       "kind" | "requestId"
     >,
   ) {
-    const message = await this.request("load", "loaded", input);
-    return (message as Extract<DocumentSyncWorkerResponse, { kind: "loaded" }>)
-      .result;
+    const message = (await this.request("load", "loaded", input)) as Extract<
+      DocumentSyncWorkerResponse,
+      { kind: "loaded" }
+    >;
+    return { result: message.result, normalized: message.normalized };
+  }
+
+  async settleLoad(
+    input: Omit<
+      Extract<DocumentSyncWorkerRequest, { kind: "settleLoad" }>,
+      "kind" | "requestId"
+    >,
+  ) {
+    await this.request("settleLoad", "loadSettled", input);
   }
 
   async initialize(
@@ -278,6 +290,7 @@ export class DocumentSyncWorkerClient {
         DocumentSyncWorkerResponse,
         { kind: "documentChanged" }
       >["event"],
+      normalized?: DocumentSyncNormalizeResult,
     ) => void,
   ) {
     const subscriptionId = this.createSubscriptionId();
@@ -352,7 +365,10 @@ export class DocumentSyncWorkerClient {
 
   private receiveMessage(message: DocumentSyncWorkerResponse) {
     if (message.kind === "documentChanged") {
-      this.documentListeners.get(message.subscriptionId)?.(message.event);
+      this.documentListeners.get(message.subscriptionId)?.(
+        message.event,
+        message.normalized,
+      );
       return;
     }
 

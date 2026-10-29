@@ -8,11 +8,15 @@ import {
   normalizeAuthoredDocumentId,
 } from "@/contracts/modeling/authored-document-equality";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
-import { createDocumentSyncWorkerFailure, type DocumentSyncWorkerRequest, type DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import { createDocumentSyncWorkerFailure, type DocumentSyncNormalizeResult, type DocumentSyncWorkerRequest, type DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import { type DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 import { isGeometryAssetDocumentRepository } from "@/core/modeling/document-repository";
-import { type DocumentRepository } from "@/contracts/modeling/document-repository";
-import type { DocumentId } from "@/contracts/shared/ids";
+import {
+  type DocumentRepository,
+  type DocumentRepositoryLoadResult,
+  type DocumentRepositoryMetadata,
+} from "@/contracts/modeling/document-repository";
+import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import type {
   LocalFileBindingRecord,
   LocalFileBindingStore,
@@ -231,6 +235,34 @@ export function createDocumentSyncWorkerMessageHandler(
     }
   }
 
+  /** A successful load result travels with its normalized document, which
+   * the open would otherwise request in a second round trip. */
+  function postLoaded(
+    requestId: RequestId,
+    result: DocumentRepositoryLoadResult,
+  ) {
+    postMessage({
+      kind: "loaded",
+      requestId,
+      result,
+      ...(result.ok
+        ? { normalized: normalizeLoaded(result.document, result.metadata) }
+        : {}),
+    });
+  }
+
+  function normalizeLoaded(
+    document: AuthoredModelDocument,
+    metadata: DocumentRepositoryMetadata,
+  ): DocumentSyncNormalizeResult {
+    const normalized = normalizeCollaborativeAuthoredModelDocument(document);
+    return {
+      document: normalized.document,
+      diagnostics: normalized.diagnostics,
+      metadata,
+    };
+  }
+
   return async function handleDocumentSyncWorkerMessage(
     request: DocumentSyncWorkerRequest,
   ) {
@@ -242,6 +274,11 @@ export function createDocumentSyncWorkerMessageHandler(
           postMessage({ kind: "preloadStarted", requestId: request.requestId });
           return;
         }
+        case "settleLoad": {
+          options.repository.settleLoad?.(request.documentId);
+          postMessage({ kind: "loadSettled", requestId: request.requestId });
+          return;
+        }
         case "load": {
           adoptStorageKey(request.documentId, request.storageKey);
           const loadResult = await options.repository.load({
@@ -249,11 +286,7 @@ export function createDocumentSyncWorkerMessageHandler(
             seedDocument: request.seedDocument,
           });
           if (!loadResult.ok) {
-            postMessage({
-              kind: "loaded",
-              requestId: request.requestId,
-              result: loadResult,
-            });
+            postLoaded(request.requestId, loadResult);
             return;
           }
 
@@ -261,11 +294,7 @@ export function createDocumentSyncWorkerMessageHandler(
             request.documentId,
           );
           if (!boundFileRecord) {
-            postMessage({
-              kind: "loaded",
-              requestId: request.requestId,
-              result: loadResult,
-            });
+            postLoaded(request.requestId, loadResult);
             return;
           }
 
@@ -274,11 +303,7 @@ export function createDocumentSyncWorkerMessageHandler(
             boundFileRecord,
           );
           if (!boundFileDocument.ok) {
-            postMessage({
-              kind: "loaded",
-              requestId: request.requestId,
-              result: boundFileDocument,
-            });
+            postLoaded(request.requestId, boundFileDocument);
             return;
           }
 
@@ -288,22 +313,17 @@ export function createDocumentSyncWorkerMessageHandler(
               boundFileDocument.document,
             )
           ) {
-            postMessage({
-              kind: "loaded",
-              requestId: request.requestId,
-              result: loadResult,
-            });
+            postLoaded(request.requestId, loadResult);
             return;
           }
 
-          postMessage({
-            kind: "loaded",
-            requestId: request.requestId,
-            result: await options.repository.initialize({
+          postLoaded(
+            request.requestId,
+            await options.repository.initialize({
               documentId: request.documentId,
               document: boundFileDocument.document,
             }),
-          });
+          );
           return;
         }
         case "reset": {
@@ -372,14 +392,16 @@ export function createDocumentSyncWorkerMessageHandler(
           const unsubscribe = options.repository.subscribe(
             request.documentId,
             (event) => {
-              const normalized = normalizeCollaborativeAuthoredModelDocument(
+              const normalized = normalizeLoaded(
                 event.document,
+                event.metadata,
               );
               queueBoundFileWrite(request.documentId, normalized.document);
               postMessage({
                 kind: "documentChanged",
                 subscriptionId: request.subscriptionId,
                 event,
+                normalized,
               });
             },
           );

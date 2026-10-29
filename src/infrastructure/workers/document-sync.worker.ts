@@ -12,6 +12,17 @@ import type {
   DocumentSyncWorkerResponse,
 } from "@/infrastructure/workers/document-sync-worker-protocol";
 import { createIndexedDbLocalFileBindingStore } from "@/infrastructure/persistence/local-file-binding-store";
+import {
+  createIndexedDbMaterializedDocumentStore,
+  type MaterializedDocumentEvent,
+} from "@/infrastructure/persistence/indexeddb-materialized-document-store";
+
+function reportMaterializedDocumentEvent(event: MaterializedDocumentEvent) {
+  // The cache only ever falls back to the Automerge load; a failing cache is
+  // a warning for whoever debugs a slow reload, never a document failure.
+  if (event.kind === "degraded") console.warn("[materialized-document]", event);
+  else console.debug("[materialized-document]", event);
+}
 
 interface DocumentSyncWorkerGlobalScope {
   postMessage(message: DocumentSyncWorkerResponse): void;
@@ -32,12 +43,25 @@ function createWorkerMessageHandler(search: string) {
   const workerSearchParams = new URLSearchParams(search);
   const localPeerSyncEnabled =
     workerSearchParams.get("cadLocalPeerSync") === "1";
+  const databaseName =
+    workerSearchParams.get("cadRepositoryDbName") ?? "cad-authored-documents";
   return createDocumentSyncWorkerMessageHandler(
     {
       repository: createIndexedDbAutomergeDocumentRepository({
         urlStore: repositoryUrlStore,
-        databaseName:
-          workerSearchParams.get("cadRepositoryDbName") ?? undefined,
+        databaseName,
+        // A dev server's worker is no content-named bundle (its modules
+        // change under the same URL), so it never answers from the cache:
+        // a record is only trusted by the build that materialized it.
+        materializedDocuments: import.meta.env.DEV
+          ? undefined
+          : {
+              store: createIndexedDbMaterializedDocumentStore({
+                databaseName: `${databaseName}-materialized-documents`,
+              }),
+              compatibility: self.location.pathname,
+              report: reportMaterializedDocumentEvent,
+            },
         localPeerSync: localPeerSyncEnabled
           ? {
               channelName:

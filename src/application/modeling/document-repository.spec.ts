@@ -4,7 +4,14 @@ import {
   literalResolvedDefinition,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import { solveSketchDefinitionCore } from "@/core/sketch-solver";
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
+import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
+import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
+import { AutomergeChunkKeyRecorder } from "@/infrastructure/persistence/automerge-chunk-key-recorder";
+import {
+  SharedMemoryMaterializedDocumentStore,
+  SharedMemoryStorage,
+} from "@/infrastructure/persistence/shared-memory-automerge-storage.fixtures";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import {
   createAuthoredModelDocumentFromSnapshot,
@@ -323,6 +330,91 @@ for (const [name, make] of [
     ).toEqual(topology.edgeIds);
   });
 }
+
+// cadara-dx2k.17. Seam: the DocumentRepository contract of a reload answered
+// from the materialized-document cache, against a cold reload of the same
+// storage over the real automerge-repo Repo.
+test("Automerge with the materialized-document cache: a reload answers like a cold reload, then edits, undoes and reloads like one", async () => {
+  await initializeBase64Wasm(automergeWasmBase64);
+  const storage = new SharedMemoryStorage();
+  const cache = new SharedMemoryMaterializedDocumentStore();
+  const urlStore = new MemoryDocumentRepositoryUrlStore();
+  const repos: Repo[] = [];
+  const open = (withCache: boolean) => {
+    const recorder = new AutomergeChunkKeyRecorder(storage);
+    const repo = new Repo({ storage: recorder });
+    repos.push(repo);
+    return new IndexedDbAutomergeDocumentRepository({
+      repo: repo as unknown as AutomergeRepositoryLike,
+      chunkKeyRecorder: recorder,
+      urlStore,
+      assetStore: createMemoryGeometryAssetStore(),
+      materializedDocuments: withCache ? cache.options() : undefined,
+    });
+  };
+  try {
+    const seed = await createSeedAuthoredModelDocument();
+    const edited = { ...seed, name: "Edited before the reload" };
+    const writer = open(true);
+    await writer.load({ documentId: seed.documentId, seedDocument: seed });
+    const stored = await writer.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document: edited,
+    });
+    if (!stored.ok) throw new Error("write failed");
+    // Publications coalesce: the latest one is recorded.
+    await vi.waitFor(() =>
+      expect(
+        [...cache.records.values()].map(
+          (record) => (record as { document: { name: string } }).document.name,
+        ),
+      ).toEqual([edited.name]),
+    );
+
+    const cached = open(true);
+    const answered = await cached.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(cache.eventKinds().at(-1)).toBe("hit");
+    const cold = await open(false).load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    if (!answered.ok || !cold.ok) throw new Error("reload failed");
+    expect(answered.document).toEqual(cold.document);
+    expect(answered.status).toEqual(cold.status);
+    expect(answered.assetAvailability).toEqual(cold.assetAvailability);
+    expect({ ...answered.metadata, actorId: "" }).toEqual({
+      ...cold.metadata,
+      actorId: "",
+    });
+    expect(cached.getMetadata(seed.documentId)).toEqual(answered.metadata);
+    expect(answered.metadata.actorId).not.toBe("");
+
+    const renamed = await cached.mutate({
+      documentId: seed.documentId,
+      expected: answered.document,
+      document: { ...answered.document, name: "Edited after the reload" },
+    });
+    expect(renamed.ok && renamed.metadata.actorId).toBe(
+      answered.metadata.actorId,
+    );
+    expect(
+      (await cached.getDurableHistoryAvailability(seed.documentId)).canUndo,
+    ).toBe(true);
+    const undone = await cached.undoDurableHistory(seed.documentId);
+    expect(undone?.ok && undone.document).toEqual(answered.document);
+    const reloaded = await open(false).load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(reloaded.ok && reloaded.document).toEqual(answered.document);
+  } finally {
+    for (const repo of repos) repo.networkSubsystem.disconnect();
+  }
+});
 
 // cadara-yrt. Seam: the Automerge repository's transaction over the
 // AutomergeHandleLike port. Reading a value through Automerge's change proxy

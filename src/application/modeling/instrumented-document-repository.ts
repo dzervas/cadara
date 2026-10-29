@@ -60,6 +60,13 @@ export function createInstrumentedDocumentRepository<
           },
         }
       : {}),
+    ...(repository.settleLoad
+      ? {
+          settleLoad(documentId: DocumentId) {
+            repository.settleLoad!(documentId);
+          },
+        }
+      : {}),
     load(input) {
       return measure(
         "load",

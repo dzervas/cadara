@@ -3,7 +3,11 @@ import {
   storeGeometryAssetInputsForManifest,
 } from "@/application/modeling/geometry-asset-persistence";
 import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
-import { initializeWasm, Repo } from "@automerge/automerge-repo/slim";
+import {
+  initializeWasm,
+  parseAutomergeUrl,
+  Repo,
+} from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { getActorId, getMissingDeps } from "@automerge/automerge/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
@@ -51,6 +55,14 @@ import {
   MemoryDocumentRepositoryUrlStore,
   type DocumentRepositoryUrlStore,
 } from "./document-repository-url-store";
+import { AutomergeChunkKeyRecorder } from "./automerge-chunk-key-recorder";
+import {
+  MATERIALIZED_DOCUMENT_FORMAT,
+  parseMaterializedDocumentRecord,
+  type MaterializedDocumentEvent,
+  type MaterializedDocumentRecord,
+  type MaterializedDocumentStore,
+} from "./indexeddb-materialized-document-store";
 
 export interface AutomergeHandleLike<T> {
   readonly url: AutomergeUrl;
@@ -84,8 +96,38 @@ function prepare() {
   });
   return wasm;
 }
+/** What a load read from storage: a cache record that provably is the
+ * stored document, or the Automerge handle being loaded. */
+type StoredDocumentRead =
+  | { kind: "materialized"; record: MaterializedDocumentRecord }
+  | {
+      kind: "automerge";
+      handle: Promise<AutomergeHandleLike<CollaborativeDocument>>;
+    };
+
+function sameStrings(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+/** A fresh Automerge-style actor id (32 hex digits). */
+function createSessionActorId() {
+  return crypto.randomUUID().replaceAll("-", "");
+}
+
 export interface IndexedDbAutomergeDocumentRepositoryOptions {
   repo?: AutomergeRepositoryLike;
+  /** With `repo`: the recorder that repo stores through; the
+   * materialized-document cache needs it. Without `repo` the repository
+   * builds both over IndexedDB. */
+  chunkKeyRecorder?: AutomergeChunkKeyRecorder;
+  /** cadara-dx2k.17: answer reloads from the last published document while
+   * the stored chunk keys are those it was materialized from. */
+  materializedDocuments?: {
+    store: MaterializedDocumentStore;
+    /** This build's identity (see MaterializedDocumentRecord.compatibility). */
+    compatibility: string;
+    report(event: MaterializedDocumentEvent): void;
+  };
   urlStore?: DocumentRepositoryUrlStore;
   databaseName?: string;
   storeName?: string;
@@ -126,15 +168,38 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   /** Reads started by preload; the next load of the same URL takes its handle. */
   private readonly preloads = new Map<
     DocumentId,
+    { url: AutomergeUrl; read: Promise<StoredDocumentRead> }
+  >();
+  /**
+   * The actor id a load answered from the materialized-document cache
+   * reported before the Automerge handle (and its own actor) existed. It
+   * stays this session's reported actor until another handle replaces it,
+   * so provenance keyed by it does not change mid-session.
+   */
+  private readonly sessionActorIds = new Map<DocumentId, string>();
+  /** A stored copy that failed to load after the cache answered; writes refuse with it. */
+  private readonly materializedAnswerFailures = new Map<
+    DocumentId,
+    Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>
+  >();
+  /** Latest publication per document awaiting its cache record. */
+  private readonly pendingMaterializedWrites = new Map<
+    DocumentId,
     {
-      url: AutomergeUrl;
-      handle: Promise<AutomergeHandleLike<CollaborativeDocument>>;
+      handle: AutomergeHandleLike<CollaborativeDocument>;
+      document: AuthoredModelDocument;
+      heads: string[];
     }
   >();
+  private readonly materializedWriters = new Set<DocumentId>();
+  /** Starts the Automerge load queued behind a cached answer (see settleLoad). */
+  private readonly deferredLoads = new Map<DocumentId, () => void>();
+  private chunkKeyRecorder: AutomergeChunkKeyRecorder | null;
   private readonly options: IndexedDbAutomergeDocumentRepositoryOptions;
   constructor(options: IndexedDbAutomergeDocumentRepositoryOptions = {}) {
     this.options = options;
     this.repo = options.repo ?? null;
+    this.chunkKeyRecorder = options.chunkKeyRecorder ?? null;
     this.urlStore = options.urlStore ?? new MemoryDocumentRepositoryUrlStore();
     this.assetStore =
       options.assetStore ??
@@ -145,14 +210,22 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   getAutomergeRepository() {
     return this.getRepo();
   }
+  /** The recorder the repository's own Repo stores through; null for an injected Repo without one. */
+  private getChunkKeyRecorder() {
+    if (!this.chunkKeyRecorder && !this.options.repo)
+      this.chunkKeyRecorder = new AutomergeChunkKeyRecorder(
+        new IndexedDBStorageAdapter(
+          this.options.databaseName ?? "cad-authored-documents",
+          this.options.storeName ?? "documents",
+        ),
+      );
+    return this.chunkKeyRecorder;
+  }
   private async getRepo() {
     if (!this.repo) {
       await prepare();
       this.repo ??= new Repo({
-        storage: new IndexedDBStorageAdapter(
-          this.options.databaseName ?? "cad-authored-documents",
-          this.options.storeName ?? "documents",
-        ),
+        storage: this.getChunkKeyRecorder()!,
         network:
           this.options.localPeerSync && typeof BroadcastChannel !== "undefined"
             ? [
@@ -172,6 +245,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     documentId: DocumentId,
     action: () => Promise<T>,
   ): Promise<T> {
+    // A request queued behind a deferred Automerge load starts that load.
+    this.settleLoad(documentId);
     const previous = this.queues.get(documentId) ?? Promise.resolve();
     // A rejected operation is returned to its caller; it must not poison subsequent transactions.
     const next = previous.then(action, action);
@@ -182,12 +257,155 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const url = this.urlStore.get(documentId);
     if (!url || this.handles.has(documentId) || this.preloads.has(documentId))
       return;
-    const handle = this.getRepo().then((repo) =>
-      repo.find<CollaborativeDocument>(url),
+    const read = this.readStoredDocument(documentId, url);
+    // The load that takes this read awaits it and reports its failure.
+    read
+      .then((stored) =>
+        stored.kind === "automerge" ? stored.handle : undefined,
+      )
+      .catch(() => undefined);
+    this.preloads.set(documentId, { url, read });
+  }
+  /**
+   * The cache record when it provably is the stored document, otherwise
+   * the started Automerge load. The cache check reads no Automerge data, so
+   * a hit leaves the worker free to answer before the Automerge load.
+   */
+  private readStoredDocument(
+    documentId: DocumentId,
+    url: AutomergeUrl,
+  ): Promise<StoredDocumentRead> {
+    const load = (): StoredDocumentRead => ({
+      kind: "automerge",
+      handle: this.getRepo().then((repo) =>
+        repo.find<CollaborativeDocument>(url),
+      ),
+    });
+    if (!this.options.materializedDocuments || !this.getChunkKeyRecorder())
+      return Promise.resolve(load());
+    return this.readMaterializedDocument(documentId, url).then((record) =>
+      record ? { kind: "materialized", record } : load(),
     );
-    // The load that takes this handle awaits it and reports its failure.
-    handle.catch(() => undefined);
-    this.preloads.set(documentId, { url, handle });
+  }
+  private async readMaterializedDocument(
+    documentId: DocumentId,
+    url: AutomergeUrl,
+  ) {
+    const cache = this.options.materializedDocuments;
+    const recorder = this.getChunkKeyRecorder();
+    if (!cache || !recorder) return null;
+    try {
+      const [value, storedKeys] = await Promise.all([
+        cache.store.read(url),
+        recorder.storedChunkKeys(parseAutomergeUrl(url).documentId),
+      ]);
+      if (value === undefined) {
+        cache.report({ kind: "miss", automergeUrl: url, reason: "absent" });
+        return null;
+      }
+      const record = parseMaterializedDocumentRecord(value, {
+        compatibility: cache.compatibility,
+        automergeUrl: url,
+      });
+      if (typeof record === "string") {
+        cache.report({
+          kind: "degraded",
+          automergeUrl: url,
+          reason: `corrupt-entry: ${record}`,
+        });
+        return null;
+      }
+      // The Automerge load reports the mismatch with its usual reason.
+      if (record.document.documentId !== documentId) {
+        cache.report({
+          kind: "miss",
+          automergeUrl: url,
+          reason: "identity-mismatch",
+        });
+        return null;
+      }
+      // Another tab's write, a compaction, a reset or lost storage.
+      if (!sameStrings(storedKeys, record.chunkKeys)) {
+        cache.report({
+          kind: "miss",
+          automergeUrl: url,
+          reason: "chunk-keys-changed",
+        });
+        return null;
+      }
+      cache.report({ kind: "hit", automergeUrl: url });
+      return record;
+    } catch (error) {
+      cache.report({
+        kind: "degraded",
+        automergeUrl: url,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+  /**
+   * Awaits a stored document's handle and checks it is a complete document
+   * of this identity: the diagnostic when not.
+   */
+  private async openStoredHandle(
+    documentId: DocumentId,
+    url: AutomergeUrl,
+    found: Promise<AutomergeHandleLike<CollaborativeDocument>>,
+  ): Promise<
+    | { ok: true; handle: AutomergeHandleLike<CollaborativeDocument> }
+    | { ok: false; diagnostic: AuthoredModelDocumentDiagnostic }
+  > {
+    let handle: AutomergeHandleLike<CollaborativeDocument>;
+    try {
+      handle = await found;
+    } catch (error) {
+      // automerge-repo 2.5 reports missing chunks (and no peer holding
+      // them) only through this message.
+      if (
+        error instanceof Error &&
+        error.message === `Document ${url} is unavailable`
+      )
+        return {
+          ok: false,
+          diagnostic: {
+            reasonCode: "automerge-document-missing",
+            message:
+              "This browser no longer has its stored copy of the document, for example because site data was cleared. Reset stored history to start fresh.",
+          },
+        };
+      throw error;
+    }
+    await handle.whenReady();
+    const stored = handle.doc();
+    // cadara-rnsb (CADARA-14): changes whose base snapshot was deleted
+    // (another tab reset the document, then a tab still holding it
+    // wrote again) stay queued, so the document reads as empty.
+    if (
+      (!stored.format || !stored.authored) &&
+      getMissingDeps(stored, []).length > 0
+    )
+      return {
+        ok: false,
+        diagnostic: {
+          reasonCode: "automerge-document-incomplete",
+          message:
+            "The stored copy of this document is incomplete, typically because it was reset or cleared in another tab. Reset stored history to start fresh.",
+        },
+      };
+    const parsed = parseAuthoredModelDocument(
+      materializeCollaborativeDocument(stored),
+    );
+    if (!parsed.ok) return { ok: false, diagnostic: parsed.diagnostic };
+    if (parsed.document.documentId !== documentId)
+      return {
+        ok: false,
+        diagnostic: {
+          reasonCode: "identity-mismatch",
+          message: "Document identity does not match.",
+        },
+      };
+    return { ok: true, handle };
   }
   load(
     input: Parameters<DocumentRepository["load"]>[0],
@@ -195,57 +413,38 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     return this.enqueue(input.documentId, async () => {
       const preload = this.preloads.get(input.documentId);
       this.preloads.delete(input.documentId);
+      this.materializedAnswerFailures.delete(input.documentId);
       try {
-        const repo = await this.getRepo();
         // Never flushes a released handle's pending durability retry.
         this.releaseSupersededHandle(input.documentId);
         const existing = this.handles.get(input.documentId);
         const url = this.urlStore.get(input.documentId);
         if (!existing && !url)
           return this.seed(input.documentId, input.seedDocument);
-        let handle = existing;
-        if (!handle) {
-          try {
-            handle = await (preload?.url === url
-              ? preload.handle
-              : repo.find<CollaborativeDocument>(url!));
-          } catch (error) {
-            // automerge-repo 2.5 reports missing chunks (and no peer holding
-            // them) only through this message.
-            if (
-              error instanceof Error &&
-              error.message === `Document ${url} is unavailable`
-            )
-              return this.fail(input.documentId, {
-                reasonCode: "automerge-document-missing",
-                message:
-                  "This browser no longer has its stored copy of the document, for example because site data was cleared. Reset stored history to start fresh.",
-              });
-            throw error;
-          }
+        let found: Promise<AutomergeHandleLike<CollaborativeDocument>>;
+        if (existing) found = Promise.resolve(existing);
+        else {
+          const read = await (preload?.url === url
+            ? preload.read
+            : this.readStoredDocument(input.documentId, url!));
+          if (read.kind === "materialized")
+            return this.answerFromMaterializedDocument(
+              input.documentId,
+              url!,
+              read.record,
+            );
+          found = read.handle;
         }
-        await handle.whenReady();
-        const stored = handle.doc();
-        // cadara-rnsb (CADARA-14): changes whose base snapshot was deleted
-        // (another tab reset the document, then a tab still holding it
-        // wrote again) stay queued, so the document reads as empty.
-        if (
-          (!stored.format || !stored.authored) &&
-          getMissingDeps(stored, []).length > 0
-        )
-          return this.fail(input.documentId, {
-            reasonCode: "automerge-document-incomplete",
-            message:
-              "The stored copy of this document is incomplete, typically because it was reset or cleared in another tab. Reset stored history to start fresh.",
-          });
-        const document = materializeCollaborativeDocument(stored);
-        const parsed = parseAuthoredModelDocument(document);
-        if (!parsed.ok) return this.fail(input.documentId, parsed.diagnostic);
-        if (parsed.document.documentId !== input.documentId)
-          return this.fail(input.documentId, {
-            reasonCode: "identity-mismatch",
-            message: "Document identity does not match.",
-          });
+        const opened = await this.openStoredHandle(
+          input.documentId,
+          url ?? existing!.url,
+          found,
+        );
+        if (!opened.ok) return this.fail(input.documentId, opened.diagnostic);
+        const { handle } = opened;
+        // Another handle reports its own Automerge actor.
+        if (!existing) this.sessionActorIds.delete(input.documentId);
+        const repo = await this.getRepo();
         this.install(input.documentId, handle);
         // Explicit load retries unresolved durability, never merely relabels live state as restored.
         if (this.durabilityFailures.has(input.documentId)) {
@@ -306,6 +505,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     const handle = repo.create(createCollaborativeDocument(parsed.document));
     await handle.whenReady();
     await repo.flush?.([handle.documentId]);
+    this.materializedAnswerFailures.delete(documentId);
+    this.sessionActorIds.delete(documentId);
     this.install(documentId, handle);
     this.urlStore.set(documentId, handle.url);
     this.actions.set(documentId, new AuthoredActionHistory());
@@ -317,7 +518,9 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     return this.enqueue(input.documentId, async () => {
       if (this.releaseSupersededHandle(input.documentId))
         return this.superseded(input.documentId);
-      const unresolved = this.durabilityFailures.get(input.documentId);
+      const unresolved =
+        this.durabilityFailures.get(input.documentId) ??
+        this.materializedAnswerFailures.get(input.documentId);
       if (unresolved) return { ok: false, status: unresolved };
       const parsed = parseAuthoredModelDocument(
         structuredClone(input.document),
@@ -352,6 +555,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     actionSequence?: number,
   ): Promise<DocumentRepositoryMutationResult> {
     const handle = this.handles.get(documentId);
+    const failedAnswer = this.materializedAnswerFailures.get(documentId);
+    if (!handle && failedAnswer) return { ok: false, status: failedAnswer };
     if (!handle)
       return this.fail(documentId, {
         reasonCode: "document-not-initialized",
@@ -534,6 +739,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       return this.supersededDocuments.has(documentId);
     this.supersededDocuments.add(documentId);
     this.handles.delete(documentId);
+    this.sessionActorIds.delete(documentId);
     this.actions.delete(documentId);
     this.metadata.delete(documentId);
     this.publishedEvents.delete(documentId);
@@ -582,7 +788,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     this.publicationVersions.set(documentId, version);
     const snapshot = handle.doc();
     const heads = [...(handle.heads?.() ?? [])];
-    const actorId = getActorId(snapshot);
+    const actorId =
+      this.sessionActorIds.get(documentId) ?? getActorId(snapshot);
     const parsed = parseAuthoredModelDocument(
       materializeCollaborativeDocument(snapshot),
     );
@@ -611,35 +818,246 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       };
     }
     const unresolved = this.durabilityFailures.get(documentId);
-    const status = unresolved ?? {
-      kind: source === "seed" ? ("seeded" as const) : ("restored" as const),
+    const result = this.announce(
       documentId,
-    };
-    const metadata: DocumentRepositoryMetadata = {
-      actorId,
+      parsed.document,
+      assets,
+      {
+        actorId,
+        documentId,
+        heads,
+        source,
+        storageKey: handle.url,
+        assetAvailability: assets.availability,
+      },
+      unresolved,
+    );
+    if (unresolved)
+      return { ok: false, status: unresolved, appliedLive: result };
+    this.scheduleMaterializedDocumentWrite(
       documentId,
+      handle,
+      parsed.document,
       heads,
-      source,
-      storageKey: handle.url,
-      assetAvailability: assets.availability,
+    );
+    return result;
+  }
+  /** Records and broadcasts a publication; the announced result. */
+  private announce(
+    documentId: DocumentId,
+    document: AuthoredModelDocument,
+    assets: Awaited<ReturnType<typeof collectAssetAvailability>>,
+    metadata: DocumentRepositoryMetadata,
+    unresolved?: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>,
+  ) {
+    const status = unresolved ?? {
+      kind:
+        metadata.source === "seed"
+          ? ("seeded" as const)
+          : ("restored" as const),
+      documentId,
     };
     this.statuses.set(documentId, status);
     this.metadata.set(documentId, metadata);
-    const appliedLive = {
-      document: parsed.document,
+    const result = {
+      ok: true as const,
+      document,
       diagnostics: assets.diagnostics,
       assetAvailability: assets.availability,
       metadata,
-    };
-    const result = {
-      ok: true as const,
-      ...appliedLive,
       status,
     };
     this.publishedEvents.set(documentId, structuredClone(result));
     for (const listener of this.listeners.get(documentId) ?? [])
       listener(structuredClone(result));
-    return unresolved ? { ok: false, status: unresolved, appliedLive } : result;
+    return result;
+  }
+  /**
+   * cadara-dx2k.17: answers a load with a cache record whose chunk keys are
+   * the stored ones, and queues the Automerge load behind it, so every
+   * later request for the document (mutate, undo, redo, reset, load) runs
+   * once the handle is installed.
+   */
+  private async answerFromMaterializedDocument(
+    documentId: DocumentId,
+    url: AutomergeUrl,
+    record: MaterializedDocumentRecord,
+  ): Promise<DocumentRepositoryLoadResult> {
+    this.publicationVersions.set(
+      documentId,
+      (this.publicationVersions.get(documentId) ?? 0) + 1,
+    );
+    const assets = await collectAssetAvailability(
+      this.assetStore,
+      record.document.assets.records,
+    );
+    const actorId = createSessionActorId();
+    this.sessionActorIds.set(documentId, actorId);
+    this.supersededDocuments.delete(documentId);
+    const result = this.announce(documentId, record.document, assets, {
+      actorId,
+      documentId,
+      heads: [...record.heads],
+      source: "restore",
+      storageKey: url,
+      assetAvailability: assets.availability,
+    });
+    // The load waits for settleLoad or the next request for the document:
+    // its ~1 s of synchronous Automerge work on this worker would otherwise
+    // delay the open's later requests (normalizing the answer, restoring
+    // the file binding) by that much.
+    let start!: () => void;
+    const settled = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    void this.enqueue(documentId, async () => {
+      await settled;
+      await this.installAfterMaterializedAnswer(documentId, url, record.heads);
+    });
+    // Set after enqueueing, which starts any earlier deferred load.
+    this.deferredLoads.set(documentId, start);
+    return result;
+  }
+  settleLoad(documentId: DocumentId) {
+    const start = this.deferredLoads.get(documentId);
+    this.deferredLoads.delete(documentId);
+    start?.();
+  }
+  /**
+   * Loads the Automerge document a cached answer stood for. Equal heads are
+   * the answered document: nothing is published. Other heads (a write
+   * landed between the key check and this load, or a peer change merged
+   * during it) are published as a peer change. A failed load refuses later
+   * writes with the reason the load would have reported.
+   */
+  private async installAfterMaterializedAnswer(
+    documentId: DocumentId,
+    url: AutomergeUrl,
+    answeredHeads: readonly string[],
+  ) {
+    try {
+      const repo = await this.getRepo();
+      const opened = await this.openStoredHandle(
+        documentId,
+        url,
+        repo.find<CollaborativeDocument>(url),
+      );
+      // Another tab reset or replaced the document since the answer: this
+      // tab refuses writes as it does for a released handle.
+      if (this.urlStore.get(documentId) !== url) {
+        this.supersededDocuments.add(documentId);
+        this.sessionActorIds.delete(documentId);
+        return;
+      }
+      if (!opened.ok) {
+        this.materializedAnswerFailed(documentId, opened.diagnostic);
+        return;
+      }
+      const answered = this.publishedEvents.get(documentId);
+      this.install(documentId, opened.handle);
+      if (
+        answered &&
+        sameStrings([...(opened.handle.heads?.() ?? [])], answeredHeads)
+      ) {
+        this.publishedEvents.set(documentId, answered);
+        return;
+      }
+      await this.publish(documentId, opened.handle, "peer");
+    } catch (error) {
+      this.materializedAnswerFailed(documentId, {
+        reasonCode: "automerge-load-failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  private materializedAnswerFailed(
+    documentId: DocumentId,
+    diagnostic: AuthoredModelDocumentDiagnostic,
+  ) {
+    const status = { kind: "failed" as const, documentId, diagnostic };
+    this.materializedAnswerFailures.set(documentId, status);
+    this.statuses.set(documentId, status);
+    this.options.materializedDocuments?.report({
+      kind: "degraded",
+      automergeUrl: this.urlStore.get(documentId) ?? "",
+      reason: `stored-copy-failed-after-answer: ${diagnostic.reasonCode}`,
+    });
+  }
+  /** Records the publication off the request path; the latest one wins. */
+  private scheduleMaterializedDocumentWrite(
+    documentId: DocumentId,
+    handle: AutomergeHandleLike<CollaborativeDocument>,
+    document: AuthoredModelDocument,
+    heads: string[],
+  ) {
+    if (!this.options.materializedDocuments || !this.getChunkKeyRecorder())
+      return;
+    this.pendingMaterializedWrites.set(documentId, { handle, document, heads });
+    if (this.materializedWriters.has(documentId)) return;
+    this.materializedWriters.add(documentId);
+    void (async () => {
+      try {
+        for (;;) {
+          const pending = this.pendingMaterializedWrites.get(documentId);
+          if (!pending) return;
+          this.pendingMaterializedWrites.delete(documentId);
+          await this.writeMaterializedDocument(documentId, pending);
+        }
+      } finally {
+        this.materializedWriters.delete(documentId);
+      }
+    })();
+  }
+  /**
+   * Stores the record only when storage provably holds exactly the
+   * published document: after a flush, the handle is still at the published
+   * heads and the stored chunk keys are the ones the recorder holds (see
+   * AutomergeChunkKeyRecorder). Anything else skips; a failure is reported
+   * and leaves the next reload on the Automerge load.
+   */
+  private async writeMaterializedDocument(
+    documentId: DocumentId,
+    pending: {
+      handle: AutomergeHandleLike<CollaborativeDocument>;
+      document: AuthoredModelDocument;
+      heads: string[];
+    },
+  ) {
+    const cache = this.options.materializedDocuments!;
+    const recorder = this.getChunkKeyRecorder()!;
+    const { handle, document, heads } = pending;
+    const skip = (reason: string) =>
+      cache.report({ kind: "skipped", automergeUrl: handle.url, reason });
+    try {
+      const current = () =>
+        this.handles.get(documentId) === handle &&
+        !this.durabilityFailures.has(documentId) &&
+        sameStrings([...(handle.heads?.() ?? [])], heads);
+      if (!current() || heads.length === 0) return skip("superseded");
+      await (await this.getRepo()).flush?.([handle.documentId]);
+      if (!current()) return skip("superseded");
+      if (getMissingDeps(handle.doc(), []).length > 0)
+        return skip("missing-dependencies");
+      const chunkKeys = await recorder.storedChunkKeys(handle.documentId);
+      if (!current()) return skip("superseded");
+      if (!sameStrings(chunkKeys, recorder.heldChunkKeys(handle.documentId)))
+        return skip("storage-holds-other-chunks");
+      await cache.store.write({
+        format: MATERIALIZED_DOCUMENT_FORMAT,
+        compatibility: cache.compatibility,
+        automergeUrl: handle.url,
+        chunkKeys,
+        heads,
+        document,
+      });
+      cache.report({ kind: "stored", automergeUrl: handle.url });
+    } catch (error) {
+      cache.report({
+        kind: "degraded",
+        automergeUrl: handle.url,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   subscribe(
     documentId: DocumentId,
@@ -663,8 +1081,21 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       const unresolved = this.durabilityFailures.get(documentId);
       if (unresolved) return unresolved;
       const url = this.urlStore.get(documentId);
-      if (url) (await this.getRepo()).delete(url);
+      if (url) {
+        (await this.getRepo()).delete(url);
+        // The deleted chunks already invalidate the record; this frees it.
+        const cache = this.options.materializedDocuments;
+        cache?.store.remove(url).catch((error: unknown) =>
+          cache.report({
+            kind: "degraded",
+            automergeUrl: url,
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
       this.handles.delete(documentId);
+      this.sessionActorIds.delete(documentId);
+      this.materializedAnswerFailures.delete(documentId);
       this.actions.delete(documentId);
       this.urlStore.delete(documentId);
       const status = { kind: "reset" as const, documentId };
@@ -723,12 +1154,16 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     });
   }
   async getGeometryAssetBytes(hash: GeometryAssetHash) {
-    const record = [...this.handles.values()]
-      .flatMap(
+    const record = [
+      ...[...this.handles.values()].flatMap(
         (handle) =>
           materializeCollaborativeDocument(handle.doc()).assets.records,
-      )
-      .find((record) => record.hash === hash);
+      ),
+      // A load answered from the cache publishes before its handle exists.
+      ...[...this.publishedEvents.values()].flatMap(
+        (event) => event.document.assets.records,
+      ),
+    ].find((record) => record.hash === hash);
     return record ? this.getGeometryAssetRecord(record) : null;
   }
   async getGeometryAssetRecord(record: GeometryAssetRecord) {

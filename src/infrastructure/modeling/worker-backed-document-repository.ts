@@ -6,6 +6,7 @@ import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-hi
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/document-repository-url-store";
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
+import type { DocumentSyncNormalizeResult } from "@/infrastructure/workers/document-sync-worker-protocol";
 import type { LocalFileBindingMetadata } from "@/contracts/modeling/local-file-binding";
 import type {
   DocumentRepository,
@@ -49,16 +50,20 @@ export class WorkerBackedDocumentRepository
     });
   }
 
+  settleLoad(documentId: DocumentId) {
+    void this.client.settleLoad({ documentId });
+  }
+
   async load(
     input: Parameters<DocumentRepository["load"]>[0],
   ): Promise<DocumentRepositoryLoadResult> {
-    const result = await this.client.load({
+    const { result, normalized } = await this.client.load({
       ...input,
       storageKey: this.storageKey(input.documentId),
     });
     if (!result.ok) return this.normalizeFailure(result);
 
-    return this.normalizeResult(result);
+    return this.normalizeResult(result, normalized);
   }
 
   async initialize(
@@ -99,12 +104,14 @@ export class WorkerBackedDocumentRepository
     let unsubscribeWorker: (() => void) | null = null;
 
     void this.client
-      .subscribe(documentId, (event) => {
-        void this.normalizeEvent(event).then((normalized) => {
-          if (!disposed) {
-            listener(normalized);
-          }
-        });
+      .subscribe(documentId, (event, normalizedInWorker) => {
+        void this.normalizeEvent(event, normalizedInWorker).then(
+          (normalized) => {
+            if (!disposed) {
+              listener(normalized);
+            }
+          },
+        );
       })
       .then((unsubscribe) => {
         if (disposed) {
@@ -257,11 +264,13 @@ export class WorkerBackedDocumentRepository
       DocumentRepositoryLoadResult | DocumentRepositoryMutationResult,
       { ok: true }
     >,
-  >(result: T): Promise<T> {
-    const normalized = await this.client.normalize({
-      document: result.document,
-      metadata: result.metadata,
-    });
+  >(result: T, normalizedInWorker?: DocumentSyncNormalizeResult): Promise<T> {
+    const normalized =
+      normalizedInWorker ??
+      (await this.client.normalize({
+        document: result.document,
+        metadata: result.metadata,
+      }));
     const metadata = normalized.metadata;
     this.persistMetadata(metadata);
     this.statuses.set(result.status.documentId, result.status);
@@ -278,11 +287,14 @@ export class WorkerBackedDocumentRepository
 
   private async normalizeEvent(
     event: DocumentRepositoryChangeEvent,
+    normalizedInWorker?: DocumentSyncNormalizeResult,
   ): Promise<DocumentRepositoryChangeEvent> {
-    const normalized = await this.client.normalize({
-      document: event.document,
-      metadata: event.metadata,
-    });
+    const normalized =
+      normalizedInWorker ??
+      (await this.client.normalize({
+        document: event.document,
+        metadata: event.metadata,
+      }));
     this.persistMetadata(normalized.metadata);
     this.statuses.set(event.status.documentId, event.status);
     this.metadata.set(normalized.metadata.documentId, normalized.metadata);

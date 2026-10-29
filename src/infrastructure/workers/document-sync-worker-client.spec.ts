@@ -1134,10 +1134,14 @@ test("worker transport preserves candidate bases, conflict atomicity, actor iden
       document: { ...seed, name: "Stale", bodyLabels: [] },
     });
     expect(conflict.ok).toBe(false);
-    const current = await client.load({
+    const { result: current, normalized } = await client.load({
       documentId: seed.documentId,
       seedDocument: seed,
     });
+    expect(
+      normalized?.document,
+      "the worker normalizes a load result before posting it",
+    ).toEqual(current.ok && current.document);
     expect(current.ok && current.document.name).toBe(local.name);
     expect(current.ok && current.document.bodyLabels).toEqual(peer.bodyLabels);
     await client.initialize({ documentId: seed.documentId, document: seed });

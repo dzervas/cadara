@@ -263,6 +263,7 @@ export function createModelingService(
   let latestRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
   let restoredRepositoryEvent: DocumentRepositoryChangeEvent | null = null;
   let isRestoringRepositoryDocument = documentRepository !== null;
+  let repositoryLoadSettled = false;
   let disposed = false;
   let adapterDisposed = false;
   /** The viewport's tier; the adapter's snapshots start at "startup". */
@@ -1525,6 +1526,19 @@ export function createModelingService(
     await replayOperationHistoryPayload(loadResult.payload);
   }
 
+  /**
+   * cadara-dx2k.17: the first snapshot of the open is answered, so the
+   * repository may finish reading the stored copy now (a reload answered
+   * from its materialized-document cache defers that ~1 s Automerge load,
+   * which would otherwise delay the open's own repository requests). An
+   * edit made before the read finished waits for it.
+   */
+  function settleRepositoryLoadOnce() {
+    if (repositoryLoadSettled || !documentRepository) return;
+    repositoryLoadSettled = true;
+    documentRepository.settleLoad?.(currentDocumentId);
+  }
+
   async function restoreRepositoryBackedDocument() {
     // The seed comes from the kernel, whose first answer waits for its runtime
     // to boot; a stored document is read meanwhile (only a missing one needs
@@ -2170,6 +2184,7 @@ export function createModelingService(
           if (generation !== stateGeneration || changes !== repositoryChangePromise) continue;
           const snapshot = attachRepositoryProvenance(validateSnapshotResponse(response, currentDocumentId));
           if (historyRestoreState.kind !== "failed") initialLoadingStatus.set("ready");
+          settleRepositoryLoadOnce();
           return snapshot;
         }
       } catch (error) {

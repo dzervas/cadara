@@ -90,6 +90,11 @@ export interface DocumentRepository {
    * waiting for that read, so the load that follows overlaps it with
    * preparing its seed document. That load reports any failure of the read. */
   preload?(documentId: DocumentId): Promise<void>;
+  /** The open that loaded the document has shown it. A load answered
+   * before the stored copy was read in full (a materialized-document cache)
+   * reads it now; until then, any later request for the document reads it
+   * first, so it waits for that read instead. */
+  settleLoad?(documentId: DocumentId): void;
   /** Also explicitly retries unresolved durability in the current editing session. */
   load(input: {
     documentId: DocumentId;

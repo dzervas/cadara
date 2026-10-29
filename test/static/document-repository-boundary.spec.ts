@@ -24,6 +24,12 @@ test("test/static/document-repository-boundary.spec.ts", () => {
       ) &&
       !relativePath.includes(
         "src/infrastructure/persistence/local-project-repository.ts",
+      ) &&
+      !relativePath.includes(
+        "src/infrastructure/persistence/automerge-chunk-key-recorder.ts",
+      ) &&
+      !relativePath.includes(
+        "src/infrastructure/persistence/shared-memory-automerge-storage.fixtures.ts",
       )
     ) {
       offenders.push(relativePath);

@@ -14,9 +14,6 @@ import {
   initializeBase64Wasm,
   Repo,
   type AutomergeUrl,
-  type Chunk,
-  type StorageAdapterInterface,
-  type StorageKey,
 } from "@automerge/automerge-repo/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
@@ -31,42 +28,7 @@ import {
   MemoryDocumentRepositoryUrlStore,
   type AutomergeRepositoryLike,
 } from "./indexeddb-automerge-document-repository";
-
-/** One shared key space, like the single IndexedDB database all tabs open. */
-class SharedMemoryStorage implements StorageAdapterInterface {
-  readonly chunks = new Map<string, { key: StorageKey; data: Uint8Array }>();
-  async load(key: StorageKey) {
-    return this.chunks.get(key.join("/"))?.data;
-  }
-  async save(key: StorageKey, data: Uint8Array) {
-    this.chunks.set(key.join("/"), { key, data });
-  }
-  async remove(key: StorageKey) {
-    this.chunks.delete(key.join("/"));
-  }
-  async loadRange(prefix: StorageKey): Promise<Chunk[]> {
-    return [...this.chunks.values()]
-      .filter(({ key }) => prefix.every((part, index) => key[index] === part))
-      .map(({ key, data }) => ({ key, data }));
-  }
-  async removeRange(prefix: StorageKey) {
-    for (const chunk of await this.loadRange(prefix))
-      this.chunks.delete(chunk.key.join("/"));
-  }
-  documentChunkKeys(url: AutomergeUrl) {
-    const documentId = url.slice("automerge:".length);
-    return [...this.chunks.keys()]
-      .filter((key) => key.startsWith(documentId))
-      .sort();
-  }
-  documentChunkKinds(url: AutomergeUrl) {
-    const documentId = url.slice("automerge:".length);
-    return [...this.chunks.values()]
-      .filter(({ key }) => key[0] === documentId)
-      .map(({ key }) => key[1])
-      .sort();
-  }
-}
+import { SharedMemoryStorage } from "./shared-memory-automerge-storage.fixtures";
 
 const repos: Repo[] = [];
 // Repo.shutdown() flushes every cached handle and throws on unavailable ones.
