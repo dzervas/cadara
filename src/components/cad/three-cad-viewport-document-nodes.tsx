@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { PickBvhGroup } from "@/components/cad/three-cad-viewport-inner-components";
 import {
   getDocumentRenderableMaterialOptions,
   placeFlatPointMarker,
@@ -25,6 +26,37 @@ import {
   type RenderableMaterialDisplayOptions,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+
+/**
+ * The document's half of the viewport pick root. It keeps its mounted nodes
+ * across snapshots: a face whose geometry survives keeps its mesh, outline
+ * and BVH, and a new or re-triangulated face gets its BVH after the frame
+ * (`PickBvhGroup`). Memoized: its props change with the document, not on
+ * the viewport's hover and drag re-renders, so the pick group's walk over
+ * the document meshes runs only when the document changes.
+ */
+export const DocumentPickLayer = memo(function DocumentPickLayer({
+  renderables,
+  palette,
+  clippingPlane,
+}: {
+  renderables: readonly ViewportRenderableRecord[];
+  palette: SketchRenderingPalette;
+  clippingPlane: THREE.Plane | null;
+}) {
+  return (
+    <PickBvhGroup>
+      {renderables.map((entry) => (
+        <DocumentRenderableNode
+          key={`${entry.origin}:${entry.renderable.id}`}
+          entry={entry}
+          palette={palette}
+          clippingPlane={clippingPlane}
+        />
+      ))}
+    </PickBvhGroup>
+  );
+});
 
 // Memoized: the viewport re-renders on every sketch drag move and hover,
 // while a document renderable record keeps its identity until the document,

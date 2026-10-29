@@ -22,6 +22,7 @@ import {
   MARKER_SPHERE_GEOMETRY,
   getVisibleMarkerRadius,
 } from "@/infrastructure/viewport/render-picking";
+import { createDeferredMeshBvhBuilder } from "@/infrastructure/viewport/deferred-mesh-bvh";
 import { createViewportCameraTransitionController } from "@/infrastructure/viewport/viewport-camera-transition";
 import type { ViewportCameraControls } from "@/infrastructure/viewport/viewport-camera-controls";
 import {
@@ -625,4 +626,24 @@ export function ViewportPickRoot({
   }, [commitToken]);
 
   return <group ref={rootRef}>{children}</group>;
+}
+
+/**
+ * A pick layer whose meshes get their picking BVH after the frame that
+ * mounted them (`createDeferredMeshBvhBuilder`; picking falls back to the
+ * brute-force raycast until then). It never remounts its children: a mesh
+ * whose geometry object survives a snapshot keeps its tree, and a new or
+ * changed geometry is queued at the commit that brought it.
+ */
+export function PickBvhGroup({ children }: { children: ReactNode }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const builder = useMemo(() => createDeferredMeshBvhBuilder(), []);
+
+  // Every commit: a child may have mounted a mesh or swapped its geometry.
+  useEffect(() => {
+    if (groupRef.current) builder.indexMeshesUnder(groupRef.current);
+  });
+  useEffect(() => () => builder.cancel(), [builder]);
+
+  return <group ref={groupRef}>{children}</group>;
 }

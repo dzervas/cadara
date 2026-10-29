@@ -754,3 +754,58 @@ test("snapshot normalization validates meshes and keeps an exact valid mesh's id
     "Mesh triangle indices must reference existing vertex positions.",
   );
 });
+
+// The snapshot boundary rejects an edge polyline that repeats a point in a
+// row (also as -0 against 0, which print alike) and accepts a point that
+// only recurs later.
+test("snapshot normalization rejects consecutive duplicate polyline points only", async () => {
+  const adapter = new MockKernelAdapter();
+  const workspace = (
+    await adapter.getDocumentSnapshot({
+      contractVersion: CONTRACT_VERSION,
+      documentId: "doc_workspace",
+    })
+  ).snapshot;
+  const polylineIndex = workspace.document.render.records.findIndex(
+    (record) =>
+      record.geometry.kind === "polyline" && !record.geometry.isClosed,
+  );
+  expect(
+    polylineIndex,
+    "premise: an open polyline record",
+  ).toBeGreaterThanOrEqual(0);
+  const withPoints = (points: [number, number, number][]) => {
+    const forged = structuredClone(workspace);
+    const geometry = forged.document.render.records[polylineIndex]!.geometry;
+    if (geometry.kind !== "polyline") throw new Error("Expected a polyline.");
+    geometry.points = points;
+    return forged;
+  };
+
+  expect(() =>
+    normalizeWorkspaceSnapshot(
+      withPoints([
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 0, 0],
+      ]),
+    ),
+  ).not.toThrow();
+  expect(() =>
+    normalizeWorkspaceSnapshot(
+      withPoints([
+        [0, 0, 0],
+        [1, 2, 3],
+        [1, 2, 3],
+      ]),
+    ),
+  ).toThrow("Polyline points must not contain consecutive duplicates.");
+  expect(() =>
+    normalizeWorkspaceSnapshot(
+      withPoints([
+        [1, -0, 0],
+        [1, 0, 0],
+      ]),
+    ),
+  ).toThrow("Polyline points must not contain consecutive duplicates.");
+});

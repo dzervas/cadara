@@ -1337,8 +1337,7 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
             throw new Error("Closed polylines must contain at least 3 points.");
           }
 
-          let previousPointKey: string | null = null;
-          const distinctPointKeys = new Set<string>();
+          let previousPoint: readonly number[] | null = null;
 
           return {
             kind: "polyline" as const,
@@ -1351,16 +1350,18 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
                 throw new Error("Invalid polyline point payload.");
               }
 
-              const pointKey = `${point[0]}:${point[1]}:${point[2]}`;
-
-              if (previousPointKey === pointKey) {
+              if (
+                previousPoint !== null &&
+                samePolylineCoordinate(previousPoint[0]!, point[0]) &&
+                samePolylineCoordinate(previousPoint[1]!, point[1]) &&
+                samePolylineCoordinate(previousPoint[2]!, point[2])
+              ) {
                 throw new Error(
                   "Polyline points must not contain consecutive duplicates.",
                 );
               }
 
-              previousPointKey = pointKey;
-              distinctPointKeys.add(pointKey);
+              previousPoint = point;
 
               return point as [number, number, number];
             }),
@@ -1584,6 +1585,16 @@ export function normalizeRenderables(value: unknown): RenderableEntityRecord[] {
   });
 }
 
+/**
+ * Equal as their string forms are (the closed-polyline check below compares
+ * those): -0 equals 0 and NaN equals NaN. Comparing numbers instead of
+ * building a string key per point keeps edge polylines cheap on the
+ * snapshot-delivering frame.
+ */
+function samePolylineCoordinate(left: number, right: number) {
+  return left === right || (left !== left && right !== right);
+}
+
 export function normalizeRenderExport(value: unknown): RenderExport {
   if (!isRecord(value) || value.schemaVersion !== "render-export/v1alpha1") {
     throw new Error("Invalid render export payload.");
@@ -1654,8 +1665,14 @@ export function normalizeEntities(value: unknown): SnapshotEntityRecord[] {
 export function normalizeKernelDocumentSnapshot(
   value: unknown,
 ): KernelDocumentSnapshot {
-  const parsed = requireKernelDocumentSnapshot(value);
+  return normalizeValidatedKernelDocumentSnapshot(
+    requireKernelDocumentSnapshot(value),
+  );
+}
 
+function normalizeValidatedKernelDocumentSnapshot(
+  parsed: KernelDocumentSnapshot,
+): KernelDocumentSnapshot {
   return {
     ...parsed,
     settings: normalizeModelingDocumentSettings(parsed.settings),
@@ -1665,13 +1682,22 @@ export function normalizeKernelDocumentSnapshot(
 }
 
 export function normalizeWorkspaceSnapshot(value: unknown): WorkspaceSnapshot {
-  const parsed = parseWorkspaceSnapshot(value);
-  const document = normalizeKernelDocumentSnapshot(parsed.document);
-  const presentation = normalizeDocumentPresentation(parsed.presentation);
+  return normalizeValidatedWorkspaceSnapshot(parseWorkspaceSnapshot(value));
+}
 
+/**
+ * Normalizes a snapshot that already passed the exact `WorkspaceSnapshot`
+ * contract (structure and document invariants), for instance as part of
+ * a validated response envelope. The contract is not run again: the
+ * snapshot is the largest payload on the main thread and each Typia pass
+ * over it cost 5-10 ms of the delivering frame.
+ */
+export function normalizeValidatedWorkspaceSnapshot(
+  parsed: WorkspaceSnapshot,
+): WorkspaceSnapshot {
   return {
     ...parsed,
-    document,
-    presentation,
+    document: normalizeValidatedKernelDocumentSnapshot(parsed.document),
+    presentation: normalizeDocumentPresentation(parsed.presentation),
   };
 }

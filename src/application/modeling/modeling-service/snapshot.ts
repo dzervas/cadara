@@ -58,7 +58,7 @@ import type {
   ModelingExportDocumentResult,
 } from "./types";
 import { CONTRACT_VERSION, SNAPSHOT_SCHEMA_VERSION } from "./helpers";
-import { normalizeWorkspaceSnapshot } from "../../../core/modeling/modeling-service/normalization";
+import { normalizeValidatedWorkspaceSnapshot } from "../../../core/modeling/modeling-service/normalization";
 
 export function buildDocumentRequest(
   documentId: WorkspaceSnapshot["document"]["documentId"],
@@ -113,7 +113,7 @@ export function validateSnapshotResponse(
     expectedDocumentId,
     "Snapshot",
   );
-  return normalizeWorkspaceSnapshot(parsed.snapshot);
+  return normalizeValidatedWorkspaceSnapshot(parsed.snapshot);
 }
 
 export function formatValidationIssues(

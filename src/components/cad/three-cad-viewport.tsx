@@ -19,7 +19,7 @@ import {
   noopPerformanceTelemetry,
   type PerformanceTelemetry,
 } from "@/contracts/performance/telemetry";
-import { Bvh, OrbitControls } from "@react-three/drei";
+import { OrbitControls } from "@react-three/drei";
 import { flushViewportCameraDamping } from "@/infrastructure/viewport/viewport-camera-damping";
 import {
   useCallback,
@@ -64,7 +64,7 @@ import {
   resolveViewCubePresetId,
   updateViewCubeVisibility,
 } from "@/components/cad/three-cad-viewport-view-cube";
-import { DocumentRenderableNode } from "@/components/cad/three-cad-viewport-document-nodes";
+import { DocumentPickLayer } from "@/components/cad/three-cad-viewport-document-nodes";
 import { ViewportInitialCameraFraming } from "@/components/cad/viewport-initial-camera-framing";
 import { SketchDisplayBvhLayer } from "@/components/cad/three-cad-viewport-sketch-nodes";
 import {
@@ -4094,25 +4094,16 @@ function ThreeCadViewportScene({
           hasNonEmptyGeometry={hasNonEmptyCommittedGeometry}
           onReady={() => firstNonEmptyGeometryFrameRef.current?.()}
         />
-        {/* `Bvh` indexes the meshes it holds when it mounts, so each half
-            remounts when its own meshes change, the document half not on a
-            sketch session change, the sketch half not on a pick target
-            change. */}
         <ViewportPickRoot
           rootRef={pickRootRef}
           commitToken={pickRootCommitToken}
           onCommit={handlePickRootCommit}
         >
-          <Bvh key={`document:${documentBvhSceneKey}`} enabled>
-            {renderables.map((entry) => (
-              <DocumentRenderableNode
-                key={`${entry.origin}:${entry.renderable.id}`}
-                entry={entry}
-                palette={sketchRenderingPalette}
-                clippingPlane={activeSectionClippingPlane}
-              />
-            ))}
-          </Bvh>
+          <DocumentPickLayer
+            renderables={renderables}
+            palette={sketchRenderingPalette}
+            clippingPlane={activeSectionClippingPlane}
+          />
           <SketchDisplayBvhLayer
             renderables={sketchDisplayRenderables}
             applyStyles={sketchDisplayStylesEnabled}

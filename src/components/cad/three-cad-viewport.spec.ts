@@ -17,7 +17,6 @@ import {
   combineViewportBvhSceneKeys,
   createDocumentBvhSceneKey,
   createRenderIdleTracker,
-  createSketchDisplayBvhMountKey,
   createSketchDisplayBvhSceneKey,
   createViewportBvhSceneKey,
   createViewportInvalidationKey,
@@ -1799,9 +1798,8 @@ test.each([0.016, 0.8, 5])(
 );
 
 test("the document BVH key ignores the sketch session: a region going stale at drag start keeps it", () => {
-  // The viewport keys the document meshes' BVH subtree on the document half
-  // alone; keying it on the whole scene key remounted (and re-indexed) every
-  // document mesh when a drag started or ended.
+  // The document half of the scene key does not follow the sketch session:
+  // a drag start or end only changes the sketch half.
   const document = [
     {
       origin: "document",
@@ -1864,32 +1862,4 @@ test("the document BVH key ignores the sketch session: a region going stale at d
   expect(combineViewportBvhSceneKeys("", "")).toBe(
     createViewportBvhSceneKey([], []),
   );
-  // The sketch half's `Bvh` does not remount for the stale fill (its node
-  // unbinds the mounted mesh instead); a structural change still remounts it.
-  expect(
-    createSketchDisplayBvhMountKey([staleRegion]),
-    "the sketch BVH mount key ignores the pick target",
-  ).toBe(createSketchDisplayBvhMountKey([region]));
-  expect(
-    createSketchDisplayBvhMountKey([
-      {
-        ...region,
-        geometry: {
-          kind: "mesh",
-          vertexPositions: [
-            [0, 0, 0],
-            [1, 0, 0],
-            [1, 1, 0],
-            [0, 1, 0],
-          ],
-          vertexNormals: null,
-          triangleIndices: [
-            [0, 1, 2],
-            [0, 2, 3],
-          ],
-        },
-      } as never,
-    ]),
-    "a re-triangulated fill remounts the sketch BVH",
-  ).not.toBe(createSketchDisplayBvhMountKey([region]));
 });

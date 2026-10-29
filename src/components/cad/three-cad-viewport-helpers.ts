@@ -261,10 +261,9 @@ export function combineViewportBvhSceneKeys(
 }
 
 /**
- * The document half of `createViewportBvhSceneKey`. The viewport keys the
- * document meshes' BVH subtree on it alone, so a sketch session change (a
- * region going stale when a drag starts) does not remount and re-index every
- * document mesh.
+ * The document half of `createViewportBvhSceneKey`: each document
+ * renderable's pick id and geometry, so the cached pick bindings and the
+ * render-idle proof follow a document change.
  */
 export function createDocumentBvhSceneKey(
   renderables: readonly ViewportRenderableRecord[],
@@ -292,18 +291,6 @@ export function createSketchDisplayBvhSceneKey(
       ].join(":"),
     )
     .join("|");
-}
-
-/**
- * The key the sketch session's `Bvh` subtree remounts on: the display
- * structure only. A renderable that only gains or loses its pick target (a
- * region fill going stale when a drag starts, current again after it) keeps
- * its mounted object, and its node rebinds that object for picking.
- */
-export function createSketchDisplayBvhMountKey(
-  sketchDisplayRenderables: readonly SketchSessionDisplayRenderable[],
-) {
-  return sketchDisplayRenderables.map(getSketchDisplayStructureToken).join("|");
 }
 
 function getSketchDisplayStructureToken(

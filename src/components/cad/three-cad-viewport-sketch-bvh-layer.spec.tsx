@@ -6,17 +6,21 @@
  * a drag starts the region fills go stale (no pick target); the layer keeps
  * the mounted objects and their BVH instead of remounting the sketch half,
  * and the stale fill is no longer pickable nor highlightable. It is pickable
- * again once current.
+ * again once current. A re-triangulated fill keeps the layer mounted and gets
+ * its BVH after the commit.
  */
 import { act } from "@react-three/fiber";
 import { createRef } from "react";
 import * as THREE from "three";
-import { expect, test } from "vitest";
+import { expect, onTestFinished, test } from "vitest";
 import { createRenderMeshGeometry } from "@/contracts/render/render-mesh-geometry";
 
 import type { SketchMarkerDisplayContext } from "@/components/cad/sketch-display-style";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
-import { createStubR3fRoot } from "@/components/cad/r3f-stub-root.fixtures";
+import {
+  createStubR3fRoot,
+  installManualIdleCallbacks,
+} from "@/components/cad/r3f-stub-root.fixtures";
 import { ViewportPickRoot } from "@/components/cad/three-cad-viewport-inner-components";
 import { SketchDisplayBvhLayer } from "@/components/cad/three-cad-viewport-sketch-nodes";
 import type { SketchSessionDisplayRenderable } from "@/core/editor/sketch-session";
@@ -70,6 +74,8 @@ function region(
 }
 
 test("a region fill going stale is unbound from picking without remounting the sketch BVH; current again, it is pickable", async () => {
+  const idle = installManualIdleCallbacks();
+  onTestFinished(() => idle.restore());
   const root = await createStubR3fRoot();
   const rootRef = createRef<THREE.Group>();
   const commits: ReturnType<typeof collectBindings>[] = [];
@@ -144,10 +150,19 @@ test("a region fill going stale is unbound from picking without remounting the s
       }),
     ),
   ]);
-  expect(bvhGroup(), "a re-triangulated fill remounts the sketch BVH").not.toBe(
+  expect(bvhGroup(), "a re-triangulated fill keeps the sketch layer").toBe(
     mountedBvh,
   );
   expect(commits.at(-1)?.pickables).toContain(fillMesh());
+  const retriangulated = fillMesh().geometry as THREE.BufferGeometry & {
+    boundsTree?: unknown;
+  };
+  expect(
+    retriangulated.boundsTree,
+    "the new fill geometry is indexed after the frame, not at the commit",
+  ).toBeUndefined();
+  await act(async () => idle.runIdlePeriods());
+  expect(retriangulated.boundsTree).toBeTruthy();
   await act(async () => root.unmount());
 });
 
