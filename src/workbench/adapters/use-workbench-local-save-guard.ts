@@ -5,6 +5,7 @@ import {
   LocalSaveGuard,
   type LocalSaveGuardSource,
   type LocalSaveNotice,
+  type PendingLocalWrites,
 } from "@/application/workspace/local-save-guard";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 
@@ -15,13 +16,21 @@ export const LOCAL_SAVE_PENDING_MESSAGE =
 export function useWorkbenchLocalSaveGuard({
   source,
   errorReporter,
+  pendingWrites,
 }: {
   source: LocalSaveGuardSource;
   errorReporter: ErrorReporter;
+  pendingWrites?: PendingLocalWrites;
 }): WorkbenchNotificationModel | null {
   const guard = useMemo(
-    () => new LocalSaveGuard({ source, reporter: errorReporter, target: window }),
-    [errorReporter, source],
+    () =>
+      new LocalSaveGuard({
+        source,
+        pendingWrites,
+        reporter: errorReporter,
+        target: window,
+      }),
+    [errorReporter, source, pendingWrites],
   );
   useEffect(() => guard.start(), [guard]);
   const subscribe = useCallback(

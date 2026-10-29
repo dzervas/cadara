@@ -142,6 +142,9 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
         databaseName: `${options.databaseName ?? "cad-authored-documents"}-geometry-assets`,
       });
   }
+  getAutomergeRepository() {
+    return this.getRepo();
+  }
   private async getRepo() {
     if (!this.repo) {
       await prepare();

@@ -21,6 +21,9 @@ test("test/static/document-repository-boundary.spec.ts", () => {
       ) &&
       !relativePath.includes(
         "src/infrastructure/persistence/document-repository-url-store.ts",
+      ) &&
+      !relativePath.includes(
+        "src/infrastructure/persistence/local-project-repository.ts",
       )
     ) {
       offenders.push(relativePath);

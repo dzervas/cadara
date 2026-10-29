@@ -14,6 +14,30 @@ export interface LocalSaveGuardSource extends LocalSaveStatusSource {
   getLocalSaveFailures(): readonly LocalSaveFailure[];
 }
 
+/** Pending project manifest writes share the document guard without inventing a document failure. */
+export class PendingLocalWrites {
+  private count = 0;
+  private readonly listeners = new Set<() => void>();
+
+  getPendingWriteCount() {
+    return this.count;
+  }
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  begin() {
+    this.count++;
+    for (const listener of this.listeners) listener();
+    return () => {
+      this.count--;
+      for (const listener of this.listeners) listener();
+    };
+  }
+}
+
 export interface LeaveAttemptEvent {
   preventDefault(): void;
   returnValue: unknown;
@@ -51,6 +75,7 @@ const NO_NOTICE: LocalSaveNotice = { kind: "none" };
 export class LocalSaveGuard {
   private readonly source: LocalSaveGuardSource;
   private readonly reporter: ErrorReporter;
+  private readonly pendingWrites?: PendingLocalWrites;
   private readonly target: LeaveGuardTarget;
   private readonly noticeListeners = new Set<() => void>();
   private notice: LocalSaveNotice = NO_NOTICE;
@@ -61,10 +86,12 @@ export class LocalSaveGuard {
 
   constructor(input: {
     source: LocalSaveGuardSource;
+    pendingWrites?: PendingLocalWrites;
     reporter: ErrorReporter;
     target: LeaveGuardTarget;
   }) {
     this.source = input.source;
+    this.pendingWrites = input.pendingWrites;
     this.reporter = input.reporter;
     this.target = input.target;
   }
@@ -74,9 +101,13 @@ export class LocalSaveGuard {
     const unsubscribe = this.source.subscribeToLocalSaveStatus(() =>
       this.update(),
     );
+    const unsubscribePending = this.pendingWrites?.subscribe(() =>
+      this.update(),
+    );
     this.update();
     return () => {
       unsubscribe();
+      unsubscribePending?.();
       this.setListening(false);
     };
   }
@@ -108,7 +139,10 @@ export class LocalSaveGuard {
   };
 
   private update() {
-    const { saving, failure } = this.source.getLocalSaveStatus();
+    const status = this.source.getLocalSaveStatus();
+    const saving =
+      status.saving || (this.pendingWrites?.getPendingWriteCount() ?? 0) > 0;
+    const failure = status.failure;
     const unsaved = failure?.target === "repository" ? failure : null;
     this.setListening(saving || unsaved !== null);
     if (!saving && unsaved === null) this.leaveBlocked = false;

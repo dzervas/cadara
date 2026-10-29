@@ -1,5 +1,16 @@
 // SLOP: Retained workbench session host while provider composition and document-tab persistence are separated from browser app bootstrap.
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
+
+import { Alert } from "@mantine/core";
+import { ProjectSwitcher } from "@/components/layout/project-switcher";
+import { useWorkbenchProject } from "./use-workbench-project";
 
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
@@ -13,14 +24,13 @@ import { createInstrumentedModelingService } from "@/application/modeling/modeli
 import { isLocalFileSyncDocumentRepository } from "@/core/modeling/document-repository";
 import { createInstrumentedDocumentRepository } from "@/application/modeling/instrumented-document-repository";
 import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-constraint-solver-adapter";
 import { getBrowserSketchRegionDerivation } from "@/infrastructure/occ/sketch-derivation-worker-runtime";
 import { createInstrumentedSketchSolverAdapter } from "@/application/solver/instrumented-sketch-solver-adapter";
 import {
-  createInitialWorkbenchTabsState,
   reduceWorkbenchTabs,
   type WorkbenchTab,
+  type WorkbenchTabsAction,
   type WorkbenchTabsState,
 } from "@/core/workspace/workbench-tabs";
 import { EditorProvider } from "@/hooks/editor-provider";
@@ -82,20 +92,44 @@ interface WorkbenchAppProps {
   runtimeExtensionRegistries: RuntimeExtensionRegistryComposition;
 }
 
-export function WorkbenchApp({
+export function WorkbenchApp(props: WorkbenchAppProps) {
+  const projects = useWorkbenchProject();
+  if (projects.initialFailure)
+    return (
+      <Alert color="red" title="Project could not be opened">
+        {projects.failure ?? "Invalid stored project session."}
+      </Alert>
+    );
+  return (
+    <ProjectWorkbenchApp
+      key={projects.sessionKey}
+      {...props}
+      projects={projects}
+    />
+  );
+}
+
+function ProjectWorkbenchApp({
   createKernelAdapter,
   documentSyncWorkerClient,
   releaseDocumentResources,
   performanceTelemetry = noopPerformanceTelemetry,
   runtimeExtensionRegistries,
-}: WorkbenchAppProps) {
+  projects,
+}: WorkbenchAppProps & { projects: ReturnType<typeof useWorkbenchProject> }) {
   const errorReporter = useErrorReporter();
+  const project = projects.project;
+  const { saveParts, saveSession } = projects;
+  const [projectApplied, setProjectApplied] = useState(project !== null);
   const tabsStorage = useMemo(
     () =>
-      typeof window === "undefined"
+      !project
         ? null
-        : createLocalStorageWorkbenchTabsStore(window.localStorage),
-    [],
+        : createLocalStorageWorkbenchTabsStore(
+            window.localStorage,
+            `cad.workbench.tabs.project.v1:${project.projectId}`,
+          ),
+    [project],
   );
   const documentRepository = useMemo(() => {
     if (typeof window === "undefined" || !documentSyncWorkerClient) {
@@ -115,21 +149,45 @@ export function WorkbenchApp({
       performanceTelemetry,
     );
   }, [documentSyncWorkerClient, performanceTelemetry]);
+  const projectTabs = useCallback((): WorkbenchTabsState => {
+    if (!project) return projects.initialTabs;
+    const cached = tabsStorage?.load();
+    const tabs = project.entries
+      .filter((entry) => entry.kind === "part")
+      .map((entry) => ({
+        ...createDefaultWorkbenchTab(entry.docId),
+        ...(cached?.ok
+          ? cached.state?.tabs.find((tab) => tab.documentId === entry.docId)
+          : undefined),
+        title: entry.name,
+      }));
+    const active = cached?.ok
+      ? cached.state?.activeDocumentId
+      : projects.initialTabs.activeDocumentId;
+    return {
+      tabs,
+      activeDocumentId:
+        tabs.find((tab) => tab.documentId === active)?.documentId ??
+        tabs[0].documentId,
+    };
+  }, [project, projects.initialTabs, tabsStorage]);
   const [tabsState, tabsDispatch] = useReducer(
-    reduceWorkbenchTabs,
+    (
+      state: WorkbenchTabsState,
+      action:
+        | WorkbenchTabsAction
+        | { type: "restoreProject"; state: WorkbenchTabsState },
+    ) =>
+      action.type === "restoreProject"
+        ? action.state
+        : reduceWorkbenchTabs(state, action),
     undefined,
-    (): WorkbenchTabsState => {
-      const fallback = createInitialWorkbenchTabsState(
-        createDefaultWorkbenchTab(OCC_KERNEL_DOCUMENT_ID),
-      );
-      if (!tabsStorage) {
-        return fallback;
-      }
-
-      const result = tabsStorage.load();
-      return result.ok && result.state ? result.state : fallback;
-    },
+    projectTabs,
   );
+  if (project && !projectApplied) {
+    tabsDispatch({ type: "restoreProject", state: projectTabs() });
+    setProjectApplied(true);
+  }
   const restoredBindingDocumentIdsRef = useRef(new Set<DocumentId>());
   const editorDependencies = useMemo(
     () => ({
@@ -192,6 +250,7 @@ export function WorkbenchApp({
   );
   const localSaveNotification = useWorkbenchLocalSaveGuard({
     source: modelingServices,
+    pendingWrites: projects.pendingWrites,
     errorReporter,
   });
   const localSaving = useLocalSaveStatus(modelingServices).saving;
@@ -233,11 +292,11 @@ export function WorkbenchApp({
   }, [errorReporter, modelingServices, tabsState.tabs]);
 
   useEffect(() => {
-    if (!tabsStorage) {
-      return;
-    }
+    if (!tabsStorage || !project || !projectApplied) return;
     tabsStorage.save(tabsState);
-  }, [tabsState, tabsStorage]);
+    saveSession(project.projectId, tabsState.activeDocumentId);
+    void saveParts(project.projectId, tabsState.tabs);
+  }, [tabsState, tabsStorage, project, projectApplied, saveParts, saveSession]);
 
   useEffect(() => {
     if (!isLocalFileSyncDocumentRepository(documentRepository)) {
@@ -361,7 +420,53 @@ export function WorkbenchApp({
             modelingService={modelingService}
             editorDependencies={editorDependencies}
           >
+            {projects.failure && (
+              <Alert
+                color="red"
+                title="Project could not be saved"
+                pos="absolute"
+                top={80}
+                right={16}
+                style={{ zIndex: 200 }}
+              >
+                {projects.failure}
+              </Alert>
+            )}
             <CadWorkbench
+              projectLoading={!projectApplied}
+              projectControls={
+                project && (
+                  <ProjectSwitcher
+                    projects={projects.projects}
+                    activeProjectId={project.projectId}
+                    busy={projects.busy || localSaving}
+                    onSwitch={(projectId) => {
+                      void waitForLocalChanges()
+                        .then(() =>
+                          projects.select((repository) =>
+                            repository.open(projectId),
+                          ),
+                        )
+                        .catch(projects.report);
+                    }}
+                    onCreate={(name) => {
+                      void waitForLocalChanges()
+                        .then(() =>
+                          projects.select((repository) =>
+                            repository.create(name, [
+                              {
+                                docId: generateDocumentId(),
+                                name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
+                                kind: "part",
+                              },
+                            ]),
+                          ),
+                        )
+                        .catch(projects.report);
+                    }}
+                  />
+                )
+              }
               tabsState={tabsState}
               onActivateDocumentTab={activateDocumentTab}
               onCloseDocumentTab={closeDocumentTab}

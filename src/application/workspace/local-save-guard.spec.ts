@@ -10,15 +10,17 @@ import type {
 } from "@/application/modeling/modeling-service";
 import {
   LocalSaveGuard,
+  PendingLocalWrites,
   type LeaveAttemptEvent,
 } from "@/application/workspace/local-save-guard";
 
-function createGuardFixture() {
+function createGuardFixture(pendingWrites?: PendingLocalWrites) {
   let status: LocalSaveStatus = { saving: false, failure: null };
   const statusListeners = new Set<() => void>();
   const leaveListeners = new Set<(event: LeaveAttemptEvent) => void>();
   const reports: Array<{ error: AppError; metadata: ErrorReportMetadata }> = [];
   const guard = new LocalSaveGuard({
+    pendingWrites,
     source: {
       getLocalSaveStatus: () => status,
       getLocalSaveFailures: () => (status.failure ? [status.failure] : []),
@@ -161,4 +163,31 @@ test("a repository failure without a leave attempt shows the error and reports l
   });
   expect(f.reports).toHaveLength(1);
   expect(f.reports[0]!.error.context.find(({ key }) => key === "leaveBlocked")?.value).toBe(false);
+});
+
+test("pending manifest writes share the part leave guard until both sources settle", () => {
+  const pending = new PendingLocalWrites();
+  const f = createGuardFixture(pending);
+  const stop = f.guard.start();
+  const finishFirst = pending.begin();
+  const finishSecond = pending.begin();
+  expect(pending.getPendingWriteCount()).toBe(2);
+  expect(f.leaveListeners.size).toBe(1);
+  expect(f.attemptLeave().prevented).toBe(true);
+  expect(f.guard.getNotice()).toEqual({ kind: "saving-after-leave-attempt" });
+  finishFirst();
+  expect(pending.getPendingWriteCount()).toBe(1);
+  expect(f.leaveListeners.size).toBe(1);
+  f.setStatus({ saving: true, failure: null });
+  finishSecond();
+  expect(pending.getPendingWriteCount()).toBe(0);
+  expect(f.leaveListeners.size, "the part still has a pending write").toBe(1);
+  f.setStatus({ saving: false, failure: null });
+  expect(f.leaveListeners.size).toBe(0);
+  expect(f.guard.getNotice()).toEqual({ kind: "none" });
+  expect(f.reports).toEqual([]);
+  stop();
+  const finishAfterStop = pending.begin();
+  expect(f.leaveListeners.size).toBe(0);
+  finishAfterStop();
 });

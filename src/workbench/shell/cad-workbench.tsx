@@ -1,5 +1,5 @@
 // SLOP: Retained shell orchestrator while document/object/debug actions and visible regions are split into named workbench modules.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
 import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
 import { appVersion, gitCommit } from "@/build-info";
@@ -217,6 +217,8 @@ const VARIABLES_FAB_RESERVE_PX =
 
 interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
+  projectControls?: ReactNode;
+  projectLoading?: boolean;
   onActivateDocumentTab: (documentId: DocumentId) => void;
   onCloseDocumentTab: (documentId: DocumentId) => void;
   onCreateNewDocument: () => Promise<DocumentId>;
@@ -233,6 +235,8 @@ interface CadWorkbenchProps {
 
 export function CadWorkbench({
   tabsState,
+  projectControls,
+  projectLoading = false,
   onActivateDocumentTab,
   onCloseDocumentTab,
   onCreateNewDocument,
@@ -1703,7 +1707,7 @@ export function CadWorkbench({
               performanceTelemetry={performanceTelemetry}
               onGraphicsUnavailable={handleGraphicsUnavailable}
             />
-            {(initialOccRenderPending ||
+            {(projectLoading || initialOccRenderPending ||
               (!openDocumentModalOpened && loading.filePhase === "opening-document")) &&
             !graphicsUnavailable ? (
               <div
@@ -1712,7 +1716,7 @@ export function CadWorkbench({
                 className="absolute inset-0 z-30 grid place-items-center bg-(--workbench-viewport-background)/85"
               >
                 <InitialLoadingStatus
-                  phase={loading.phase}
+                  phase={projectLoading ? "opening-document" : loading.phase}
                   progress={loading.progress}
                 />
               </div>
@@ -2070,17 +2074,22 @@ export function CadWorkbench({
               </div>
               <div className="pointer-events-auto mt-3">
                 <div
-                  className="contents"
+                  className="flex items-center"
                   data-viewport-annotation-bottom-band=""
                 >
-                  <DocumentTabsBar
-                    ref={tabsBarRef}
-                    state={tabsState}
-                    onActivate={onActivateDocumentTab}
-                    onClose={handleTabClose}
-                    onReorder={handleTabReorder}
-                    onRename={handleTabRename}
-                  />
+                  {projectControls}
+                  <div className="min-w-0 flex-1">
+                    {!projectLoading && (
+                      <DocumentTabsBar
+                        ref={tabsBarRef}
+                        state={tabsState}
+                        onActivate={onActivateDocumentTab}
+                        onClose={handleTabClose}
+                        onReorder={handleTabReorder}
+                        onRename={handleTabRename}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
