@@ -48,6 +48,7 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
         startPointId: "sketch_point_a",
         endPointId: "sketch_point_b",
         style: {
+          fillOpacity: 0.37,
           strokeMiterLimit: 5,
           strokeDashSize: 0.4,
           strokeGapSize: 0.2,
@@ -59,6 +60,13 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
     dimensionIds: [],
     dimensions: [],
   };
+
+  for (const fillOpacity of [-0.01, 1.01, NaN, Infinity, -Infinity]) {
+    expect(validateSketchDefinition({
+      ...baseDefinition,
+      entities: baseDefinition.entities.map((entity) => ({ ...entity, style: { fillOpacity } })),
+    }).success).toBe(false);
+  }
 
   const migrated = validateSketchDefinition(baseDefinition);
   expect(
@@ -120,12 +128,16 @@ test("src/contracts/sketch/style-runtime-schema.spec.ts", () => {
     "Runtime schema should accept authored entity/region style records.",
   ).toBeTruthy();
 
+  if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
+  expect(parsed.data.entities[0]?.style?.fillOpacity).toBe(0.37);
   const serialized = JSON.parse(JSON.stringify(parsed.data)) as unknown;
   const roundTrip = validateSketchDefinition(serialized);
   expect(
     roundTrip.success,
     "Style payloads should survive serialize/parse round-trips.",
   ).toBeTruthy();
+  if (!roundTrip.success) throw new Error(JSON.stringify(roundTrip.issues));
+  expect(roundTrip.data.entities[0]?.style?.fillOpacity).toBe(0.37);
   expect(
     roundTrip.data.svgRenderingEnabled,
     "Round-tripped definitions should preserve SVG rendering state.",

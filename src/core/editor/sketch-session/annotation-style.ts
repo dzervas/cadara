@@ -133,12 +133,13 @@ function applyFillStylePatchToDefinition(
 export function isFillStylePatch(patch: SketchStylePatch): patch is Extract<
   SketchStylePatch,
   {
-    field: "fillMode" | "fillColor" | "gradientStartColor" | "gradientEndColor";
+    field: "fillMode" | "fillColor" | "fillOpacity" | "gradientStartColor" | "gradientEndColor";
   }
 > {
   return (
     patch.field === "fillMode" ||
     patch.field === "fillColor" ||
+    patch.field === "fillOpacity" ||
     patch.field === "gradientStartColor" ||
     patch.field === "gradientEndColor"
   );
@@ -171,6 +172,7 @@ function applyRegionFillPatch(
       field:
         | "fillMode"
         | "fillColor"
+        | "fillOpacity"
         | "gradientStartColor"
         | "gradientEndColor";
     }
@@ -202,6 +204,12 @@ function applySketchStyleDefinitionPatch(
         return style ?? next;
       }
       next.fillMode = patch.value;
+      break;
+    case "fillOpacity":
+      if (next.fillOpacity === patch.value) {
+        return style ?? next;
+      }
+      next.fillOpacity = patch.value;
       break;
     case "fillColor":
       if (next.fillColor === patch.value) {
@@ -305,6 +313,7 @@ function sketchStyleFillToDefinition(
     return {
       fillMode: "solid",
       fillColor: fill.color,
+      fillOpacity: fill.opacity,
     };
   }
 
@@ -340,6 +349,6 @@ function sketchStyleDefinitionToFill(
   return {
     kind: "solid",
     color: style.fillColor ?? "var(--cad-accent)",
-    opacity: 0.42,
+    opacity: style.fillOpacity ?? 0.42,
   };
 }

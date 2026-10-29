@@ -15,6 +15,7 @@ export const SKETCH_STYLE_PATCH_INTENT = "patchSketchStyle" as const;
 
 export type SketchStylePatchField =
   | "fillMode"
+  | "fillOpacity"
   | "fillColor"
   | "gradientStartColor"
   | "gradientEndColor"
@@ -28,6 +29,11 @@ export type SketchStylePatchField =
   | "strokeGapSize";
 
 export type SketchStylePatch =
+  | {
+      intent: typeof SKETCH_STYLE_PATCH_INTENT;
+      field: "fillOpacity";
+      value: number;
+    }
   | {
       intent: typeof SKETCH_STYLE_PATCH_INTENT;
       field: "fillMode";
@@ -106,6 +112,7 @@ export function buildSketchStyleControls(
 ): readonly SketchToolControlDescriptor[] {
   const resolved: Required<SketchStyleDefinition> = {
     fillMode: style?.fillMode ?? "none",
+    fillOpacity: style?.fillOpacity ?? 0.42,
     fillColor: style?.fillColor ?? "var(--cad-accent)",
     gradientStartColor: style?.gradientStartColor ?? "var(--cad-accent)",
     gradientEndColor: style?.gradientEndColor ?? "var(--cad-surface)",
@@ -385,6 +392,10 @@ export function parseSketchStylePatch(
       return value === "none" || value === "solid" || value === "gradient"
         ? { intent: SKETCH_STYLE_PATCH_INTENT, field: patch.field, value }
         : null;
+    case "fillOpacity":
+      return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+        ? { intent: SKETCH_STYLE_PATCH_INTENT, field: patch.field, value }
+        : null;
     case "fillColor":
     case "gradientStartColor":
     case "gradientEndColor":
@@ -420,6 +431,7 @@ function isSketchStylePatchField(
   return (
     field === "fillMode" ||
     field === "fillColor" ||
+    field === "fillOpacity" ||
     field === "gradientStartColor" ||
     field === "gradientEndColor" ||
     field === "strokeEnabled" ||

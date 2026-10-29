@@ -9,7 +9,7 @@ import type {
   SketchDefinition,
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
-import { buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
+import { resolveAuthoredSketchVectorStyle, buildSketchVectorExportModel } from "@/core/export/sketch-vector-export-model";
 import { deriveSketchValidity } from "@/contracts/sketch/derived-validity";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 
@@ -504,3 +504,11 @@ function createRegion(): RegionRecord {
     ],
   };
 }
+
+
+test("local solid vector fills preserve alpha and resolve the native default", () => {
+  for (const fillOpacity of [0, 0.37, 1, undefined]) {
+    expect(resolveAuthoredSketchVectorStyle({ fillMode: "solid", fillColor: "#abcdef", fillOpacity })?.fill)
+      .toEqual({ kind: "solid", color: "#abcdef", opacity: fillOpacity ?? 0.42 });
+  }
+});

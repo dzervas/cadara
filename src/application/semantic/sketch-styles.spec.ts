@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validateSemanticCommand } from "@/contracts/semantic/runtime-schema";
 import { createSketchWorkflow } from "../../../test/helpers/semantic-sketch-workflow";
 
 test("explicit sketch stroke authoring preserves geometry and owns one undoable style action", async () => {
@@ -202,6 +203,58 @@ test("all production stroke and fill properties retain current native profiles a
       gradient: { startColor: "#112233", endColor: "#445566" },
     });
     expect(reopened.discovery!.sketch!.profiles).toHaveLength(1);
+  } finally {
+    await w.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120_000);
+
+
+test.each([0, 1])("solid fill alpha %s survives color edits, native save/reopen and SVG export", async (opacity) => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-fill-opacity-"));
+  const w = await createSketchWorkflow();
+  try {
+    const circle = await w.execute({
+      operation: "sketch.author",
+      draft: w.current().discovery!.state.draft,
+      primitive: { kind: "circle", center: [4, 3], radius: 2 },
+      construction: false,
+      intent: "fulfill",
+    });
+    const region = circle.discovery!.references.find((r) => r.target.kind === "region")!.target;
+    for (const [field, value] of Object.entries({ fillMode: "solid", fillOpacity: opacity, fillColor: "#abcdef" })) {
+      await w.execute({
+        operation: "sketch.style.patch",
+        draft: w.current().discovery!.state.draft,
+        targets: [region],
+        patch: { field, value },
+        intent: "fulfill",
+      });
+    }
+    const fill = { kind: "solid", color: "#abcdef", opacity };
+    expect(w.current().discovery!.sketch!.styles![0]!.fill).toEqual(fill);
+    for (const value of [-0.01, 1.01, NaN, Infinity, -Infinity]) {
+      const state = w.current().completion.live.state!;
+      expect(validateSemanticCommand({
+        version: 1, commandId: "invalid-opacity",
+        basis: { documentId: state.documentId, revisionId: state.revisionId, repositoryHeads: state.repositoryHeads },
+        operation: "sketch.style.patch", draft: w.current().discovery!.state.draft,
+        targets: [region], patch: { field: "fillOpacity", value }, intent: "fulfill",
+      }).success).toBe(false);
+    }
+    const published = await w.execute({ operation: "sketch.publish", draft: w.current().discovery!.state.draft, requireProfiles: true });
+    const sketchId = published.discovery!.sketch!.sketchId;
+    const path = join(directory, "opacity.cadara");
+    await w.execute({ operation: "document.save", path });
+    await w.execute({ operation: "document.open", basis: null, path });
+    const reopened = await w.execute({ operation: "sketch.open", sketchId });
+    expect(reopened.discovery!.sketch!.styles![0]!.fill).toEqual(fill);
+    await w.execute({ operation: "sketch.publish", draft: reopened.discovery!.state.draft, requireProfiles: true });
+    const svgPath = join(directory, "opacity.svg");
+    await w.execute({ operation: "export.svg", target: { kind: "sketch", sketchId }, options: {}, path: svgPath });
+    const svg = await readFile(svgPath, "utf8");
+    expect(svg).toContain('fill="#abcdef"');
+    expect(svg).toContain(`fill-opacity="${opacity}"`);
   } finally {
     await w.close();
     await rm(directory, { recursive: true, force: true });

@@ -95,7 +95,7 @@ function resolveLocalFill(
   return {
     kind: "solid",
     color: style.fillColor ?? "dodgerblue",
-    opacity: 1,
+    opacity: style.fillOpacity ?? 0.42,
   };
 }
 

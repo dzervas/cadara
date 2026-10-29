@@ -315,9 +315,12 @@ All style/image commands take current `basis`/`draft` and explicit `intent`.
 `sketch.style.patch` takes nonempty owned `targets` and one `{ field, value }`
 patch. Fill targets are current enclosed regions; stroke targets are local
 entities. Fields follow the existing style owner: `fillMode` (none/solid/gradient),
-`fillColor`, `gradientStartColor`, `gradientEndColor`, `strokeEnabled`,
+`fillColor`, `fillOpacity`, `gradientStartColor`, `gradientEndColor`, `strokeEnabled`,
 `strokeColor`, `strokeWidth`, `strokeCap` (butt/round/square), `strokeJoin`
 (miter/round/bevel), `strokeMiterLimit`, `strokeDashSize`, `strokeGapSize`.
+`fillOpacity` is a finite solid-fill alpha in [0, 1]: 0 is transparent, 1 is
+opaque, and omission retains the native 0.42 default. Later color edits preserve
+authored alpha. Gradient stop opacities retain their existing defaults.
 Numeric stroke values are finite and nonnegative; widths/dashes/gaps are the
 existing SVG pixel values, not model dimensions. Color strings retain the
 browser's policy (including CSS variables), not a new color parser. Styles

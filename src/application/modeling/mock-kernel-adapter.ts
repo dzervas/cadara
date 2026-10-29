@@ -1,3 +1,4 @@
+import { remapPublishedRegionStyles } from "@/core/sketch-styles/region-style-publication";
 import { resolveRegionProfile } from "@/contracts/sketch/region-selector";
 import type {
   SketchDefinition,
@@ -6200,7 +6201,7 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         diagnostics,
       };
     }
-    const normalizedDefinition = normalizeSketchDefinitionForSketchId(
+    let normalizedDefinition = normalizeSketchDefinitionForSketchId(
       structuralValidation.data,
       sketchId,
     );
@@ -6300,6 +6301,13 @@ export class MockKernelAdapter implements ModelingKernelAdapter {
         offsetDiagnostics: solvedOffsetDiagnostics,
       };
     }
+
+    normalizedDefinition = await remapPublishedRegionStyles(
+      normalizedDefinition,
+      structuralValidation.data.entities[0]?.target.sketchId ??
+        structuralValidation.data.points[0]?.target.sketchId,
+      derivedRegions,
+    );
 
     // T17d (B5): the derivation restore and rebuild use too.
     const { solvedSnapshot, derivedValidity } =

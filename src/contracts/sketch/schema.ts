@@ -1,3 +1,4 @@
+import type { tags } from "typia";
 import type {
   ConstraintId,
   DimensionId,
@@ -235,6 +236,8 @@ export type SketchDerivationDefinitionOf<TDistance> =
 export interface SketchStyleDefinition {
   fillMode?: SketchFillMode;
   fillColor?: string;
+  /** Solid fill alpha; omitted values retain the native 0.42 default. */
+  fillOpacity?: number & tags.Minimum<0> & tags.Maximum<1>;
   gradientStartColor?: string;
   gradientEndColor?: string;
   strokeEnabled?: boolean;

@@ -1482,7 +1482,7 @@ export function parseLocalPaintStyle(
   return {
     kind: "solid",
     color,
-    opacity: 0.42,
+    opacity: style.fillOpacity ?? 0.42,
   };
 }
 

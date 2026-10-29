@@ -126,3 +126,14 @@ test("src/domain/sketch-styles/definition.spec.ts", () => {
     "Style patch parser should ignore external style sources.",
   ).toBe(null);
 });
+
+
+test("fillOpacity patches accept finite alpha including endpoints and reject invalid values", () => {
+  for (const value of [0, 0.37, 1]) {
+    expect(parseSketchStylePatch({ intent: SKETCH_STYLE_PATCH_INTENT, field: "fillOpacity", value }))
+      .toEqual({ intent: SKETCH_STYLE_PATCH_INTENT, field: "fillOpacity", value });
+  }
+  for (const value of [-0.01, 1.01, NaN, Infinity, -Infinity, "1", null]) {
+    expect(parseSketchStylePatch({ intent: SKETCH_STYLE_PATCH_INTENT, field: "fillOpacity", value })).toBeNull();
+  }
+});

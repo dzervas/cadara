@@ -55,3 +55,4 @@ test/fixtures/onshape-captures/5151a4c877c9493b733ad52f.onshape-capture.json
 test/fixtures/onshape-captures/9841e486906fa2ce62d74d8e.onshape-capture.json
 .scratch
 *.png
+/server
