@@ -8,6 +8,16 @@ const sources = import.meta.glob<string>("/src/assets/icons/*.svg", {
   import: "default",
   eager: true,
 });
+// One markup object per icon: React re-assigns `innerHTML` whenever the
+// `dangerouslySetInnerHTML` object changes identity, so a fresh object per
+// render would re-parse the SVG on every re-render of the icon's parent.
+// Asset file newlines must not become text in tree rows or status labels.
+const markupByPath = new Map(
+  Object.entries(sources).map(([path, source]) => [
+    path,
+    { __html: source.trim() },
+  ]),
+);
 
 interface SvgIconProps {
   fileName: string;
@@ -26,10 +36,9 @@ export function SvgIcon({
   highlight = false,
   draggable = false,
 }: SvgIconProps) {
-  const source = sources[`/src/assets/icons/${fileName}`];
-  if (!source) throw new Error(`Unknown icon asset: ${fileName}`);
+  const markup = markupByPath.get(`/src/assets/icons/${fileName}`);
+  if (!markup) throw new Error(`Unknown icon asset: ${fileName}`);
 
-  // Asset file newlines must not become text in tree rows or status labels.
   return (
     <span
       aria-hidden="true"
@@ -38,7 +47,7 @@ export function SvgIcon({
       className={cn("cadara-icon", className)}
       style={{ width: size, height: size, ...style }}
       draggable={draggable}
-      dangerouslySetInnerHTML={{ __html: source.trim() }}
+      dangerouslySetInnerHTML={markup}
     />
   );
 }

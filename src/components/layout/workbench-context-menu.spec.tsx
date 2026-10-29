@@ -116,3 +116,35 @@ test("src/components/layout/workbench-context-menu.spec.tsx", async () => {
     "Disabled menu items should render as disabled controls.",
   ).toBeTruthy();
 });
+
+// The Mantine menu is mounted on the first open only: every row of the parts
+// tree and the timeline wraps one, and a closed menu re-rendered its popover,
+// floating-ui hooks and anchor on every workbench update (each sketch drag
+// move). A closed menu renders just its trigger; opening it is an E2E seam
+// (context menu rows in e2e/feature-history-context-menu.spec.ts).
+test("a closed workbench context menu renders only its trigger", () => {
+  const markup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <WorkbenchContextMenu
+        items={[
+          {
+            kind: "item",
+            id: "rename",
+            label: "Rename",
+            onSelect: () => undefined,
+          },
+        ]}
+        label="Body actions"
+        withinPortal={false}
+      >
+        <button type="button">Part 1</button>
+      </WorkbenchContextMenu>
+    </MantineProvider>,
+  );
+
+  // After MantineProvider's style tags.
+  const body = markup.slice(markup.lastIndexOf("</style>") + "</style>".length);
+  expect(body).toBe(
+    '<button type="button" aria-haspopup="menu">Part 1</button>',
+  );
+});

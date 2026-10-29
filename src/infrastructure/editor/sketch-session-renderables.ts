@@ -4,28 +4,21 @@ import type {
   SketchSessionState,
   SketchSessionDisplayRenderable,
 } from "@/core/editor/sketch-session/types";
-import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
-export function mergeSketchRenderables<
-  T extends RenderableEntityRecord | ViewportRenderableRecord,
->(documentRenderables: T[], session: SketchSessionState | null) {
-  if (!session) {
-    return {
-      documentRenderables,
-      sketchDisplayRenderables: [],
-    };
-  }
 
-  const activeSketchId = session.sketchId;
-  const visibleDocumentRenderables = activeSketchId
+/**
+ * The committed renderables an open sketch session does not replace: the
+ * session draws its own sketch's curves, points and regions (its display
+ * renderables), so the committed copies of that sketch are dropped. A new
+ * sketch (no id yet) replaces nothing.
+ */
+export function withoutActiveSketchRenderables<
+  T extends RenderableEntityRecord | ViewportRenderableRecord,
+>(documentRenderables: T[], activeSketchId: SketchSessionState["sketchId"]) {
+  return activeSketchId
     ? documentRenderables.filter(
         (entry) => !isActiveSketchRenderable(entry, activeSketchId),
       )
     : documentRenderables;
-
-  return {
-    documentRenderables: visibleDocumentRenderables,
-    sketchDisplayRenderables: getSketchSessionDisplayRenderables(session),
-  };
 }
 
 export type MergedSketchRenderables = {

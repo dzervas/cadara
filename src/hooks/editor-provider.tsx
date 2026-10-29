@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 
 import { getEditorViewState } from "@/core/editor/state-machine";
@@ -12,6 +12,10 @@ import { useEditorEventLoop } from "@/hooks/use-editor-event-loop";
 import type { EditorExtensionDependencies } from "@/core/editor/state-machine";
 import type { ModelingService } from "@/application/modeling/modeling-service";
 import { EditorContext } from "@/hooks/editor-context";
+import {
+  createEditorStateStore,
+  EditorStateStoreContext,
+} from "@/hooks/editor-state-store";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { createEditorDebugTraceRecorder } from "@/application/editor/editor-debug-trace";
 import { SketchAuthoredActions } from "@/application/editor/sketch-authored-actions";
@@ -98,7 +102,16 @@ export function EditorProvider({
     [dispatch, machineState, traceRecorder, draftRecovery],
   );
 
+  const [store] = useState(() => createEditorStateStore(value));
+  // Selector subscribers re-render (synchronously, before paint) once the
+  // value is committed.
+  useLayoutEffect(() => store.publish(value), [store, value]);
+
   return (
-    <EditorContext.Provider value={value}>{children}</EditorContext.Provider>
+    <EditorContext.Provider value={value}>
+      <EditorStateStoreContext.Provider value={store}>
+        {children}
+      </EditorStateStoreContext.Provider>
+    </EditorContext.Provider>
   );
 }

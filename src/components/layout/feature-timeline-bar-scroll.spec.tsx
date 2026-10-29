@@ -11,7 +11,7 @@ import {
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
-import { EditorContext } from "@/hooks/editor-context";
+import { EditorContextFixture } from "@/hooks/editor-context.fixtures";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
 test("long feature timelines overflow their scroller instead of widening the shared panel grid", async () => {
@@ -62,7 +62,7 @@ test("long feature timelines overflow their scroller instead of widening the sha
   for (const session of [null, sketchSession]) {
     const markup = renderToStaticMarkup(
       <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-        <EditorContext.Provider
+        <EditorContextFixture
           value={{
             machineState: initialEditorState,
             state: getEditorViewState(initialEditorState),
@@ -91,7 +91,7 @@ test("long feature timelines overflow their scroller instead of widening the sha
             onRenameDocumentItem={() => undefined}
             onSuppressFeature={() => undefined}
           />
-        </EditorContext.Provider>
+        </EditorContextFixture>
       </MantineProvider>,
     );
 

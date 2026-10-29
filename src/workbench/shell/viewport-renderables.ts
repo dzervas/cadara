@@ -7,7 +7,11 @@ import {
   getSketchConstraintDisplaySummary,
 } from "@/core/editor/sketch-session";
 
-import { mergeSketchRenderables, type MergedSketchRenderables } from "@/infrastructure/editor/sketch-session-renderables";
+import {
+  withoutActiveSketchRenderables,
+  type MergedSketchRenderables,
+} from "@/infrastructure/editor/sketch-session-renderables";
+import { getSketchSessionDisplayRenderables } from "@/infrastructure/editor/sketch-session/display";
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
@@ -96,6 +100,38 @@ export function getBodyDisplayColors(
 export function composeViewportRenderables(
   input: ComposeViewportRenderablesInput,
 ): ComposedViewportRenderables {
+  return {
+    documentRenderables: composeViewportDocumentRenderables({
+      ...input,
+      activeSketch: input.sketchSession,
+    }),
+    sketchDisplayRenderables: composeViewportSketchDisplayRenderables(
+      input.sketchSession,
+    ),
+  };
+}
+
+/** The open sketch session's own renderables (none when no sketch is open). */
+export function composeViewportSketchDisplayRenderables(
+  sketchSession: SketchSessionState | null,
+) {
+  return sketchSession ? getSketchSessionDisplayRenderables(sketchSession) : [];
+}
+
+export interface ComposeViewportDocumentRenderablesInput
+  extends Omit<ComposeViewportRenderablesInput, "sketchSession"> {
+  /**
+   * The open sketch session's scope (null when no sketch is open). The
+   * committed and preview renderables depend only on which sketch is open,
+   * not on its in-session edits, so a sketch drag move keeps them.
+   */
+  activeSketch: Pick<SketchSessionState, "sketchId"> | null;
+}
+
+/** The committed and preview renderables of `composeViewportRenderables`. */
+export function composeViewportDocumentRenderables(
+  input: ComposeViewportDocumentRenderablesInput,
+): ViewportRenderableRecord[] {
   const snapshotSketches = input.snapshotSketches ?? [];
   const sketchConstraintDisplayById =
     createCommittedSketchConstraintDisplayLookup(snapshotSketches);
@@ -132,32 +168,29 @@ export function composeViewportRenderables(
       !(target.kind === "region" && nonCurrentSketchStates.has(target.sketchId))
     );
   });
+  const { activeSketch } = input;
 
-  const mergedRenderables = mergeSketchRenderables(
-    layeredRenderables,
-    input.sketchSession,
-  );
-
-  return {
-    ...mergedRenderables,
-    documentRenderables: mergedRenderables.documentRenderables.map((entry) => {
-      const target = entry.renderable.binding.target;
-      const bodyColor =
-        entry.origin === "document" &&
-        (target.kind === "body" || target.kind === "face")
-          ? input.bodyColors?.get(target.bodyId)
-          : undefined;
-      return {
-        ...entry,
-        ...(bodyColor === undefined ? {} : { bodyColor }),
-        isInactiveSketch: Boolean(
-          input.sketchSession &&
-            "sketchId" in target &&
-            target.sketchId !== input.sketchSession.sketchId,
-        ),
-      };
-    }),
-  };
+  return (
+    activeSketch
+      ? withoutActiveSketchRenderables(layeredRenderables, activeSketch.sketchId)
+      : layeredRenderables
+  ).map((entry) => {
+    const target = entry.renderable.binding.target;
+    const bodyColor =
+      entry.origin === "document" &&
+      (target.kind === "body" || target.kind === "face")
+        ? input.bodyColors?.get(target.bodyId)
+        : undefined;
+    return {
+      ...entry,
+      ...(bodyColor === undefined ? {} : { bodyColor }),
+      isInactiveSketch: Boolean(
+        activeSketch &&
+          "sketchId" in target &&
+          target.sketchId !== activeSketch.sketchId,
+      ),
+    };
+  });
 }
 
 function createCommittedSketchConstraintDisplayLookup(

@@ -65,7 +65,8 @@
 //   x1.1 (x0.9 when x1.1 loses bodies) then restored on alternate samples,
 //   sketchConstraintAdd (Horizontal on a sloped line), sketchEntityDelete,
 //   sketchUndo/sketchRedo (of a rectangle), sketchDragPoint (24-step drag
-//   of a rectangle corner; per-move latency in metrics).
+//   of a rectangle corner; per-move latency in metrics, the release's final
+//   solve separately as releaseReflectedMs).
 //   Viewport: selectBodyTree/selectFaceViewport/selectEdgeViewport (with the
 //   Measure readout time in metrics), hoverViewport (30-step glide; per-step
 //   hover latency), orbit (300 px right-button drag; frame intervals),

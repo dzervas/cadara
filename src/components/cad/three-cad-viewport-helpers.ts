@@ -244,11 +244,41 @@ export function createViewportBvhSceneKey(
   renderables: readonly ViewportRenderableRecord[],
   sketchDisplayRenderables: readonly SketchSessionDisplayRenderable[],
 ) {
-  return [
-    ...renderables.map(({ origin, renderable }) => {
+  return combineViewportBvhSceneKeys(
+    createDocumentBvhSceneKey(renderables),
+    createSketchDisplayBvhSceneKey(sketchDisplayRenderables),
+  );
+}
+
+export function combineViewportBvhSceneKeys(
+  documentKey: string,
+  sketchDisplayKey: string,
+) {
+  return [documentKey, sketchDisplayKey].filter((key) => key !== "").join("|");
+}
+
+/**
+ * The document half of `createViewportBvhSceneKey`. The viewport keys the
+ * document meshes' BVH subtree on it alone, so a sketch session change (a
+ * region going stale when a drag starts) does not remount and re-index every
+ * document mesh.
+ */
+export function createDocumentBvhSceneKey(
+  renderables: readonly ViewportRenderableRecord[],
+) {
+  return renderables
+    .map(({ origin, renderable }) => {
       return `${origin}:${renderable.id}:${renderable.binding.pickId}:${getGeometryToken(renderable.geometry)}`;
-    }),
-    ...sketchDisplayRenderables.map((renderable) => {
+    })
+    .join("|");
+}
+
+/** The sketch session half of `createViewportBvhSceneKey`. */
+export function createSketchDisplayBvhSceneKey(
+  sketchDisplayRenderables: readonly SketchSessionDisplayRenderable[],
+) {
+  return sketchDisplayRenderables
+    .map((renderable) => {
       return [
         "sketch",
         renderable.id,
@@ -258,8 +288,8 @@ export function createViewportBvhSceneKey(
         getSketchStructuralGeometryToken(renderable.geometry),
         renderable.textureFill?.sourceKey ?? "no-texture",
       ].join(":");
-    }),
-  ].join("|");
+    })
+    .join("|");
 }
 
 export function createViewportInvalidationKey(input: {

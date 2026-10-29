@@ -3,6 +3,7 @@ import { SvgIcon } from "@/components/ui/svg-icon";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import {
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -288,68 +289,77 @@ export function ViewportInvalidationBridge({
   return null;
 }
 
-export function ViewportProjectionSelector({
-  projectionMode,
-  onProjectionModeChange,
-}: {
-  projectionMode: ViewportProjectionMode;
-  onProjectionModeChange: (mode: ViewportProjectionMode) => void;
-}) {
-  const projectionLabel = getProjectionModeLabel(projectionMode);
+// Memoized: the viewport re-renders on every sketch drag move and hover.
+export const ViewportProjectionSelector = memo(
+  function ViewportProjectionSelector({
+    projectionMode,
+    onProjectionModeChange,
+  }: {
+    projectionMode: ViewportProjectionMode;
+    onProjectionModeChange: (mode: ViewportProjectionMode) => void;
+  }) {
+    const projectionLabel = getProjectionModeLabel(projectionMode);
 
-  return (
-    <div
-      className="pointer-events-auto"
-      data-testid="viewport-projection-selector"
-      data-projection-mode={projectionMode}
-    >
-      <Menu position="bottom-end" width={160} transitionProps={{ duration: 0 }}>
-        <Menu.Target>
-          <Tooltip
-            label={`Viewport projection: ${projectionLabel}`}
-            position="left"
-            withArrow
-          >
-            <ActionIcon
-              type="button"
-              aria-label={`Viewport projection: ${projectionLabel}`}
-              variant="filled"
-              size={28}
-              style={{
-                backgroundColor: "var(--workbench-shell-overlay-strong)",
-                border: "1px solid var(--workbench-shell-border)",
-                color: "var(--workbench-shell-text)",
-              }}
-            >
-              <SvgIcon fileName="view-cube.svg" className="h-4 w-4" />
-            </ActionIcon>
-          </Tooltip>
-        </Menu.Target>
-        <Menu.Dropdown
-          aria-label="Viewport projection menu"
-          style={{
-            backgroundColor: "var(--workbench-shell-overlay-strong)",
-            borderColor: "var(--workbench-shell-border)",
-            boxShadow: "var(--workbench-panel-shadow)",
-          }}
+    return (
+      <div
+        className="pointer-events-auto"
+        data-testid="viewport-projection-selector"
+        data-projection-mode={projectionMode}
+      >
+        <Menu
+          position="bottom-end"
+          width={160}
+          transitionProps={{ duration: 0 }}
         >
-          {VIEWPORT_PROJECTION_OPTIONS.map((option) => (
-            <Menu.Item
-              key={option.mode}
-              onClick={() => onProjectionModeChange(option.mode)}
-              aria-current={projectionMode === option.mode ? "true" : undefined}
-              rightSection={
-                projectionMode === option.mode ? "Active" : undefined
-              }
+          <Menu.Target>
+            <Tooltip
+              label={`Viewport projection: ${projectionLabel}`}
+              position="left"
+              withArrow
             >
-              {option.label}
-            </Menu.Item>
-          ))}
-        </Menu.Dropdown>
-      </Menu>
-    </div>
-  );
-}
+              <ActionIcon
+                type="button"
+                aria-label={`Viewport projection: ${projectionLabel}`}
+                variant="filled"
+                size={28}
+                style={{
+                  backgroundColor: "var(--workbench-shell-overlay-strong)",
+                  border: "1px solid var(--workbench-shell-border)",
+                  color: "var(--workbench-shell-text)",
+                }}
+              >
+                <SvgIcon fileName="view-cube.svg" className="h-4 w-4" />
+              </ActionIcon>
+            </Tooltip>
+          </Menu.Target>
+          <Menu.Dropdown
+            aria-label="Viewport projection menu"
+            style={{
+              backgroundColor: "var(--workbench-shell-overlay-strong)",
+              borderColor: "var(--workbench-shell-border)",
+              boxShadow: "var(--workbench-panel-shadow)",
+            }}
+          >
+            {VIEWPORT_PROJECTION_OPTIONS.map((option) => (
+              <Menu.Item
+                key={option.mode}
+                onClick={() => onProjectionModeChange(option.mode)}
+                aria-current={
+                  projectionMode === option.mode ? "true" : undefined
+                }
+                rightSection={
+                  projectionMode === option.mode ? "Active" : undefined
+                }
+              >
+                {option.label}
+              </Menu.Item>
+            ))}
+          </Menu.Dropdown>
+        </Menu>
+      </div>
+    );
+  },
+);
 
 function getProjectionModeLabel(mode: ViewportProjectionMode) {
   return (

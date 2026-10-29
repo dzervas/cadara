@@ -13,7 +13,10 @@ import {
   TANGENT_HANDLE_ZERO_CAPTURE_PX,
   WORKSPACE_SCAFFOLD_RENDER_ORDER,
   configureWorkspaceScaffoldWireObject,
+  combineViewportBvhSceneKeys,
+  createDocumentBvhSceneKey,
   createRenderIdleTracker,
+  createSketchDisplayBvhSceneKey,
   createViewportBvhSceneKey,
   createViewportInvalidationKey,
   projectWorldPointToViewport,
@@ -1779,4 +1782,74 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
     createViewportBvhSceneKey([record(moved)], []),
     "A new geometry object with moved vertices changes the key.",
   ).not.toBe(first);
+});
+
+test("the document BVH key ignores the sketch session: a region going stale at drag start keeps it", () => {
+  // The viewport keys the document meshes' BVH subtree on the document half
+  // alone; keying it on the whole scene key remounted (and re-indexed) every
+  // document mesh when a drag started or ended.
+  const document = [
+    {
+      origin: "document",
+      renderable: {
+        id: "render_body_face",
+        label: "Body face",
+        ownerBodyId: null,
+        ownerFeatureId: null,
+        binding: {
+          pickId: "pick_body_face",
+          pickPriority: 1,
+          target: { kind: "body", bodyId: "body_feature_extrude-1" },
+          topology: null,
+          semanticClass: "bodyFace",
+        },
+        geometry: {
+          kind: "mesh",
+          vertexPositions: [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+          ],
+          triangleIndices: [[0, 1, 2]],
+        },
+      },
+    },
+  ] as never;
+  const region = {
+    id: "renderable_sketch_region_region_1_0",
+    label: "Region 1",
+    target: { kind: "region", sketchId: "sketch_1", regionId: "region_1" },
+    geometry: {
+      kind: "mesh",
+      vertexPositions: [
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+      ],
+      vertexNormals: null,
+      triangleIndices: [[0, 1, 2]],
+    },
+    linePattern: "solid",
+    role: "local",
+    semanticClass: "region",
+  } as never as Parameters<typeof createSketchDisplayBvhSceneKey>[0][number];
+  const staleRegion = { ...region, label: "Region 1 (stale)", target: null };
+
+  expect(
+    createSketchDisplayBvhSceneKey([staleRegion]),
+    "the sketch half changes: the stale fill is no longer pickable",
+  ).not.toBe(createSketchDisplayBvhSceneKey([region]));
+  expect(
+    combineViewportBvhSceneKeys(
+      createDocumentBvhSceneKey(document),
+      createSketchDisplayBvhSceneKey([staleRegion]),
+    ),
+    "the combined key (pick bindings, render idle) is the whole-scene key",
+  ).toBe(createViewportBvhSceneKey(document, [staleRegion]));
+  expect(
+    combineViewportBvhSceneKeys("", createSketchDisplayBvhSceneKey([region])),
+  ).toBe(createViewportBvhSceneKey([], [region]));
+  expect(combineViewportBvhSceneKeys("", "")).toBe(
+    createViewportBvhSceneKey([], []),
+  );
 });

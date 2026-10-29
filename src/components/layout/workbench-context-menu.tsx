@@ -11,7 +11,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 
 import { ShortcutHint } from "@/components/shortcuts/shortcut-hint";
 import type { ShortcutCommandId } from "@/core/shortcuts/commands";
@@ -72,6 +72,10 @@ export function WorkbenchContextMenu({
 }: WorkbenchContextMenuProps) {
   const menuId = useId();
   const [opened, setOpened] = useState(defaultOpened);
+  // The Mantine menu (popover, floating-ui, a portal anchor) re-renders with
+  // its row on every workbench update, so it mounts on the first open only
+  // and then stays mounted.
+  const [menuMounted, setMenuMounted] = useState(defaultOpened);
   const [anchor, setAnchor] = useState<MenuAnchor>({ x: 0, y: 0 });
   const hasItems = items.some((item) => item.kind === "item");
 
@@ -100,7 +104,16 @@ export function WorkbenchContextMenu({
       return;
     }
 
-    setAnchor(nextAnchor);
+    if (!menuMounted) {
+      // Commit the menu closed first: its focus return records the focused
+      // element on the closed -> open transition, not on mount.
+      flushSync(() => {
+        setAnchor(nextAnchor);
+        setMenuMounted(true);
+      });
+    } else {
+      setAnchor(nextAnchor);
+    }
     setOpened(true);
   };
 
@@ -153,6 +166,10 @@ export function WorkbenchContextMenu({
     "aria-haspopup": "menu",
     "aria-controls": opened ? menuId : undefined,
   });
+
+  if (!menuMounted) {
+    return trigger;
+  }
 
   return (
     <>

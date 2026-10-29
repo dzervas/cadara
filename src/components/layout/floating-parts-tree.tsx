@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   useState,
   type CSSProperties,
   type HTMLAttributes,
@@ -41,7 +42,11 @@ import {
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { canReassignCommittedSketchPlane } from "@/core/editor/sketch-plane-editing";
 import { getSketchErrorSummary } from "@/core/modeling/document-snapshot-view";
-import { useEditorState } from "@/hooks/use-editor-state";
+import {
+  selectSelectionState,
+  shallowEqualRecords,
+  useEditorStateSelector,
+} from "@/hooks/editor-state-store";
 import type { ShellSelectRequest } from "@/core/editor/state-machine/types";
 import { createShellRowSelectRequest } from "@/core/editor/state-machine/selection-helpers";
 
@@ -93,7 +98,10 @@ interface CustomColorSession {
  * on the leading edge plus a `--workbench-glass-fill-row-active` lift; the rail commits
  * the selection, the glass makes it readable.
  */
-export function FloatingPartsTree({
+// Memoized with a selector-subscribed editor state: the workbench re-renders
+// on every editor state change (each sketch drag move), the tree only when
+// its own inputs change.
+export const FloatingPartsTree = memo(function FloatingPartsTree({
   snapshot,
   hiddenTargetKeys,
   objectLabelOverrides,
@@ -109,9 +117,8 @@ export function FloatingPartsTree({
   onBodyAppearanceChange,
   onBodyColorPreview,
 }: FloatingPartsTreeProps) {
-  const {
-    state: { selection, selectionFilter, selectionCatalog },
-  } = useEditorState();
+  const { selection, selectionFilter, selectionCatalog } =
+    useEditorStateSelector(selectSelectionState, shallowEqualRecords);
   const objects = snapshot?.presentation.objects ?? [];
   // The Shift range anchor: the last row clicked without Shift.
   const [rangeAnchorKey, setRangeAnchorKey] = useState<string | null>(null);
@@ -299,7 +306,7 @@ export function FloatingPartsTree({
       ) : null}
     </aside>
   );
-}
+});
 
 interface RowProps extends HTMLAttributes<HTMLDivElement> {
   label: string;

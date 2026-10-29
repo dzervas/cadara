@@ -2,6 +2,7 @@ import { test, expect } from "vitest";
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import {
+  composeViewportDocumentRenderables,
   composeViewportRenderables,
   getBodyDisplayColors,
   isTargetHidden,
@@ -279,6 +280,24 @@ test("src/app/viewport-renderables.spec.ts", async () => {
     expect(editing.documentRenderables.some(({ renderable }) => renderable.id === committedSketchCurve.id)).toBe(false);
     const finished = composeViewportRenderables({ ...ownershipInput, sketchSession: null });
     expect(finished.documentRenderables.map((entry) => entry.isInactiveSketch)).toEqual([false, false, false, false]);
+    // The workbench composes the document half from the open sketch's id
+    // alone (a drag move keeps it); it equals the full composition's.
+    expect(
+      composeViewportDocumentRenderables({
+        ...ownershipInput,
+        activeSketch: { sketchId: activeSession.sketchId },
+      }),
+    ).toEqual(editing.documentRenderables);
+    expect(
+      composeViewportDocumentRenderables({ ...ownershipInput, activeSketch: null }),
+    ).toEqual(finished.documentRenderables);
+    expect(
+      composeViewportDocumentRenderables({
+        ...ownershipInput,
+        activeSketch: { sketchId: null },
+      }).map((entry) => entry.isInactiveSketch),
+      "a new sketch (no id yet) replaces nothing and dims every committed sketch",
+    ).toEqual([false, true, true, true]);
     const activeSketchRegion = createCommittedRegion("sketch_a", "region_a");
     const otherSketchRegion = createCommittedRegion("sketch_b", "region_b");
 

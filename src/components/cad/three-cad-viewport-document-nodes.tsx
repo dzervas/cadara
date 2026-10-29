@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import * as THREE from "three";
 
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
@@ -21,7 +21,10 @@ import {
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
 
-export function DocumentRenderableNode({
+// Memoized: the viewport re-renders on every sketch drag move and hover,
+// while a document renderable record keeps its identity until the document,
+// a preview, visibility or the open sketch changes.
+export const DocumentRenderableNode = memo(function DocumentRenderableNode({
   entry,
   palette,
   clippingPlane,
@@ -51,7 +54,7 @@ export function DocumentRenderableNode({
     case "marker":
       return <DocumentMarkerNode entry={entry} palette={palette} />;
   }
-}
+});
 
 export function DocumentMeshNode({
   entry,

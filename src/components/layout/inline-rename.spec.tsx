@@ -10,7 +10,7 @@ import {
   initialEditorState,
 } from "@/core/editor/state-machine";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
-import { EditorContext } from "@/hooks/editor-context";
+import { EditorContextFixture } from "@/hooks/editor-context.fixtures";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
 test.each([
@@ -44,7 +44,7 @@ test.each([
     };
     const markup = renderToStaticMarkup(
       <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-        <EditorContext.Provider
+        <EditorContextFixture
           value={{
             machineState: initialEditorState,
             state: getEditorViewState(initialEditorState),
@@ -78,7 +78,7 @@ test.each([
               onSuppressFeature={() => undefined}
             />
           )}
-        </EditorContext.Provider>
+        </EditorContextFixture>
       </MantineProvider>,
     );
     const inputs = markup.match(/<input\b[^>]*>/g);

@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -56,13 +57,12 @@ import {
   type ToolbarCompactionSection,
 } from "@/core/tools/toolbar-compaction";
 import { recordRecentToolbarTool } from "@/core/tools/toolbar-recency";
-import {
-  getActiveSketchStyleToolId,
-  isSketchSvgRenderingEnabled,
-  isSketchConstructionSelected,
-} from "@/core/editor/sketch-session";
 import { isSketchStyleToolId } from "@/core/sketch-styles/definition";
-import { useEditorState } from "@/hooks/use-editor-state";
+import {
+  shallowEqualRecords,
+  useEditorStateSelector,
+} from "@/hooks/editor-state-store";
+import { selectToolbarEditorState } from "@/components/layout/workspace-toolbar-editor-state";
 import { useWorkbenchCommandHandlers } from "@/hooks/use-workbench-command-handlers";
 import type { EditorHistoryAvailability } from "@/core/editor/state-machine";
 import {
@@ -109,7 +109,10 @@ interface WorkspaceToolbarProps {
  * + `--workbench-glass-blur` + `--workbench-pill-shadow` — earned because they float over
  * the canvas (Floating-Glass Rule).
  */
-export function WorkspaceToolbar({
+// Memoized with a selector-subscribed editor state: the workbench re-renders
+// on every editor state change (each sketch drag move), the toolbar only when
+// its own inputs change.
+export const WorkspaceToolbar = memo(function WorkspaceToolbar({
   historyAvailability,
   showBrowserStorageWarning = false,
   localSaving = false,
@@ -133,16 +136,19 @@ export function WorkspaceToolbar({
   const probeToolRef = useRef<HTMLSpanElement | null>(null);
   const probeDropdownRef = useRef<HTMLSpanElement | null>(null);
   const {
-    state: {
-      activeCommand,
-      activeEditSession,
-      activeSketchPlaneEditSession,
-      activeImportSession,
-      history,
-      mode,
-      sketchSession,
-    },
-  } = useEditorState();
+    activeToolId,
+    activeEditSession,
+    activeSketchPlaneEditSession,
+    activeImportSession,
+    canUndo,
+    canRedo,
+    mode,
+    hasActiveSketchSession,
+    activeSketchStyleToolId,
+    svgRenderingEnabled,
+    sketchConstructionSelected,
+  } = useEditorStateSelector(selectToolbarEditorState, shallowEqualRecords);
+  const history = useMemo(() => ({ canUndo, canRedo }), [canUndo, canRedo]);
   const { activateTool } = useWorkbenchCommandHandlers();
   const visibleHistory = historyAvailability ?? history;
   const visibleSections = useMemo(
@@ -161,16 +167,8 @@ export function WorkspaceToolbar({
         ? 0
         : highlightedSearchResultIndex;
   const isSearchPopoverVisible = searchPopoverOpen && searchQuery.length > 0;
-  const hasActiveSketchSession = sketchSession !== null;
   const canImportReferenceImage =
-    sketchSession !== null || activeCommand?.toolId === "sketch";
-
-  const activeSketchStyleToolId = sketchSession
-    ? getActiveSketchStyleToolId(sketchSession)
-    : null;
-  const svgRenderingEnabled = sketchSession
-    ? isSketchSvgRenderingEnabled(sketchSession)
-    : false;
+    hasActiveSketchSession || activeToolId === "sketch";
 
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
     (tool.id === "undo" && !visibleHistory.canUndo) ||
@@ -181,7 +179,7 @@ export function WorkspaceToolbar({
         activeImportSession !== null)) ||
     (tool.id === "importImage" && !canImportReferenceImage) ||
     (isSketchStyleToolId(tool.id) &&
-      (!sketchSession || !svgRenderingEnabled)) ||
+      (!hasActiveSketchSession || !svgRenderingEnabled)) ||
     (mode === "sketch" && toolLeavesSketch(tool.id));
 
   const closeSearchPopover = () => {
@@ -380,12 +378,10 @@ export function WorkspaceToolbar({
   }, [updateToolbarMeasurement]);
 
   const isToolActive = (toolId: ToolId) =>
-    (toolId === "construction" &&
-      sketchSession !== null &&
-      isSketchConstructionSelected(sketchSession)) ||
+    (toolId === "construction" && sketchConstructionSelected) ||
     (toolId === "svgRendering" && svgRenderingEnabled) ||
     activeSketchStyleToolId === toolId ||
-    activeCommand?.toolId === toolId;
+    activeToolId === toolId;
 
   const renderPlainTool = (tool: RegisteredToolDefinition) => (
     <ToolButton
@@ -417,7 +413,7 @@ export function WorkspaceToolbar({
           tool.dropdown.variantIds.some((variantId) => isToolActive(variantId))
         }
         disabled={isToolDisabled(tool)}
-        activeToolId={activeCommand?.toolId ?? null}
+        activeToolId={activeToolId}
         recentToolIds={recentToolIds}
         onToolUsed={recordToolUse}
       />
@@ -661,7 +657,7 @@ export function WorkspaceToolbar({
                         buttonRole="option"
                         buttonTabIndex={-1}
                         ariaSelected={isHighlighted}
-                        active={activeCommand?.toolId === tool.id}
+                        active={activeToolId === tool.id}
                         selected={isHighlighted}
                         disabled={isToolDisabled(tool)}
                         disabledReason={
@@ -782,7 +778,7 @@ export function WorkspaceToolbar({
       </ToolbarPill>
     </div>
   );
-}
+});
 
 function isToolShownInToolbar(toolId: ToolId, hasActiveSketchSession: boolean) {
   return hasActiveSketchSession

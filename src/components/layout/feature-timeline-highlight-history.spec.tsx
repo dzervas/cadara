@@ -41,7 +41,7 @@ import { buildOccWorkspaceSnapshot } from "@/infrastructure/occ/snapshot";
 import { createStandardPlaneDefinition } from "@/core/modeling/opencascade-kernel-seed";
 import { getTargetContributingFeatureIds } from "@/core/modeling/document-snapshot-view";
 import { getPrimitiveRefKey, type PrimitiveRef } from "@/core/editor/schema";
-import { EditorContext } from "@/hooks/editor-context";
+import { EditorContextFixture } from "@/hooks/editor-context.fixtures";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
 test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async () => {
@@ -386,7 +386,7 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
 
     return renderToStaticMarkup(
       <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-        <EditorContext.Provider value={editorValue}>
+        <EditorContextFixture value={editorValue}>
           <FeatureTimelineBar
             snapshot={snapshot}
             historyHighlightFeatureIds={historyHighlightFeatureIds}
@@ -399,7 +399,7 @@ test("src/components/layout/feature-timeline-highlight-history.spec.tsx", async 
             onRenameItem={() => undefined}
             onSuppressFeature={() => undefined}
           />
-        </EditorContext.Provider>
+        </EditorContextFixture>
       </MantineProvider>,
     );
   }

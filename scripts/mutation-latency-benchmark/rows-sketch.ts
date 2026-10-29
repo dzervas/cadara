@@ -22,6 +22,7 @@ import {
   occDrained,
   openFixture,
   partsTree,
+  round,
   selectableTargets,
   settleBeforeCleanup,
   stagedEntityCount,
@@ -34,6 +35,7 @@ import {
   waitForMachine,
   waitForOccQuiet,
   waitInPage,
+  type FrameProbeRecord,
   type RowPreparation,
   type SampleTiming,
   type Session,
@@ -772,21 +774,31 @@ export async function prepareSketchRow(
             () =>
               (
                 window as unknown as {
-                  __benchFrameProbe: {
-                    changes: { sinceMoveMs: number | null }[];
-                    frames: number[];
-                  };
+                  __benchFrameProbe: FrameProbeRecord;
                 }
               ).__benchFrameProbe,
           );
+          // A change after the release answers the release (the drag's
+          // final solve), not a move: its time since the last move would
+          // include the harness's frame wait before `mouse.up`.
+          const releaseMs = probe.releaseMs ?? Number.POSITIVE_INFINITY;
+          const moveChanges = probe.changes.filter(
+            (change) => change.atMs < releaseMs,
+          );
+          const releaseChange = probe.changes.findLast(
+            (change) => change.atMs >= releaseMs,
+          );
           const perMove = medianAndP95(
-            probe.changes.flatMap((change) => change.sinceMoveMs ?? []),
+            moveChanges.flatMap((change) => change.sinceMoveMs ?? []),
           );
           timing.metrics = {
             dragSteps: steps,
             pointChanges: probe.changes.length,
             perMoveReflectedMedianMs: perMove.median,
             perMoveReflectedP95Ms: perMove.p95,
+            releaseReflectedMs: releaseChange
+              ? round(releaseChange.atMs - releaseMs)
+              : null,
             probedFrames: probe.frames.length,
           };
           return timing;

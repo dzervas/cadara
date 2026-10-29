@@ -315,6 +315,9 @@ export function SketchDisplayPolylineNode({
     materialConfig;
   const { camera, size } = useThree();
   const strokeGeometryTokenRef = useRef<string | null>(null);
+  const strokeGeometryFrameRef = useRef<
+    SketchSessionDisplayRenderable["sketchPlaneFrame"] | null
+  >(null);
   const material = useMemo(() => {
     if (useStrokeMesh) {
       const nextMaterial = new THREE.MeshBasicMaterial({
@@ -380,6 +383,19 @@ export function SketchDisplayPolylineNode({
         size.height,
         geometryData.points,
       );
+      const token = createStrokeGeometryToken(
+        strokeGeometryStaticToken,
+        worldUnitsPerPixel,
+      );
+      // Every session update (each drag move) brings new geometry objects
+      // for every curve; a curve whose stroke inputs are unchanged keeps
+      // its buffer.
+      if (
+        token === strokeGeometryTokenRef.current &&
+        renderable.sketchPlaneFrame === strokeGeometryFrameRef.current
+      ) {
+        return;
+      }
       updatePolylineStrokeGeometryBuffer(
         geometry,
         geometryData,
@@ -387,14 +403,13 @@ export function SketchDisplayPolylineNode({
         worldUnitsPerPixel,
         renderable.sketchPlaneFrame,
       );
-      strokeGeometryTokenRef.current = createStrokeGeometryToken(
-        strokeGeometryStaticToken,
-        worldUnitsPerPixel,
-      );
+      strokeGeometryTokenRef.current = token;
+      strokeGeometryFrameRef.current = renderable.sketchPlaneFrame;
       return;
     }
 
     strokeGeometryTokenRef.current = null;
+    strokeGeometryFrameRef.current = null;
     updatePolylineGeometryBuffer(geometry, geometryData);
 
     if (linePattern === "dashed" && line instanceof THREE.Line) {
@@ -439,6 +454,7 @@ export function SketchDisplayPolylineNode({
       renderable.sketchPlaneFrame,
     );
     strokeGeometryTokenRef.current = token;
+    strokeGeometryFrameRef.current = renderable.sketchPlaneFrame;
   });
 
   useEffect(() => {

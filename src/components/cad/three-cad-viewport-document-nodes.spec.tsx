@@ -7,17 +7,16 @@
  * so rebuilding them recompiled every program and re-uploaded every buffer.
  * A colour change replaces only the material.
  */
-import { act, createRoot, extend } from "@react-three/fiber";
+import { act } from "@react-three/fiber";
 import { createRef } from "react";
 import * as THREE from "three";
 import { expect, test } from "vitest";
 
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
+import { createStubR3fRoot } from "@/components/cad/r3f-stub-root.fixtures";
 import { DocumentRenderableNode } from "@/components/cad/three-cad-viewport-document-nodes";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
-
-extend(THREE as never);
 
 const palette: SketchRenderingPalette = {
   constrained: 0xdddddd,
@@ -25,36 +24,6 @@ const palette: SketchRenderingPalette = {
   overconstrained: 0xdd3333,
   regionFill: 0x334455,
 };
-
-function stubRoot() {
-  const canvas = {
-    style: {},
-    width: 100,
-    height: 100,
-    addEventListener() {},
-    removeEventListener() {},
-    getContext: () => null,
-  } as unknown as HTMLCanvasElement;
-  const gl = {
-    domElement: canvas,
-    render() {},
-    setSize() {},
-    setPixelRatio() {},
-    getPixelRatio: () => 1,
-    setAnimationLoop() {},
-    dispose() {},
-    shadowMap: {},
-    info: { render: {} },
-    xr: {
-      enabled: false,
-      isPresenting: false,
-      addEventListener() {},
-      removeEventListener() {},
-      setAnimationLoop() {},
-    },
-  };
-  return { root: createRoot(canvas), gl };
-}
 
 const geometry: RenderableEntityRecord["geometry"] = {
   kind: "mesh",
@@ -93,12 +62,7 @@ function faceEntry(label: string, bodyColor: number): ViewportRenderableRecord {
 }
 
 test("a new snapshot's record for an unchanged mesh keeps its geometry and material; a colour change replaces only the material", async () => {
-  const { root, gl } = stubRoot();
-  await root.configure({
-    gl: gl as never,
-    frameloop: "never",
-    size: { width: 100, height: 100, top: 0, left: 0 },
-  });
+  const root = await createStubR3fRoot();
   const groupRef = createRef<THREE.Group>();
   const mounted = () => {
     let mesh: THREE.Mesh | null = null;
@@ -140,5 +104,45 @@ test("a new snapshot's record for an unchanged mesh keeps its geometry and mater
   expect(
     (recoloured.material as THREE.MeshStandardMaterial).color.getHex(),
   ).toBe(0xcc5533);
+  await act(async () => root.unmount());
+});
+
+test("a viewport re-render with the same record does not re-render the document node", async () => {
+  // The viewport re-renders on every sketch drag move and hover; the
+  // workbench keeps each document record's identity across them, so the
+  // node (and every document mesh's ref binding) is skipped.
+  const root = await createStubR3fRoot();
+  const groupRef = createRef<THREE.Group>();
+  const entry = faceEntry("Hub", 0x336699);
+  const render = (hoverVersion: number) =>
+    act(async () =>
+      root.render(
+        <group ref={groupRef} userData={{ hoverVersion }}>
+          <DocumentRenderableNode
+            entry={entry}
+            palette={palette}
+            clippingPlane={null}
+          />
+        </group>,
+      ),
+    );
+  const mesh = () => {
+    let found: THREE.Mesh | null = null;
+    groupRef.current?.traverse((object) => {
+      if (object instanceof THREE.Mesh && !found) found = object;
+    });
+    if (!found) throw new Error("Expected a mounted mesh.");
+    return found as THREE.Mesh;
+  };
+
+  await render(1);
+  // A marker the node's ref binding would overwrite if it re-rendered.
+  mesh().userData.target = "marker";
+  await render(2);
+  expect(groupRef.current?.userData.hoverVersion).toBe(2);
+  expect(
+    mesh().userData.target,
+    "the memoized node did not re-run its ref binding",
+  ).toBe("marker");
   await act(async () => root.unmount());
 });

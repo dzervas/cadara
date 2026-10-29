@@ -5,6 +5,7 @@ import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
 import { appVersion, gitCommit } from "@/build-info";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
+import { useLatestCallbacks } from "@/hooks/use-latest-callbacks";
 import { SketchSpecialModePanel } from "@/components/cad/sketch-special-mode-panel";
 import { SketchMirrorActions } from "@/components/cad/sketch-mirror-actions";
 import { SketchOffsetActions } from "@/components/cad/sketch-offset-actions";
@@ -71,7 +72,8 @@ import {
   recordPerformanceMark,
 } from "@/contracts/performance/telemetry";
 import {
-  composeViewportRenderables,
+  composeViewportDocumentRenderables,
+  composeViewportSketchDisplayRenderables,
   getBodyDisplayColors,
   isTargetHidden,
 } from "@/workbench/shell/viewport-renderables";
@@ -607,18 +609,19 @@ export function CadWorkbench({
     [allowedAutoHiddenTargetKeys, rawExplicitlyShownAutoHiddenTargetKeys],
   );
 
+  const isSketchEditing = sketchSession !== null;
   const effectiveHiddenTargetKeys = useMemo(
     () =>
       getWorkbenchVisibilityState({
         snapshot,
         explicitHiddenTargetKeys,
         explicitlyShownAutoHiddenTargetKeys,
-        isSketchEditing: sketchSession !== null,
+        isSketchEditing,
       }).effectiveHiddenTargetKeys,
     [
       explicitHiddenTargetKeys,
       explicitlyShownAutoHiddenTargetKeys,
-      sketchSession,
+      isSketchEditing,
       snapshot,
     ],
   );
@@ -745,25 +748,40 @@ export function CadWorkbench({
     bodyId: BodyId;
     hex: string;
   } | null>(null);
-  const viewportRenderables = useMemo(() => {
-    return composeViewportRenderables({
-      snapshotRenderables: snapshot?.document.render.records ?? [],
-      snapshotSketches: snapshot?.document.sketches ?? [],
+  // A sketch drag move changes only the session's display renderables: the
+  // document renderables keep their identity (the viewport skips their
+  // per-move re-render).
+  const activeSketchId = sketchSession?.sketchId ?? null;
+  const documentRenderables = useMemo(
+    () =>
+      composeViewportDocumentRenderables({
+        snapshotRenderables: snapshot?.document.render.records ?? [],
+        snapshotSketches: snapshot?.document.sketches ?? [],
+        previewRenderables,
+        activeSketch: isSketchEditing ? { sketchId: activeSketchId } : null,
+        hiddenTargetKeys: effectiveHiddenTargetKeys,
+        bodyColors: getBodyDisplayColors(
+          snapshot?.document.bodies ?? [],
+          bodyColorPreview,
+        ),
+      }),
+    [
+      activeSketchId,
+      bodyColorPreview,
+      effectiveHiddenTargetKeys,
+      isSketchEditing,
       previewRenderables,
-      sketchSession,
-      hiddenTargetKeys: effectiveHiddenTargetKeys,
-      bodyColors: getBodyDisplayColors(
-        snapshot?.document.bodies ?? [],
-        bodyColorPreview,
-      ),
-    });
-  }, [
-    bodyColorPreview,
-    effectiveHiddenTargetKeys,
-    previewRenderables,
-    sketchSession,
-    snapshot,
-  ]);
+      snapshot,
+    ],
+  );
+  const sketchDisplayRenderables = useMemo(
+    () => composeViewportSketchDisplayRenderables(sketchSession),
+    [sketchSession],
+  );
+  const viewportRenderables = useMemo(
+    () => ({ documentRenderables, sketchDisplayRenderables }),
+    [documentRenderables, sketchDisplayRenderables],
+  );
   const sketchToolPresentation = sketchSession
     ? getSketchToolPresentation(sketchSession)
     : null;
@@ -1616,6 +1634,47 @@ export function CadWorkbench({
     ],
   );
 
+  // The toolbar, the parts tree and the document timeline are memoized: a
+  // sketch drag move re-renders the workbench but not them, so their
+  // handlers keep one identity (each call runs the latest handler).
+  const toolbarCallbacks = useLatestCallbacks({
+    onNewDocument: handleNewDocument,
+    onOpenDocument: handleOpenDocument,
+    onSaveDocumentAs: handleSaveDocumentAs,
+    onReportBug: handleReportBug,
+    onDownloadBugReportState: handleDownloadBugReportState,
+  });
+  const { canUndo: toolbarCanUndo, canRedo: toolbarCanRedo } =
+    toolbarHistoryAvailability;
+  const stableToolbarHistoryAvailability = useMemo(
+    () => ({ canUndo: toolbarCanUndo, canRedo: toolbarCanRedo }),
+    [toolbarCanRedo, toolbarCanUndo],
+  );
+  const partsTreeCallbacks = useLatestCallbacks({
+    onSelectTarget: handleShellSelect,
+    onReopenTarget: handleNavigationReopen,
+    onChangeSketchPlaneTarget: handleSketchPlaneEditRequest,
+    onObjectDelete: handleDeleteTarget,
+    onObjectExport: handleObjectExport,
+    onRenameTarget: handleTargetRename,
+    onToggleTargetVisibility: handleTargetVisibilityToggle,
+    onBodyAppearanceChange: handleBodyAppearanceChange,
+    onBodyColorPreview: handleBodyColorPreview,
+  });
+  const historyTimelineCallbacks = useLatestCallbacks({
+    onSelectTarget: handleShellSelect,
+    onReopenTarget: handleNavigationReopen,
+    onChangeSketchPlaneTarget: handleSketchPlaneEditRequest,
+    onDocumentCursorRequested: handleTimelineCursorRequested,
+    onDocumentHistoryReorder: handleDocumentHistoryReorder,
+    onDeleteDocumentItem: handleDocumentHistoryDelete,
+    onExportDocumentItem: handleDocumentHistoryExport,
+    onRenameDocumentItem: handleDocumentHistoryRename,
+    onSuppressFeature: handleFeatureSuppressionRequested,
+    onUndoAction: requestUndo,
+    onRedoAction: requestRedo,
+  });
+
   return (
     <WorkbenchCommandProvider
       handlers={{
@@ -1923,14 +1982,10 @@ export function CadWorkbench({
             />
 
             <WorkspaceToolbar
-              historyAvailability={toolbarHistoryAvailability}
+              historyAvailability={stableToolbarHistoryAvailability}
               showBrowserStorageWarning={showBrowserStorageWarning}
               localSaving={localSaving}
-              onNewDocument={handleNewDocument}
-              onOpenDocument={handleOpenDocument}
-              onSaveDocumentAs={handleSaveDocumentAs}
-              onReportBug={handleReportBug}
-              onDownloadBugReportState={handleDownloadBugReportState}
+              {...toolbarCallbacks}
             />
 
             <div className="contents" data-viewport-annotation-chrome="">
@@ -1939,20 +1994,12 @@ export function CadWorkbench({
                 hiddenTargetKeys={effectiveHiddenTargetKeys}
                 objectLabelOverrides={objectLabelOverrides}
                 visibleSelection={visibleSelection}
-                onSelectTarget={handleShellSelect}
-                onReopenTarget={handleNavigationReopen}
-                onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
-                onObjectDelete={handleDeleteTarget}
-                onObjectExport={handleObjectExport}
-                onRenameTarget={handleTargetRename}
                 renameSession={
                   renameInProgress?.surface === "parts"
                     ? inlineRenameSession
                     : undefined
                 }
-                onToggleTargetVisibility={handleTargetVisibilityToggle}
-                onBodyAppearanceChange={handleBodyAppearanceChange}
-                onBodyColorPreview={handleBodyColorPreview}
+                {...partsTreeCallbacks}
               />
 
               <WorkbenchVariablesFab
@@ -1994,33 +2041,23 @@ export function CadWorkbench({
                     sketchSession={sketchSession}
                     historyHighlightFeatureIds={historyHighlightFeatureIds}
                     visibleSelection={visibleSelection}
-                    onSelectTarget={handleShellSelect}
-                    onReopenTarget={handleNavigationReopen}
-                    onChangeSketchPlaneTarget={handleSketchPlaneEditRequest}
-                    onDocumentCursorRequested={handleTimelineCursorRequested}
                     documentCursorDisabled={
                       !history.canUndo && !history.canRedo
                     }
-                    onDocumentHistoryReorder={handleDocumentHistoryReorder}
                     documentHistoryReorderDisabled={
                       Boolean(sketchSession) ||
                       isDocumentHistoryReorderRunning ||
                       isUndoRedoRunning ||
                       (!history.canUndo && !history.canRedo)
                     }
-                    onDeleteDocumentItem={handleDocumentHistoryDelete}
-                    onExportDocumentItem={handleDocumentHistoryExport}
-                    onRenameDocumentItem={handleDocumentHistoryRename}
                     renameSession={
                       renameInProgress?.surface === "history"
                         ? inlineRenameSession
                         : undefined
                     }
-                    onSuppressFeature={handleFeatureSuppressionRequested}
                     actionHistory={contextualActionHistory}
                     actionHistoryDisabled={isUndoRedoRunning}
-                    onUndoAction={requestUndo}
-                    onRedoAction={requestRedo}
+                    {...historyTimelineCallbacks}
                   />
                 </div>
               </div>

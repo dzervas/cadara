@@ -230,7 +230,9 @@ import {
 import {
   cancelCoalescedSketchGeometryDragMove,
   createViewportInvalidationKey,
-  createViewportBvhSceneKey,
+  combineViewportBvhSceneKeys,
+  createDocumentBvhSceneKey,
+  createSketchDisplayBvhSceneKey,
   getViewportPickTuning,
   isSketchDragHoverTarget,
   isSketchFitPointDraftActive,
@@ -1101,9 +1103,18 @@ function ThreeCadViewportScene({
   const selectionFilterRef = useRef(selectionFilter);
   const multiSelectionRef = useRef(multiSelection);
   const selectionCatalogRef = useRef(selectionCatalog);
+  const documentBvhSceneKey = useMemo(
+    () => createDocumentBvhSceneKey(renderables),
+    [renderables],
+  );
+  const sketchDisplayBvhSceneKey = useMemo(
+    () => createSketchDisplayBvhSceneKey(sketchDisplayRenderables),
+    [sketchDisplayRenderables],
+  );
   const bvhSceneKey = useMemo(
-    () => createViewportBvhSceneKey(renderables, sketchDisplayRenderables),
-    [renderables, sketchDisplayRenderables],
+    () =>
+      combineViewportBvhSceneKeys(documentBvhSceneKey, sketchDisplayBvhSceneKey),
+    [documentBvhSceneKey, sketchDisplayBvhSceneKey],
   );
   const bvhSceneKeyRef = useRef(bvhSceneKey);
   const activeSectionClippingPlane = useMemo(
@@ -4023,12 +4034,15 @@ function ThreeCadViewportScene({
           hasNonEmptyGeometry={hasNonEmptyCommittedGeometry}
           onReady={() => firstNonEmptyGeometryFrameRef.current?.()}
         />
-        <Bvh key={bvhSceneKey} enabled>
-          <ViewportPickRoot
-            rootRef={pickRootRef}
-            commitToken={pickRootCommitToken}
-            onCommit={handlePickRootCommit}
-          >
+        {/* `Bvh` indexes the meshes it holds when it mounts, so each half
+            remounts when its own meshes change, the document half not on a
+            sketch session change. */}
+        <ViewportPickRoot
+          rootRef={pickRootRef}
+          commitToken={pickRootCommitToken}
+          onCommit={handlePickRootCommit}
+        >
+          <Bvh key={`document:${documentBvhSceneKey}`} enabled>
             {renderables.map((entry) => (
               <DocumentRenderableNode
                 key={`${entry.origin}:${entry.renderable.id}`}
@@ -4037,6 +4051,8 @@ function ThreeCadViewportScene({
                 clippingPlane={activeSectionClippingPlane}
               />
             ))}
+          </Bvh>
+          <Bvh key={`sketch:${sketchDisplayBvhSceneKey}`} enabled>
             {sketchDisplayRenderables.map((renderable) => (
               <SketchDisplayRenderableNode
                 key={renderable.id}
@@ -4046,8 +4062,8 @@ function ThreeCadViewportScene({
                 markerContext={sketchMarkerContext}
               />
             ))}
-          </ViewportPickRoot>
-        </Bvh>
+          </Bvh>
+        </ViewportPickRoot>
         <MeasurementWitnessLayer witnesses={measurementWitnesses} />
         {activeSectionView ? (
           <>

@@ -28,7 +28,7 @@ import {
 import { getPrimitiveRefKey } from "@/core/editor/schema";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createSketchSessionFromSnapshot } from "@/core/editor/sketch-session";
-import { EditorContext } from "@/hooks/editor-context";
+import { EditorContextFixture } from "@/hooks/editor-context.fixtures";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import type { FeatureId, RegionId, SketchId } from "@/contracts/shared/ids";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
@@ -159,7 +159,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const sidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={snapshot}
           hiddenTargetKeys={{}}
@@ -180,7 +180,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -254,7 +254,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const floatingPartsTreeMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FloatingPartsTree
           snapshot={snapshot}
           hiddenTargetKeys={{}}
@@ -267,7 +267,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -286,7 +286,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   const conflictMessage = "Horizontal 2 conflicts with Vertical 1.";
   const invalidSketchTreeMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FloatingPartsTree
           snapshot={{
             ...snapshot,
@@ -324,7 +324,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onSelectTarget={() => undefined}
           onToggleTargetVisibility={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
   const invalidRowStart = invalidSketchTreeMarkup.indexOf(
@@ -349,7 +349,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const selectedSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={snapshot}
           hiddenTargetKeys={{}}
@@ -367,7 +367,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -420,7 +420,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   };
   const variableSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={variableResultSnapshot}
           hiddenTargetKeys={{}}
@@ -438,7 +438,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -488,7 +488,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const invalidVariableSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={variableResultSnapshot}
           hiddenTargetKeys={{}}
@@ -508,7 +508,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -537,7 +537,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const multipleInvalidVariablesMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={variableResultSnapshot}
           hiddenTargetKeys={{}}
@@ -558,7 +558,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -581,7 +581,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   };
   const blankVariableSidebarMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={blankVariableSnapshot}
           hiddenTargetKeys={{}}
@@ -599,7 +599,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -618,7 +618,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const hiddenObjectMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={snapshot}
           hiddenTargetKeys={{
@@ -639,7 +639,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -654,7 +654,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   });
   const hiddenSketchMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureSidebar
           snapshot={snapshot}
           hiddenTargetKeys={{ [hiddenSketchKey]: true }}
@@ -672,7 +672,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onUpdateVariable={() => undefined}
           onRemoveVariable={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -687,7 +687,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const timelineMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureTimelineBar
           snapshot={snapshot}
           historyHighlightFeatureIds={[]}
@@ -702,7 +702,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -923,7 +923,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   ];
   const erroredTimelineMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureTimelineBar
           snapshot={erroredTimelineSnapshot}
           historyHighlightFeatureIds={[]}
@@ -936,7 +936,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -1020,7 +1020,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
 
   const reorderDisabledMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureTimelineBar
           snapshot={snapshot}
           historyHighlightFeatureIds={[]}
@@ -1034,7 +1034,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
   expect(
@@ -1068,7 +1068,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   };
   const sketchCursorMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <FeatureTimelineBar
           snapshot={sketchCursorSnapshot}
           historyHighlightFeatureIds={[]}
@@ -1081,7 +1081,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onRenameItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 
@@ -1096,7 +1096,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
   );
   const sketchHistoryMarkup = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-      <EditorContext.Provider value={editorValue}>
+      <EditorContextFixture value={editorValue}>
         <HistoryTimelineShell
           snapshot={snapshot}
           sketchSession={sketchSession}
@@ -1110,7 +1110,7 @@ test("src/components/layout/feature-timeline-bar.spec.tsx", async () => {
           onRenameDocumentItem={() => undefined}
           onSuppressFeature={() => undefined}
         />
-      </EditorContext.Provider>
+      </EditorContextFixture>
     </MantineProvider>,
   );
 

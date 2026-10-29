@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -45,6 +46,11 @@ import {
   type SketchHistoryItem,
   type SketchSessionState,
 } from "@/core/editor/sketch-session";
+import {
+  selectSelectionState,
+  shallowEqualRecords,
+  useEditorStateSelector,
+} from "@/hooks/editor-state-store";
 import { useEditorState } from "@/hooks/use-editor-state";
 import {
   getDocumentHistoryMenuEntryDescriptors,
@@ -690,7 +696,10 @@ function HistoryTimelineSurface({
   );
 }
 
-export function FeatureTimelineBar({
+// Memoized with a selector-subscribed editor state: the workbench re-renders
+// on every editor state change (each sketch drag move, while this bar is kept
+// mounted under the sketch timeline), the bar only when its inputs change.
+export const FeatureTimelineBar = memo(function FeatureTimelineBar({
   snapshot,
   historyHighlightFeatureIds,
   onSelectTarget,
@@ -707,9 +716,8 @@ export function FeatureTimelineBar({
   onSuppressFeature,
   visibleSelection,
 }: FeatureTimelineBarProps) {
-  const {
-    state: { selection, selectionFilter, selectionCatalog },
-  } = useEditorState();
+  const { selection, selectionFilter, selectionCatalog } =
+    useEditorStateSelector(selectSelectionState, shallowEqualRecords);
   const historyItems = useMemo(
     () => snapshot?.presentation.documentHistory ?? [],
     [snapshot],
@@ -1083,7 +1091,7 @@ export function FeatureTimelineBar({
       trackRef={trackRef}
     />
   );
-}
+});
 
 export function SketchHistoryTimelineBar({
   session,

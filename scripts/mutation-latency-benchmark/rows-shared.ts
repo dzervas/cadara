@@ -222,7 +222,9 @@ export async function waitForWatch(page: Page, name: string) {
  * Records `probe()` once per animation frame from now until
  * `stopFrameProbe`: the frame timestamps, and every change of the probed
  * value with its time since the latest pointer move (null before the first
- * move). Measures pointer-driven gestures (hover, drags, orbit) per step.
+ * move), and the first pointer release (`releaseMs`, null without one: a
+ * change at or after it answers the release, not a move). Measures
+ * pointer-driven gestures (hover, drags, orbit) per step.
  */
 export async function startFrameProbe(page: Page, probe: () => string) {
   await page.evaluate((source) => {
@@ -232,13 +234,18 @@ export async function startFrameProbe(page: Page, probe: () => string) {
       frames: [] as number[],
       changes: [] as { atMs: number; sinceMoveMs: number | null }[],
       lastMoveMs: null as number | null,
+      releaseMs: null as number | null,
       last: read(),
       stop: () => {},
     };
     const onMove = (event: PointerEvent) => {
       recorder.lastMoveMs = performance.timeOrigin + event.timeStamp;
     };
+    const onRelease = (event: PointerEvent) => {
+      recorder.releaseMs ??= performance.timeOrigin + event.timeStamp;
+    };
     window.addEventListener("pointermove", onMove, { capture: true });
+    window.addEventListener("pointerup", onRelease, { capture: true });
     const frame = (timestamp: number) => {
       if (!recorder.running) return;
       recorder.frames.push(performance.timeOrigin + timestamp);
@@ -257,6 +264,7 @@ export async function startFrameProbe(page: Page, probe: () => string) {
     recorder.stop = () => {
       recorder.running = false;
       window.removeEventListener("pointermove", onMove, { capture: true });
+      window.removeEventListener("pointerup", onRelease, { capture: true });
     };
     (
       window as unknown as { __benchFrameProbe: typeof recorder }
@@ -268,6 +276,7 @@ export async function startFrameProbe(page: Page, probe: () => string) {
 export interface FrameProbeRecord {
   frames: number[];
   changes: { atMs: number; sinceMoveMs: number | null }[];
+  releaseMs: number | null;
 }
 
 export function stopFrameProbe(page: Page): Promise<FrameProbeRecord> {
@@ -278,7 +287,11 @@ export function stopFrameProbe(page: Page): Promise<FrameProbeRecord> {
       }
     ).__benchFrameProbe;
     recorder.stop();
-    return { frames: recorder.frames, changes: recorder.changes };
+    return {
+      frames: recorder.frames,
+      changes: recorder.changes,
+      releaseMs: recorder.releaseMs,
+    };
   });
 }
 

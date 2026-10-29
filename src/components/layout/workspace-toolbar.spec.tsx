@@ -22,7 +22,7 @@ import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
 } from "@/core/modeling/opencascade-kernel-seed";
-import { EditorContext } from "@/hooks/editor-context";
+import { EditorContextFixture } from "@/hooks/editor-context.fixtures";
 import { WorkbenchCommandProvider } from "@/hooks/workbench-command-provider";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import {
@@ -88,7 +88,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
 
     return renderToStaticMarkup(
       <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
-        <EditorContext.Provider
+        <EditorContextFixture
           value={{
             machineState: initialEditorState,
             state: viewState,
@@ -104,7 +104,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
           <WorkbenchCommandProvider handlers={workbenchHandlers}>
             <WorkspaceToolbar onReportBug={onReportBug} />
           </WorkbenchCommandProvider>
-        </EditorContext.Provider>
+        </EditorContextFixture>
       </MantineProvider>,
     );
   }
