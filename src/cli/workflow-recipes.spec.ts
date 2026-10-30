@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import {
+  cliEntry,
+  execCliTestProcess,
+} from "../../test/helpers/cli-recipe-process";
 import {
   mkdtemp,
   readFile,
@@ -12,22 +14,25 @@ import {
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { SemanticResult } from "@/contracts/semantic/schema";
 import { validateSemanticResult } from "@/contracts/semantic/runtime-schema";
-const exec = promisify(execFile);
+const exec = execCliTestProcess;
 
 const root = resolve(import.meta.dirname, "../..");
 
 function createRecipeProcess(
   directory: string,
   runtime: { entry: string; cwd: string },
+  signal: AbortSignal,
 ) {
   const recipe = join(directory, "recipe.json");
   const invocation = [runtime.entry, "document", "recipe", recipe];
   const options = {
     cwd: runtime.cwd,
     timeout: 90000,
+    encoding: "utf8" as const,
+    signal,
   };
   let invocationNumber = 0;
   async function run(inputs: readonly Record<string, unknown>[], exitCode = 0) {
@@ -45,6 +50,7 @@ function createRecipeProcess(
       ({ stdout, stderr } = await exec("bun", invocation, options));
     } catch (error) {
       const failed = error as { code: number; stdout: string; stderr: string };
+      if (typeof failed.code !== "number") throw error;
       code = failed.code;
       stdout = failed.stdout;
       stderr = failed.stderr;
@@ -81,35 +87,78 @@ function createRecipeProcess(
   return run;
 }
 
-describe.each(["source", "extracted package"])(
+it("runs the source entry with real OCC and clean correlated recipe output", async ({ signal }) => {
+  const directory = await mkdtemp(join(tmpdir(), "cadara-source-cli-"));
+  try {
+    // Only entry compatibility needs the expensive source transform. Workflow
+    // semantics below run against the same release bundle used by the CLI suite.
+    const example = JSON.parse(
+      await readFile(join(root, "src/cli/examples/plate.json"), "utf8"),
+    );
+    const inputs = example.operations as Record<string, unknown>[];
+    for (const input of inputs)
+      if (input.operation === "document.save")
+        input.path = join(directory, "plate.cadara");
+    const recipe = join(directory, "recipe.json");
+    await writeFile(recipe, JSON.stringify(example));
+    // Source startup resolves bunfig's Typia preload from the repository cwd.
+    const { stdout, stderr } = await exec(
+      "bun",
+      [join(root, "src/cli/main.ts"), "document", "recipe", recipe],
+      { cwd: root, encoding: "utf8", timeout: 90000, signal },
+    );
+    expect(stderr).toBe("");
+    const envelope = JSON.parse(stdout);
+    expect(envelope.results).toHaveLength(inputs.length);
+    expect(envelope.unexecuted).toEqual([]);
+    expect(envelope.cleanup).toMatchObject({
+      kind: "closed",
+      resourcesReleased: true,
+    });
+    const results = envelope.results as SemanticResult[];
+    for (const [index, result] of results.entries()) {
+      expect(result.correlation.commandId).toBe(inputs[index].commandId);
+      expect(result.outcome.kind).toBe("completed");
+      expect(validateSemanticResult(result.correlation, result).success).toBe(true);
+    }
+    const bounds = results.at(-1)!.discovery!.model!.bodies[0]!.bounds!;
+    for (const [axis, value] of [20, 10, 7].entries())
+      expect(bounds.max[axis]! - bounds.min[axis]!).toBeCloseTo(value, 5);
+    expect(
+      (await readFile(join(directory, "plate.cadara"))).length,
+    ).toBeGreaterThan(0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 120000);
+
+describe.each(["bundle", "extracted package"])(
   "%s release workflow",
   (mode) => {
     let packageDirectory: string | undefined;
-    const runtime = { entry: "src/cli/main.ts", cwd: root };
+    const runtime = { entry: "", cwd: root };
     beforeAll(async () => {
-      if (mode === "source") return;
+      runtime.entry = cliEntry();
+      if (mode === "bundle") return;
       packageDirectory = await mkdtemp(join(tmpdir(), "cadara-cli-release-"));
-      const staging = join(packageDirectory, "build");
+      // Archive the production build already created by global setup. Rebuilding
+      // it here would duplicate the transform/type emission under test-worker load.
+      const staging = dirname(cliEntry());
       const extracted = join(packageDirectory, "extracted");
-      await exec("bun", ["scripts/build-cli.mjs", staging], {
-        cwd: root,
-        timeout: 90000,
-      });
       await exec("tar", [
         "-czf",
         join(packageDirectory, "cli.tar.gz"),
         "-C",
         staging,
         ".",
-      ]);
+      ], { encoding: "utf8", timeout: 10000 });
       await mkdir(extracted);
       await exec("tar", [
         "-xzf",
         join(packageDirectory, "cli.tar.gz"),
         "-C",
         extracted,
-      ]);
-      await rm(staging, { recursive: true });
+      ], { encoding: "utf8", timeout: 10000 });
       expect((await readdir(extracted)).filter((name) => !/^chunk-.*\.js$/.test(name)).sort()).toEqual([
         "COVERAGE.md",
         "LICENSE.md",
@@ -151,13 +200,13 @@ describe.each(["source", "extracted package"])(
         await rm(packageDirectory, { recursive: true, force: true });
     });
 
-    it("replays the dimensioned workflow in real Bun processes with correlated JSON and exit code 0", async () => {
+    it("replays the dimensioned workflow in real Bun processes with correlated JSON and exit code 0", async ({ signal }) => {
       const directory = await mkdtemp(
         join(tmpdir(), "cadara-workflow-recipe-"),
       );
       const native = join(directory, "plate.cadara");
       const output = join(directory, "plate.step");
-      const run = createRecipeProcess(directory, runtime);
+      const run = createRecipeProcess(directory, runtime, signal);
       function size(result: SemanticResult, width: number) {
         const bounds = result.discovery!.model!.bodies[0]!.bounds!;
         for (const [axis, value] of [width, 10, 7].entries())
@@ -380,9 +429,9 @@ describe.each(["source", "extracted package"])(
       }
     }, 180000);
 
-    it("real Bun failure and usage exits preserve clean correlated output and stop before the next recipe action", async () => {
+    it("real Bun failure and usage exits preserve clean correlated output and stop before the next recipe action", async ({ signal }) => {
       const directory = await mkdtemp(join(tmpdir(), "cadara-workflow-exits-"));
-      const run = createRecipeProcess(directory, runtime);
+      const run = createRecipeProcess(directory, runtime, signal);
       try {
         const failure = await run(
           [
@@ -428,10 +477,15 @@ describe.each(["source", "extracted package"])(
     }, 120000);
 
     if (mode === "extracted package")
-      it("runs shipped examples and refuses missing packaged assets without a fallback", async () => {
+      it("runs shipped examples and refuses missing packaged assets without a fallback", async ({ signal }) => {
         const extracted = resolve(runtime.entry, "..");
         const invocation = [runtime.entry, "document", "recipe"];
-        const options = { cwd: runtime.cwd, timeout: 90000 };
+        const options = {
+          cwd: runtime.cwd,
+          timeout: 90000,
+          encoding: "utf8" as const,
+          signal,
+        };
         const plateDocuments: string[] = [];
         for (const name of ["plate", "plate", "sketch", "scoped-profiles"]) {
           const output = await exec(

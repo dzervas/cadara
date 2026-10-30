@@ -1,5 +1,10 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
+import {
+  execFile,
+  type ExecFileOptions,
+  type ExecFileOptionsWithStringEncoding,
+} from "node:child_process";
 import { writeFile, readdir, copyFile } from "node:fs/promises";
+import { addAbortListener } from "node:events";
 import { resolve, dirname } from "node:path";
 import { promisify } from "node:util";
 import { inject } from "vitest";
@@ -24,7 +29,39 @@ export async function copyCliRuntimeWithoutAssets(directory: string) {
   }
 }
 
-type CliProcessOptions = Pick<ExecFileOptions, "cwd" | "timeout" | "env" | "maxBuffer"> & {
+/** Pass Vitest's TestContext.signal to stop CPU-bound children at the test deadline. */
+export async function execCliTestProcess(
+  file: string,
+  args: readonly string[],
+  options: ExecFileOptionsWithStringEncoding,
+) {
+  const execution = promisify(execFile)(file, args, {
+    ...options,
+    // Bound the per-process timeout even if a child ignores graceful shutdown.
+    // Node's execFile AbortSignal path uses SIGTERM independently of this option.
+    killSignal: "SIGKILL",
+  });
+  const closed = new Promise<void>((resolve) => {
+    execution.child.once("close", () => resolve());
+  });
+  // execFile does not forward killSignal to its AbortSignal handler. Ensure
+  // cancellation also stops a child that cannot service graceful shutdown.
+  const abortListener = options.signal && addAbortListener(options.signal, () => {
+    execution.child.kill("SIGKILL");
+  });
+  try {
+    return await execution;
+  } finally {
+    // execFile rejects on abort before the OS has actually reaped the child.
+    await closed;
+    abortListener?.[Symbol.dispose]();
+  }
+}
+
+type CliProcessOptions = Pick<
+  ExecFileOptions,
+  "cwd" | "timeout" | "env" | "maxBuffer" | "signal"
+> & {
   /** Another copy of the CLI entry; defaults to the built bundle. */
   entry?: string;
 };
@@ -37,14 +74,16 @@ export async function invokeCliDocumentRecipe(
   try {
     return {
       code: 0,
-      ...(await promisify(execFile)(
+      ...(await execCliTestProcess(
         "bun",
         [entry, "document", "recipe", ...args],
         { ...options, encoding: "utf8" },
       )),
     };
   } catch (error) {
-    return error as { code: number; stdout: string; stderr: string };
+    const failure = error as { code: number; stdout: string; stderr: string };
+    if (typeof failure.code !== "number") throw error;
+    return failure;
   }
 }
 
