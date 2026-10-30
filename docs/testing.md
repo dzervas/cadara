@@ -161,6 +161,7 @@ Test render-local behavior, visual state contracts, and event wiring.
 - Do not add static policy checks to inflate non-UI coverage.
 - Do not test private helpers if a public seam exists.
 - Product examples and artwork can provide useful complex-input smoke coverage, but must not supply accidental premises such as "the first dimension is 20". Construct a fixture for the behavior being asserted; retain a real model only when it carries a specific regression.
+- Compare solved geometry at the model's stated accuracy, not by hashing raw floating-point output across JavaScript runtimes. Exact equality is appropriate for byte-level contracts or same-runtime comparisons that specifically prove an optimization preserves its reference behavior.
 - Do not create a new one-off harness when a seam-specific shared fixture would make future tests cheaper.
 - Do not default to end-to-end coverage for behavior that can be proven in the logic lane. Authored/model semantics (geometry, requirements, features, history, persistence, exports) go through the in-process semantic session (`src/application/semantic/`, fixtures in `test/helpers/semantic-*.ts`); an E2E row must prove something only the browser has (pointer inference, picking, overlays, workers, peers, downloads). When a flow lacks a semantic seam, expose the seam (epic `cadara-d17` lists the known gaps) rather than reaching for Playwright.
 

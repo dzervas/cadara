@@ -1,9 +1,14 @@
 import type { SketchEntityId, SketchPointId } from "@/contracts/shared/ids";
-import type { SketchPoint2D } from "@/contracts/sketch/schema";
+import type {
+  SketchPoint2D,
+  SolvedSketchSnapshot,
+} from "@/contracts/sketch/schema";
 import { compileSketchSolveProgram } from "./compile-program";
 import { startCompiledSketchSolveSession } from "./start-session";
 import { updateCompiledSketchSolveSession } from "./update-session";
 import captured from "../../../test/fixtures/sketch-drag-conditioning.json";
+import firstGoalGeometry from "../../../test/fixtures/sketch-drag-first-goal-geometry.json";
+import smallGeometry from "../../../test/fixtures/sketch-drag-small-geometry.json";
 
 type CompileInput = Parameters<typeof compileSketchSolveProgram>[0];
 type CapturedDragCase = {
@@ -18,7 +23,6 @@ type CapturedDragCase = {
     entityId: SketchEntityId;
     poles: SketchPoint2D[][];
   }[];
-  baselineFrameDigests: string[];
   baselineKinds: ("solved" | "blocked")[];
 };
 
@@ -56,17 +60,81 @@ export function startConditioningReplay(
   return started.session;
 }
 
-// Uninterrupted GN10 preview, then the real zero-delta/unchanged-goal release
-// protocol. Recorded before the continuation port (not recomputed by the test).
-// cadara-p4r5.2: re-recorded for the first-order tangency loss (Fillet 17
-// tangent A, the arc start contact): the accepted frames move by ≤ 2.6e-3.
-export const uninterruptedFarDragDigests = {
-  "drag-large": {
-    preview: "14ff12bc9d6f2283ea9fba2c74912b38e480a79e18dd55d400bd7f93a9626650",
-    release: "c72622b837af488cf4990136f2eb66da77ddbbe974e730972dbdec7a3e1c7703",
-  },
-  "drag-corner": {
-    preview: "fd9dbc7fab96aa82027ce99f12e6e4f2ca1e7f2fb9d07fda9f8ade6264bad2c0",
-    release: "fd9dbc7fab96aa82027ce99f12e6e4f2ca1e7f2fb9d07fda9f8ade6264bad2c0",
-  },
+// Numeric geometry from the previously hash-approved Node 24 trajectory.
+// Cross-runtime bit identity is not a geometry contract: Node 22 and 24 differ
+// even on 0.013 ** 3, used by cubic evaluation, and BFGS amplifies that rounding.
+export const approvedFirstGoalGeometry = firstGoalGeometry as unknown as Record<
+  "drag-large" | "drag-corner",
+  { preview: ApprovedDragGeometry; release: ApprovedDragGeometry }
+>;
+
+export type ApprovedDragGeometry = {
+  points: [SketchPointId, number, number][];
+  splines: { entityId: SketchEntityId; poles: SketchPoint2D[][] }[];
 };
+
+// Trusted numeric capture, like the shared native-document fixture above.
+const smallDragApproval = smallGeometry as unknown as {
+  fixed: ApprovedDragGeometry;
+  pointIds: SketchPointId[];
+  splineIds: SketchEntityId[];
+  frames: { points: SketchPoint2D[]; splines: SketchPoint2D[][][] }[];
+};
+
+// Stationary geometry is stored once; each frame still approves every point
+// and every cubic span, not only the geometry directly under the cursor.
+export const approvedSmallDragFrames: ApprovedDragGeometry[] =
+  smallDragApproval.frames.map((frame) => ({
+    points: [
+      ...smallDragApproval.fixed.points,
+      ...frame.points.map((position, i): [SketchPointId, number, number] => [
+        smallDragApproval.pointIds[i]!,
+        ...position,
+      ]),
+    ],
+    splines: [
+      ...smallDragApproval.fixed.splines,
+      ...frame.splines.map((poles, i) => ({
+        entityId: smallDragApproval.splineIds[i]!,
+        poles,
+      })),
+    ],
+  }));
+
+export function dragSnapshotGeometry(snapshot: SolvedSketchSnapshot) {
+  return [
+    snapshot.solvedPoints.map((p) => [p.pointId, ...p.solvedPosition]),
+    snapshot.solvedEntities.filter((e) => e.kind === "spline"),
+  ];
+}
+
+// Bound the entire cubic locus, not just a few sampled points. The maximum of
+// each coordinate's difference is at an endpoint or a zero of its derivative.
+// Off-curve control poles are not geometric points (they may differ by more).
+export function cubicCoordinateDelta(
+  before: readonly SketchPoint2D[],
+  after: readonly SketchPoint2D[],
+) {
+  let maximum = 0;
+  for (const coordinate of [0, 1] as const) {
+    const [p0, p1, p2, p3] = before.map(
+      (p, i) => after[i]![coordinate] - p[coordinate],
+    );
+    const a = -p0! + 3 * p1! - 3 * p2! + p3!;
+    const b = 3 * p0! - 6 * p1! + 3 * p2!;
+    const c = -3 * p0! + 3 * p1!;
+    const candidates = [0, 1];
+    if (a === 0) {
+      if (b !== 0) candidates.push(-c / (2 * b));
+    } else {
+      const discriminant = 4 * b * b - 12 * a * c;
+      if (discriminant >= 0)
+        for (const sign of [-1, 1])
+          candidates.push((-2 * b + sign * Math.sqrt(discriminant)) / (6 * a));
+    }
+    for (const t of candidates)
+      if (t >= 0 && t <= 1)
+        maximum = Math.max(maximum, Math.abs(((a * t + b) * t + c) * t + p0!));
+  }
+  return maximum;
+}

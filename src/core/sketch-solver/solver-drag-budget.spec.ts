@@ -1,14 +1,20 @@
-import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
 import { compileSketchSolveProgram } from "./compile-program";
 import { startCompiledSketchSolveSession } from "./start-session";
 import { traceSketchSolverForTest } from "./solve-tracing";
-import { updateCompiledSketchSolveSession } from "./update-session";
+import {
+  updateCompiledSketchSolveSession,
+  updateCompiledSketchSolveSessionFrame,
+} from "./update-session";
+import { finishSolve } from "./solve-steps";
 import {
   dragConditioningFixture,
   startConditioningReplay,
-  uninterruptedFarDragDigests,
+  approvedFirstGoalGeometry,
+  cubicCoordinateDelta,
+  dragSnapshotGeometry,
+  type ApprovedDragGeometry,
 } from "./solver-drag-conditioning.fixtures";
 import {
   FIXTURE_TOLERANCE,
@@ -17,42 +23,103 @@ import {
 } from "@/contracts/sketch/region-extraction.fixtures";
 // Logic lane: compiled drag sessions; no scheduler, DOM or timing assumptions.
 
-function digest(snapshot: SolvedSketchSnapshot) {
-  return createHash("sha256").update(JSON.stringify([
-    snapshot.solvedPoints.map((p) => [p.pointId, ...p.solvedPosition]),
-    snapshot.solvedEntities.filter((e) => e.kind === "spline"),
-  ])).digest("hex");
+function expectApprovedGeometry(
+  snapshot: SolvedSketchSnapshot,
+  approved: ApprovedDragGeometry,
+) {
+  // Points and the complete cubic locus share the far-drag contract's existing
+  // coordinate accuracy. Control poles alone are not points on the curve.
+  const coordinateAccuracy = 0.05;
+  expect(snapshot.solvedPoints).toHaveLength(approved.points.length);
+  for (const [id, x, y] of approved.points) {
+    const point = snapshot.solvedPoints.find(
+      (p) => p.pointId === id,
+    )!.solvedPosition;
+    expect(
+      Math.max(Math.abs(point[0] - x), Math.abs(point[1] - y)),
+      `point ${id}`,
+    ).toBeLessThanOrEqual(coordinateAccuracy);
+  }
+  const splines = snapshot.solvedEntities.filter((e) => e.kind === "spline");
+  expect(splines).toHaveLength(approved.splines.length);
+  for (const before of approved.splines) {
+    const after = splines.find((e) => e.entityId === before.entityId)!;
+    expect(after.reconstruction.spans).toHaveLength(before.poles.length);
+    for (const [index, poles] of before.poles.entries())
+      expect(
+        cubicCoordinateDelta(poles, after.reconstruction.spans[index]!.poles),
+        `approved spline ${before.entityId} span ${index}`,
+      ).toBeLessThanOrEqual(coordinateAccuracy);
+  }
 }
 
 function expectAuthored(snapshot: SolvedSketchSnapshot) {
-  expect(snapshot.constraintStatuses.every((s) => s.status === "satisfied")).toBe(true);
-  expect(snapshot.dimensionStatuses.every((s) => s.status === "driving")).toBe(true);
+  expect(
+    snapshot.constraintStatuses.every((s) => s.status === "satisfied"),
+  ).toBe(true);
+  expect(snapshot.dimensionStatuses.every((s) => s.status === "driving")).toBe(
+    true,
+  );
 }
 
 for (const row of dragConditioningFixture.cases) {
   if (row.scenario === "drag-small") continue;
-  const baseline = uninterruptedFarDragDigests[row.scenario];
+  const baseline = approvedFirstGoalGeometry[row.scenario];
   const [goal] = row.targets[0]!;
-  const unchangedGoal = goal.kind === "sketchTranslate" ? { ...goal, delta: [0, 0] as const } : goal;
+  const unchangedGoal =
+    goal.kind === "sketchTranslate"
+      ? { ...goal, delta: [0, 0] as const }
+      : goal;
 
   test(`${row.scenario}: identical goals progress privately and publish the uninterrupted accepted iterate`, () => {
     const session = startConditioningReplay(row);
     const initial = session.lastAcceptedSnapshot;
+    const uninterrupted = startConditioningReplay(row);
+    const expectedPreview = finishSolve(
+      updateCompiledSketchSolveSessionFrame(uninterrupted, goal, null),
+    );
+    expectAuthored(expectedPreview.solvedSnapshot!);
     let frames = 0;
     for (; frames < 80; frames += 1) {
-      const trace = traceSketchSolverForTest(() => updateCompiledSketchSolveSession(session, frames === 0 ? goal : unchangedGoal, null));
-      expect(trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0)).toBeLessThanOrEqual(48);
-      expect(trace.work.dragConditioningResidualEvaluations).toBeLessThanOrEqual(2500);
+      const trace = traceSketchSolverForTest(() =>
+        updateCompiledSketchSolveSession(
+          session,
+          frames === 0 ? goal : unchangedGoal,
+          null,
+        ),
+      );
+      expect(
+        trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0),
+      ).toBeLessThanOrEqual(48);
+      expect(
+        trace.work.dragConditioningResidualEvaluations,
+      ).toBeLessThanOrEqual(2500);
       expectAuthored(trace.result.solvedSnapshot!);
       if (session.lastAcceptedSnapshot !== initial) break;
       expect(trace.result.solvedSnapshot).toBe(initial);
     }
     expect(frames).toBeGreaterThan(0); // Fails on the unbudgeted solver.
     expect(frames).toBeLessThan(80); // A cap without continuation never finishes.
-    expect(digest(session.lastAcceptedSnapshot)).toBe(baseline.preview);
-    const release = updateCompiledSketchSolveSession(session, unchangedGoal, 1e-4);
+    expect(dragSnapshotGeometry(session.lastAcceptedSnapshot)).toEqual(
+      dragSnapshotGeometry(expectedPreview.solvedSnapshot!),
+    );
+    expectApprovedGeometry(session.lastAcceptedSnapshot, baseline.preview);
+    const release = updateCompiledSketchSolveSession(
+      session,
+      unchangedGoal,
+      1e-4,
+    );
+    const expectedRelease = updateCompiledSketchSolveSession(
+      uninterrupted,
+      unchangedGoal,
+      1e-4,
+    );
+    expect(release.kind).toBe(expectedRelease.kind);
     expectAuthored(release.solvedSnapshot!);
-    expect(digest(release.solvedSnapshot!)).toBe(baseline.release);
+    expect(dragSnapshotGeometry(release.solvedSnapshot!)).toEqual(
+      dragSnapshotGeometry(expectedRelease.solvedSnapshot!),
+    );
+    expectApprovedGeometry(release.solvedSnapshot!, baseline.release);
   });
 
   test(`${row.scenario}: release after the first exhausted budget flushes the private iterate`, () => {
@@ -60,9 +127,26 @@ for (const row of dragConditioningFixture.cases) {
     const initial = session.lastAcceptedSnapshot;
     const preview = updateCompiledSketchSolveSession(session, goal, null);
     expect(preview.solvedSnapshot).toBe(initial);
-    const release = updateCompiledSketchSolveSession(session, unchangedGoal, 1e-4);
+    const release = updateCompiledSketchSolveSession(
+      session,
+      unchangedGoal,
+      1e-4,
+    );
     expectAuthored(release.solvedSnapshot!);
-    expect(digest(release.solvedSnapshot!)).toBe(baseline.release);
+    const uninterrupted = startConditioningReplay(row);
+    finishSolve(
+      updateCompiledSketchSolveSessionFrame(uninterrupted, goal, null),
+    );
+    const expectedRelease = updateCompiledSketchSolveSession(
+      uninterrupted,
+      unchangedGoal,
+      1e-4,
+    );
+    expect(release.kind).toBe(expectedRelease.kind);
+    expect(dragSnapshotGeometry(release.solvedSnapshot!)).toEqual(
+      dragSnapshotGeometry(expectedRelease.solvedSnapshot!),
+    );
+    expectApprovedGeometry(release.solvedSnapshot!, baseline.release);
   });
 }
 
