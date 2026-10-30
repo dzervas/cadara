@@ -16,6 +16,7 @@ import type {
 } from "@/core/workspace/workbench-tabs";
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
+import { WorkbenchPartReadiness } from "@/application/workspace/workbench-part-readiness";
 import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
 import { createWorkbenchProjectSessionStore } from "@/infrastructure/persistence/workbench-project-session-store";
@@ -90,12 +91,17 @@ export function useWorkbenchProject() {
         initialTabs.tabs = [...initialTabs.tabs, defaultTab];
       initialTabs.activeDocumentId = session.activeDocumentId;
     }
+    const partReadiness = new WorkbenchPartReadiness();
     let repository: Promise<LocalProjectRepository> | undefined;
     return {
       sessionStore,
       session,
       initialTabs,
       initialFailure,
+      partReadiness,
+      registerPartReadiness: (
+        owner: Parameters<WorkbenchPartReadiness["register"]>[0],
+      ) => partReadiness.register(owner),
       getRepository() {
         // Automerge initialization is independent of mounting the current part's shell.
         repository ??= Promise.all([
@@ -121,6 +127,7 @@ export function useWorkbenchProject() {
               }),
               urls,
               catalogUrls,
+              (docId) => partReadiness.ensure(docId),
             );
           },
         );
@@ -128,6 +135,17 @@ export function useWorkbenchProject() {
       },
     };
   }, []);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      // Strict Mode replays effects before this microtask; only a real unmount cancels discovery.
+      queueMicrotask(() => {
+        if (!mounted.current) context.partReadiness.dispose();
+      });
+    };
+  }, [context]);
   const unwrap = useCallback(<T>(result: ProjectResult<T>): T => {
     if (!result.ok) throw new Error(result.diagnostic.message);
     return result.value;
@@ -262,6 +280,7 @@ export function useWorkbenchProject() {
     projects,
     pendingWrites,
     sessionKey,
+    registerPartReadiness: context.registerPartReadiness,
     initialTabs: context.initialTabs,
     initialFailure: context.initialFailure,
     busy: busy || saving > 0,

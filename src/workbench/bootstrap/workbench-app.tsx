@@ -123,7 +123,7 @@ function ProjectWorkbenchApp({
 }: WorkbenchAppProps & { projects: ReturnType<typeof useWorkbenchProject> }) {
   const errorReporter = useErrorReporter();
   const project = projects.project;
-  const { saveParts, saveSession } = projects;
+  const { saveParts, saveSession, registerPartReadiness } = projects;
   const [projectApplied, setProjectApplied] = useState(project !== null);
   const tabsStorage = useMemo(
     () =>
@@ -236,6 +236,13 @@ function ProjectWorkbenchApp({
       runtimeExtensionRegistries.exportProviders,
       releaseDocumentResources,
     ],
+  );
+  useEffect(
+    () =>
+      registerPartReadiness(async (documentId) => {
+        await modelingServices.get(documentId).getCurrentDocumentSnapshot();
+      }),
+    [modelingServices, registerPartReadiness],
   );
   const modelingService = modelingServices.get(tabsState.activeDocumentId);
   const waitForLocalChanges = useCallback(

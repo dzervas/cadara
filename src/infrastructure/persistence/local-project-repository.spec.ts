@@ -4,7 +4,12 @@ import {
   reduceWorkbenchTabs,
   type WorkbenchTab,
 } from "@/core/workspace/workbench-tabs";
-import { createEmptyAuthoredModelDocument } from "@/core/modeling/empty-authored-model-document";
+import { WorkbenchPartReadiness } from "@/application/workspace/workbench-part-readiness";
+import { WorkerBackedDocumentRepository } from "@/infrastructure/modeling/worker-backed-document-repository";
+import { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
+import type { DocumentSyncWorkerLike } from "@/infrastructure/workers/document-sync-worker-client";
+import { createDocumentSyncWorkerMessageHandler } from "@/infrastructure/workers/document-sync-worker-runtime";
+import type { DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { Repo } from "@automerge/automerge-repo";
 import * as Automerge from "@automerge/automerge";
@@ -35,11 +40,29 @@ function setup(urls = new MemoryDocumentRepositoryUrlStore()) {
     urlStore: urls,
     assetStore: createMemoryGeometryAssetStore(),
   });
+  const ensurePartReady = async (
+    documentId: Parameters<typeof documents.load>[0]["documentId"],
+  ) => {
+    const loaded = await documents.load({
+      documentId,
+      seedDocument: {
+        ...(await createSeedAuthoredModelDocument()),
+        documentId,
+      },
+    });
+    if (!loaded.ok) throw new Error(loaded.status.diagnostic.message);
+  };
   return {
     repo,
     urls,
     documents,
-    projects: new LocalProjectRepository(documents, urls),
+    ensurePartReady,
+    projects: new LocalProjectRepository(
+      documents,
+      urls,
+      urls,
+      ensurePartReady,
+    ),
   };
 }
 
@@ -229,6 +252,7 @@ test("database-local catalogs stay independent when peer channels share part poi
     first.documents,
     sharedPartUrls,
     new MemoryDocumentRepositoryUrlStore(),
+    first.ensurePartReady,
   );
   const secondProjects = new LocalProjectRepository(
     second.documents,
@@ -463,28 +487,121 @@ test("a document opened during discovery joins the manifest and survives reposit
   }
 });
 
-test("an unsaved initial part is the same document later opened by the workbench", async () => {
-  const { repo, urls, documents, projects } = setup();
+test("overlapping worker load and project creation share one initialized part", async () => {
+  const { repo, urls, documents } = setup();
+  const workerDocuments = new IndexedDbAutomergeDocumentRepository({
+    repo: repo as unknown as AutomergeRepositoryLike,
+    urlStore: new MemoryDocumentRepositoryUrlStore(),
+    assetStore: createMemoryGeometryAssetStore(),
+  });
+  let releaseLoad!: () => void;
+  const loading = new Promise<void>((resolve) => {
+    releaseLoad = resolve;
+  });
+  const load = workerDocuments.load.bind(workerDocuments);
+  vi.spyOn(workerDocuments, "load").mockImplementation(async (input) => {
+    await loading;
+    return load(input);
+  });
+  const projectLoad = vi.spyOn(documents, "load");
+  let listener:
+    | ((event: MessageEvent<DocumentSyncWorkerResponse>) => void)
+    | null = null;
+  const handler = createDocumentSyncWorkerMessageHandler(
+    { repository: workerDocuments },
+    (message) => {
+      listener?.({ data: message } as MessageEvent<DocumentSyncWorkerResponse>);
+    },
+  );
+  const worker: DocumentSyncWorkerLike = {
+    postMessage: (message) => {
+      void handler(message);
+    },
+    addEventListener: (_type, callback) => {
+      listener = callback;
+    },
+    removeEventListener: () => {
+      listener = null;
+    },
+  };
+  const client = new DocumentSyncWorkerClient({ worker });
+  const workerRepository = new WorkerBackedDocumentRepository({
+    client,
+    urlStore: urls,
+  });
+  const readiness = new WorkbenchPartReadiness();
+  const projects = new LocalProjectRepository(documents, urls, urls, (docId) =>
+    readiness.ensure(docId),
+  );
   try {
-    const project = unwrap(
-      await projects.create("New project", [
-        { name: "Workspace", kind: "part", docId: "doc_unsaved" },
-      ]),
-    );
-    const entry = project.entries[0];
-    const url = urls.get(entry.docId)!;
-    const handle = await repo.find<CollaborativeDocument>(url);
-    expect(entry.automergeDocumentId).toBe(handle.documentId);
-    const opened = await documents.load({
-      documentId: entry.docId,
-      seedDocument: createEmptyAuthoredModelDocument(entry.docId),
+    const seed = {
+      ...(await createSeedAuthoredModelDocument()),
+      documentId: "doc_unsaved" as const,
+    };
+    const create = vi.spyOn(repo, "create");
+    const workerLoad = workerRepository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
     });
+    const creating = projects.create("New project", [
+      { name: "Workspace", kind: "part", docId: seed.documentId },
+    ]);
+    const prepare = vi.fn(async () => {
+      const loaded = await workerLoad;
+      if (!loaded.ok) throw new Error(loaded.status.diagnostic.message);
+    });
+    readiness.register(prepare);
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    expect(urls.get(seed.documentId)).toBeNull();
+    releaseLoad();
+    const [opened, result] = await Promise.all([workerLoad, creating]);
     expect(opened.ok).toBe(true);
-    if (opened.ok) expect(opened.document.documentId).toBe(entry.docId);
-    expect(urls.get(entry.docId)).toBe(url);
+    expect(projectLoad).not.toHaveBeenCalled();
+    const project = unwrap(result);
+    const url = urls.get(seed.documentId)!;
+    const handle = await repo.find<CollaborativeDocument>(url);
+    expect(project.entries[0].automergeDocumentId).toBe(handle.documentId);
     expect(materializeCollaborativeDocument(handle.doc()).documentId).toBe(
-      entry.docId,
+      seed.documentId,
     );
+    expect(
+      create.mock.calls.filter(
+        ([initial]) =>
+          (initial as { format?: string })?.format ===
+          "cadara-stable-authored-v3",
+      ),
+    ).toHaveLength(1);
+    const reopened = await workerRepository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(reopened.ok).toBe(true);
+    expect(urls.get(seed.documentId)).toBe(url);
+    expect(unwrap(await projects.open(project.projectId))).toEqual(project);
+  } finally {
+    releaseLoad();
+    client.dispose();
+    readiness.dispose();
+    await repo.shutdown();
+  }
+});
+
+test("missing part identities are diagnosed after the document owner settles without a URL", async () => {
+  const { repo, urls, documents } = setup();
+  try {
+    const owner = vi.fn(async () => {});
+    const projects = new LocalProjectRepository(documents, urls, urls, owner);
+    const result = await projects.create("Missing part", [
+      { kind: "part", name: "Missing", docId: "doc_missing" },
+    ]);
+    expect(owner).toHaveBeenCalledWith("doc_missing");
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostic: {
+        message: expect.stringContaining("no stored Automerge URL"),
+      },
+    });
+    expect(urls.get("doc_missing")).toBeNull();
   } finally {
     await repo.shutdown();
   }
@@ -596,6 +713,40 @@ test("setParts retains known identities and persists newly added unsaved parts",
     const added = await repo.find(urls.get("doc_added")!);
     expect(edited.entries[1].automergeDocumentId).toBe(added.documentId);
     expect(unwrap(await projects.open(project.projectId))).toEqual(edited);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test("migration refuses writes when entries change during identity resolution", async () => {
+  const { repo, urls, projects } = setup();
+  try {
+    const { manifest, readme } = await seedLegacyManifest(repo, urls);
+    const find = repo.find.bind(repo);
+    vi.spyOn(repo, "find").mockImplementation((id) => {
+      if (id === readme.url) {
+        const entries = JSON.parse(
+          JSON.stringify(manifest.doc().entries),
+        ).reverse();
+        manifest.change((draft) => {
+          draft.entries = entries;
+        });
+      }
+      return find(id);
+    });
+    expect(await projects.open("legacy-project")).toMatchObject({
+      ok: false,
+      diagnostic: { message: expect.stringContaining("entries changed") },
+    });
+    expect(manifest.doc().entries.map((entry) => entry.docId)).toEqual([
+      "doc_notes",
+      "doc_part",
+    ]);
+    expect(
+      manifest
+        .doc()
+        .entries.every((entry) => !("automergeDocumentId" in entry)),
+    ).toBe(true);
   } finally {
     await repo.shutdown();
   }

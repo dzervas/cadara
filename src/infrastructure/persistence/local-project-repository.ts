@@ -16,7 +16,6 @@ import {
   parseProjectManifest,
   validateLegacyProjectManifest,
 } from "@/contracts/modeling/project-manifest.runtime-schema";
-import { createEmptyAuthoredModelDocument } from "@/core/modeling/empty-authored-model-document";
 import type { AutomergeHandleLike } from "./indexeddb-automerge-document-repository";
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import type { DocumentRepositoryUrlStore } from "./document-repository-url-store";
@@ -29,14 +28,17 @@ export class LocalProjectRepository {
   private readonly documents: IndexedDbAutomergeDocumentRepository;
   private readonly urls: DocumentRepositoryUrlStore;
   private readonly catalogUrls: DocumentRepositoryUrlStore;
+  private readonly ensurePartReady?: (docId: DocumentId) => Promise<void>;
   constructor(
     documents: IndexedDbAutomergeDocumentRepository,
     urls: DocumentRepositoryUrlStore,
     catalogUrls: DocumentRepositoryUrlStore = urls,
+    ensurePartReady?: (docId: DocumentId) => Promise<void>,
   ) {
     this.documents = documents;
     this.urls = urls;
     this.catalogUrls = catalogUrls;
+    this.ensurePartReady = ensurePartReady;
   }
 
   private run<T>(operation: () => Promise<T>): Promise<ProjectResult<T>> {
@@ -105,14 +107,8 @@ export class LocalProjectRepository {
   }): Promise<ProjectEntry> {
     if (!entry.name.trim() || !entry.docId.trim())
       throw new Error("Project entries require names and document identities.");
-    // An entry exists only after its document exists, including unsaved initial tabs.
-    if (!this.urls.get(entry.docId)) {
-      const loaded = await this.documents.load({
-        documentId: entry.docId,
-        seedDocument: createEmptyAuthoredModelDocument(entry.docId),
-      });
-      if (!loaded.ok) throw new Error(loaded.status.diagnostic.message);
-    }
+    // The workbench's document owner initializes unsaved tabs; a second repository must not seed them.
+    if (!this.urls.get(entry.docId)) await this.ensurePartReady?.(entry.docId);
     return {
       ...entry,
       kind: "part",
@@ -129,18 +125,25 @@ export class LocalProjectRepository {
       )
     )
       return;
+    const originalEntries = JSON.stringify(legacy.data.entries);
     const next = JSON.parse(JSON.stringify(legacy.data)) as ProjectManifest;
+    const assignments = next.entries.flatMap((entry, index) =>
+      entry.automergeDocumentId === undefined ? [index] : [],
+    );
     for (const entry of next.entries) {
       if (entry.automergeDocumentId === undefined)
         entry.automergeDocumentId = await this.resolveDocumentId(entry.docId);
     }
     const parsed = parseProjectManifest(next);
     if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+    if (JSON.stringify(handle.doc().entries) !== originalEntries)
+      throw new Error(
+        "Project entries changed while resolving document identities. Reopen the project to retry.",
+      );
     handle.change((draft) => {
-      for (let index = 0; index < next.entries.length; index++)
-        if (draft.entries[index].automergeDocumentId === undefined)
-          draft.entries[index].automergeDocumentId =
-            next.entries[index].automergeDocumentId;
+      for (const index of assignments)
+        draft.entries[index].automergeDocumentId =
+          next.entries[index].automergeDocumentId;
     });
     await (
       await this.documents.getAutomergeRepository()
