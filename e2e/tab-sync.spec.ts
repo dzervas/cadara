@@ -36,14 +36,12 @@ test("opt-in local peer sync exposes peer-authored document changes after refres
   // T17p2 (F-4): the second tab picks the change up through the production
   // peer refresh, not the debug refresh hook.
   await waitForPeerRevision(secondTab, secondTabRevisionBefore);
-  await expect
-    .poll(() => revisionLabel(secondTab), { timeout: 30_000 })
-    .toBe("rev_0002");
   await secondTab.locator("[data-workbench-variables-fab]").click();
   // Synced (non-locally-added) variables render in view mode by default, so we assert against
   // the row's data attributes rather than the edit-mode inputs.
   const syncedRow = secondTab.locator('[data-variable-row="variable_1"]');
   await expect(syncedRow).toBeVisible({ timeout: 30_000 });
+  await expect(secondTab.locator("[data-variable-row]")).toHaveCount(1);
   await expect(syncedRow).toContainText("var1");
   await expect(
     syncedRow.locator('[data-variable-expression="variable_1"]'),

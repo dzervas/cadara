@@ -2,6 +2,7 @@ import { enrichExtrudeRegionProfiles } from "@/core/modeling/region-profile-sele
 import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import { requireMeasureTopologyResponse } from "@/contracts/modeling/topology-measure.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import { appErrorFromModelingDiagnostic } from "@/contracts/errors/app-error";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -64,7 +65,7 @@ import {
 import type { ProjectSketchExternalReferencesRequest } from "@/contracts/solver/schema";
 import { loadOrCreateOperationHistory } from "@/application/modeling/modeling-history-persistence";
 import { isLocalFileSyncDocumentRepository, isGeometryAssetDocumentRepository } from "@/core/modeling/document-repository";
-import { type DocumentRepositoryChangeEvent, type DocumentRepositoryMetadata, type DocumentRepositoryMutationResult } from "@/contracts/modeling/document-repository";
+import { type DocumentRepositoryChangeEvent, type DocumentRepositoryMetadata, type DocumentRepositoryMutationResult, type DocumentRepositoryRestoreStatus } from "@/contracts/modeling/document-repository";
 import { serializeAuthoredDocumentJson as createLocalAuthoredDocumentPayload } from "@/contracts/modeling/authored-document-serialization";
 import { hashGeometryAssetBytes } from "@/core/modeling/geometry-asset-store";
 import type {
@@ -189,6 +190,8 @@ export function createModelingService(
     createEmptyOperationHistory(currentDocumentId);
   let canPersistOperationHistory = true;
   let canPersistAuthoredDocument = true;
+  /** No canonical stored basis was adopted; provisional kernel state is not editable. */
+  let initialRepositoryLoadFailure: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }> | null = null;
   /** Why an accepted local change exists in memory only (cadara-vk96). */
   let unsavedLocalChange: SaveFailureReason | null = null;
   let historyRestoreState: ModelingHistoryRestoreState = {
@@ -591,7 +594,14 @@ export function createModelingService(
   ) {
     return runModelingMutationBoundary<T>({
       ...input,
-      action: () => runLocalDocumentChange(() => applyLocalMutation(input.action)),
+      action: () => runLocalDocumentChange(() => {
+        if (initialRepositoryLoadFailure)
+          throw appErrorFromModelingDiagnostic(
+            createDocumentRepositoryDiagnostic(initialRepositoryLoadFailure),
+            { operation: input.operation, requestId: input.requestId },
+          );
+        return applyLocalMutation(input.action);
+      }),
     });
   }
 
@@ -1035,6 +1045,7 @@ export function createModelingService(
     resetOperationHistoryPayloadForCurrentRepository();
     canPersistOperationHistory = true;
     canPersistAuthoredDocument = true;
+    initialRepositoryLoadFailure = null;
     // The in-memory document was replaced; nothing unsaved remains.
     unsavedLocalChange = null;
     historyRestoreState = {
@@ -1355,6 +1366,16 @@ export function createModelingService(
     }
   }
 
+  function isCurrentRestoredRepositoryEvent(event: DocumentRepositoryChangeEvent) {
+    const metadata = documentRepository!.getMetadata(currentDocumentId);
+    return event.status.kind === "restored" &&
+      documentRepository!.getRestoreStatus(currentDocumentId).kind === "restored" &&
+      event.document.documentId === currentDocumentId &&
+      event.metadata.documentId === currentDocumentId &&
+      event.metadata.storageKey === metadata.storageKey &&
+      sameStringSet(event.metadata.heads, metadata.heads);
+  }
+
   function subscribeToDocumentRepository() {
     if (disposed || unsubscribeDocumentRepository || !documentRepository) {
       return;
@@ -1390,9 +1411,20 @@ export function createModelingService(
           await repositoryPersistencePromise;
           if (disposed) return;
           const latest = latestRepositoryEvent ?? event;
+          // An explicit recovery that could not save the displayed state must
+          // not lose it to automatic bootstrap recovery. Editor-private drafts
+          // remain owned by the existing editor peer-reconciliation path.
+          if (initialRepositoryLoadFailure && (
+            unsavedLocalChange || pendingPublicationRestore || !isCurrentRestoredRepositoryEvent(latest)
+          )) return;
           if (latest !== restoredRepositoryEvent) {
             const rollbackDocument = await exportAuthoredDocumentForRepository();
             const rollbackBasis = repositorySnapshotBasis;
+            // Export may yield to an explicit lifecycle recovery. Recheck its
+            // owned state before changing the kernel, not only after adoption.
+            if (initialRepositoryLoadFailure && (
+              unsavedLocalChange || pendingPublicationRestore || !isCurrentRestoredRepositoryEvent(latest)
+            )) return;
             try {
               await adoptRepositoryState(rollbackDocument, latest);
             } catch (error) {
@@ -1411,6 +1443,23 @@ export function createModelingService(
           if (repositoryRestoreFailure) {
             historyRestoreState = repositoryRestoreFailure.previousHistoryState;
             repositoryRestoreFailure = null;
+          }
+          if (
+            initialRepositoryLoadFailure &&
+            latest === latestRepositoryEvent &&
+            !unsavedLocalChange &&
+            !pendingPublicationRestore &&
+            isCurrentRestoredRepositoryEvent(latest)
+          ) {
+            // Only a successfully adopted canonical peer copy reopens writes;
+            // do not replay or publish the provisional bootstrap document.
+            initialRepositoryLoadFailure = null;
+            canPersistOperationHistory = true;
+            canPersistAuthoredDocument = true;
+            resetOperationHistoryPayloadForCurrentRepository();
+            historyRestoreState = { kind: "restored", entriesReplayed: 0, diagnostics: [] };
+            initialLoadingStatus.setProgress(null);
+            initialLoadingStatus.set("preparing-geometry");
           }
           if (!disposed) notifyModelingDocumentChange(event);
         }).catch((error: unknown) => {
@@ -1553,6 +1602,7 @@ export function createModelingService(
     });
 
     if (!loadResult.ok) {
+      initialRepositoryLoadFailure = loadResult.status;
       canPersistOperationHistory = false;
       canPersistAuthoredDocument = false;
       historyRestoreState = createRepositoryRestoreFailure(loadResult.status);
@@ -1741,31 +1791,38 @@ export function createModelingService(
   }
 
   function resetOperationHistory() {
-    operationHistoryStore?.clear();
-    operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);
-    canPersistOperationHistory = true;
-    // The in-memory document was replaced; nothing unsaved remains.
-    unsavedLocalChange = null;
-    publishLocalSaveStatus();
-    historyRestoreState = {
-      kind: "empty",
-      entriesReplayed: 0,
-      diagnostics: [],
+    const resetLocalHistory = () => {
+      operationHistoryStore?.clear();
+      operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);
+      canPersistOperationHistory = true;
+      // Reset deliberately resolves the displayed state, not an older failure.
+      unsavedLocalChange = null;
+      publishLocalSaveStatus();
+      historyRestoreState = {
+        kind: "empty",
+        entriesReplayed: 0,
+        diagnostics: [],
+      };
     };
     if (!documentRepository) {
+      resetLocalHistory();
       canPersistAuthoredDocument = true;
       return;
     }
     // cadara-rnsb: the reset deletes the stored document, so store the one on
     // screen as its replacement; until then (and if that fails) edits are not
     // persisted. Later edits and writes queue behind this recovery.
-    canPersistAuthoredDocument = false;
     const repository = documentRepository;
+    const changesBefore = repositoryChangePromise;
     const mutationsBefore = localMutations;
     const writesBefore = repositoryPersistencePromise;
     const recovery = (async () => {
+      await changesBefore;
       await mutationsBefore;
       await writesBefore;
+      if (disposed) return null;
+      resetLocalHistory();
+      canPersistAuthoredDocument = false;
       // Export first: a failed export must not leave storage deleted.
       const document = await exportAuthoredDocumentForRepository();
       if (disposed) return null;
@@ -1781,6 +1838,7 @@ export function createModelingService(
         document.revisionId);
       operationHistoryPayload = createEmptyOperationHistoryForCurrentRepository();
       canPersistAuthoredDocument = true;
+      initialRepositoryLoadFailure = null;
       // Edits refused while storage was unavailable are stored now.
       unsavedLocalChange = null;
       // An earlier overlapping reset may have recorded a failure.
@@ -1809,8 +1867,9 @@ export function createModelingService(
           0,
         );
       });
+    // Own reset through the lifecycle tail, like New/Import. An earlier peer
+    // must not await this recovery as persistence while recovery awaits it.
     localMutations = recovery;
-    repositoryPersistencePromise = recovery;
     trackLocalSave(recovery);
   }
 
@@ -2090,6 +2149,7 @@ export function createModelingService(
     },
     async waitForPersistence() {
       await ensureInitialized();
+      await waitForLocalMutations();
       await waitForRepositoryChanges();
       await repositoryPersistencePromise;
     },
@@ -2272,6 +2332,10 @@ export function createModelingService(
     },
     async renameDocument(input) {
       return runLocalDocumentChange(async () => {
+        if (initialRepositoryLoadFailure) return {
+          ok: false,
+          diagnostics: [createDocumentRepositoryDiagnostic(initialRepositoryLoadFailure)],
+        };
         const document = await exportRuntimeDocument();
         if (document.name === input.name) {
           const snapshot = validateSnapshotResponse(

@@ -1490,27 +1490,33 @@ test("src/domain/modeling/modeling-service-document-repository.spec.ts", async (
     ).toBe("unsupported-schema-version");
 
     const snapshot = await service.getCurrentDocumentSnapshot();
-    const renamed = await unwrapModelingResult(
-      service.renameBody({
-        baseRevisionId: snapshot.document.revisionId,
-        bodyId: "body_part-1",
-        bodyLabel: "Must Not Overwrite Unsupported Document",
-      }),
-    );
+    const renamed = await service.renameBody({
+      baseRevisionId: snapshot.document.revisionId,
+      bodyId: "body_part-1",
+      bodyLabel: "Must Not Overwrite Unsupported Document",
+    });
     expect(
-      renamed.revisionState.kind,
-      "The active seed adapter may still accept local mutations.",
-    ).toBe("accepted");
+      renamed.isErr(),
+      "Without a canonical stored basis, the provisional kernel must refuse authored mutations.",
+    ).toBe(true);
+    expect(
+      (await service.getCurrentDocumentSnapshot()).document,
+      "A refused mutation must leave the provisional kernel unchanged.",
+    ).toEqual(snapshot.document);
     expect(
       documentRepository.savedDocuments.length,
       "Restore failures should block later repository writes from the seed adapter.",
     ).toBe(0);
     expect(
-      renamed.diagnostics.some(
-        (diagnostic) => diagnostic.code === "unsupported-schema-version",
+      renamed.isErr() && renamed.error.context.some(
+        (entry) => entry.key === "diagnosticCode" && entry.value === "unsupported-schema-version",
       ),
-      "Blocked repository writes should keep surfacing the restore diagnostic.",
+      "Refused mutations should retain the original repository schema diagnostic.",
     ).toBeTruthy();
+    expect(
+      await documentRepository.load({ documentId: "doc_workspace", seedDocument }),
+      "The unsupported canonical document must remain stored rather than reset or replaced.",
+    ).toMatchObject({ ok: false, status: { diagnostic: { reasonCode: "unsupported-schema-version" } } });
   }
 
   async function testPeerRepositoryChangesRefreshSnapshotsAndStaleMutationsConflict() {

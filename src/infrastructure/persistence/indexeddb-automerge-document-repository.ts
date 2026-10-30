@@ -70,12 +70,15 @@ export interface AutomergeHandleLike<T> {
   whenReady(): Promise<void>;
   doc(): T;
   heads?(): readonly string[];
+  isReady?(): boolean;
+  off?(event: "change", callback: () => void): void;
   change(callback: (document: T) => void): void;
   on(event: "change", callback: () => void): void;
 }
 export interface AutomergeRepositoryLike {
   create<T>(initialValue?: T): AutomergeHandleLike<T>;
   find<T>(id: AutomergeUrl): Promise<AutomergeHandleLike<T>>;
+  findWithProgress?<T>(id: AutomergeUrl): { handle: AutomergeHandleLike<T> };
   delete(id: AutomergeUrl): void;
   flush?(documents?: string[]): Promise<void>;
 }
@@ -162,6 +165,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     Set<(event: DocumentRepositoryChangeEvent) => void>
   >();
   private readonly localChanges = new Set<DocumentId>();
+  /** Missing copies can still arrive from a peer after initial discovery ends. */
+  private readonly missingCopyWatches = new Map<DocumentId, () => void>();
   /** Released by releaseSupersededHandle until a load or initialize installs a handle. */
   private readonly supersededDocuments = new Set<DocumentId>();
   private readonly queues = new Map<DocumentId, Promise<unknown>>();
@@ -365,7 +370,8 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       if (
         error instanceof Error &&
         error.message === `Document ${url} is unavailable`
-      )
+      ) {
+        this.watchMissingCopy(documentId, url);
         return {
           ok: false,
           diagnostic: {
@@ -374,6 +380,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
               "This browser no longer has its stored copy of the document, for example because site data was cleared. Reset stored history to start fresh.",
           },
         };
+      }
       throw error;
     }
     await handle.whenReady();
@@ -407,10 +414,70 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       };
     return { ok: true, handle };
   }
+  /**
+   * Automerge's unavailable handle can become ready when a late peer arrives.
+   * Observe that handle without accepting any local seed or writes as a copy.
+   */
+  private watchMissingCopy(documentId: DocumentId, url: AutomergeUrl) {
+    this.clearMissingCopyWatch(documentId);
+    const handle =
+      this.repo?.findWithProgress?.<CollaborativeDocument>(url).handle;
+    if (!handle) return;
+    const current = () =>
+      this.missingCopyWatches.get(documentId) === stop &&
+      this.urlStore.get(documentId) === url &&
+      !this.handles.has(documentId);
+    const recover = () => {
+      // Automerge emits change before its ready transition, so inspect readiness
+      // in the queued turn, not inside its synchronous change callback.
+      void this.enqueue(documentId, async () => {
+        if (!current()) {
+          if (this.missingCopyWatches.get(documentId) === stop) stop();
+          return;
+        }
+        if (!handle.isReady?.()) return;
+        stop();
+        try {
+          const opened = await this.openStoredHandle(
+            documentId,
+            url,
+            Promise.resolve(handle),
+          );
+          if (
+            this.urlStore.get(documentId) !== url ||
+            this.handles.has(documentId)
+          )
+            return;
+          if (!opened.ok) {
+            this.fail(documentId, opened.diagnostic);
+            return;
+          }
+          this.materializedAnswerFailures.delete(documentId);
+          this.install(documentId, opened.handle);
+          await this.publish(documentId, opened.handle, "peer");
+        } catch (error) {
+          this.failure(documentId, "automerge-load-failed", error);
+        }
+      });
+    };
+    const stop = () => {
+      handle.off?.("change", recover);
+      if (this.missingCopyWatches.get(documentId) === stop)
+        this.missingCopyWatches.delete(documentId);
+    };
+    this.missingCopyWatches.set(documentId, stop);
+    handle.on("change", recover);
+    // The handle may have become ready between find's rejection and attachment.
+    recover();
+  }
+  private clearMissingCopyWatch(documentId: DocumentId) {
+    this.missingCopyWatches.get(documentId)?.();
+  }
   load(
     input: Parameters<DocumentRepository["load"]>[0],
   ): Promise<DocumentRepositoryLoadResult> {
     return this.enqueue(input.documentId, async () => {
+      this.clearMissingCopyWatch(input.documentId);
       const preload = this.preloads.get(input.documentId);
       this.preloads.delete(input.documentId);
       this.materializedAnswerFailures.delete(input.documentId);
@@ -761,6 +828,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     documentId: DocumentId,
     handle: AutomergeHandleLike<CollaborativeDocument>,
   ) {
+    this.clearMissingCopyWatch(documentId);
     this.supersededDocuments.delete(documentId);
     if (this.handles.get(documentId) === handle) return;
     this.handles.set(documentId, handle);
@@ -798,6 +866,13 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       this.assetStore,
       parsed.document.assets.records,
     );
+    // Worker requests can replace the shared URL while asset storage is read,
+    // before their repository operations reach this document's queue.
+    if (
+      this.handles.get(documentId) === handle &&
+      this.releaseSupersededHandle(documentId)
+    )
+      return this.superseded(documentId);
     if (
       this.handles.get(documentId) !== handle ||
       this.publicationVersions.get(documentId) !== version
@@ -1080,6 +1155,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
     return this.enqueue(documentId, async () => {
       const unresolved = this.durabilityFailures.get(documentId);
       if (unresolved) return unresolved;
+      this.clearMissingCopyWatch(documentId);
       const url = this.urlStore.get(documentId);
       if (url) {
         (await this.getRepo()).delete(url);

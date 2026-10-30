@@ -19,7 +19,11 @@ import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64"
 import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { CollaborativeDocument } from "@/core/modeling/collaborative-document";
-import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
+import {
+  createMemoryGeometryAssetStore,
+  type GeometryAssetStore,
+} from "@/core/modeling/geometry-asset-store";
+import { createDeterministicGeometryAsset } from "@/core/modeling/geometry-asset-test-helpers";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 import { createModelingService } from "@/application/modeling/modeling-service";
 import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
@@ -153,6 +157,275 @@ test("with the BroadcastChannel adapter, missing storage is still missing unless
   });
   expect(withLivePeer.ok && withLivePeer.status.kind).toBe("restored");
 });
+
+async function latePeer(
+  assetStore: GeometryAssetStore = createMemoryGeometryAssetStore(),
+) {
+  const channelName = `late-discovery-${crypto.randomUUID()}`;
+  const { seed, url, writer } = await seedOnce(new SharedMemoryStorage());
+  const network = new BroadcastChannelNetworkAdapter({
+    channelName,
+    peerWaitMs: 1,
+  });
+  // Pin the interleaving: the discovery window has ended before the peer is visible.
+  await network.whenReady();
+  const readerRepo = new Repo({
+    storage: new SharedMemoryStorage(),
+    network: [network],
+  });
+  repos.push(readerRepo);
+  const urls = new MemoryDocumentRepositoryUrlStore();
+  urls.set(seed.documentId, url);
+  const reader = new IndexedDbAutomergeDocumentRepository({
+    repo: readerRepo as unknown as AutomergeRepositoryLike,
+    urlStore: urls,
+    assetStore,
+  });
+  const publications: string[] = [];
+  reader.subscribe(seed.documentId, (event) =>
+    publications.push(event.document.name),
+  );
+  const load = () =>
+    reader.load({ documentId: seed.documentId, seedDocument: seed });
+  const connect = () =>
+    writer.repo.networkSubsystem.addNetworkAdapter(
+      new BroadcastChannelNetworkAdapter({ channelName, peerWaitMs: 1 }),
+    );
+  return {
+    seed,
+    url,
+    writer,
+    reader,
+    readerRepo,
+    urls,
+    publications,
+    load,
+    connect,
+  };
+}
+
+async function expectMissingCopy(peer: Awaited<ReturnType<typeof latePeer>>) {
+  expect(await peer.load()).toMatchObject({
+    ok: false,
+    status: { diagnostic: { reasonCode: "automerge-document-missing" } },
+  });
+  expect(
+    (
+      await peer.reader.mutate({
+        documentId: peer.seed.documentId,
+        expected: peer.seed,
+        document: { ...peer.seed, name: "Must stay private" },
+      })
+    ).ok,
+  ).toBe(false);
+  expect(peer.publications).toEqual([]);
+}
+
+test("a fresh peer recovers a missing-copy restore when the same document arrives after discovery readiness", async () => {
+  const peer = await latePeer();
+  await expectMissingCopy(peer);
+  peer.connect();
+  await expect
+    .poll(() => peer.reader.getRestoreStatus(peer.seed.documentId))
+    .toMatchObject({ kind: "restored" });
+  expect(peer.publications).toEqual([peer.seed.name]);
+  expect(await peer.load()).toMatchObject({
+    ok: true,
+    document: { name: peer.seed.name },
+  });
+  expect(
+    await peer.writer.repository.load({
+      documentId: peer.seed.documentId,
+      seedDocument: peer.seed,
+    }),
+  ).toMatchObject({
+    ok: true,
+    document: { name: peer.seed.name },
+  });
+});
+
+test("a missing copy without a serving peer remains failed and cannot store a local draft", async () => {
+  const peer = await latePeer();
+  await expectMissingCopy(peer);
+  await expectMissingCopy(peer);
+  expect(peer.urls.get(peer.seed.documentId)).toBe(peer.url);
+  expect(await peer.reader.undoDurableHistory(peer.seed.documentId)).toBeNull();
+  expect(await peer.reader.redoDurableHistory(peer.seed.documentId)).toBeNull();
+  expect(await peer.load()).toMatchObject({
+    ok: false,
+    status: { diagnostic: { reasonCode: "automerge-document-missing" } },
+  });
+  expect(peer.publications).toEqual([]);
+});
+
+test("a peer copy ready between find rejection and recovery attachment is not missed", async () => {
+  const peer = await latePeer();
+  const find = peer.readerRepo.find.bind(peer.readerRepo);
+  peer.readerRepo.find = (async (...args: Parameters<typeof find>) => {
+    try {
+      return await find(...args);
+    } catch (error) {
+      const { handle } = peer.readerRepo.findWithProgress(peer.url);
+      peer.connect();
+      await handle.whenReady();
+      throw error;
+    }
+  }) as typeof peer.readerRepo.find;
+  await peer.load();
+  await expect.poll(() => peer.publications).toEqual([peer.seed.name]);
+  expect(peer.reader.getRestoreStatus(peer.seed.documentId)).toMatchObject({
+    kind: "restored",
+  });
+});
+
+test.each(["invalid", "identity-mismatch"] as const)(
+  "late %s peer data cannot recover a missing copy or permit edits",
+  async (kind) => {
+    const peer = await latePeer();
+    const handle = await peer.writer.repo.find<CollaborativeDocument>(peer.url);
+    handle.change((document) => {
+      if (kind === "invalid") document.authored.name = 123;
+      else document.authored.documentId = "doc_another";
+    });
+    await expectMissingCopy(peer);
+    peer.connect();
+    await expect
+      .poll(() => peer.reader.getRestoreStatus(peer.seed.documentId))
+      .toMatchObject({
+        kind: "failed",
+        diagnostic: {
+          reasonCode:
+            kind === "invalid"
+              ? "invalid-authored-document"
+              : "identity-mismatch",
+        },
+      });
+    expect(peer.publications).toEqual([]);
+    expect(
+      (
+        await peer.reader.mutate({
+          documentId: peer.seed.documentId,
+          expected: peer.seed,
+          document: { ...peer.seed, name: "Must stay private" },
+        })
+      ).ok,
+    ).toBe(false);
+  },
+);
+
+test.each(["url-changed", "reset", "initialize"] as const)(
+  "late peer arrival cannot restore a %s document context",
+  async (replacement) => {
+    const peer = await latePeer();
+    await expectMissingCopy(peer);
+    if (replacement === "url-changed") peer.urls.delete(peer.seed.documentId);
+    else if (replacement === "reset")
+      await peer.reader.reset(peer.seed.documentId);
+    else
+      await peer.reader.initialize({
+        documentId: peer.seed.documentId,
+        document: { ...peer.seed, name: "Replacement" },
+      });
+    const before = peer.reader.getRestoreStatus(peer.seed.documentId);
+    peer.publications.length = 0;
+    peer.connect();
+    // Await the actual late handle, then drain the repository queue; a discarded
+    // context must not publish even though its Automerge copy is now ready.
+    const handle = peer.readerRepo.findWithProgress(peer.url).handle;
+    await handle.whenReady();
+    expect(
+      await peer.reader.undoDurableHistory(peer.seed.documentId),
+    ).toBeNull();
+    expect(peer.publications).toEqual([]);
+    if (replacement === "initialize")
+      expect(await peer.load()).toMatchObject({
+        ok: true,
+        document: { name: "Replacement" },
+      });
+    else
+      expect(peer.reader.getRestoreStatus(peer.seed.documentId).kind).not.toBe(
+        "restored",
+      );
+    expect(before.kind).not.toBe("restored");
+  },
+);
+
+test.each(["changed", "deleted"] as const)(
+  "a remembered URL %s during recovery's asset read cannot publish the superseded copy",
+  async (change) => {
+    const assets = createMemoryGeometryAssetStore();
+    let releaseRead!: () => void;
+    const readHeld = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let markReading!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      markReading = resolve;
+    });
+    const peer = await latePeer({
+      put: (input) => assets.put(input),
+      get: (asset) => assets.get(asset),
+      has: async (asset) => {
+        markReading();
+        await readHeld;
+        return assets.has(asset);
+      },
+    });
+    const asset = await createDeterministicGeometryAsset({
+      ownerFeatureIds: [peer.seed.features[0]!.featureId],
+    });
+    const published = {
+      ...peer.seed,
+      assets: { ...peer.seed.assets, records: [asset.asset] },
+    };
+    expect(
+      await peer.writer.repository.mutate({
+        documentId: peer.seed.documentId,
+        expected: peer.seed,
+        document: published,
+        assets: [asset],
+      }),
+    ).toMatchObject({ ok: true });
+    await expectMissingCopy(peer);
+    peer.connect();
+    await reading;
+    // Worker requests adopt their incoming URL synchronously, even while a
+    // prior repository operation is queued behind this asset-availability read.
+    const replacementUrl =
+      change === "changed" ? peer.writer.repo.create({}).url : null;
+    if (replacementUrl) peer.urls.set(peer.seed.documentId, replacementUrl);
+    else peer.urls.delete(peer.seed.documentId);
+    releaseRead();
+    // Drain recovery without requesting a load, which could legitimately seed
+    // a new document after a deleted URL.
+    await peer.reader.undoDurableHistory(peer.seed.documentId);
+    expect(peer.publications).toEqual([]);
+    expect(peer.reader.getRestoreStatus(peer.seed.documentId)).toMatchObject({
+      kind: "failed",
+    });
+    expect(
+      await peer.reader.mutate({
+        documentId: peer.seed.documentId,
+        expected: peer.seed,
+        document: { ...peer.seed, name: "Must stay private" },
+      }),
+    ).toMatchObject({
+      ok: false,
+      status: { diagnostic: { reasonCode: "automerge-document-superseded" } },
+    });
+    expect(peer.urls.get(peer.seed.documentId)).toBe(replacementUrl);
+    expect(peer.publications).toEqual([]);
+    expect(
+      await peer.writer.repository.load({
+        documentId: peer.seed.documentId,
+        seedDocument: peer.seed,
+      }),
+    ).toMatchObject({
+      ok: true,
+      document: { name: peer.seed.name },
+    });
+  },
+);
 
 test("a stale tab writing after another tab's reset leaves incremental-only storage that restores as incomplete storage", async () => {
   const storage = new SharedMemoryStorage();
