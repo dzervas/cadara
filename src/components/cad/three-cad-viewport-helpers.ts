@@ -73,7 +73,6 @@ interface DragPoint {
 }
 
 interface RenderIdleSample {
-  delta: number;
   isEditorIdle: boolean;
   sceneKey: string;
 }
@@ -546,11 +545,9 @@ function getViewportWorldHeightAtPoint(
 
 export function createRenderIdleTracker(
   options: {
-    maxStableDelta?: number;
     requiredStableFrames?: number;
   } = {},
 ) {
-  const maxStableDelta = options.maxStableDelta ?? 0.5;
   const requiredStableFrames = options.requiredStableFrames ?? 3;
   let stableFrameCount = 0;
   let lastSceneKey: string | null = null;
@@ -559,11 +556,11 @@ export function createRenderIdleTracker(
     update(sample: RenderIdleSample) {
       const sceneChanged =
         lastSceneKey !== null && lastSceneKey !== sample.sceneKey;
-      const visuallyStable = sample.delta <= maxStableDelta && !sceneChanged;
-
+      // Readiness follows rendered state, not frame rate. Software rendering
+      // can take seconds per unchanged frame without leaving any work pending.
       lastSceneKey = sample.sceneKey;
 
-      if (!sample.isEditorIdle || !visuallyStable) {
+      if (!sample.isEditorIdle || sceneChanged) {
         stableFrameCount = 0;
         return false;
       }

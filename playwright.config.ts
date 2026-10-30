@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const shouldStartWebServer = (process.env.PLAYWRIGHT_WEB_SERVER ?? "1") !== "0";
 const runRealCaptures = process.env.PLAYWRIGHT_REAL_CAPTURES === "1";
+const isCI = Boolean(process.env.CI);
 const recordDiagnostics = process.env.PLAYWRIGHT_DIAGNOSTICS === "1";
 const useGPU = process.env.PLAYWRIGHT_GPU === "1";
 
@@ -21,10 +22,13 @@ export default defineConfig({
     ? undefined
     : [...realCaptureTests, "**/e2e/offline/**", "**/e2e/production/**"],
   timeout: 30_000,
+  // Leave time for the runner to upload diagnostics before its job deadline.
+  globalTimeout: isCI && !runRealCaptures ? 50 * 60_000 : undefined,
+  reporter: isCI ? [["line"], ["html", { open: "never" }]] : undefined,
   fullyParallel: true,
-  // Real captures saturate the OCC worker and run serially. The default fast
-  // lane runs four browsers in parallel (about 14 minutes for 190 rows, T17b).
-  workers: runRealCaptures ? 1 : 4,
+  // CI shards across runners instead of competing for software-rendering CPU.
+  // Real captures also saturate the OCC worker and always run serially.
+  workers: runRealCaptures || isCI ? 1 : 4,
   retries: 0,
   use: {
     baseURL,
@@ -42,7 +46,7 @@ export default defineConfig({
         }
       : {}),
     viewport: { width: 1440, height: 900 },
-    trace: recordDiagnostics ? "retain-on-failure" : "off",
+    trace: isCI || recordDiagnostics ? "retain-on-failure" : "off",
     screenshot: "only-on-failure",
     video: recordDiagnostics ? "retain-on-failure" : "off",
   },
@@ -50,7 +54,7 @@ export default defineConfig({
     ? {
         command: "bun run dev",
         url: baseURL,
-        reuseExistingServer: true,
+        reuseExistingServer: !isCI,
         stdout: "pipe",
         stderr: "pipe",
         timeout: 120_000,

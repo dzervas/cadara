@@ -490,7 +490,7 @@ export function RenderIdleSignal({
     invalidate();
   }, [invalidate, isEditorIdle, sceneKey, viewportRef]);
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const viewportElement = viewportRef.current;
 
     if (!viewportElement) {
@@ -498,7 +498,6 @@ export function RenderIdleSignal({
     }
 
     const isIdle = trackerRef.current.update({
-      delta,
       isEditorIdle,
       sceneKey,
     });

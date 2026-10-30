@@ -6,13 +6,22 @@ on:
     branches:
       - main
 
+env:
+  # Bun does not select Vitest's Node runtime; pin it for reproducible validation.
+  NODE_VERSION: "24.21.0"
+
 jobs:
   bun-lanes:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: oven-sh/setup-bun@v2
-
+      - name: Runtime versions
+        run: node --version && bun --version
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Lint
@@ -24,24 +33,50 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      # Separate runners provide parallelism without four software-rendered
+      # browsers competing with Vite and OCC on the same runner.
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: oven-sh/setup-bun@v2
-
+      - name: Runtime versions
+        run: node --version && bun --version
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Install Playwright chromium
         run: bunx playwright install --with-deps chromium
       - name: E2E
-        run: bun run test:e2e
+        run: bun run test:e2e --shard=${{ matrix.shard }}/4
+      - name: Retain browser failure evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.shard }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
 
   heavy:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: oven-sh/setup-bun@v2
-
+      - name: Runtime versions
+        run: node --version && bun --version
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Heavy tier (real-OCC pipelines, CLI subprocess specs)
-        run: bun run test:heavy
+        # Source CLI startup alone can use several GB; leave room for OCC.
+        run: bun run test:heavy --maxWorkers=2

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { SketchWorkbenchHarness } from "./sketch-workbench";
 import {
@@ -358,7 +358,27 @@ export class FeatureWorkbenchHarness extends SketchWorkbenchHarness {
   }
 
   async waitForRenderIdle(timeout = 15_000) {
-    await this.page.waitForSelector('[data-render-idle="true"]', { timeout });
+    try {
+      await this.page.waitForSelector('[data-render-idle="true"]', { timeout });
+    } catch (error) {
+      const readiness = await this.page
+        .evaluate(() => ({
+          visibility: document.visibilityState,
+          renderIdle: document
+            .querySelector('[data-testid="cad-viewport"]')
+            ?.getAttribute("data-render-idle"),
+          state: window.__cadaraDebug?.getState() ?? null,
+          trace: window.__cadaraDebug?.getTrace().entries.slice(-40) ?? [],
+        }))
+        .catch((diagnosticError: unknown) => ({
+          diagnosticError: String(diagnosticError),
+        }));
+      await test.info().attach("render-readiness", {
+        body: JSON.stringify(readiness, null, 2),
+        contentType: "application/json",
+      });
+      throw error;
+    }
   }
 
   async expectBodyPresent(bodyId: string) {

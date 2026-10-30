@@ -448,25 +448,20 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
   function testRenderIdleTrackerRequiresStableIdleFrames() {
     const tracker = createRenderIdleTracker({
       requiredStableFrames: 2,
-      maxStableDelta: 0.05,
     });
     const active = tracker.update({
-      delta: 0.016,
       isEditorIdle: false,
       sceneKey: "scene-a",
     });
     const firstIdle = tracker.update({
-      delta: 0.016,
       isEditorIdle: true,
       sceneKey: "scene-a",
     });
     const secondIdle = tracker.update({
-      delta: 0.016,
       isEditorIdle: true,
       sceneKey: "scene-a",
     });
     const sceneChanged = tracker.update({
-      delta: 0.016,
       isEditorIdle: true,
       sceneKey: "scene-b",
     });
@@ -1784,6 +1779,23 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
     "A new geometry object with moved vertices changes the key.",
   ).not.toBe(first);
 });
+
+test.each([0.016, 0.8, 5])(
+  "an unchanged idle scene becomes render-ready even with %s-second frames",
+  (delta) => {
+    const tracker = createRenderIdleTracker();
+    const frame = { delta, isEditorIdle: true, sceneKey: "scene-a" };
+    expect(tracker.update(frame)).toBe(false);
+    expect(tracker.update(frame)).toBe(false);
+    expect(tracker.update(frame)).toBe(true);
+
+    expect(tracker.update({ ...frame, sceneKey: "scene-b" })).toBe(false);
+    expect(tracker.update({ ...frame, isEditorIdle: false })).toBe(false);
+    expect(tracker.update(frame)).toBe(false);
+    expect(tracker.update(frame)).toBe(false);
+    expect(tracker.update(frame)).toBe(true);
+  },
+);
 
 test("the document BVH key ignores the sketch session: a region going stale at drag start keeps it", () => {
   // The viewport keys the document meshes' BVH subtree on the document half
