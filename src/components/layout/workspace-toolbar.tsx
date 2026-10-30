@@ -77,7 +77,8 @@ const REPOSITORY_URL = "https://github.com/dzervas/cadara";
 const TOOLBAR_GAP_PX = 8;
 const TOOLBAR_PILL_GAP_PX = 2;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;
-const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 32;
+// Leave 56px between the final tool pill and search, including the 8px grid gap.
+const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 48;
 const PART_TOOL_DURING_SKETCH_REASON =
   "Part tools are unavailable while sketching. Finish Sketch first.";
 type VisibleToolbarSection = ReturnType<
@@ -89,6 +90,7 @@ interface ToolbarMeasurement {
 }
 
 interface WorkspaceToolbarProps {
+  accountMenu?: ReactNode;
   historyAvailability?: EditorHistoryAvailability;
   showBrowserStorageWarning?: boolean;
   /** A local save is underway in any open tab: the logo shows its ring. */
@@ -113,6 +115,7 @@ interface WorkspaceToolbarProps {
 // on every editor state change (each sketch drag move), the toolbar only when
 // its own inputs change.
 export const WorkspaceToolbar = memo(function WorkspaceToolbar({
+  accountMenu,
   historyAvailability,
   showBrowserStorageWarning = false,
   localSaving = false,
@@ -697,6 +700,7 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
       </div>
 
       <ToolbarPill sectionId="utilities" style={utilityPillStyle}>
+        {accountMenu}
         <ShortcutSettingsButton />
         {onReportBug ? (
           <Tooltip

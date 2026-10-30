@@ -1,4 +1,5 @@
 export const workbenchIconAssetMap = {
+  account: "shell-account.svg",
   ban: "shell-ban.svg",
   box: "shell-box.svg",
   check: "shell-check.svg",

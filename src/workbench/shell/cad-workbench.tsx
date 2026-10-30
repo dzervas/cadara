@@ -1,4 +1,5 @@
 // SLOP: Retained shell orchestrator while document/object/debug actions and visible regions are split into named workbench modules.
+import { WorkbenchAccount } from "./workbench-account";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
 import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
@@ -1992,6 +1993,7 @@ export function CadWorkbench({
             />
 
             <WorkspaceToolbar
+              accountMenu={<WorkbenchAccount />}
               historyAvailability={stableToolbarHistoryAvailability}
               showBrowserStorageWarning={showBrowserStorageWarning}
               localSaving={localSaving}

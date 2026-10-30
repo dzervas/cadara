@@ -76,3 +76,23 @@ checkout: Bun does not run `prepare` for `file:` packages, and this repository's
 portable declarations are not committed. The web build replaces `dist/`, so
 re-run `build:contracts` after building the web app if using this checkout as a
 local dependency. The separately built `cadara-cli` package is unchanged.
+
+### Account API
+
+Sign-in is optional; local projects remain available without an account. Set
+`VITE_CADARA_API_ORIGIN` at Vite start/build time to the CADara API origin (no path).
+It defaults to `http://localhost:8787` in development and `https://api.cadara.app`
+in production. The API must trust the app's exact origin for CORS and Better Auth.
+Browser requests include credentials; session cookies remain host-only on the API.
+Google/GitHub require providers configured on the API, and passkeys require a
+secure context (or localhost) and the API's configured RP ID.
+
+The opt-in browser sign-in regression (`e2e/account-sign-in.spec.ts`) needs a
+local API using the memory mailer. Capture wrangler stdout to a private file and
+set `CADARA_AUTH_MAILER_LOG` to that absolute path when running Playwright; do not
+publish that file (it contains one-time sign-in links). Set
+`PLAYWRIGHT_WEB_SERVER=0` and `PLAYWRIGHT_BASE_URL` to your own Vite origin.
+If port 3000 is occupied, wrangler `--var` overrides can set `APP_ORIGIN`,
+`TRUSTED_ORIGINS` and `AUTH_BASE_URL` for that run without changing the server's
+configuration. Keep the browser and API on `localhost` rather than mixing it
+with `127.0.0.1`, so same-site API cookies work.
