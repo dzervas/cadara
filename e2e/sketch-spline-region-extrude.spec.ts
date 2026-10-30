@@ -93,6 +93,8 @@ test("both regions of a spline annulus (the annulus and its spline disk) extrude
   await expect(profileChip(page, targets[0]!)).toHaveCount(0);
   // The consumed sketch is auto-hidden: shown again to pick its other region.
   await showInViewport(page, "Spline Sketch");
+  // The first prism can occlude the other region in this camera view.
+  await toggleVisibility(page, "Hide", "Extrude 1");
   await activateProfileSlot(page);
   await selectRegionInViewport(workbench, targets[1]!);
   await expect(profileChip(page, targets[1]!)).toHaveCount(1, {
@@ -101,6 +103,7 @@ test("both regions of a spline annulus (the annulus and its spline disk) extrude
   await workbench.setOperation("newBody");
   await workbench.expectFeaturePreviewReady("extrude");
   await workbench.commitFeature("feature_extrude-2");
+  await toggleVisibility(page, "Show", "Extrude 1");
   await workbench.expectBodyCountAtLeast(2);
   await expectExactPrism(
     page,
