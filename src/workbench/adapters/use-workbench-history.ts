@@ -1,4 +1,7 @@
-import { createAuthoredHistoryOperation } from "@/application/history/authored-history";
+import {
+  authoredActionConflictReason,
+  createAuthoredHistoryOperation,
+} from "@/application/history/authored-history";
 import {
   useCallback,
   useEffect,
@@ -276,6 +279,9 @@ export function useWorkbenchHistory({
             appError: createAppError({
               code: "workbench/action-failed",
               message,
+              // Only structured authored-action refusals are expected conflicts;
+              // persistence, synchronization and unknown failures remain errors.
+              severity: authoredActionConflictReason(error) ? "warning" : "error",
               context: [
                 { key: "operation", value: direction },
                 ...errorContext("documentId", currentSnapshot.document.documentId),

@@ -8,6 +8,7 @@ import {
   ok,
 } from "@/contracts/errors";
 import type { DurableHistoryService } from "@/application/history/durable-history";
+import { HistoryOperationError } from "@/application/history/authored-history";
 
 import {
   createHookTestHarness,
@@ -45,6 +46,78 @@ beforeEach(() => {
   hookHarness.reset();
   currentDurableHistory = createDurableHistoryStub();
 });
+
+// Logic lane: the history controller preserves visible refusals while classifying
+// structured compensation conflicts separately from persistence/runtime faults.
+test.each([
+  ["identity-mismatch", "warning"],
+  ["context-missing", "warning"],
+  ["expected-state-changed", "warning"],
+  ["dependent-record-changed", "warning"],
+  ["action-not-found", "warning"],
+  ["later-action-overlap", "warning"],
+  ["automerge-durability-pending", "error"],
+  ["repository-synchronization-timeout", "error"],
+  ["unknown-reason", "error"],
+  [undefined, "error"],
+] as const)(
+  "history refusal %s is reported at %s without hiding its notification or blocked marker",
+  async (failureReason, severity) => {
+    const reporter = createTestErrorReporter();
+    const notifications: string[] = [];
+    const message =
+      "Can't undo Publish Sketch: a later action also changed the document; undo that first.";
+    currentDurableHistory = createDurableHistoryStub({
+      async getAvailability() {
+        return {
+          canUndo: true,
+          canRedo: false,
+          undoEntries: [{ sequence: 1, label: "Publish Sketch" }],
+        };
+      },
+      async undo() {
+        if (failureReason === undefined) throw new Error(message);
+        throw new HistoryOperationError(message, {
+          kind: "failed",
+          failureReason,
+          document: null,
+          metadata: null,
+        });
+      },
+    });
+    const render = () =>
+      hookHarness.render(() =>
+        useWorkbenchHistory({
+          dispatch() {
+            throw new Error(
+              "A refused compensation must not replace the document.",
+            );
+          },
+          errorReporter: reporter,
+          history: { canUndo: false, canRedo: false },
+          setInvalidVariableValueMessages() {},
+          showWorkbenchError(message) {
+            notifications.push(message);
+          },
+          sketchSession: null,
+          snapshot: makeSnapshot(),
+        }),
+      );
+    let controller = render();
+    await hookHarness.flushEffects();
+    await flushMicrotasks();
+    controller = render();
+    controller.requestUndo(1);
+    await flushMicrotasks();
+    controller = render();
+    expect(notifications).toEqual([message]);
+    expect(controller.contextualActionHistory.undo).toEqual([
+      { sequence: 1, label: "Publish Sketch", blockedReason: message },
+    ]);
+    expect(reporter.reports).toHaveLength(1);
+    expect(reporter.reports[0]?.error.severity).toBe(severity);
+  },
+);
 
 function makeHistoryItem(kind: "feature" | "sketch", id: string, label = id) {
   return kind === "feature"

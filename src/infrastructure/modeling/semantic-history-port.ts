@@ -1,5 +1,6 @@
 import {
   HistoryOperationError,
+  authoredActionConflictReason,
   createAuthoredHistoryOperation,
   type HistoryCompensationReceipt,
 } from "@/application/history/authored-history";
@@ -180,31 +181,16 @@ export function createSemanticHistoryPort(input: {
       await refresh(!!result);
       return terminal;
     } catch (error) {
-      if (
-        error instanceof HistoryOperationError &&
-        error.compensation?.document === null
-      ) {
-        const reason = error.compensation.failureReason;
-        if (
-          reason &&
-          [
-            "identity-mismatch",
-            "context-missing",
-            "expected-state-changed",
-            "dependent-record-changed",
-            "later-action-overlap",
-            "action-not-found",
-          ].includes(reason)
-        )
-          return {
-            ...terminal,
-            outcome:
-              reason === "action-not-found"
-                ? { kind: "rejected", reasonCode: reason }
-                : { kind: "conflicted", actualBasis: state },
-            diagnostics: [semanticDiagnostic(error)],
-          };
-      }
+      const conflictReason = authoredActionConflictReason(error);
+      if (conflictReason)
+        return {
+          ...terminal,
+          outcome:
+            conflictReason === "action-not-found"
+              ? { kind: "rejected", reasonCode: conflictReason }
+              : { kind: "conflicted", actualBasis: state },
+          diagnostics: [semanticDiagnostic(error)],
+        };
       if (error instanceof HistoryOperationError && error.compensation) {
         retainCompensation(error.compensation);
         if (error.compensation.kind === "failed" && error.snapshot) {

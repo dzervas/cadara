@@ -2,6 +2,7 @@ import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-hi
 import type { DocumentId, RevisionId } from "@/contracts/shared/ids";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { AuthoredActionResult } from "@/contracts/modeling/authored-actions";
 
 export interface HistoryCompensationReceipt {
   /** Populated only after exact repository synchronization has been verified. */
@@ -28,6 +29,35 @@ export class HistoryOperationError extends Error {
     this.compensation = compensation;
     this.snapshot = snapshot;
   }
+}
+type AuthoredActionConflictReason = Extract<
+  AuthoredActionResult,
+  { status: "blocked" }
+>["reason"];
+// Keyed by the whole contract union, so a new blocked reason must be added here.
+const authoredActionConflictReasons = {
+  "identity-mismatch": true,
+  "context-missing": true,
+  "expected-state-changed": true,
+  "dependent-record-changed": true,
+  "later-action-overlap": true,
+  "action-not-found": true,
+} as const satisfies Record<AuthoredActionConflictReason, true>;
+/**
+ * The authored-action reason when an undo/redo was refused because the
+ * document no longer allows it (nothing was written). Persistence,
+ * synchronization and unknown failures return null.
+ */
+export function authoredActionConflictReason(
+  error: unknown,
+): AuthoredActionConflictReason | null {
+  if (!(error instanceof HistoryOperationError)) return null;
+  if (error.compensation?.document !== null) return null;
+  const reason = error.compensation.failureReason;
+  return reason !== undefined &&
+    Object.hasOwn(authoredActionConflictReasons, reason)
+    ? (reason as AuthoredActionConflictReason)
+    : null;
 }
 export interface DurableHistoryActionResult {
   context: "document";
