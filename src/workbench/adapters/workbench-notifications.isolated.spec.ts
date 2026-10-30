@@ -1,6 +1,7 @@
 import { beforeEach, vi, test, expect } from "vitest";
 
 import { createTestErrorReporter } from "@/contracts/errors";
+import type { ModelingService } from "@/application/modeling/modeling-service";
 
 import {
   createHookTestHarness,
@@ -25,10 +26,42 @@ beforeEach(() => {
   hookHarness.reset();
 });
 
+type RestoreState = Awaited<ReturnType<ModelingService["getHistoryRestoreState"]>>;
+type DocumentChangeListener = Parameters<ModelingService["subscribeToDocumentChanges"]>[0];
+const restored: RestoreState = { kind: "restored", entriesReplayed: 0, diagnostics: [] };
+const failedRestore = (message: string): RestoreState => ({
+  kind: "failed",
+  entriesReplayed: 0,
+  diagnostics: [{ entryIndex: null, reasonCode: "automerge-document-missing", message }],
+});
+
+function restoreStateSource(read: () => Promise<RestoreState>) {
+  const listeners = new Set<DocumentChangeListener>();
+  const service = {
+    currentDocumentId: "doc_restore_notification" as const,
+    getHistoryRestoreState: read,
+    subscribeToDocumentChanges(listener: DocumentChangeListener) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+  return {
+    service,
+    listeners,
+    changed() {
+      for (const listener of listeners) listener({
+        documentId: service.currentDocumentId,
+        metadata: { documentId: service.currentDocumentId, actorId: "peer", heads: [], source: "peer" },
+      });
+    },
+  };
+}
+
 test("useWorkbenchNotifications maps info and error status messages to notification models", () => {
   const reporter = createTestErrorReporter();
   const modelingService = {
     currentDocumentId: "document_notifications",
+    subscribeToDocumentChanges() { return () => undefined; },
     async getHistoryRestoreState() {
       return { kind: "idle" as const };
     },
@@ -92,6 +125,7 @@ test("useWorkbenchNotifications reports restore failures once and exposes restor
   const reporter = createTestErrorReporter();
   const modelingService = {
     currentDocumentId: "document_restore_failed",
+    subscribeToDocumentChanges() { return () => undefined; },
     async getHistoryRestoreState() {
       return {
         diagnostics: [
@@ -176,6 +210,7 @@ test("useWorkbenchNotifications reports document file action failures and mirror
   const reporter = createTestErrorReporter();
   const modelingService = {
     currentDocumentId: "document_file_failure",
+    subscribeToDocumentChanges() { return () => undefined; },
     async getHistoryRestoreState() {
       return { kind: "idle" as const };
     },
@@ -234,6 +269,7 @@ test("OCC abort is immediately reported and presented through the workbench erro
   const reporter = createTestErrorReporter();
   const modelingService = {
     currentDocumentId: "doc_occ_abort" as const,
+    subscribeToDocumentChanges() { return () => undefined; },
     async getHistoryRestoreState() { return { kind: "empty" as const, entriesReplayed: 0 as const, diagnostics: [] as [] }; },
   };
   const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService });
@@ -250,4 +286,122 @@ test("OCC abort is immediately reported and presented through the workbench erro
   expect(reporter.reports).toHaveLength(1);
   expect(reporter.reports[0]?.error.cause).toBe(error);
   expect(reporter.reports[0]?.metadata.source).toBe("workbench.occ.worker");
+});
+
+test("successful document recovery clears only the obsolete restore notice", async () => {
+  const reporter = createTestErrorReporter();
+  let state = failedRestore("The stored copy is unavailable.");
+  const source = restoreStateSource(async () => state);
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService: source.service });
+  let controller = hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  controller = hookHarness.render(useNotifications);
+  expect(controller.restoreMessage).toBe("The stored copy is unavailable.");
+  controller.showWorkbenchError("An unrelated export failed.");
+  source.changed();
+  await flushMicrotasks();
+  expect(reporter.reports).toHaveLength(1);
+  expect(hookHarness.render(useNotifications).restoreMessage).toBe("The stored copy is unavailable.");
+
+  state = restored;
+  source.changed();
+  await flushMicrotasks();
+  controller = hookHarness.render(useNotifications);
+  expect(controller.restoreMessage).toBeNull();
+  expect(controller.workbenchStatusNotification?.message).toBe("An unrelated export failed.");
+  expect(reporter.reports).toHaveLength(1);
+  hookHarness.cleanup();
+  expect(source.listeners.size).toBe(0);
+});
+
+test("an older restore-state read cannot resurrect a recovered notice", async () => {
+  const reporter = createTestErrorReporter();
+  let completeOlderRead!: (state: RestoreState) => void;
+  const olderRead = new Promise<RestoreState>((resolve) => { completeOlderRead = resolve; });
+  let nextRead = Promise.resolve(failedRestore("Initial failure."));
+  const source = restoreStateSource(() => nextRead);
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService: source.service });
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBe("Initial failure.");
+
+  nextRead = olderRead;
+  source.changed();
+  nextRead = Promise.resolve(restored);
+  source.changed();
+  await flushMicrotasks();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBeNull();
+  completeOlderRead(failedRestore("An obsolete failure."));
+  await flushMicrotasks();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBeNull();
+  expect(reporter.reports).toHaveLength(1);
+});
+
+test("switching document services clears the old notice and unsubscribes", async () => {
+  const reporter = createTestErrorReporter();
+  const first = restoreStateSource(async () => failedRestore("Old document failure."));
+  let completeNewRead!: (state: RestoreState) => void;
+  const newRead = new Promise<RestoreState>((resolve) => { completeNewRead = resolve; });
+  const second = restoreStateSource(() => newRead);
+  let current = first.service;
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService: current });
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBe("Old document failure.");
+
+  current = second.service;
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBeNull();
+  expect(first.listeners.size).toBe(0);
+  expect(second.listeners.size).toBe(1);
+  completeNewRead(restored);
+  await flushMicrotasks();
+  hookHarness.cleanup();
+  expect(second.listeners.size).toBe(0);
+});
+
+test("a dismissed unchanged restore failure stays dismissed until its condition changes", async () => {
+  const reporter = createTestErrorReporter();
+  const failure = failedRestore("A known failure.");
+  let state = failure;
+  const source = restoreStateSource(async () => state);
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService: source.service });
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  hookHarness.render(useNotifications).setRestoreMessage(null);
+  source.changed();
+  await flushMicrotasks();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBeNull();
+  state = restored;
+  source.changed();
+  await flushMicrotasks();
+  state = failure;
+  source.changed();
+  await flushMicrotasks();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBe("A known failure.");
+  expect(reporter.reports).toHaveLength(1);
+});
+
+test("a prior service result arriving before effect cleanup cannot label the new document", async () => {
+  const reporter = createTestErrorReporter();
+  let completeOldRead!: (state: RestoreState) => void;
+  const oldRead = new Promise<RestoreState>((resolve) => { completeOldRead = resolve; });
+  let nextRead = Promise.resolve(failedRestore("First document failure."));
+  const first = restoreStateSource(() => nextRead);
+  const second = restoreStateSource(async () => restored);
+  let current = first.service;
+  const useNotifications = () => useWorkbenchNotifications({ errorReporter: reporter, modelingService: current });
+  hookHarness.render(useNotifications);
+  await hookHarness.flushEffects();
+  nextRead = oldRead;
+  first.changed();
+  current = second.service;
+  hookHarness.render(useNotifications);
+  completeOldRead(failedRestore("An old service result."));
+  await flushMicrotasks();
+  expect(hookHarness.render(useNotifications).restoreMessage).toBeNull();
+  await hookHarness.flushEffects();
+  expect(first.listeners.size).toBe(0);
+  expect(second.listeners.size).toBe(1);
 });

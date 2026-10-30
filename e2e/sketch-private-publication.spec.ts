@@ -75,6 +75,10 @@ test("§6 E2E-6 two authors: private drafts, one Publish Sketch, document Undo/R
     .toEqual(["Publish Sketch"]);
   // B receives it through the production peer refresh.
   await expect(sketchEntry(pageB)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    pageB.getByRole("button", { name: "Reset stored history", exact: true }),
+    "a successful peer restore removes the obsolete destructive recovery action",
+  ).toHaveCount(0);
   const sketchId = await sketchEntry(pageA).getAttribute(
     "data-history-sketch-id",
   );

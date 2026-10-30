@@ -29,6 +29,7 @@ test.each([false, true])(
     );
     const modelingService = {
       currentDocumentId: "doc_workspace" as const,
+      subscribeToDocumentChanges() { return () => undefined; },
       getHistoryRestoreState: () => pending,
     };
     const useNotifications = () =>
