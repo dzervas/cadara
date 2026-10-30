@@ -88,7 +88,7 @@ These tests should prove rendering behavior, interaction wiring, and local prese
 
 Use Playwright in `e2e/` for cross-surface behavior that must run through the browser and workbench shell.
 
-Prefer the shared harnesses under `e2e/helpers/` instead of ad hoc page scripting when the harness already covers the needed flow.
+Prefer the shared harnesses under `e2e/helpers/` instead of ad hoc page scripting when the harness already covers the needed flow. Asynchronous assertions use Playwright's standard five-second budget; a DOM-state poll is not a one-second latency benchmark. Measure latency explicitly when it is the contract under test. Read related layout bounds in one browser evaluation so a scroll or layout frame cannot fall between the samples.
 
 Pointer-following behaviour (a dimension preview before its placing click, a dragged label or handle) is asserted along the path, not at the endpoint: a label that jumps on intermediate steps but lands in the right place passes an endpoint check. In the logic lane, walk a dense pointer path through the session seam and assert every step (`src/core/editor/sketch-session/dimension-placement-continuity.spec.ts`: the label never moves faster than the pointer, k = 1; it sits at the pointer or on its placed segment within a stated reach; the preview equals the commit). In E2E, glide with `e2e/helpers/pointer-glide.ts`: it moves the mouse one step at a time, samples the followed element's box once it settles after each step (k = 1 plus 2 px per step), and records every position the element is drawn at in between, so a dragged chip drawn away from the pointer for one frame fails too. Keep paths inside one reference zone: crossing a zone boundary switches the carrier by design.
 

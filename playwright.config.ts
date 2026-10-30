@@ -21,9 +21,6 @@ export default defineConfig({
     ? undefined
     : [...realCaptureTests, "**/e2e/offline/**", "**/e2e/production/**"],
   timeout: 30_000,
-  expect: {
-    timeout: 1_000,
-  },
   fullyParallel: true,
   // Real captures saturate the OCC worker and run serially. The default fast
   // lane runs four browsers in parallel (about 14 minutes for 190 rows, T17b).

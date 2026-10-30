@@ -678,10 +678,14 @@ test.describe("at 1280×720", () => {
     // A-7: a glyph selected in the viewport scrolls its (hidden) row into view.
     await showAllSwitch(page).check({ force: true });
     await workbench.hoverViewportAt({ x: 600, y: 600 });
-    const visibleInList = async (row: Locator) => {
-      const [r, l] = [await boxOf(row), await boxOf(list)];
-      return r.y >= l.y - 1 && r.y + r.height <= l.y + l.height + 1;
-    };
+    // Measure both boxes in one browser turn: separate requests can straddle
+    // a scroll or layout frame and compare positions that never coexisted.
+    const visibleInList = (row: Locator) =>
+      row.evaluate((element) => {
+        const r = element.getBoundingClientRect();
+        const l = element.closest("ul")!.getBoundingClientRect();
+        return r.y >= l.y - 1 && r.y + r.height <= l.y + l.height + 1;
+      });
     let target: { row: Locator; glyph: Locator } | null = null;
     for (let index = (await rows.count()) - 1; index >= 0; index -= 1) {
       const row = rows.nth(index);
