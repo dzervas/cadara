@@ -3302,11 +3302,7 @@ function ThreeCadViewportScene({
 
       const activeSketchSession = sketchSessionRef.current;
 
-      if (dragDistance > SKETCH_DRAG_THRESHOLD_PX || !activeSketchSession) {
-        return;
-      }
-
-      if (activeSketchSession.activeSpecialMode) {
+      if (dragDistance > SKETCH_DRAG_THRESHOLD_PX) {
         return;
       }
 
@@ -3316,8 +3312,9 @@ function ThreeCadViewportScene({
         event.clientY,
         viewportRect,
       );
-      // The stack is resolved once per physical click, here, and reused by
-      // `click`, where `detail` is reliable (T11d, review R-1).
+      // Resolve both part and sketch picks at PointerEvent precision, as
+      // hover does. The subsequent `click` can report whole-pixel MouseEvent
+      // coordinates, which may land across a face/edge/vertex boundary.
       const pick = resolvePickFromClientPoint(
         event.clientX,
         event.clientY,
@@ -3328,6 +3325,11 @@ function ThreeCadViewportScene({
         y: event.clientY,
         pick,
       };
+
+      if (!activeSketchSession || activeSketchSession.activeSpecialMode) {
+        return;
+      }
+
       const wiring = pick.sketch
         ? getSketchPickCycleWiring(pick.sketch.stack)
         : null;
@@ -3455,11 +3457,14 @@ function ThreeCadViewportScene({
       // shows that stack's hint again below (T11e).
       clearSketchPickHint();
 
-      // Reuse the stack resolved at this click's pointer-up (T11d, R-1).
+      // Reuse the pointer-up decision. `click` may report the release point
+      // as whole-pixel MouseEvent coordinates, so match within one pixel.
       const released = releasedPickRef.current;
       releasedPickRef.current = null;
       const pick =
-        released && released.x === event.clientX && released.y === event.clientY
+        released &&
+        Math.abs(released.x - event.clientX) < 1 &&
+        Math.abs(released.y - event.clientY) < 1
           ? released.pick
           : resolvePickFromClientPoint(
               event.clientX,
