@@ -78,6 +78,7 @@ import {
   validateOccWorkerEngineDownloadProgressMessage,
   type OccWorkerEngineDownloadProgressMessage,
 } from "@/infrastructure/occ/worker-engine-download-progress.runtime-schema";
+import { OccKernelVersionRetiredError } from "@/infrastructure/occ/kernel-version-retired";
 import type {
   OccSnapshotLodRefinementOutcome,
   OccWorkerAssetConfig,
@@ -131,6 +132,8 @@ export interface OccWorkerClientOptions {
   worker: OccWorkerLike;
   createWorker?: () => OccWorkerLike;
   onFatalError?: (error: Error) => void;
+  /** Any request found this tab's kernel version replaced by a deploy. */
+  onKernelVersionRetired?: () => void;
   onEngineDownloadProgress?: (
     progress: Omit<OccWorkerEngineDownloadProgressMessage, "kind">,
   ) => void;
@@ -266,6 +269,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
   private worker: OccWorkerLike;
   private readonly createWorker: (() => OccWorkerLike) | undefined;
   private readonly onFatalError: ((error: Error) => void) | undefined;
+  private readonly onKernelVersionRetired: (() => void) | undefined;
   private readonly onEngineDownloadProgress: OccWorkerClientOptions["onEngineDownloadProgress"];
   private documentsInvalidated = false;
   private readonly restoredDocuments = new Set<string>();
@@ -281,6 +285,7 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.worker = options.worker;
     this.createWorker = options.createWorker;
     this.onFatalError = options.onFatalError;
+    this.onKernelVersionRetired = options.onKernelVersionRetired;
     this.onEngineDownloadProgress = options.onEngineDownloadProgress;
     this.assetResolver = options.assetResolver;
     this.requestTimeoutMs = options.requestTimeoutMs ?? null;
@@ -851,6 +856,11 @@ export class OccWorkerClient implements OccWorkerSnapshotClient {
     this.clearPendingTimeout(pending);
 
     if (message.kind === "failure") {
+      if (message.error.code === "occ-kernel-version-retired") {
+        this.onKernelVersionRetired?.();
+        pending.reject(new OccKernelVersionRetiredError(message.error.message));
+        return;
+      }
       pending.reject(new Error(message.error.message));
       return;
     }

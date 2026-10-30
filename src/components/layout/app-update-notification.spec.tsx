@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 
 import {
+  APP_UPDATED_NOTIFICATION_TITLE,
   APP_UPDATE_NOTIFICATION_TITLE,
   APP_UPDATE_WHATS_NEW_LABEL,
   AppUpdateNotificationView,
@@ -13,12 +14,17 @@ import { DISCORD_URL } from "@/components/layout/community-links";
 import type { AppUpdatePhase } from "@/hooks/use-app-update";
 import { workbenchTheme } from "@/theme/workbench-theme";
 
-const render = (phase: AppUpdatePhase, version: string | null) =>
+const render = (
+  phase: AppUpdatePhase,
+  version: string | null,
+  kernelVersionRetired = false,
+) =>
   renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <AppUpdateNotificationView
         version={version}
         phase={phase}
+        kernelVersionRetired={kernelVersionRetired}
         onReload={() => undefined}
       />
     </MantineProvider>,
@@ -68,4 +74,14 @@ test("the update prompt links What's new to #announcements on Discord in a new t
     markup.indexOf(reloadButton(markup)),
     "the link follows Reload",
   ).toBeLessThan(markup.indexOf(link));
+});
+
+test("a tab whose kernel version a deploy retired says CADara was updated and offers Reload", () => {
+  const markup = render("idle", null, true);
+  expect(markup).toContain(APP_UPDATED_NOTIFICATION_TITLE);
+  expect(markup).not.toContain(APP_UPDATE_NOTIFICATION_TITLE);
+  expect(markup).toContain("Reload to continue");
+  const button = reloadButton(markup);
+  expect(button).toContain("Reload");
+  expect(button).not.toContain("disabled");
 });

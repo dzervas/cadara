@@ -1,3 +1,5 @@
+import { OccKernelVersionRetiredError } from "@/infrastructure/occ/kernel-version-retired";
+
 export interface EngineDownloadProgress {
   completedBytes: number;
   totalBytes: number;
@@ -30,6 +32,7 @@ export function createEngineDownloadInstantiateWasm({
   async function instantiate(imports: WebAssembly.Imports) {
     const startedAt = Date.now();
     const response = await fetch(url, { credentials: "same-origin" });
+    if (response.status === 404) throw new OccKernelVersionRetiredError();
     if (!response.ok || !response.body) {
       throw new Error(`Failed to download the geometry engine: ${response.status} ${url}`);
     }

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 
+import { OCC_ASSET_BASE_PATH } from "../../src/infrastructure/occ/asset-version";
+
 const landingHeading = "Good things start with a part.";
 
 test("root and unknown pages serve the landing without starting the editor", async ({
@@ -65,7 +67,7 @@ test("app and its trailing-slash canonical URL load the editor", async ({
 test("root assets retain their types and missing assets stay failures", async ({
   request,
 }) => {
-  const wasm = await request.get("/cadara-occ.wasm?v=routing-probe", {
+  const wasm = await request.get(`${OCC_ASSET_BASE_PATH}/cadara-occ.wasm`, {
     headers: { Range: "bytes=0-7" },
   });
   expect([200, 206]).toContain(wasm.status());
@@ -73,8 +75,22 @@ test("root assets retain their types and missing assets stay failures", async ({
   expect((await wasm.body()).subarray(0, 4)).toEqual(
     Buffer.from([0, 97, 115, 109]),
   );
+  expect(wasm.headers()["cache-control"]).toContain("immutable");
+  expect((await request.get("/cadara-occ.wasm?v=old")).status()).toBe(404);
+  expect(
+    (await request.get("/kernels/deleted-version/cadara-occ.wasm")).status(),
+  ).toBe(404);
+  const html = await request.get("/app");
+  const entry = (await html.text()).match(
+    /<script type="module"[^>]*src="([^"]+)"/,
+  )![1]!;
+  expect((await request.get(entry)).headers()["cache-control"]).toContain(
+    "immutable",
+  );
+  expect(html.headers()["cache-control"]).not.toContain("immutable");
   const serviceWorker = await request.get("/service-worker.js");
   expect(serviceWorker.status()).toBe(200);
+  expect(serviceWorker.headers()["cache-control"]).not.toContain("immutable");
   expect(serviceWorker.headers()["content-type"]).toMatch(/javascript/);
   const icon = await request.get("/icons/GitHub-logo.svg");
   expect(icon.status()).toBe(200);

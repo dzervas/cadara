@@ -1,57 +1,104 @@
+import { readFile, rm } from "node:fs/promises";
+import path from "node:path";
+
+import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-import { OCC_ASSET_VERSION } from "./src/infrastructure/occ/asset-version.ts";
+import { OCC_ASSET_BASE_PATH } from "./src/infrastructure/occ/asset-version.ts";
 
-const occKernelFilePattern = /(?:^|\/)cadara-occ\.(?:js|wasm)$/;
+// 200 sequential requests cost 60 s at 300 ms RTT, leaving four minutes of
+// the browser's five-minute install budget for transfer and cache writes.
+const MAX_INSTALL_REQUESTS = 200;
+
+/** Publish one content-addressed kernel, never copies of previous versions. */
+function versionedKernelPlugin(): Plugin {
+  let root: string;
+  let publicDir: string;
+  return {
+    name: "versioned-occ-kernel",
+    configResolved(config) {
+      root = config.root;
+      publicDir = config.publicDir;
+    },
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        if (request.url?.startsWith(`${OCC_ASSET_BASE_PATH}/`))
+          request.url = request.url.replace(OCC_ASSET_BASE_PATH, "");
+        next();
+      });
+    },
+    async generateBundle() {
+      for (const extension of ["js", "wasm"]) {
+        const name = `cadara-occ.${extension}`;
+        const source = await readFile(path.join(publicDir, name));
+        if (source.byteLength > 25 * 1024 * 1024)
+          this.error(`${name} exceeds Workers' 25 MiB per-file limit.`);
+        this.emitFile({
+          type: "asset",
+          fileName: `${OCC_ASSET_BASE_PATH.slice(1)}/${name}`,
+          source,
+        });
+      }
+    },
+    async writeBundle(options) {
+      // Vite also copies publicDir. Keep the source files there for Node/CLI
+      // loaders, but deploy only the content-addressed browser URLs.
+      for (const extension of ["js", "wasm"])
+        await rm(path.resolve(root, options.dir!, `cadara-occ.${extension}`), {
+          force: true,
+        });
+    },
+  };
+}
 
 /**
  * The production service worker (`src/service-worker.ts`, vite-plugin-pwa
- * `injectManifest`; builds to /service-worker.js). Production only: the dev
- * server serves no service worker. The app registers it through
- * `virtual:pwa-register/react` (src/hooks/use-app-update.ts); the web app
- * manifest is cadara-h13. `srcDir` holds service-worker.ts.
+ * `injectManifest`; builds to /service-worker.js) and the versioned kernel it
+ * precaches. Production only: the dev server serves no service worker. The app
+ * registers it through `virtual:pwa-register/react`
+ * (src/hooks/use-app-update.ts). `srcDir` holds service-worker.ts. The whole offline application installs atomically;
+ * runtime caching is not offline readiness.
  */
 export function createServiceWorkerPlugin(srcDir: string) {
-  return VitePWA({
-    strategies: "injectManifest",
-    srcDir,
-    filename: "service-worker.ts",
-    registerType: "prompt",
-    injectRegister: false,
-    manifest: false,
-    injectManifest: {
-      // The whole offline app shell: HTML entries, every emitted asset
-      // (chunks, worker bundles, fonts), public icons and the OCC kernel.
-      globPatterns: [
-        "*.html",
-        "assets/**/*",
-        "**/*.{svg,png,ico,woff,woff2,ttf,otf}",
-        "cadara-occ.{js,wasm}",
-      ],
-      globIgnores: ["**/*.map"],
-      // cadara-occ.wasm is about 17 MB.
-      maximumFileSizeToCacheInBytes: 64 * 1024 * 1024,
-      manifestTransforms: [
-        // The app requests the kernel as /cadara-occ.{js,wasm}?v=<version>
-        // (`getVersionedOpenCascadeAssetUrl`), so it is precached under that
-        // exact URL: a worker still active after a deploy then misses for the
-        // new version's URL and the page gets the new kernel from the network,
-        // never the old one. The version is the content hash
-        // (test/static/occ-asset-version.spec.ts), so the URL is the revision;
-        // revision null also lets the install reuse the HTTP-cached download.
-        async (entries) => ({
-          manifest: entries.map((entry) =>
-            occKernelFilePattern.test(entry.url)
-              ? {
-                  ...entry,
-                  url: `${entry.url}?v=${OCC_ASSET_VERSION}`,
-                  revision: null,
-                }
-              : entry,
-          ),
-          warnings: [],
-        }),
-      ],
-    },
-  });
+  return [
+    versionedKernelPlugin(),
+    VitePWA({
+      strategies: "injectManifest",
+      srcDir,
+      filename: "service-worker.ts",
+      registerType: "prompt",
+      injectRegister: false,
+      manifest: false,
+      injectManifest: {
+        globPatterns: [
+          "*.html",
+          "assets/**/*",
+          "**/*.{svg,png,ico,woff,woff2,ttf,otf}",
+          "kernels/**/*.{js,wasm}",
+        ],
+        globIgnores: ["**/*.map"],
+        // Workers static assets allow at most 25 MiB per file.
+        maximumFileSizeToCacheInBytes: 25 * 1024 * 1024,
+        manifestTransforms: [
+          async (entries) => {
+            if (entries.length > MAX_INSTALL_REQUESTS)
+              throw new Error(
+                `Offline install has ${entries.length} requests; budget is ${MAX_INSTALL_REQUESTS}. Bundle resources rather than expanding the sequential install.`,
+              );
+            return {
+              // Vite assets and the kernel already have content-addressed URLs.
+              // Null revisions preserve the page's URL and normal HTTP-cache
+              // semantics instead of Workbox's revisioned reload requests.
+              manifest: entries.map((entry) =>
+                /^(?:assets|kernels)\//.test(entry.url)
+                  ? { ...entry, revision: null }
+                  : entry,
+              ),
+              warnings: [],
+            };
+          },
+        ],
+      },
+    }),
+  ];
 }

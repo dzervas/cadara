@@ -7,6 +7,7 @@ import {
   releaseBrowserOccDocument,
   startBrowserOccWarmup,
 } from "@/infrastructure/occ/browser-kernel-runtime";
+import { OccKernelVersionRetiredError } from "@/infrastructure/occ/kernel-version-retired";
 import { ErrorReporterProvider } from "@/hooks/error-reporter-provider";
 import { ReportedErrorBoundary } from "@/components/layout/reported-error-boundary";
 import { BuildMetadataLabel } from "@/components/layout/build-metadata-label";
@@ -97,6 +98,9 @@ function OccWarmupErrorEffect({
     if (!warmupPromise) return;
 
     void warmupPromise.catch((error: unknown) => {
+      // A deploy replaced this tab's kernel: the update notification asks
+      // for a reload (browserOccKernelVersionRetired); nothing is broken.
+      if (error instanceof OccKernelVersionRetiredError) return;
       errorReporter.report(
         normalizeUnknownError(error, {
           code: "editor/effect-failed",

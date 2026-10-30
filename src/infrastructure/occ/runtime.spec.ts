@@ -234,8 +234,8 @@ test("src/infrastructure/occ/runtime.spec.ts", async () => {
   function testRuntimeAssetVersioningPairsTheCustomModuleAndWasm() {
     const jsUrl = getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.js");
     const wasmUrl = getVersionedOpenCascadeRuntimeAssetUrl("/cadara-occ.wasm");
-    const jsVersion = new URL(jsUrl).searchParams.get("v");
-    const wasmVersion = new URL(wasmUrl).searchParams.get("v");
+    const jsVersion = new URL(jsUrl).pathname.split("/")[2];
+    const wasmVersion = new URL(wasmUrl).pathname.split("/")[2];
 
     expect(
       jsVersion,

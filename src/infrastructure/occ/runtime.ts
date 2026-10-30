@@ -5,6 +5,10 @@ import type {
 } from "@/infrastructure/occ/kernel-capabilities";
 import { getVersionedOpenCascadeRuntimeAssetUrls } from "@/infrastructure/occ/assets";
 import {
+  isKernelVersionRetired,
+  OccKernelVersionRetiredError,
+} from "@/infrastructure/occ/kernel-version-retired";
+import {
   createProductionOpenCascadeInitializerFromMainJS,
 } from "@/infrastructure/occ/initialization";
 
@@ -55,6 +59,17 @@ async function loadBrowserOpenCascadeModule(): Promise<OpenCascadeFactoryModule>
   return { default: customInitializer };
 }
 
+/** A failed module import hides the HTTP status; a 404 means a deploy retired it. */
+async function loadPublishedBrowserOpenCascadeModule() {
+  try {
+    return await loadBrowserOpenCascadeModule();
+  } catch (error) {
+    if (await isKernelVersionRetired(getVersionedOpenCascadeRuntimeAssetUrls().mainJS))
+      throw new OccKernelVersionRetiredError();
+    throw error;
+  }
+}
+
 async function loadNodeOpenCascadeModule(): Promise<OpenCascadeFactoryModule> {
   const { loadFilesystemOpenCascadeFactory } =
     await import("@/infrastructure/occ/filesystem-kernel-runtime");
@@ -81,7 +96,7 @@ export async function loadDefaultOpenCascadeFactory(
   const loadModule =
     (options.isNodeRuntime ?? isNodeRuntime())
       ? (options.loadNodeModule ?? loadNodeOpenCascadeModule)
-      : (options.loadBrowserModule ?? loadBrowserOpenCascadeModule);
+      : (options.loadBrowserModule ?? loadPublishedBrowserOpenCascadeModule);
   const module = await loadModule();
 
   return resolveOpenCascadeInitializer(module);

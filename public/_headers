@@ -1,0 +1,7 @@
+# Only content-addressed paths are immutable. HTML and the permanent worker
+# script retain Workers' default max-age=0, must-revalidate policy.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/kernels/*
+  Cache-Control: public, max-age=31536000, immutable

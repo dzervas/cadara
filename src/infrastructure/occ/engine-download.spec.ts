@@ -3,6 +3,7 @@ import {
   createEngineDownloadInstantiateWasm,
   type EngineDownloadProgress,
 } from "./engine-download";
+import { OccKernelVersionRetiredError } from "./kernel-version-retired";
 
 // A valid 100-byte module: the header plus one custom section of padding.
 const wasm = new Uint8Array([
@@ -94,9 +95,9 @@ test("bytes beyond the build-time total are not reported", async () => {
 });
 
 test("a non-ok response, a stream error and a compile error reject the failure promise", async () => {
-  stubFetch(wasm, 10, { status: 404 });
-  const notFound = await download();
-  expect(String(notFound.failure)).toContain("Failed to download the geometry engine: 404");
+  stubFetch(wasm, 10, { status: 503 });
+  const unavailable = await download();
+  expect(String(unavailable.failure)).toContain("Failed to download the geometry engine: 503");
 
   stubFetch(wasm, 10, { failAfterChunks: 3 });
   const reset = await download();
@@ -107,4 +108,13 @@ test("a non-ok response, a stream error and a compile error reject the failure p
   const invalid = await download();
   expect(invalid.received).toEqual([]);
   expect(invalid.failure).toBeInstanceOf(WebAssembly.CompileError);
+});
+
+// A deploy publishes only its own kernel directory, so a 404 on this tab's
+// versioned URL means the tab is out of date, not that the download broke.
+test("a 404 on the versioned kernel URL rejects with the retired-kernel error", async () => {
+  stubFetch(wasm, 10, { status: 404 });
+  const notFound = await download();
+  expect(notFound.received).toEqual([]);
+  expect(notFound.failure).toBeInstanceOf(OccKernelVersionRetiredError);
 });

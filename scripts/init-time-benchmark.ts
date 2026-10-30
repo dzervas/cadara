@@ -8,6 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { createTwoExtrudeBodiesOperationHistory } from "../e2e/helpers/modeling-fixtures.ts";
 import { MODELING_OPERATION_HISTORY_STORAGE_KEY } from "../src/application/modeling/modeling-history-persistence.ts";
+import { OCC_ASSET_BASE_PATH } from "../src/infrastructure/occ/asset-version.ts";
 
 const PREVIEW_HOST = "127.0.0.1";
 const PREVIEW_PORT = 4173;
@@ -32,7 +33,8 @@ function sha256File(path: string) {
 function assertPreviewAssetsAreFresh() {
   for (const basename of CUSTOM_OCC_ASSET_BASENAMES) {
     const publicPath = `/app/public/${basename}`;
-    const distPath = `/app/dist/${basename}`;
+    // The build publishes the kernel only under its content-versioned path.
+    const distPath = `/app/dist${OCC_ASSET_BASE_PATH}/${basename}`;
     const publicExists = existsSync(publicPath);
     const distExists = existsSync(distPath);
 

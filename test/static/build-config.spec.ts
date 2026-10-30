@@ -5,6 +5,7 @@ import { test, expect } from "vitest";
 import type { UserConfig } from "vite";
 import { parseConfigFileTextToJson } from "typescript";
 
+import { OCC_ASSET_BASE_PATH } from "../../src/infrastructure/occ/asset-version";
 import { shouldTransformWithTypia } from "../../typia-plugin-options";
 import viteConfig, {
   getBuildSourcemap,
@@ -70,29 +71,23 @@ test("test/static/build-config.spec.ts", async () => {
     ),
     "Production build should include the Sentry Vite plugin for release source-map upload.",
   ).toBeTruthy();
+  const kernelPath = `${OCC_ASSET_BASE_PATH}/cadara-occ`;
   expect(
-    getOpenCascadeAssetHeaders("/cadara-occ.wasm")["Content-Type"] ===
+    getOpenCascadeAssetHeaders(`${kernelPath}.wasm`)["Content-Type"] ===
       "application/wasm",
     "The custom app-served OpenCascade wasm response should preserve a streaming-compatible MIME type.",
   ).toBeTruthy();
+  for (const extension of ["js", "wasm"])
+    expect(
+      getOpenCascadeAssetHeaders(`${kernelPath}.${extension}`)[
+        "Cache-Control"
+      ]?.includes("immutable"),
+      "The content-versioned OpenCascade kernel should be eligible for immutable repeat-load caching.",
+    ).toBeTruthy();
   expect(
-    getOpenCascadeAssetHeaders("/cadara-occ.wasm")["Cache-Control"]?.includes(
-      "immutable",
-    ),
-    "The custom OpenCascade wasm asset should be eligible for immutable repeat-load caching.",
-  ).toBeTruthy();
-  expect(
-    getOpenCascadeAssetHeaders("/cadara-occ.js")["Cache-Control"]?.includes(
-      "immutable",
-    ),
-    "The custom OpenCascade bootstrap module should be eligible for immutable repeat-load caching.",
-  ).toBeTruthy();
-  expect(
-    getOpenCascadeAssetHeaders("/cadara-occ.wasm?v=paired-artifact")[
-      "Cache-Control"
-    ]?.includes("immutable"),
-    "Versioned custom OpenCascade requests should retain immutable cache headers.",
-  ).toBeTruthy();
+    getOpenCascadeAssetHeaders("/cadara-occ.wasm")["Cache-Control"],
+    "An unversioned kernel path names no fixed content, so it is never immutable.",
+  ).toBeUndefined();
 });
 
 test("Cloudflare builds distinct landing/editor entries and a landing 404 page", () => {

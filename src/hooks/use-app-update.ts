@@ -1,11 +1,40 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { messageSW } from "workbox-window";
 
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
+import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
+import {
+  isServiceWorkerInstallDiagnostic,
+  type ServiceWorkerInstallDiagnostic,
+} from "@/infrastructure/workers/service-worker-install-telemetry";
 
 export const SERVICE_WORKER_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
+
+export function watchServiceWorkerInstallMessages(
+  container: Pick<
+    ServiceWorkerContainer,
+    "addEventListener" | "removeEventListener"
+  >,
+  onDiagnostic: (
+    worker: object,
+    diagnostic: ServiceWorkerInstallDiagnostic,
+  ) => void,
+) {
+  const onMessage = (event: MessageEvent) => {
+    if (event.source && isServiceWorkerInstallDiagnostic(event.data))
+      onDiagnostic(event.source, event.data);
+  };
+  container.addEventListener("message", onMessage);
+  return () => container.removeEventListener("message", onMessage);
+}
 
 interface ServiceWorkerUpdateCheckHost {
   window: Pick<
@@ -26,13 +55,28 @@ interface ServiceWorkerUpdateCheckHost {
  * Returns the disposer that stops the checks.
  */
 export function startServiceWorkerUpdateChecks(
-  registration: Pick<ServiceWorkerRegistration, "installing" | "update">,
+  registration: Pick<ServiceWorkerRegistration, "installing" | "update"> &
+    Partial<Pick<ServiceWorkerRegistration, "active" | "scope">>,
   onCheckFailed: (error: unknown) => void,
   host: ServiceWorkerUpdateCheckHost = { window, document, navigator },
+  migration?: {
+    scriptURL: string;
+    register: (url: string, options: RegistrationOptions) => Promise<unknown>;
+  },
 ) {
   const check = () => {
     if (registration.installing || !host.navigator.onLine) return;
-    registration.update().catch(onCheckFailed);
+    // update() follows the ACTIVE script URL after a failed migration. That
+    // endpoint may no longer exist; retry the shipped URL without unregistering
+    // the working offline registration or discarding its caches. A failed
+    // first install leaves no active worker and the browser drops the
+    // registration, so update() would reject: register the shipped URL again.
+    const active = registration.active;
+    const update =
+      migration && (!active || active.scriptURL !== migration.scriptURL)
+        ? migration.register(migration.scriptURL, { scope: registration.scope })
+        : registration.update();
+    update.catch(onCheckFailed);
   };
   const checkWhenVisible = () => {
     if (host.document.visibilityState === "visible") check();
@@ -62,19 +106,40 @@ export function watchServiceWorkerInstalls(
     ServiceWorkerRegistration,
     "installing" | "addEventListener" | "removeEventListener"
   >,
-  onInstallFailed: (error: Error) => void,
+  onInstallFailed: (
+    error: Error,
+    diagnostic: ServiceWorkerInstallDiagnostic,
+  ) => void,
+  getDiagnostic: (
+    worker: ServiceWorker,
+  ) => ServiceWorkerInstallDiagnostic | undefined = () => undefined,
 ) {
   const watchInstalling = () => {
     const worker = registration.installing;
     if (!worker) return;
+    const startedAt = Date.now();
     const onStateChange = () => {
       worker.removeEventListener("statechange", onStateChange);
-      if (worker.state === "redundant")
+      if (worker.state === "redundant") {
+        const diagnostic = getDiagnostic(worker);
+        // Explicit failures were already forwarded by the message listener.
+        if (diagnostic?.errorKind) return;
+        const start = diagnostic?.startedAt ?? startedAt;
         onInstallFailed(
           new Error(
             `The new service worker ${worker.scriptURL} failed to install.`,
           ),
+          {
+            type: "CADARA_SW_INSTALL",
+            url: diagnostic?.url ?? worker.scriptURL,
+            startedAt: start,
+            elapsedMs: Date.now() - start,
+            errorKind: "install-interrupted",
+            message:
+              "Worker became redundant without an explicit failure; termination cause unknown.",
+          },
         );
+      }
     };
     worker.addEventListener("statechange", onStateChange);
   };
@@ -121,6 +186,8 @@ export type AppUpdatePhase = "idle" | "saving" | "reloading";
  * The production service worker's update prompt (vite-plugin-pwa
  * `registerType: "prompt"`). `needRefresh` turns true when a new build is
  * installed and waiting, in every open tab; the first install shows nothing.
+ * `kernelVersionRetired` turns true when a deploy already replaced this tab's
+ * kernel on the server (no waiting worker needed): only a reload recovers.
  */
 export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
   const errorReporter = useErrorReporter();
@@ -131,33 +198,76 @@ export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
   );
   const stopWatchingRegistration = useRef<(() => void) | null>(null);
   useEffect(() => () => stopWatchingRegistration.current?.(), []);
-  const reportDeveloperFailure = (operation: string) => (error: unknown) =>
-    errorReporter.report(
-      normalizeUnknownError(error, {
-        code: "app/operation-failed",
-        fallbackMessage: "The app update check failed.",
-        context: [{ key: "operation", value: operation }],
-      }),
-      {
-        source: "app-update",
-        visibility: "developer",
-        dedupeKey: `app-update:${operation}`,
+  const installDiagnostics = useRef(
+    new WeakMap<object, ServiceWorkerInstallDiagnostic>(),
+  );
+  const reportDeveloperFailure = useCallback(
+    (operation: string, diagnostic?: ServiceWorkerInstallDiagnostic) =>
+      (error: unknown) =>
+        errorReporter.report(
+          normalizeUnknownError(error, {
+            code: "app/operation-failed",
+            fallbackMessage: "The app update check failed.",
+            context: [
+              { key: "operation", value: operation },
+              ...(diagnostic
+                ? [
+                    { key: "url", value: diagnostic.url },
+                    { key: "errorKind", value: diagnostic.errorKind },
+                    { key: "elapsedMs", value: diagnostic.elapsedMs },
+                    { key: "installMessage", value: diagnostic.message },
+                  ]
+                : []),
+            ],
+          }),
+          {
+            source: "app-update",
+            visibility: "developer",
+            // Every open tab receives the worker's diagnostic; one install
+            // attempt is reported once per tab, whichever signal arrives first.
+            dedupeKey: diagnostic
+              ? `app-update:install:${diagnostic.startedAt}:${diagnostic.url}`
+              : `app-update:${operation}`,
+          },
+        ),
+    [errorReporter],
+  );
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    return watchServiceWorkerInstallMessages(
+      navigator.serviceWorker,
+      (worker, diagnostic) => {
+        installDiagnostics.current.set(worker, diagnostic);
+        if (diagnostic.errorKind)
+          reportDeveloperFailure(
+            "serviceWorker.install",
+            diagnostic,
+          )(new Error(diagnostic.message ?? diagnostic.errorKind));
       },
     );
+  }, [reportDeveloperFailure]);
   // These options are read once, on the first render (upstream contract).
   const {
     needRefresh: [needRefresh],
     updateServiceWorker,
   } = useRegisterSW({
-    onRegisteredSW(_url, registration) {
+    onRegisteredSW(url, registration) {
       if (!registration) return;
       const stopChecks = startServiceWorkerUpdateChecks(
         registration,
         reportDeveloperFailure("serviceWorker.update"),
+        { window, document, navigator },
+        {
+          scriptURL: new URL(url, window.location.href).href,
+          register: (script, options) =>
+            navigator.serviceWorker.register(script, options),
+        },
       );
       const stopWatchingInstalls = watchServiceWorkerInstalls(
         registration,
-        reportDeveloperFailure("serviceWorker.install"),
+        (error, diagnostic) =>
+          reportDeveloperFailure("serviceWorker.install", diagnostic)(error),
+        (worker) => installDiagnostics.current.get(worker),
       );
       stopWatchingRegistration.current = () => {
         stopChecks();
@@ -183,6 +293,12 @@ export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
     onRegisterError: reportDeveloperFailure("serviceWorker.register"),
   });
 
+  const kernelVersionRetired = useSyncExternalStore(
+    browserOccKernelVersionRetired.subscribe,
+    browserOccKernelVersionRetired.getSnapshot,
+    browserOccKernelVersionRetired.getSnapshot,
+  );
+
   async function reload() {
     setPhase("saving");
     try {
@@ -191,7 +307,10 @@ export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
           await waitForLocalChanges();
           setPhase("reloading");
         },
-        activateWaitingWorker: updateServiceWorker,
+        // Without a waiting worker the new build is already being served.
+        activateWaitingWorker: needRefresh
+          ? updateServiceWorker
+          : async () => window.location.reload(),
       });
     } catch (error) {
       setPhase("idle");
@@ -207,5 +326,5 @@ export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
     }
   }
 
-  return { needRefresh, version, phase, reload };
+  return { needRefresh, kernelVersionRetired, version, phase, reload };
 }

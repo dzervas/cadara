@@ -14,6 +14,7 @@ export { canUseOccModuleWorker };
 export function createBrowserOccWorkerClient(options: {
   assetResolver?: GeometryAssetResolver;
   onFatalError?: (error: Error) => void;
+  onKernelVersionRetired?: () => void;
   onEngineDownloadProgress?: OccWorkerClientOptions["onEngineDownloadProgress"];
 } = {}) {
   if (!canUseOccModuleWorker()) {
@@ -24,6 +25,7 @@ export function createBrowserOccWorkerClient(options: {
     worker: takeStartedOccModuleWorker() ?? createOccModuleWorker(),
     createWorker: createOccModuleWorker,
     onFatalError: options.onFatalError,
+    onKernelVersionRetired: options.onKernelVersionRetired,
     onEngineDownloadProgress: options.onEngineDownloadProgress,
     assetResolver: options.assetResolver,
     requestTimeoutMs: 30 * 60 * 1000,

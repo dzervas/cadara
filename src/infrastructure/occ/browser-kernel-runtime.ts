@@ -12,6 +12,7 @@ import {
   type OccPreloadController,
 } from "@/infrastructure/occ/preload";
 import { createBrowserOccWorkerClient } from "@/infrastructure/occ/worker-runtime";
+import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
 import {
   getBrowserGeometryAssetComposition,
 } from "@/infrastructure/modeling/browser-geometry-asset-store";
@@ -45,6 +46,7 @@ const browserOccWorkerClient =
               ? { stage: "downloading-engine", completed: completedBytes, total: totalBytes, label: null }
               : null,
           ),
+        onKernelVersionRetired: browserOccKernelVersionRetired.mark,
         onFatalError: (error) => {
           lastWorkerFailure = error;
           browserOccLoadingStatus.set("failed");

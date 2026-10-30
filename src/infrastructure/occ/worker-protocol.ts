@@ -318,7 +318,9 @@ export interface OccWorkerFailureMessage {
     code:
       | "occ-worker-initialization-failed"
       | "occ-worker-request-failed"
-      | "occ-worker-request-cancelled";
+      | "occ-worker-request-cancelled"
+      // OccKernelVersionRetiredError: a deploy replaced this tab's kernel.
+      | "occ-kernel-version-retired";
   };
 }
 

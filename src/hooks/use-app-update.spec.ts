@@ -8,6 +8,7 @@ import {
   createAppUpdateReload,
   startServiceWorkerUpdateChecks,
   watchServiceWorkerInstalls,
+  watchServiceWorkerInstallMessages,
 } from "@/hooks/use-app-update";
 
 function fakeUpdateCheckHost() {
@@ -163,6 +164,151 @@ test("a failed update check is handed to the failure handler", async () => {
   await Promise.resolve();
   await Promise.resolve();
   expect(failures).toEqual([failure]);
+});
+
+test.each([
+  {
+    state: "an obsolete active script (failed migration)",
+    active: "https://cadara.test/occ-asset-cache-sw.js?v=old",
+    expected: "register",
+  },
+  {
+    state: "no active worker (failed first install)",
+    active: null,
+    expected: "register",
+  },
+  {
+    state: "the shipped script active",
+    active: "https://cadara.test/service-worker.js",
+    expected: "update",
+  },
+])(
+  "the update check with $state uses $expected, so it never re-fetches a deleted active script",
+  async ({ active, expected }) => {
+    const { host, intervals } = fakeUpdateCheckHost();
+    const requested: unknown[] = [];
+    const registration = {
+      active: active ? ({ scriptURL: active } as ServiceWorker) : null,
+      scope: "https://cadara.test/",
+      installing: null,
+      async update() {
+        requested.push("update");
+        return {} as ServiceWorkerRegistration;
+      },
+    };
+    startServiceWorkerUpdateChecks(
+      registration,
+      (error) => {
+        throw error;
+      },
+      host as never,
+      {
+        scriptURL: "https://cadara.test/service-worker.js",
+        async register(url, options) {
+          requested.push(["register", url, options]);
+        },
+      },
+    );
+    intervals[0]!.callback();
+    await Promise.resolve();
+    expect(requested).toEqual([
+      expected === "update"
+        ? "update"
+        : [
+            "register",
+            "https://cadara.test/service-worker.js",
+            { scope: "https://cadara.test/" },
+          ],
+    ]);
+  },
+);
+
+test("worker messages preserve install diagnostics and disposal removes the listener", () => {
+  const container = new EventTarget();
+  const channel = new MessageChannel();
+  const source = channel.port1;
+  const diagnostic = {
+    type: "CADARA_SW_INSTALL",
+    url: "https://cadara.test/assets/failing.js",
+    startedAt: 100,
+    elapsedMs: 250,
+    errorKind: "TypeError",
+    message: "Failed to fetch",
+  };
+  const received: unknown[] = [];
+  const stop = watchServiceWorkerInstallMessages(
+    container as unknown as ServiceWorkerContainer,
+    (worker, details) => received.push([worker, details]),
+  );
+  container.dispatchEvent(
+    new MessageEvent("message", { source, data: diagnostic }),
+  );
+  container.dispatchEvent(
+    new MessageEvent("message", { source, data: { type: "unrelated" } }),
+  );
+  expect(received).toEqual([[source, diagnostic]]);
+  stop();
+  container.dispatchEvent(
+    new MessageEvent("message", { source, data: diagnostic }),
+  );
+  expect(received).toHaveLength(1);
+  source.close();
+  channel.port2.close();
+});
+
+test("a worker terminated without an explicit cause reports its last URL and elapsed time without guessing a timeout", () => {
+  const registration = new EventTarget() as EventTarget & {
+    installing: ServiceWorker | null;
+  };
+  const failed = fakeServiceWorker("https://cadara.test/service-worker.js");
+  registration.installing = failed.worker as unknown as ServiceWorker;
+  const reports: unknown[] = [];
+  watchServiceWorkerInstalls(
+    registration,
+    (_error, details) => reports.push(details),
+    () => ({
+      type: "CADARA_SW_INSTALL",
+      url: "https://cadara.test/assets/pending.js",
+      startedAt: Date.now() - 1500,
+      elapsedMs: 0,
+      errorKind: null,
+      message: null,
+    }),
+  );
+  failed.becomes("redundant");
+  expect(reports).toEqual([
+    expect.objectContaining({
+      url: "https://cadara.test/assets/pending.js",
+      errorKind: "install-interrupted",
+      elapsedMs: expect.any(Number),
+    }),
+  ]);
+  expect(
+    (reports[0] as { elapsedMs: number }).elapsedMs,
+  ).toBeGreaterThanOrEqual(1500);
+});
+
+test("a worker whose install already reported an explicit cause is not reported again as interrupted", () => {
+  const registration = new EventTarget() as EventTarget & {
+    installing: ServiceWorker | null;
+  };
+  const failed = fakeServiceWorker("https://cadara.test/service-worker.js");
+  registration.installing = failed.worker as unknown as ServiceWorker;
+  const reports: unknown[] = [];
+  watchServiceWorkerInstalls(
+    registration,
+    (_error, details) => reports.push(details),
+    () => ({
+      type: "CADARA_SW_INSTALL",
+      url: "https://cadara.test/assets/failing.js",
+      startedAt: 100,
+      elapsedMs: 250,
+      errorKind: "bad-precaching-response",
+      message: "503",
+    }),
+  );
+  failed.becomes("redundant");
+  expect(reports).toEqual([]);
 });
 
 test("Reload activates the waiting worker only after the local changes are persisted, then reloads once the new worker controls the tab", async () => {

@@ -21,7 +21,9 @@ export function getOpenCascadeAssetHeaders(
 ): Record<string, string> {
   const pathname = new URL(value, "https://cadara.local").pathname;
 
-  if (!/cadara-occ\.(?:js|wasm)$/.test(pathname)) {
+  // Only the content-versioned kernel directory is immutable; the dev server
+  // maps it onto public/ (service-worker-plugin.ts).
+  if (!/^\/kernels\/[^/]+\/cadara-occ\.(?:js|wasm)$/.test(pathname)) {
     return {};
   }
 

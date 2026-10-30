@@ -12,7 +12,7 @@ import { build } from "vite";
 import { expect, test } from "vitest";
 
 import { createServiceWorkerPlugin } from "../../service-worker-plugin";
-import { OCC_ASSET_VERSION } from "../../src/infrastructure/occ/asset-version";
+import { OCC_ASSET_BASE_PATH } from "../../src/infrastructure/occ/asset-version";
 
 // Static lane (cadara-vk96): the shipped service worker's precache manifest,
 // built by the production plugin (`service-worker-plugin.ts`) from the real
@@ -86,19 +86,50 @@ new Worker(new URL("./kernel-worker.js", import.meta.url), { type: "module" });`
     expect(assets.some((file) => file.endsWith(".woff2"))).toBe(true);
     for (const file of assets) expect(urls).toContain(`assets/${file}`);
 
-    // The app fetches /cadara-occ.{js,wasm}?v=<OCC_ASSET_VERSION>; only that
-    // exact URL may be answered from the precache, so an old worker never
+    // The app fetches /kernels/<content-version>/cadara-occ.{js,wasm}; only
+    // that exact URL may be answered from the precache, so an old worker never
     // hands an old kernel to a newer app.
     expect(
-      manifest.filter((entry) => entry.url.includes("cadara-occ")),
+      manifest
+        .filter((entry) => entry.url.includes("cadara-occ"))
+        .sort((a, b) => a.url.localeCompare(b.url)),
     ).toEqual([
-      { url: `cadara-occ.js?v=${OCC_ASSET_VERSION}`, revision: null },
-      { url: `cadara-occ.wasm?v=${OCC_ASSET_VERSION}`, revision: null },
+      { url: `${OCC_ASSET_BASE_PATH.slice(1)}/cadara-occ.js`, revision: null },
+      {
+        url: `${OCC_ASSET_BASE_PATH.slice(1)}/cadara-occ.wasm`,
+        revision: null,
+      },
     ]);
-    expect(
-      source.includes("/^v$/"),
-      "the worker matches precache URLs including their v parameter",
-    ).toBe(false);
+    expect(manifest.filter((entry) => entry.url.startsWith("assets/"))).toEqual(
+      expect.arrayContaining(
+        assets.map((file) => ({ url: `assets/${file}`, revision: null })),
+      ),
+    );
+    await expect(
+      readFile(path.join(root, "dist/cadara-occ.wasm")),
+    ).rejects.toThrow();
+    expect(await readdir(path.join(root, "dist/kernels"))).toEqual([
+      OCC_ASSET_BASE_PATH.split("/").at(-1),
+    ]);
+
+    // Asset growth must not silently return to a five-minute sequential install.
+    await Promise.all(
+      Array.from({ length: 201 }, (_, i) =>
+        writeFile(
+          path.join(root, `public/icons/tool-${i}.svg`),
+          `<svg>${i}</svg>`,
+        ),
+      ),
+    );
+    await expect(
+      build({
+        root,
+        configFile: false,
+        logLevel: "silent",
+        plugins: [createServiceWorkerPlugin(path.resolve("src"))],
+        build: { rollupOptions: { input: path.join(root, "app.html") } },
+      }),
+    ).rejects.toThrow(/Offline install has .* requests; budget is 200/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

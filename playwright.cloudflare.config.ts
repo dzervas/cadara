@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
 import appConfig from "./playwright.config";
 
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4175";
+
 // Exercise the actual Workers Static Assets router, not Vite's SPA fallback.
 export default defineConfig({
   ...appConfig,
@@ -14,7 +16,7 @@ export default defineConfig({
   timeout: 120_000,
   use: {
     ...appConfig.use,
-    baseURL: "http://127.0.0.1:4175",
+    baseURL,
     launchOptions: {
       args: [
         "--use-gl=angle",
@@ -25,8 +27,8 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "bun run preview:cf",
-    url: "http://127.0.0.1:4175",
+    command: `bunx wrangler dev --local --ip 127.0.0.1 --port ${new URL(baseURL).port} --show-interactive-dev-session=false`,
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 300_000,
     env: { WRANGLER_SEND_METRICS: "false", SENTRY_AUTH_TOKEN: "" },

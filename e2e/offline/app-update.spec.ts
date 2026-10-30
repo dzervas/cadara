@@ -211,7 +211,7 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
             (response) => response.status,
             () => "unreachable",
           ),
-        `/cadara-occ.wasm?v=${version}`,
+        `/kernels/${version}/cadara-occ.wasm`,
       );
     expect(await fetchKernel(OCC_ASSET_VERSION)).toBe(200);
     expect(

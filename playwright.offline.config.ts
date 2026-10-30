@@ -22,7 +22,9 @@ export default defineConfig({
   workers: 1,
   use: {
     ...appConfig.use,
-    baseURL: `http://127.0.0.1:${OFFLINE_PREVIEW_PORT}`,
+    baseURL:
+      process.env.PLAYWRIGHT_BASE_URL ??
+      `http://127.0.0.1:${OFFLINE_PREVIEW_PORT}`,
     // A production build reports to Sentry; keep test runs off the real
     // project without `route` (routing disables the HTTP cache).
     launchOptions: {

@@ -1,6 +1,6 @@
-import { OCC_ASSET_VERSION } from "./asset-version";
+import { OCC_ASSET_BASE_PATH } from "./asset-version";
 
-export { OCC_ASSET_VERSION };
+export { OCC_ASSET_VERSION } from "./asset-version";
 
 const CUSTOM_OPENCASCADE_ASSET_PATHS = {
   mainJS: "/cadara-occ.js",
@@ -22,7 +22,7 @@ export function getVersionedOpenCascadeAssetUrl(path: string) {
     getRuntimeAbsoluteAssetUrl(path),
     globalThis.location?.origin ?? "https://cadara.local",
   );
-  assetUrl.searchParams.set("v", OCC_ASSET_VERSION);
+  assetUrl.pathname = `${OCC_ASSET_BASE_PATH}${assetUrl.pathname}`;
   return assetUrl.href;
 }
 

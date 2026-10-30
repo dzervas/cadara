@@ -11,6 +11,7 @@ import type { DocumentId, GeometryAssetId, RequestId } from "@/contracts/shared/
 import { OpenCascadeKernelAdapter } from "@/infrastructure/occ/opencascade-kernel-adapter";
 import { loadDefaultOpenCascadeFactory } from "@/infrastructure/occ/runtime";
 import { createEngineDownloadInstantiateWasm } from "@/infrastructure/occ/engine-download";
+import { OccKernelVersionRetiredError } from "@/infrastructure/occ/kernel-version-retired";
 import { OCC_WASM_BYTE_LENGTH } from "@/infrastructure/occ/asset-version";
 import {
   probeOpenCascadeNativeTopologyKernelCapabilities,
@@ -631,9 +632,11 @@ function reportOccWorkerRequestFailure(
     normalizeOccWorkerFailure(
       request.requestId,
       error,
-      request.kind === "invoke" && request.operation.kind === "warmup"
-        ? "occ-worker-initialization-failed"
-        : "occ-worker-request-failed",
+      error instanceof OccKernelVersionRetiredError
+        ? "occ-kernel-version-retired"
+        : request.kind === "invoke" && request.operation.kind === "warmup"
+          ? "occ-worker-initialization-failed"
+          : "occ-worker-request-failed",
     ),
   );
 }

@@ -2,18 +2,21 @@
 // /service-worker.js). Workbox precaches the build output listed in
 // `service-worker-plugin.ts`: HTML entries, every /assets/ chunk (including the
 // dedicated worker bundles, which may first be spawned offline), fonts, icons
-// and the OCC kernel. Each entry carries a content revision (the kernel a
-// content-versioned URL instead), so a new deploy
+// and the OCC kernel. Content-addressed assets use their URL as revision;
+// mutable HTML/icons carry a content revision. A new deploy therefore
 // downloads only the files whose content changed. The new worker then waits
 // until the user accepts the update prompt (`registerType: "prompt"`).
 import { clientsClaim } from "workbox-core";
 import {
+  addPlugins,
   cleanupOutdatedCaches,
   matchPrecache,
   precacheAndRoute,
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { NetworkOnly } from "workbox-strategies";
+
+import { createServiceWorkerInstallTelemetry } from "./infrastructure/workers/service-worker-install-telemetry";
 
 declare let self: ServiceWorkerGlobalScope;
 declare const __CADARA_APP_VERSION__: string;
@@ -75,7 +78,18 @@ registerRoute(
   ),
 );
 
+// Install progress and explicit precache failures reach every window, which
+// reports them to Sentry (src/hooks/use-app-update.ts).
+addPlugins([
+  createServiceWorkerInstallTelemetry(async (diagnostic) => {
+    const clients = await self.clients.matchAll({
+      type: "window",
+      includeUncontrolled: true,
+    });
+    for (const client of clients) client.postMessage(diagnostic);
+  }),
+]);
 // The kernel entries are its exact versioned URLs
-// (/cadara-occ.{js,wasm}?v=<OCC_ASSET_VERSION>, service-worker-plugin.ts), so
+// (/kernels/<content-version>/cadara-occ.{js,wasm}, service-worker-plugin.ts), so
 // a request for another version is not answered from this precache.
 precacheAndRoute(self.__WB_MANIFEST);

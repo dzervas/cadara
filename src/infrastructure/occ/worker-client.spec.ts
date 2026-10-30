@@ -28,6 +28,7 @@ import {
 } from "@/contracts/solver/schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
+import { OccKernelVersionRetiredError } from "@/infrastructure/occ/kernel-version-retired";
 
 class FakeOccWorker implements OccWorkerLike {
   private messageListener:
@@ -765,6 +766,27 @@ test("src/infrastructure/occ/worker-client.spec.ts", async () => {
   await testPostMessageFailuresBecomeTerminalAndRejectAllRequests();
   await testDisposeRejectsPendingAndFutureRequests();
   testWorkerFailureNormalizerPreservesUsefulMessages();
+});
+
+test("a retired-kernel failure from any request rejects with the retired-kernel error and notifies the tab", async () => {
+  const worker = new FakeOccWorker();
+  let retired = 0;
+  const client = new OccWorkerClient({
+    worker,
+    onKernelVersionRetired: () => retired++,
+  });
+  const document = await createSeedAuthoredModelDocument();
+  const snapshot = client.getDocumentSnapshot({
+    contractVersion: CONTRACT_VERSION,
+    documentId: document.documentId,
+  });
+  worker.emit({
+    kind: "failure",
+    requestId: worker.posted[0]!.requestId,
+    error: { code: "occ-kernel-version-retired", message: "CADara was updated" },
+  });
+  await expect(snapshot).rejects.toBeInstanceOf(OccKernelVersionRetiredError);
+  expect(retired).toBe(1);
 });
 
 test("fatal OCC abort rejects pending requests and replaces without replay; documents require explicit restore", async () => {
