@@ -306,11 +306,26 @@ export function createModelingService(
     return createEmptyOperationHistory(
       currentDocumentId,
       currentRepositoryMetadata?.heads,
+      currentRepositoryMetadata?.storageKey,
     );
   }
 
   function resetOperationHistoryPayloadForCurrentRepository() {
     operationHistoryPayload = createEmptyOperationHistoryForCurrentRepository();
+  }
+
+  function operationHistoryMatchesRepositoryBasis(
+    historyPayload: ModelingOperationHistoryPayload,
+    metadata: DocumentRepositoryMetadata,
+  ) {
+    // Content equality (including a fresh seed) does not identify a stored
+    // document. A bound journal may only recover the exact basis it extends.
+    return (
+      (historyPayload.baseRepositoryHeads === undefined ||
+        sameStringSet(historyPayload.baseRepositoryHeads, metadata.heads)) &&
+      (historyPayload.baseRepositoryStorageKey === undefined ||
+        historyPayload.baseRepositoryStorageKey === metadata.storageKey)
+    );
   }
 
   function canReplayOperationHistoryOverRestoredRepository(
@@ -319,13 +334,16 @@ export function createModelingService(
     seedDocument: AuthoredModelDocument,
     restoredMetadata: DocumentRepositoryMetadata,
   ) {
+    // A journal bound to a repository basis replays only over that basis; the
+    // content-based fallbacks below are for legacy journals without one.
+    if (historyPayload.baseRepositoryHeads !== undefined) {
+      return operationHistoryMatchesRepositoryBasis(
+        historyPayload,
+        restoredMetadata,
+      );
+    }
     return (
       authoredDocumentsEqual(restoredDocument, seedDocument) ||
-      (historyPayload.baseRepositoryHeads !== undefined &&
-        sameStringSet(
-          historyPayload.baseRepositoryHeads,
-          restoredMetadata.heads,
-        )) ||
       canOperationHistoryRepairMissingSketchDependencies(
         historyPayload,
         restoredDocument,
@@ -1439,6 +1457,20 @@ export function createModelingService(
               throw error;
             }
             restoredRepositoryEvent = latest;
+            // This tab's own Undo/Redo moves the stored basis its next edits
+            // extend, so an empty journal follows it; a peer's state must not
+            // become a basis this tab's journal may replay over.
+            if (
+              (latest.metadata.source === "undo" ||
+                latest.metadata.source === "redo") &&
+              operationHistoryPayload.entries.length === 0
+            ) {
+              operationHistoryPayload = createEmptyOperationHistory(
+                currentDocumentId,
+                latest.metadata.heads,
+                latest.metadata.storageKey,
+              );
+            }
           }
           if (repositoryRestoreFailure) {
             historyRestoreState = repositoryRestoreFailure.previousHistoryState;
@@ -1702,6 +1734,21 @@ export function createModelingService(
           null,
           0,
         );
+        return;
+      }
+
+      if (
+        !operationHistoryMatchesRepositoryBasis(
+          historyLoadResult.payload,
+          loadResult.metadata,
+        )
+      ) {
+        resetOperationHistoryPayloadForCurrentRepository();
+        historyRestoreState = {
+          kind: "empty",
+          entriesReplayed: 0,
+          diagnostics: [],
+        };
         return;
       }
 

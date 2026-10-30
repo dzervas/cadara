@@ -33,13 +33,18 @@ test("src/infrastructure/persistence/local-storage-operation-history-store.spec.
     "Operation history stores should return an explicit invalid-json failure for malformed persisted payloads.",
   ).toBeTruthy();
 
-  const payload = createEmptyOperationHistory("doc_workspace", ["head_1"]);
+  const payload = createEmptyOperationHistory(
+    "doc_workspace",
+    ["head_1"],
+    "automerge:document",
+  );
   store.save(payload);
   const loaded = store.load();
   expect(
     loaded.ok &&
       loaded.payload?.documentId === "doc_workspace" &&
-      loaded.payload.baseRepositoryHeads?.[0] === "head_1",
+      loaded.payload.baseRepositoryHeads?.[0] === "head_1" &&
+      loaded.payload.baseRepositoryStorageKey === "automerge:document",
     "Operation history stores should round-trip valid persisted payloads through the storage adapter.",
   ).toBeTruthy();
 

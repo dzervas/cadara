@@ -120,6 +120,7 @@ export interface ModelingOperationHistoryPayload {
   schemaVersion: OperationHistorySchemaVersion;
   documentId: DocumentId;
   baseRepositoryHeads?: readonly string[];
+  baseRepositoryStorageKey?: string;
   entries: ModelingOperationHistoryEntry[];
 }
 
@@ -130,11 +131,15 @@ export type OperationHistoryValidationResult =
 export function createEmptyOperationHistory(
   documentId: DocumentId,
   baseRepositoryHeads?: readonly string[],
+  baseRepositoryStorageKey?: string,
 ): ModelingOperationHistoryPayload {
   const payload: ModelingOperationHistoryPayload = {
     contractVersion: CONTRACT_VERSION,
     schemaVersion: OPERATION_HISTORY_SCHEMA_VERSION,
     documentId,
+    ...(baseRepositoryStorageKey !== undefined
+      ? { baseRepositoryStorageKey }
+      : {}),
     entries: [],
   };
 
