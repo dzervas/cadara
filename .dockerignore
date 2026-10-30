@@ -21,3 +21,4 @@ coverage
 .devenv
 .codegraph
 .tmp*
+/server
