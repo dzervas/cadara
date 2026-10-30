@@ -4,14 +4,12 @@ import {
 } from "@/contracts/render/render-mesh-geometry";
 import { test, expect } from "vitest";
 import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
-import { readFileSync } from "node:fs";
 
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import type { SketchSessionState } from "@/core/editor/sketch-session";
 import type { ProjectedSketchReferenceRecord } from "@/contracts/solver/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
-import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import {
   beginSketchGeometryDrag,
   beginSketchTool,
@@ -5379,65 +5377,10 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     ).toBe(firstPreview);
   }
 
-  function testLogoCadaraPointerPreviewReusesStableDisplayBasis() {
-    const parsed = parseAuthoredModelDocument(
-      JSON.parse(readFileSync("public/logo.cadara", "utf8")),
-    );
-    expect(
-      parsed.ok,
-      "public/logo.cadara should parse as an authored Cadara document fixture.",
-    ).toBeTruthy();
-    if (!parsed.ok) {
-      return;
-    }
-
-    const sketch = parsed.document.sketches[0];
-    expect(
-      sketch,
-      "public/logo.cadara should contain a sketch fixture.",
-    ).not.toBe(undefined);
-    if (!sketch) {
-      return;
-    }
-
-    const solved = solveSketchDefinitionCore({
-      definition: literalResolvedDefinition(sketch.definition),
-      tolerances: {
-        coincidence: 1e-6,
-        angleRadians: 1e-6,
-        minimumSegmentLength: 1e-6,
-      },
-      modelingTolerance: 1e-3,
-      partialSolvePolicy: "bestEffort",
-    });
+  function testConstrainedChainPointerPreviewReusesStableDisplayBasis() {
+    // Keep the constrained, open-chain regression independent of changing artwork.
     let session = enterSketchSession(
-      createSketchSessionFromSnapshot(
-        {
-          ownerDocumentId: parsed.document.documentId,
-          ownerRevisionId: parsed.document.revisionId,
-          ownerFeatureId: null,
-          ownerSketchId: sketch.sketchId,
-          ownerBodyId: null,
-          sketchId: sketch.sketchId,
-          label: sketch.label,
-          plane: sketch.plane,
-          sketch: {
-            ownerDocumentId: parsed.document.documentId,
-            ownerRevisionId: parsed.document.revisionId,
-            ownerFeatureId: null,
-            ownerSketchId: sketch.sketchId,
-            ownerBodyId: null,
-            sketchId: sketch.sketchId,
-            label: sketch.label,
-            planeSupport: sketch.plane.support,
-            definition: sketch.definition,
-            solvedSnapshot: solved.solvedSnapshot,
-            derivedValidity: { state: "current", diagnostics: [] },
-            regions: [],
-          },
-        } satisfies SketchSnapshotRecord,
-        OCC_KERNEL_SETTINGS,
-      ),
+      createSessionFromDefinition(createLogoLikeDragDefinition()),
     );
     session = beginSketchTool(session, "line");
     session = startSketchDraw(session, [0, 0]);
@@ -5446,13 +5389,28 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
     const stableDisplay =
       getStableSketchSessionDisplayRenderables(firstPreview);
 
+    expect(stableDisplay.length).toBeGreaterThan(0);
+    let transientDisplay =
+      getTransientSketchSessionDisplayRenderables(firstPreview);
     let nextPreview = firstPreview;
     for (let index = 0; index < 40; index += 1) {
       nextPreview = updateSketchPointer(nextPreview, [index + 2, index % 5]);
       expect(
         getStableSketchSessionDisplayRenderables(nextPreview),
-        "Logo pointer-only preview movement should not rebuild accepted sketch display.",
+        "Pointer-only preview movement should not rebuild accepted constrained-chain display.",
       ).toBe(stableDisplay);
+      expect(nextPreview.definition).toBe(firstPreview.definition);
+      const nextTransientDisplay =
+        getTransientSketchSessionDisplayRenderables(nextPreview);
+      expect(
+        nextTransientDisplay.length,
+        "Pointer movement must keep visible staged tool feedback.",
+      ).toBeGreaterThan(0);
+      expect(
+        nextTransientDisplay,
+        "Transient geometry must follow each changed pointer position.",
+      ).not.toEqual(transientDisplay);
+      transientDisplay = nextTransientDisplay;
     }
   }
 
@@ -5503,7 +5461,7 @@ test("src/domain/editor/sketch-geometry-editing.spec.ts", async () => {
   testAcceptedSketchEditInvalidatesStableDisplayRenderables();
   testConstrainedSplineDragPersistsAcceptedTangentsAcrossFreshReentry();
   testNoOpPointerMovementPreservesSessionIdentity();
-  testLogoCadaraPointerPreviewReusesStableDisplayBasis();
+  testConstrainedChainPointerPreviewReusesStableDisplayBasis();
 });
 
 // T10g-1 (logic lane, session seam). Review R-6: the "accepted live solve of

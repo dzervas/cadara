@@ -26,7 +26,6 @@ import {
   withOffset,
 } from "@/core/editor/sketch-offset.fixtures";
 import { eid } from "@/core/editor/sketch-mirror.fixtures";
-import { readFileSync } from "node:fs";
 import {
   validateDeriveSketchRegionsRequest,
   validateSolveSketchRequest,
@@ -39,6 +38,28 @@ import {
   FIXTURE_SKETCH_ID,
   literalResolvedDefinition,
 } from "@/contracts/sketch/region-extraction.fixtures";
+
+async function makeAuthoredDimensionDocument() {
+  const snapshot = await new MockKernelAdapter().getDocumentSnapshot({
+    contractVersion: "modeling-contract/v1alpha1",
+    documentId: "doc_workspace",
+  });
+  const document = createAuthoredModelDocumentFromSnapshot(snapshot.snapshot);
+  document.sketches[0]!.definition = withDimensions(
+    makeReferenceDimensionSketch(),
+    [
+      {
+        dimensionId: "dimension_persistence_distance",
+        kind: "distance",
+        label: "Persistence distance",
+        axis: "aligned",
+        pointIds: ["sketch_point_a", "sketch_point_c"],
+        value: createLiteralAuthoredValue(5),
+      },
+    ],
+  );
+  return document;
+}
 
 // Lane: logic. Seam: strict current sketch-record runtime contract.
 test("invalid and stale sketch derivations cannot carry consumable regions", async () => {
@@ -456,23 +477,19 @@ test("T17p2 F-2: a bare or non-wrapper dimension value in a current-version sket
     "definition.dimensions.0.value",
   );
 
-  const logo = JSON.parse(readFileSync("public/logo.cadara", "utf8"));
+  const document = await makeAuthoredDimensionDocument();
   expect(
-    parseAuthoredModelDocument(logo).ok,
-    "the shipped logo (wrapped values) opens",
+    parseAuthoredModelDocument(document).ok,
+    "the authored document opens with a wrapped dimension value",
   ).toBe(true);
-  const bareLogo = structuredClone(logo);
-  const logoDimension = bareLogo.sketches[0].definition.dimensions[0];
-  expect(logoDimension.value, "premise: the logo's wrapped value").toEqual({
-    source: "literal",
-    value: 20,
-  });
-  logoDimension.value = 20;
-  expect(parseAuthoredModelDocument(bareLogo)).toEqual({
+  const bareDocument = JSON.parse(JSON.stringify(document));
+  const dimension = bareDocument.sketches[0].definition.dimensions[0];
+  dimension.value = 5;
+  expect(parseAuthoredModelDocument(bareDocument)).toEqual({
     ok: false,
     diagnostic: {
       reasonCode: "invalid-authored-document",
-      message: `Sketch dimension ‘${logoDimension.label}’ stores its value as 20; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
+      message: `Sketch dimension ‘${dimension.label}’ stores its value as 5; a dimension value must be an authored value ({"source": "literal", "value": …} or {"source": "expression", "valueText": …}). Bare values are not supported and are not converted.`,
     },
   });
 });
@@ -548,10 +565,9 @@ test("T13d D9′: sketch records and authored documents carry reference dimensio
 // (`parseAuthoredModelDocument`). The readable bare-value reason is for
 // current-version files only: a file of an unsupported document or sketch
 // version reports its version, whatever its dimension values look like.
-test("T17p2 R-1: an unsupported-version file with a bare dimension value reports its version, not the bare value", () => {
-  const logo = JSON.parse(readFileSync("public/logo.cadara", "utf8"));
-  const bare = structuredClone(logo);
-  bare.sketches[0].definition.dimensions[0].value = 20;
+test("T17p2 R-1: an unsupported-version file with a bare dimension value reports its version, not the bare value", async () => {
+  const bare = JSON.parse(JSON.stringify(await makeAuthoredDimensionDocument()));
+  bare.sketches[0].definition.dimensions[0].value = 5;
   const message = (document: unknown) => {
     const parsed = parseAuthoredModelDocument(document);
     return parsed.ok ? null : parsed.diagnostic.message;
@@ -559,7 +575,7 @@ test("T17p2 R-1: an unsupported-version file with a bare dimension value reports
   expect(
     message(bare),
     "premise: current versions give the bare reason",
-  ).toMatch(/stores its value as 20/);
+  ).toMatch(/stores its value as 5/);
   const oldDocument = structuredClone(bare);
   oldDocument.schemaVersion = "authored-model-document/v1alpha0";
   const oldSketch = structuredClone(bare);
