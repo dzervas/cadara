@@ -157,7 +157,10 @@ test("an edit turns the save ring around the logo until the save ends, then it s
     end.iterations,
     "a save held past a revolution ends after more than one loop",
   ).toBeGreaterThan(1);
-  expect(end.finishedAtMs, "it stopped exactly on a loop boundary").toBe(
+  // Web Animations exposes a floating-point time, not a bitwise timestamp
+  // guarantee. The finished outcome and integer loop cap above still prove
+  // that the rotation was not cancelled partway through a revolution.
+  expect(end.finishedAtMs, "it stopped on a loop boundary").toBeCloseTo(
     end.iterations * end.durationMs,
   );
 });
