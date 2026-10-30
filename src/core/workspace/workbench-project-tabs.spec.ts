@@ -21,6 +21,7 @@ const project: ProjectManifest = {
   name: "Enclosure",
   entries: [first, second].map((tab) => ({
     kind: "part",
+    automergeDocumentId: "automerge_part",
     docId: tab.documentId,
     name: tab.title,
   })),

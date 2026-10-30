@@ -1,9 +1,10 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { mergeDiscoveredWorkbenchProjectTabs } from "@/core/workspace/workbench-project-tabs";
 import {
   reduceWorkbenchTabs,
   type WorkbenchTab,
 } from "@/core/workspace/workbench-tabs";
+import { createEmptyAuthoredModelDocument } from "@/core/modeling/empty-authored-model-document";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { Repo } from "@automerge/automerge-repo";
 import * as Automerge from "@automerge/automerge";
@@ -27,9 +28,8 @@ function unwrap<T>(result: ProjectResult<T>) {
   return result.value;
 }
 
-function setup() {
+function setup(urls = new MemoryDocumentRepositoryUrlStore()) {
   const repo = new Repo();
-  const urls = new MemoryDocumentRepositoryUrlStore();
   const documents = new IndexedDbAutomergeDocumentRepository({
     repo: repo as unknown as AutomergeRepositoryLike,
     urlStore: urls,
@@ -55,11 +55,14 @@ test("projects preserve part identity, ordered membership and names on repositor
         })
       ).ok,
     ).toBe(true);
-    const firstUrl = urls.get(seed.documentId);
+    const firstUrl = urls.get(seed.documentId)!;
     let project = unwrap(
       await projects.create("Enclosure", [
         { name: "Base", kind: "part", docId: seed.documentId },
       ]),
+    );
+    expect(project.entries[0].automergeDocumentId).toBe(
+      (await repo.find(firstUrl)).documentId,
     );
     const second = { ...seed, documentId: "doc_lid" as const };
     project = unwrap(
@@ -124,6 +127,11 @@ test("readmes persist, discussions are lazy and unique, and named versions reope
     expect(unwrap(await projects.ensureDiscussion(project.projectId))).toEqual(
       project,
     );
+    for (const entry of project.entries) {
+      expect(entry.automergeDocumentId).toBe(
+        (await repo.find(urls.get(entry.docId)!)).documentId,
+      );
+    }
     const versioned = unwrap(
       await projects.recordVersion(
         project.projectId,
@@ -214,9 +222,9 @@ test("unsupported assembly creation and corrupt stored manifests produce diagnos
 });
 
 test("database-local catalogs stay independent when peer channels share part pointers", async () => {
-  const first = setup();
-  const second = setup();
   const sharedPartUrls = new MemoryDocumentRepositoryUrlStore();
+  const first = setup(sharedPartUrls);
+  const second = setup(sharedPartUrls);
   const firstProjects = new LocalProjectRepository(
     first.documents,
     sharedPartUrls,
@@ -234,6 +242,10 @@ test("database-local catalogs stay independent when peer channels share part poi
       ]),
     );
     expect(unwrap(await secondProjects.list())).toEqual([]);
+    const part = await first.repo.find(sharedPartUrls.get("doc_workspace")!);
+    second.repo.import(Automerge.save(part.doc()), {
+      docId: part.documentId,
+    });
     const secondProject = unwrap(
       await secondProjects.create("Second database", [
         { name: "Part", kind: "part", docId: "doc_workspace" },
@@ -363,8 +375,12 @@ test("setParts on a mixed-document manifest preserves plain readme and discussio
       ]),
     );
     expect(project.entries).toEqual([
-      { name: "Lid", kind: "part", docId: "doc_lid" },
-      { name: "Housing", kind: "part", docId: "doc_base" },
+      expect.objectContaining({ name: "Lid", kind: "part", docId: "doc_lid" }),
+      expect.objectContaining({
+        name: "Housing",
+        kind: "part",
+        docId: "doc_base",
+      }),
       ...otherEntries,
     ]);
     project = unwrap(
@@ -373,7 +389,11 @@ test("setParts on a mixed-document manifest preserves plain readme and discussio
       ]),
     );
     expect(unwrap(await projects.open(project.projectId)).entries).toEqual([
-      { name: "Housing", kind: "part", docId: "doc_base" },
+      expect.objectContaining({
+        name: "Housing",
+        kind: "part",
+        docId: "doc_base",
+      }),
       ...otherEntries,
     ]);
   } finally {
@@ -426,10 +446,156 @@ test("a document opened during discovery joins the manifest and survives reposit
       await new LocalProjectRepository(documents, urls).open(project.projectId),
     );
     expect(reopened.entries).toEqual([
-      { name: "Base", kind: "part", docId: seed.documentId },
-      { name: second.name, kind: "part", docId: second.documentId },
+      expect.objectContaining({
+        name: "Base",
+        kind: "part",
+        docId: seed.documentId,
+      }),
+      expect.objectContaining({
+        name: second.name,
+        kind: "part",
+        docId: second.documentId,
+      }),
     ]);
     expect(merged.activeDocumentId).toBe(second.documentId);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test("an unsaved initial part is the same document later opened by the workbench", async () => {
+  const { repo, urls, documents, projects } = setup();
+  try {
+    const project = unwrap(
+      await projects.create("New project", [
+        { name: "Workspace", kind: "part", docId: "doc_unsaved" },
+      ]),
+    );
+    const entry = project.entries[0];
+    const url = urls.get(entry.docId)!;
+    const handle = await repo.find<CollaborativeDocument>(url);
+    expect(entry.automergeDocumentId).toBe(handle.documentId);
+    const opened = await documents.load({
+      documentId: entry.docId,
+      seedDocument: createEmptyAuthoredModelDocument(entry.docId),
+    });
+    expect(opened.ok).toBe(true);
+    if (opened.ok) expect(opened.document.documentId).toBe(entry.docId);
+    expect(urls.get(entry.docId)).toBe(url);
+    expect(materializeCollaborativeDocument(handle.doc()).documentId).toBe(
+      entry.docId,
+    );
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+async function seedLegacyManifest(
+  repo: Repo,
+  urls: MemoryDocumentRepositoryUrlStore,
+) {
+  const part = repo.create({ content: "part" });
+  const readme = repo.create({ content: "readme" });
+  urls.set("doc_part", part.url);
+  urls.set("doc_notes", readme.url);
+  const manifest = repo.create({
+    format: "cadara-project" as const,
+    schemaVersion: 1 as const,
+    projectId: "legacy-project",
+    name: "Legacy",
+    versions: [],
+    entries: [
+      { name: "Part", kind: "part" as const, docId: "doc_part" as const },
+      { name: "Notes", kind: "readme" as const, docId: "doc_notes" as const },
+    ],
+  });
+  const catalog = repo.create<ProjectCatalog>({
+    format: "cadara-project-catalog",
+    schemaVersion: 1,
+    projects: [{ projectId: "legacy-project", url: manifest.url }],
+  });
+  urls.set("doc_project_catalog", catalog.url);
+  return { manifest, part, readme };
+}
+
+test("opening a legacy manifest persists identities resolved once through the local URL store", async () => {
+  const { repo, urls, documents, projects } = setup();
+  try {
+    const { manifest, part, readme } = await seedLegacyManifest(repo, urls);
+    const opened = unwrap(await projects.open("legacy-project"));
+    expect(opened.entries.map((entry) => entry.automergeDocumentId)).toEqual([
+      part.documentId,
+      readme.documentId,
+    ]);
+    expect(manifest.doc().entries).toEqual(opened.entries);
+    urls.delete("doc_part");
+    urls.delete("doc_notes");
+    expect(
+      unwrap(
+        await new LocalProjectRepository(documents, urls).open(
+          "legacy-project",
+        ),
+      ),
+    ).toEqual(opened);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test.each(["missing URL", "unavailable document"])(
+  "unresolvable legacy entries return a diagnostic without a partial migration: %s",
+  async (failure) => {
+    const { repo, urls, projects } = setup();
+    try {
+      const { manifest, readme } = await seedLegacyManifest(repo, urls);
+      if (failure === "missing URL") urls.delete("doc_notes");
+      else {
+        const find = repo.find.bind(repo);
+        vi.spyOn(repo, "find").mockImplementation((id) => {
+          if (id === readme.url)
+            return Promise.reject(new Error("Stored document unavailable"));
+          return find(id);
+        });
+      }
+      const result = await projects.open("legacy-project");
+      expect(result).toMatchObject({
+        ok: false,
+        diagnostic: {
+          reasonCode: "project-persistence-failed",
+          message: expect.any(String),
+        },
+      });
+      expect(
+        manifest
+          .doc()
+          .entries.every((entry) => !("automergeDocumentId" in entry)),
+      ).toBe(true);
+    } finally {
+      await repo.shutdown();
+    }
+  },
+);
+
+test("setParts retains known identities and persists newly added unsaved parts", async () => {
+  const { repo, urls, projects } = setup();
+  try {
+    const project = unwrap(
+      await projects.create("Parts", [
+        { name: "Original", kind: "part", docId: "doc_original" },
+      ]),
+    );
+    const original = project.entries[0];
+    urls.delete(original.docId);
+    const edited = unwrap(
+      await projects.setParts(project.projectId, [
+        { name: "Renamed", docId: original.docId },
+        { name: "New", docId: "doc_added" },
+      ]),
+    );
+    expect(edited.entries[0]).toEqual({ ...original, name: "Renamed" });
+    const added = await repo.find(urls.get("doc_added")!);
+    expect(edited.entries[1].automergeDocumentId).toBe(added.documentId);
+    expect(unwrap(await projects.open(project.projectId))).toEqual(edited);
   } finally {
     await repo.shutdown();
   }

@@ -1,7 +1,20 @@
 import typia from "typia";
-import type { ProjectManifest, ProjectResult } from "./project-manifest";
+import type {
+  ProjectEntry,
+  ProjectManifest,
+  ProjectResult,
+} from "./project-manifest";
 
 const validateProjectManifest = typia.createValidateEquals<ProjectManifest>();
+
+/** Only the persistence migration accepts entries predating shared document identities. */
+export type LegacyProjectManifest = Omit<ProjectManifest, "entries"> & {
+  entries: (Omit<ProjectEntry, "automergeDocumentId"> & {
+    automergeDocumentId?: string;
+  })[];
+};
+export const validateLegacyProjectManifest =
+  typia.createValidateEquals<LegacyProjectManifest>();
 
 export function parseProjectManifest(
   value: unknown,
@@ -19,6 +32,7 @@ export function parseProjectManifest(
   if (!manifest.projectId.trim() || !manifest.name.trim())
     return invalid("Project identity and name must not be empty.");
   const ids = new Set<string>();
+  const automergeIds = new Set<string>();
   let discussions = 0;
   for (const entry of manifest.entries) {
     if (!entry.name.trim() || !entry.docId.trim() || ids.has(entry.docId))
@@ -26,6 +40,14 @@ export function parseProjectManifest(
         "Project entries require names and unique document identities.",
       );
     ids.add(entry.docId);
+    if (
+      !entry.automergeDocumentId.trim() ||
+      automergeIds.has(entry.automergeDocumentId)
+    )
+      return invalid(
+        "Project entries require unique Automerge document identities.",
+      );
+    automergeIds.add(entry.automergeDocumentId);
     if (entry.kind === "discussion") discussions++;
   }
   if (discussions > 1)

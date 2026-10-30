@@ -12,7 +12,11 @@ import type {
   ProjectReadmeDocument,
   ProjectDiscussionDocument,
 } from "@/contracts/modeling/project-manifest";
-import { parseProjectManifest } from "@/contracts/modeling/project-manifest.runtime-schema";
+import {
+  parseProjectManifest,
+  validateLegacyProjectManifest,
+} from "@/contracts/modeling/project-manifest.runtime-schema";
+import { createEmptyAuthoredModelDocument } from "@/core/modeling/empty-authored-model-document";
 import type { AutomergeHandleLike } from "./indexeddb-automerge-document-repository";
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import type { DocumentRepositoryUrlStore } from "./document-repository-url-store";
@@ -86,6 +90,63 @@ export class LocalProjectRepository {
     return JSON.parse(JSON.stringify(result.value)) as ProjectManifest;
   }
 
+  private async resolveDocumentId(docId: DocumentId) {
+    const url = this.urls.get(docId);
+    if (!url) throw new Error(`Document ${docId} has no stored Automerge URL.`);
+    const repo = await this.documents.getAutomergeRepository();
+    const handle = await repo.find<Record<string, unknown>>(url);
+    await handle.whenReady();
+    return handle.documentId;
+  }
+
+  private async partEntry(entry: {
+    name: string;
+    docId: DocumentId;
+  }): Promise<ProjectEntry> {
+    if (!entry.name.trim() || !entry.docId.trim())
+      throw new Error("Project entries require names and document identities.");
+    // An entry exists only after its document exists, including unsaved initial tabs.
+    if (!this.urls.get(entry.docId)) {
+      const loaded = await this.documents.load({
+        documentId: entry.docId,
+        seedDocument: createEmptyAuthoredModelDocument(entry.docId),
+      });
+      if (!loaded.ok) throw new Error(loaded.status.diagnostic.message);
+    }
+    return {
+      ...entry,
+      kind: "part",
+      automergeDocumentId: await this.resolveDocumentId(entry.docId),
+    };
+  }
+
+  private async migrate(handle: AutomergeHandleLike<ProjectManifest>) {
+    const legacy = validateLegacyProjectManifest(handle.doc());
+    if (!legacy.success) throw new Error("Invalid project manifest.");
+    if (
+      !legacy.data.entries.some(
+        (entry) => entry.automergeDocumentId === undefined,
+      )
+    )
+      return;
+    const next = JSON.parse(JSON.stringify(legacy.data)) as ProjectManifest;
+    for (const entry of next.entries) {
+      if (entry.automergeDocumentId === undefined)
+        entry.automergeDocumentId = await this.resolveDocumentId(entry.docId);
+    }
+    const parsed = parseProjectManifest(next);
+    if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+    handle.change((draft) => {
+      for (let index = 0; index < next.entries.length; index++)
+        if (draft.entries[index].automergeDocumentId === undefined)
+          draft.entries[index].automergeDocumentId =
+            next.entries[index].automergeDocumentId;
+    });
+    await (
+      await this.documents.getAutomergeRepository()
+    ).flush?.([handle.documentId]);
+  }
+
   private async handle(projectId: string) {
     const catalog = await this.catalog();
     const entry = catalog
@@ -96,6 +157,7 @@ export class LocalProjectRepository {
       await this.documents.getAutomergeRepository()
     ).find<ProjectManifest>(entry.url as AutomergeUrl);
     await handle.whenReady();
+    await this.migrate(handle);
     if (this.checked(handle).projectId !== projectId)
       throw new Error("Project identity does not match its catalog entry.");
     return handle;
@@ -113,7 +175,7 @@ export class LocalProjectRepository {
 
   create(
     name: string,
-    entries: ProjectEntry[],
+    entries: Omit<ProjectEntry, "automergeDocumentId">[],
     forkedFrom?: ProjectManifest["forkedFrom"],
   ) {
     return this.run(async () => {
@@ -124,7 +186,18 @@ export class LocalProjectRepository {
         schemaVersion: 1,
         projectId: crypto.randomUUID(),
         name,
-        entries,
+        entries: await Promise.all(
+          entries.map(async (entry) =>
+            entry.kind === "part"
+              ? this.partEntry(entry)
+              : {
+                  ...entry,
+                  automergeDocumentId: await this.resolveDocumentId(
+                    entry.docId,
+                  ),
+                },
+          ),
+        ),
         versions: [],
         ...(forkedFrom ? { forkedFrom } : {}),
       };
@@ -189,9 +262,14 @@ export class LocalProjectRepository {
     return this.run(async () => {
       const handle = await this.handle(projectId);
       const next = this.checked(handle);
-      next.entries.push({ ...entry, kind: "part" });
-      const parsed = parseProjectManifest(next);
-      if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+      if (
+        !entry.name.trim() ||
+        !entry.docId.trim() ||
+        next.entries.some((current) => current.docId === entry.docId)
+      )
+        throw new Error(
+          "Project entries require names and unique document identities.",
+        );
       if (seed) {
         if (this.urls.get(entry.docId))
           throw new Error(
@@ -204,7 +282,8 @@ export class LocalProjectRepository {
         if (!initialized.ok)
           throw new Error(initialized.status.diagnostic.message);
       }
-      return this.write(handle, parsed.value);
+      next.entries.push(await this.partEntry(entry));
+      return this.write(handle, next);
     });
   }
 
@@ -221,7 +300,12 @@ export class LocalProjectRepository {
       const docId = `doc_${handle.documentId}` as DocumentId;
       this.urls.set(docId, handle.url);
       return this.edit(projectId, (draft) => {
-        draft.entries.push({ name, kind: "readme", docId });
+        draft.entries.push({
+          name,
+          kind: "readme",
+          docId,
+          automergeDocumentId: handle.documentId,
+        });
       });
     });
   }
@@ -242,7 +326,12 @@ export class LocalProjectRepository {
       const docId = `doc_${handle.documentId}` as DocumentId;
       this.urls.set(docId, handle.url);
       return this.edit(projectId, (draft) => {
-        draft.entries.push({ name: "Discussion", kind: "discussion", docId });
+        draft.entries.push({
+          name: "Discussion",
+          kind: "discussion",
+          docId,
+          automergeDocumentId: handle.documentId,
+        });
       });
     });
   }
@@ -259,24 +348,26 @@ export class LocalProjectRepository {
 
   /** Tab order/membership is authored in the manifest, not in a second tab index. */
   setParts(projectId: string, parts: { docId: DocumentId; name: string }[]) {
-    return this.run(() =>
-      this.edit(projectId, (draft) => {
-        const current = draft.entries.filter((entry) => entry.kind === "part");
-        if (
-          current.length === parts.length &&
-          current.every(
-            (entry, index) =>
-              entry.docId === parts[index].docId &&
-              entry.name === parts[index].name,
-          )
-        )
-          return;
-        draft.entries = [
-          ...parts.map((part) => ({ ...part, kind: "part" as const })),
-          ...draft.entries.filter((entry) => entry.kind !== "part"),
-        ];
-      }),
-    );
+    return this.run(async () => {
+      const handle = await this.handle(projectId);
+      const next = this.checked(handle);
+      const entries: ProjectEntry[] = [];
+      for (const part of parts) {
+        const existing = next.entries.find(
+          (entry) => entry.kind === "part" && entry.docId === part.docId,
+        );
+        entries.push(
+          existing
+            ? { ...existing, name: part.name }
+            : await this.partEntry(part),
+        );
+      }
+      next.entries = [
+        ...entries,
+        ...next.entries.filter((entry) => entry.kind !== "part"),
+      ];
+      return this.write(handle, next);
+    });
   }
 
   recordVersion(

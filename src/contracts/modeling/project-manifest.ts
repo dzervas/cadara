@@ -4,6 +4,7 @@ export interface ProjectEntry {
   name: string;
   kind: "part" | "readme" | "discussion" | "assembly";
   docId: DocumentId;
+  automergeDocumentId: string;
 }
 
 export interface ProjectVersion {
