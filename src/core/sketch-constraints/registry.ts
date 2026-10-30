@@ -1179,6 +1179,7 @@ function getPointPairDimensionPlacement(input: {
 export function inferDimensionAnnotationPlacement(
   selectedTargets: readonly SketchConstraintTargetRecord[],
   point: readonly [number, number] | null,
+  toolId: SketchConstraintToolId,
 ): DimensionAnnotationPlacement | null {
   const [first, second] = selectedTargets;
 
@@ -1249,11 +1250,18 @@ export function inferDimensionAnnotationPlacement(
   }
 
   if (first && second) {
-    const referenceKind = selectPointToPointDimensionReference({
-      first: first.anchor,
-      second: second.anchor,
-      pointer: point,
-    });
+    // Fixed-axis previews and commits read the offset on the tool's axis,
+    // regardless of the adaptive Distance tool's pointer reference zone.
+    const referenceKind =
+      toolId === "dimensionHorizontal"
+        ? "horizontal"
+        : toolId === "dimensionVertical"
+          ? "vertical"
+          : selectPointToPointDimensionReference({
+              first: first.anchor,
+              second: second.anchor,
+              pointer: point,
+            });
     return (
       getPointPairDimensionPlacement({
         first: first.anchor,
@@ -1607,7 +1615,11 @@ function buildLineDistancePreview(
   const placement =
     input.annotationPlacement?.kind === "dimensionLine"
       ? input.annotationPlacement
-      : inferDimensionAnnotationPlacement([first, second], input.pointer);
+      : inferDimensionAnnotationPlacement(
+          [first, second],
+          input.pointer,
+          "dimensionDistance",
+        );
   const { start, end } = createPlacedParallelLineDistance(
     first.line,
     second.line,
@@ -1849,7 +1861,11 @@ function buildDiameterPreview(
   const placement =
     input.annotationPlacement?.kind === "dimensionLine"
       ? input.annotationPlacement
-      : inferDimensionAnnotationPlacement([target], input.pointer);
+      : inferDimensionAnnotationPlacement(
+          [target],
+          input.pointer,
+          "dimensionDistance",
+        );
   const angle =
     placement?.kind === "dimensionLine" && placement.angleRadians !== undefined
       ? placement.angleRadians

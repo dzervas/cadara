@@ -19,9 +19,10 @@ import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 // chip, grabbed at its centre and dragged by a glide, keeps its centre on the
 // pointer at every settled step (3 px) and at every frame it is drawn in
 // between (12 px: one pointer step of lag plus the 6 px drag threshold).
-// Paths stay inside one reference zone (aligned / horizontal / vertical,
-// minor angle side) and off the geometry; crossing a zone boundary switches
-// the carrier by design.
+// Distance-tool paths stay inside one reference zone (aligned / horizontal /
+// vertical, minor angle side) and off the geometry; crossing a zone boundary
+// switches its carrier by design. Fixed-axis tools keep their carrier across
+// zones.
 //
 // On main xonwsmot (before cadara-2wpl) the creation rows for line length,
 // point to line, point to axis, point to origin and the Horizontal /
@@ -30,8 +31,7 @@ import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 // were green at kzsllyol (pre-wave), so those two are the wave's regression
 // (cadara-bmy0 put their label at the pointer); line length and point to
 // origin stuttered at kzsllyol already. cadara-2wpl fixed all of them. The
-// fixed tools' zone crossing is a separate pre-existing defect, cadara-y3p6,
-// pinned as expected-fail rows.
+// fixed tools' zone crossing is covered too: their placement axis stays fixed.
 test.use({ viewport: { width: 1440, height: 960 } });
 test.setTimeout(180_000);
 
@@ -86,12 +86,6 @@ interface GlideRow {
    * bisector at the pointer's radius, so it only must never outrun it.
    */
   dragFollowsPointer?: false;
-  /**
-   * A known defect's bead: the row is expected to fail (Playwright
-   * `test.fail`) and stops after the creation glide; drop it when the bead
-   * lands.
-   */
-  expectedFailure?: string;
 }
 
 const ROWS: readonly GlideRow[] = [
@@ -135,11 +129,7 @@ const ROWS: readonly GlideRow[] = [
       { x: 1140, y: 345 },
     ],
   },
-  // cadara-y3p6: a fixed-axis tool's preview reads the zone-chosen point-pair
-  // offset on its own axis. The Horizontal glide from (980, 170) to (1150,
-  // 300) enters the vertical zone near (1080, 225), where the label jumps
-  // 149.2 px for a 7.9 px step; the Vertical glide from (1150, 300) to (980,
-  // 170) enters the horizontal zone near (1055, 237): 148.4 px for 7.8 px.
+  // Fixed-axis placement must stay continuous across adaptive reference zones.
   {
     kind: "Horizontal tool, point pair, pointer crossing into the vertical zone,",
     geometry: [D],
@@ -148,9 +138,9 @@ const ROWS: readonly GlideRow[] = [
     creation: [
       { x: 980, y: 170 },
       { x: 1010, y: 150 },
-      { x: 1150, y: 300 },
+      // Ends left of the Constraints panel so the placing click hits the canvas.
+      { x: 1120, y: 300 },
     ],
-    expectedFailure: "cadara-y3p6",
   },
   {
     kind: "Vertical tool, point pair, pointer crossing into the horizontal zone,",
@@ -162,7 +152,6 @@ const ROWS: readonly GlideRow[] = [
       { x: 1160, y: 330 },
       { x: 980, y: 170 },
     ],
-    expectedFailure: "cadara-y3p6",
   },
   {
     kind: "point to line",
@@ -291,10 +280,6 @@ for (const row of ROWS) {
   test(`cadara-3wp6: a ${row.kind} dimension label follows a gliding pointer step by step, in the creation preview and when its chip is dragged`, async ({
     page,
   }) => {
-    test.fail(
-      Boolean(row.expectedFailure),
-      `${row.expectedFailure}: expected to fail until it lands`,
-    );
     const workbench = new SketchWorkbenchHarness(page);
     await openTopSketch(workbench);
     const box = (await workbench.viewport().boundingBox())!;
@@ -343,7 +328,6 @@ for (const row of ROWS) {
     expectGlideFollowed(creation, {
       what: `${row.kind} creation preview label`,
     });
-    if (row.expectedFailure) return;
 
     const before = await dimensionIds(page);
     await page.mouse.down();

@@ -3039,6 +3039,7 @@ for (const row of [
     const placement = inferDimensionAnnotationPlacement(
       [first, second],
       pointer,
+      "dimensionDistance",
     );
     const expectedOffset =
       ((pointer[0] - first.line.start[0]) * axis[0] +
@@ -3189,6 +3190,7 @@ test("cadara-bmy0: a point-to-axis distance preview and its committed dimension 
   const placement = inferDimensionAnnotationPlacement(
     [axisTarget, pointTarget],
     pointer,
+    "dimensionDistance",
   );
   expect(
     placement,

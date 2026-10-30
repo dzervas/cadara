@@ -13,9 +13,10 @@
 //      placement moves its label faster than the pointer (a projection onto
 //      the placed carrier, a midpoint of a line that slides with the pointer,
 //      a point at the pointer's radius, or a rim point seen from outside the
-//      circle). Paths stay inside one reference zone (aligned / horizontal /
-//      vertical, minor angle side) and outside circles: crossing a zone
-//      boundary switches the carrier by design.
+//      circle). Distance-tool paths stay inside one reference zone (aligned /
+//      horizontal / vertical, minor angle side) and outside circles: crossing
+//      a zone boundary switches its carrier by design. Fixed-axis tools keep
+//      their carrier across zones.
 //  (b) tracking: in the creation preview the carrier (the infinite dimension
 //      line, or the angle arc's circle) passes through the pointer, and the
 //      label sits at the pointer (point-to-line kinds) or on its placed
@@ -28,9 +29,8 @@
 // What this lane cannot see: cadara-2wpl's causes were in the browser (the
 // preview's DOM drag handle swallowing pointer moves, a displaced chip's
 // first drag frame); the E2E glide rows (e2e/cadara-3wp6-dimension-glide.spec.ts)
-// cover those. On main xonwsmot this table was green except the fixed
-// Horizontal / Vertical tools' zone crossing, a pre-existing bug (same code at
-// kzsllyol) tracked as cadara-y3p6 and pinned below as expected-fail rows.
+// cover those. Fixed-axis tools also cross the other reference zones below:
+// unlike Distance, their carrier must stay on the tool's axis.
 import { describe, expect, test } from "vitest";
 
 import type { SketchPoint } from "@/contracts/modeling/schema";
@@ -841,14 +841,8 @@ describe("cadara-3wp6: dimension labels follow a gliding pointer continuously (c
   }
 });
 
-// cadara-y3p6 (expected to fail until it lands; then drop `.fails`): the fixed
-// Horizontal / Vertical tools store `inferDimensionAnnotationPlacement`'s
-// zone-chosen point-pair offset, which their preview reads on the tool's own
-// axis. Gliding the Horizontal tool from [15, 8] to [19, 8] to [20, 4] enters
-// the vertical zone near [19.1, 7.6]: the label moves 0.506 for a 0.0497 step
-// and the carrier then misses the pointer by 0.40–0.60. The Vertical tool
-// gliding [20, 4] → [20, 8] → [15, 8] enters the horizontal zone at [19.5, 8]:
-// 0.45 for a 0.05 step.
+// Fixed-axis tools must retain their placement axis even when the pointer
+// enters a zone that would switch the adaptive Distance tool's reference.
 const ZONE_CROSSING_ROWS: readonly ContinuityRow[] = [
   {
     name: "Horizontal tool, point pair, pointer crossing into the vertical zone",
@@ -882,13 +876,10 @@ const ZONE_CROSSING_ROWS: readonly ContinuityRow[] = [
   },
 ];
 
-describe("cadara-y3p6 (expected to fail until fixed): a fixed-axis dimension tool's preview label follows the pointer across the other reference zone", () => {
+describe("a fixed-axis dimension tool's preview label follows the pointer across the other reference zone", () => {
   for (const row of ZONE_CROSSING_ROWS) {
-    test.fails(
-      `${row.name}: the creation preview's label never outruns the pointer and stays on its carrier`,
-      () => {
-        expectCreationPreviewFollows(row);
-      },
-    );
+    test(`${row.name}: the creation preview's label never outruns the pointer and stays on its carrier`, () => {
+      expectCreationPreviewFollows(row);
+    });
   }
 });

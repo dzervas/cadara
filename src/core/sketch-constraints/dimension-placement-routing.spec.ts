@@ -1,6 +1,6 @@
 // cadara-3wp6, logic lane (core registry seams: `inferDimensionAnnotationPlacement`,
-// the Distance tool's `buildPreview` and `createCommitContribution`): a
-// routing guard for the Distance tool's placement inference.
+// dimension tools' `buildPreview` and `createCommitContribution`): a
+// routing guard for adaptive and fixed-kind dimension placement inference.
 //
 // `inferDimensionAnnotationPlacement` is an order-dependent if-chain over the
 // picked target kinds. A branch inserted ahead of another (cadara-bmy0 added
@@ -19,7 +19,10 @@ import {
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
 import type { PrimitiveRef } from "@/core/editor/schema";
-import type { SketchConstraintTargetRecord } from "@/core/sketch-constraints/definition";
+import type {
+  SketchConstraintToolId,
+  SketchConstraintTargetRecord,
+} from "@/core/sketch-constraints/definition";
 import {
   getSketchConstraintDefinition,
   inferDimensionAnnotationPlacement,
@@ -105,7 +108,8 @@ const unit = (line: Line) => {
 };
 
 /**
- * Each placement semantics the Distance tool may route a pick to, as the
+ * Each placement semantics a dimension tool may route a pick to (horizontal /
+ * vertical: the fixed-axis tools only), as the
  * placement it gives `pointer` (null when it does not apply to the pick).
  */
 const ROUTES = {
@@ -148,6 +152,16 @@ const ROUTES = {
       ? inferLinePointDimensionPlacement(line.line, point.anchor, pointer)
       : null;
   },
+  /** Fixed Horizontal: the pointer's Y offset, even in the vertical zone. */
+  horizontal: ([first, second]: readonly Target[], pointer: SketchPoint) =>
+    first && second && !first.line && !second.line
+      ? { kind: "dimensionLine", offset: pointer[1] - first.anchor[1] }
+      : null,
+  /** Fixed Vertical: the pointer's X offset, even in the horizontal zone. */
+  vertical: ([first, second]: readonly Target[], pointer: SketchPoint) =>
+    first && second && !first.line && !second.line
+      ? { kind: "dimensionLine", offset: pointer[0] - first.anchor[0] }
+      : null,
   /** Two points: the offset across the reference axis the pointer picks. */
   pointPair: ([first, second]: readonly Target[], pointer: SketchPoint) => {
     if (!first || !second || first.line || second.line) return null;
@@ -179,8 +193,12 @@ function routesOf(
   targets: readonly Target[],
   pointer: SketchPoint,
   placement: unknown,
+  toolId: SketchConstraintToolId,
 ): Route[] {
   return (Object.keys(ROUTES) as Route[]).filter((route) => {
+    if (route === "horizontal" && toolId !== "dimensionHorizontal")
+      return false;
+    if (route === "vertical" && toolId !== "dimensionVertical") return false;
     const expected = ROUTES[route](targets, pointer);
     if (!expected || !placement || typeof placement !== "object") return false;
     if (route === "angleArc") {
@@ -199,6 +217,7 @@ function routesOf(
 }
 
 interface RoutingRow {
+  tool?: SketchConstraintToolId;
   pick: string;
   targets: (targets: Targets) => readonly Target[];
   pointer: SketchPoint;
@@ -209,6 +228,33 @@ interface RoutingRow {
 }
 
 const ROWS: readonly RoutingRow[] = [
+  {
+    tool: "dimensionHorizontal",
+    pick: "point + point in the vertical zone",
+    targets: (t) => [t.point, t.otherPoint],
+    pointer: [12, 7],
+    route: "horizontal",
+    previewKind: "horizontal",
+    committedKind: "horizontalDistance",
+  },
+  {
+    tool: "dimensionVertical",
+    pick: "point + point in the horizontal zone",
+    targets: (t) => [t.point, t.otherPoint],
+    pointer: [5, 13],
+    route: "vertical",
+    previewKind: "vertical",
+    committedKind: "verticalDistance",
+  },
+  {
+    tool: "dimensionRadius",
+    pick: "circle",
+    targets: (t) => [t.circle],
+    pointer: [17, 5],
+    route: "circleAngle",
+    previewKind: "radius",
+    committedKind: "circleRadius",
+  },
   {
     pick: "circle",
     targets: (t) => [t.circle],
@@ -364,19 +410,25 @@ const ROWS: readonly RoutingRow[] = [
 ];
 
 for (const row of ROWS) {
-  test(`cadara-3wp6 routing guard: a Distance ${row.pick} pick is placed by the ${row.route} route, previewed as ${row.previewKind ?? "an angle arc"} and committed as ${row.committedKind}`, () => {
+  const toolId = row.tool ?? "dimensionDistance";
+  const tool = getSketchConstraintDefinition(toolId);
+  test(`dimension placement routing: a ${tool.metadata.name} ${row.pick} pick is placed by the ${row.route} route, previewed as ${row.previewKind ?? "an angle arc"} and committed as ${row.committedKind}`, () => {
     const targets = row.targets(makeTargets());
     expect(
-      distanceTool.isReadyForValue?.(targets),
+      tool.isReadyForValue?.(targets) ?? targets.length === tool.steps.length,
       "premise: the pick is complete",
     ).toBe(true);
-    const placement = inferDimensionAnnotationPlacement(targets, row.pointer);
+    const placement = inferDimensionAnnotationPlacement(
+      targets,
+      row.pointer,
+      toolId,
+    );
     expect(
-      routesOf(targets, row.pointer, placement),
+      routesOf(targets, row.pointer, placement, toolId),
       `the route that produced ${JSON.stringify(placement)}`,
     ).toEqual([row.route]);
 
-    const preview = distanceTool
+    const preview = tool
       .buildPreview({
         selectedTargets: targets,
         hoverTarget: null,
@@ -397,7 +449,7 @@ for (const row of ROWS) {
       "the preview that reads the placement",
     ).toBe(row.previewKind);
 
-    const committed = distanceTool.createCommitContribution({
+    const committed = tool.createCommitContribution({
       sequence: 1,
       selectedTargets: targets,
       pointer: row.pointer,

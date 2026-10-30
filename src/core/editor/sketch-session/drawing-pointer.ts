@@ -67,6 +67,7 @@ export function updateSketchPointer(
       ? inferDimensionAnnotationPlacement(
           session.constraintAuthoring.selectedTargets,
           point,
+          session.constraintAuthoring.toolId,
         )
       : session.constraintAuthoring.pendingAnnotationPlacement;
 

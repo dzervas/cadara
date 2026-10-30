@@ -504,7 +504,11 @@ export function authorSketchConstraintTarget(
     Boolean(definition.valueSpec) &&
     isSketchConstraintReadyForValue(definition, nextTargets);
   const pendingAnnotationPlacement = readyForValue
-    ? inferDimensionAnnotationPlacement(nextTargets, authoring.pointer)
+    ? inferDimensionAnnotationPlacement(
+        nextTargets,
+        authoring.pointer,
+        authoring.toolId,
+      )
     : null;
   const nextSession: SketchSessionState = {
     ...session,
@@ -560,6 +564,7 @@ export function pinSketchConstraintPreview(
     pendingAnnotationPlacement: inferDimensionAnnotationPlacement(
       authoring.selectedTargets,
       point ?? authoring.pointer,
+      authoring.toolId,
     ),
   };
 
@@ -706,6 +711,7 @@ export function patchSketchConstraintValue(
       pendingAnnotationPlacement: inferDimensionAnnotationPlacement(
         authoring.selectedTargets,
         point,
+        authoring.toolId,
       ),
     };
     if (pins) {
