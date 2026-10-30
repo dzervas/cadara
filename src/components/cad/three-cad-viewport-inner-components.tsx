@@ -506,7 +506,9 @@ export function RenderIdleSignal({
       viewportElement.setAttribute("data-render-idle", "true");
     } else {
       viewportElement.removeAttribute("data-render-idle");
-      invalidate();
+      // Scene changes and controls request their own frames. An open feature
+      // or sketch editor alone is not a reason to keep rendering unchanged GL.
+      if (isEditorIdle) invalidate();
     }
   });
 
