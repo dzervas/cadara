@@ -16,24 +16,15 @@ import type {
 } from "@/core/workspace/workbench-tabs";
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
-import { WorkbenchPartReadiness } from "@/application/workspace/workbench-part-readiness";
 import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
-import { createWorkbenchProjectSessionStore } from "@/infrastructure/persistence/workbench-project-session-store";
-import {
-  createDocumentRepositoryUrlStorageKey,
-  createLocalStorageDocumentRepositoryUrlStore,
-  getDocumentRepositoryStorageNamespace,
-} from "@/infrastructure/persistence/document-repository-url-store";
-import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
-import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
+import { createWorkbenchProjectBootstrap } from "@/infrastructure/persistence/workbench-project-bootstrap";
 
-export function useWorkbenchProject() {
+export function useWorkbenchProject(persistenceEnabled: boolean) {
   const reporter = useErrorReporter();
   const [project, setProject] = useState<ProjectManifest | null>(null);
   const [projects, setProjects] = useState<ProjectManifest[]>([]);
   const [sessionKey, setSessionKey] = useState("initial");
-  const [busy, setBusy] = useState(true);
   const pendingWrites = useMemo(() => new PendingLocalWrites(), []);
   const saving = useSyncExternalStore(
     useCallback(
@@ -43,98 +34,16 @@ export function useWorkbenchProject() {
     () => pendingWrites.getPendingWriteCount(),
   );
   const [failure, setFailure] = useState<string | null>(null);
-  const context = useMemo(() => {
-    const namespace = getDocumentRepositoryStorageNamespace(
-      window.location.search,
-    );
-    const databaseName =
-      new URLSearchParams(window.location.search).get("cadRepositoryDbName") ??
-      "cad-authored-documents";
-    // Local peer channels share part pointers across databases, not project catalogs.
-    const projectNamespace = `${namespace}:projects:${databaseName}`;
-    const sessionStore = createWorkbenchProjectSessionStore(
-      window.localStorage,
-      `cad.workbench.activeProject.v1:${projectNamespace}`,
-    );
-    let initialFailure: unknown = null;
-    let session: ReturnType<typeof sessionStore.load> = null;
-    try {
-      session = sessionStore.load();
-    } catch (error) {
-      initialFailure = error;
-    }
-    const cached = createLocalStorageWorkbenchTabsStore(
-      window.localStorage,
-      session
-        ? `cad.workbench.tabs.project.v1:${session.projectId}`
-        : undefined,
-    ).load();
-    const defaultTab: WorkbenchTab = {
-      documentId: session?.activeDocumentId ?? OCC_KERNEL_DOCUMENT_ID,
-      title: "Workspace",
-      storageKind: "browser",
-      storageDescriptor: null,
-    };
-    const initialTabs: WorkbenchTabsState =
-      cached.ok && cached.state
-        ? cached.state
-        : {
-            tabs: [defaultTab],
-            activeDocumentId: defaultTab.documentId,
-          };
-    if (session) {
-      if (
-        !initialTabs.tabs.some(
-          (tab) => tab.documentId === session.activeDocumentId,
-        )
-      )
-        initialTabs.tabs = [...initialTabs.tabs, defaultTab];
-      initialTabs.activeDocumentId = session.activeDocumentId;
-    }
-    const partReadiness = new WorkbenchPartReadiness();
-    let repository: Promise<LocalProjectRepository> | undefined;
-    return {
-      sessionStore,
-      session,
-      initialTabs,
-      initialFailure,
-      partReadiness,
-      registerPartReadiness: (
-        owner: Parameters<WorkbenchPartReadiness["register"]>[0],
-      ) => partReadiness.register(owner),
-      getRepository() {
-        // Automerge initialization is independent of mounting the current part's shell.
-        repository ??= Promise.all([
-          import("@/infrastructure/persistence/local-project-repository"),
-          import("@/infrastructure/persistence/indexeddb-automerge-document-repository"),
-        ]).then(
-          ([
-            { LocalProjectRepository },
-            { IndexedDbAutomergeDocumentRepository },
-          ]) => {
-            const urls = createLocalStorageDocumentRepositoryUrlStore(
-              window.localStorage,
-              createDocumentRepositoryUrlStorageKey(namespace),
-            );
-            const catalogUrls = createLocalStorageDocumentRepositoryUrlStore(
-              window.localStorage,
-              createDocumentRepositoryUrlStorageKey(projectNamespace),
-            );
-            return new LocalProjectRepository(
-              new IndexedDbAutomergeDocumentRepository({
-                databaseName,
-                urlStore: urls,
-              }),
-              urls,
-              catalogUrls,
-              (docId) => partReadiness.ensure(docId),
-            );
-          },
-        );
-        return repository;
-      },
-    };
-  }, []);
+  const context = useMemo(
+    () =>
+      createWorkbenchProjectBootstrap(
+        window.localStorage,
+        window.location.search,
+        persistenceEnabled,
+      ),
+    [persistenceEnabled],
+  );
+  const [busy, setBusy] = useState(context.persistenceEnabled);
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
@@ -168,7 +77,7 @@ export function useWorkbenchProject() {
       projectId: string,
       activeDocumentId: WorkbenchTabsState["activeDocumentId"],
     ) => {
-      context.sessionStore.save({
+      context.sessionStore?.save({
         schemaVersion: 1,
         projectId,
         activeDocumentId,
@@ -176,38 +85,11 @@ export function useWorkbenchProject() {
     },
     [context],
   );
-  const initial = useRef<Promise<ProjectManifest> | null>(null);
   useEffect(() => {
-    initial.current ??= (async () => {
-      if (context.initialFailure) throw context.initialFailure;
-      const repository = await context.getRepository();
-      const available = unwrap(await repository.list());
-      if (available.length)
-        return unwrap(
-          await repository.open(
-            available.find(
-              (entry) => entry.projectId === context.session?.projectId,
-            )?.projectId ?? available[0].projectId,
-          ),
-        );
-      const finish = pendingWrites.begin();
-      try {
-        return unwrap(
-          await repository.create(
-            "My project",
-            context.initialTabs.tabs.map((tab) => ({
-              docId: tab.documentId,
-              name: tab.title,
-              kind: "part" as const,
-            })),
-          ),
-        );
-      } finally {
-        finish();
-      }
-    })();
+    const opening = context.openInitialProject(pendingWrites);
+    if (!opening) return;
     let live = true;
-    void initial.current
+    void opening
       .then(async (opened) => {
         if (!opened.entries.some((entry) => entry.kind === "part"))
           throw new Error("This project has no part documents.");
@@ -280,6 +162,7 @@ export function useWorkbenchProject() {
     projects,
     pendingWrites,
     sessionKey,
+    persistenceEnabled: context.persistenceEnabled,
     registerPartReadiness: context.registerPartReadiness,
     initialTabs: context.initialTabs,
     initialFailure: context.initialFailure,

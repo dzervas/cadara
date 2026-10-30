@@ -97,7 +97,8 @@ interface WorkbenchAppProps {
 }
 
 export function WorkbenchApp(props: WorkbenchAppProps) {
-  const projects = useWorkbenchProject();
+  // Without a document repository there is no durable project (see createWorkbenchProjectBootstrap).
+  const projects = useWorkbenchProject(props.documentSyncWorkerClient !== null);
   if (projects.initialFailure)
     return (
       <Alert color="red" title="Project could not be opened">
@@ -124,7 +125,9 @@ function ProjectWorkbenchApp({
   const errorReporter = useErrorReporter();
   const project = projects.project;
   const { saveParts, saveSession, registerPartReadiness } = projects;
-  const [projectApplied, setProjectApplied] = useState(project !== null);
+  const [projectApplied, setProjectApplied] = useState(
+    project !== null || !projects.persistenceEnabled,
+  );
   const tabsStorage = useMemo(
     () =>
       !project
