@@ -14,6 +14,7 @@ import type { Account } from "@/contracts/account/account";
 export interface AccountPanelProps {
   account: Account | null;
   offline: boolean;
+  errorMessage: string | null;
   pendingEmail: string | null;
   busy: boolean;
   passkeyRegistered: boolean;
@@ -28,6 +29,11 @@ export function AccountPanel(props: AccountPanelProps) {
   const [email, setEmail] = useState("");
   return (
     <Stack gap="xs">
+      {props.errorMessage && (
+        <Text size="xs" c="red" role="alert">
+          {props.errorMessage}
+        </Text>
+      )}
       {props.offline && (
         <Text size="xs" c="dimmed" role="status">
           Account offline · unable to check your session.

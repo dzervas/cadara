@@ -1647,7 +1647,12 @@ export function CadWorkbench({
 
   // The toolbar, the parts tree and the document timeline are memoized: a
   // sketch drag move re-renders the workbench but not them, so their
-  // handlers keep one identity (each call runs the latest handler).
+  // handlers keep one identity (each call runs the latest handler). The
+  // account element also keeps its identity across workbench renders.
+  const accountMenu = useMemo(
+    () => <WorkbenchAccount onError={showWorkbenchError} />,
+    [showWorkbenchError],
+  );
   const toolbarCallbacks = useLatestCallbacks({
     onNewDocument: handleNewDocument,
     onOpenDocument: handleOpenDocument,
@@ -1993,7 +1998,7 @@ export function CadWorkbench({
             />
 
             <WorkspaceToolbar
-              accountMenu={<WorkbenchAccount />}
+              accountMenu={accountMenu}
               historyAvailability={stableToolbarHistoryAvailability}
               showBrowserStorageWarning={showBrowserStorageWarning}
               localSaving={localSaving}

@@ -11,6 +11,7 @@ function render(overrides: Partial<AccountPanelProps> = {}) {
       <AccountPanel
         account={null}
         offline={false}
+        errorMessage={null}
         pendingEmail={null}
         busy={false}
         passkeyRegistered={false}
@@ -63,4 +64,10 @@ test("unreachable account API is distinguished from a known signed-out session",
   expect(render({ offline: true })).toContain(
     "Account offline · unable to check your session.",
   );
+});
+
+test("account failures remain visible inline", () => {
+  const html = render({ errorMessage: "Unable to send the sign-in link." });
+  expect(html).toContain('role="alert"');
+  expect(html).toContain("Unable to send the sign-in link.");
 });

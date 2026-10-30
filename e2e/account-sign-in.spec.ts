@@ -3,11 +3,11 @@ import { expect, test } from "@playwright/test";
 
 // Opt-in: this row needs a local API with the memory mailer and its stdout file.
 const mailerLog = process.env.CADARA_AUTH_MAILER_LOG;
-test.skip(!mailerLog, "Set CADARA_AUTH_MAILER_LOG to local wrangler stdout.");
 
 test("magic link creates a persistent API session; sign out clears it without affecting local projects", async ({
   page,
 }) => {
+  test.skip(!mailerLog, "Set CADARA_AUTH_MAILER_LOG to local wrangler stdout.");
   test.setTimeout(90_000);
   const logOffset = statSync(mailerLog!).size;
   let sessionRequests = 0;
@@ -67,4 +67,39 @@ test("magic link creates a persistent API session; sign out clears it without af
   await expect(
     page.getByRole("combobox", { name: "Project", exact: true }),
   ).toHaveValue("My project");
+});
+
+test("rejected magic-link requests show inline feedback and a workbench notification", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/sign-in/magic-link", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        message: "Unable to send the sign-in link.",
+        code: "INVALID_EMAIL",
+      }),
+    }),
+  );
+  await page.goto("/app?cadTestMode=1");
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "Email", exact: true })
+    .fill("maker@example.test");
+  await page
+    .getByRole("button", { name: "Email sign-in link", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "Unable to send the sign-in link." }),
+  ).toHaveCount(2);
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Workbench action failed" }),
+  ).toContainText("Unable to send the sign-in link.");
+  await expect(
+    page.getByText("Workbench action failed", { exact: true }),
+  ).toBeVisible();
 });
