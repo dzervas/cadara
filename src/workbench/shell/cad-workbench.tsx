@@ -68,6 +68,7 @@ import {
   hasNonEmptyCommittedGeometry,
   isInitialOccRenderPending,
 } from "@/workbench/runtime/initial-occ-render-state";
+import { isEditSessionCursorRestorePending } from "@/workbench/runtime/edit-session-cursor-restore-status";
 import {
   getDocumentRefreshFailureNotification,
   getEditorFailureNotification,
@@ -296,6 +297,8 @@ export function CadWorkbench({
   const deletedSketchNotice = getPeerDeletedSketchNotice(machineState);
   const loading = useInitialLoadingPhase(modelingService);
   const initialOccRenderPending = isInitialOccRenderPending(machineState);
+  const editCursorRestorePending =
+    isEditSessionCursorRestorePending(machineState);
   const [graphicsUnavailable, setGraphicsUnavailable] = useState(false);
   const handleGraphicsUnavailable = useCallback(
     () => setGraphicsUnavailable(true),
@@ -1798,6 +1801,17 @@ export function CadWorkbench({
                   phase={projectLoading ? "opening-document" : loading.phase}
                   progress={loading.progress}
                 />
+              </div>
+            ) : editCursorRestorePending && !graphicsUnavailable ? (
+              // Covers the rolled-back model (often no bodies at all) while
+              // the history rolls forward again. It only hides that stale
+              // view and leaves input handling unchanged.
+              <div
+                role="status"
+                aria-label="Model rebuild pending"
+                className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-(--workbench-viewport-background)/85"
+              >
+                <InitialLoadingStatus phase="preparing-geometry" />
               </div>
             ) : null}
             {/* T14d (A-11): the left floating panel stack. The sketch
