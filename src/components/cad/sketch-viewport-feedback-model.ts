@@ -77,6 +77,13 @@ export interface SketchAnnotationLayoutRect {
  */
 export interface SketchAnnotationLayoutObstacle extends SketchAnnotationLayoutRect {
   chrome?: boolean;
+  /**
+   * A sketch decoration (the reserved pick-hint slot, a near-gap ring). A
+   * chip the user dropped (a `dropOrder`) keeps its place over it: to the
+   * user it is empty canvas, so pushing the chip off it would be a jump at
+   * the release. The chip then draws over the ring or a showing hint.
+   */
+  decoration?: boolean;
 }
 
 /**
@@ -208,7 +215,8 @@ export function estimateSketchAnnotationExtent(annotation: {
  * in). Each other label takes the first candidate from its anchor
  * outward (8 directions on up to 6 rings, ring step = its own size + 6 px
  * gap), clamped 8 px inside the usable band, whose rect keeps the gap to
- * every placed label and obstacle. With no free candidate, a problem or
+ * every placed label and obstacle (a dropped chip ignores `decoration`
+ * obstacles). With no free candidate, a problem or
  * dimension takes the first candidate that only keeps clear of the chrome;
  * otherwise it is dropped. A lower-priority item never moves a
  * higher-priority one (A-14). Pure: a function of its inputs only.
@@ -219,7 +227,7 @@ export function layoutSketchAnnotations(
   obstacles: readonly SketchAnnotationLayoutObstacle[],
 ): SketchAnnotationPlacement[] {
   const chrome = obstacles.filter((obstacle) => obstacle.chrome);
-  const taken: SketchAnnotationLayoutRect[] = [...obstacles];
+  const taken: SketchAnnotationLayoutObstacle[] = [...obstacles];
   const placements: SketchAnnotationPlacement[] = [];
   const ordered = [...items].sort(
     (left, right) =>
@@ -233,10 +241,12 @@ export function layoutSketchAnnotations(
   const clear = (
     candidate: { x: number; y: number },
     item: SketchAnnotationLayoutItem,
-    rects: readonly SketchAnnotationLayoutRect[],
+    rects: readonly SketchAnnotationLayoutObstacle[],
   ) =>
-    !rects.some((rect) =>
-      layoutRectsTooClose(layoutRectAt(candidate, item), rect),
+    !rects.some(
+      (rect) =>
+        !(rect.decoration && item.dropOrder != null) &&
+        layoutRectsTooClose(layoutRectAt(candidate, item), rect),
     );
 
   for (const item of ordered) {

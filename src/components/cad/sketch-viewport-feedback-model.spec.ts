@@ -273,6 +273,44 @@ describe("T14d layoutSketchAnnotations (T-8)", () => {
     expectPairwiseSeparated(placements, items, "and of each other");
   });
 
+  test("a dropped chip keeps its place over decorations (hint slot, near-gap ring) but not over a panel; other labels still avoid decorations", () => {
+    const anchor = { x: 600, y: 120 };
+    const decoration = {
+      x: 540,
+      y: 76,
+      width: 420,
+      height: 72,
+      decoration: true,
+    };
+    const panel = { x: 540, y: 76, width: 420, height: 72 };
+    const dropped = {
+      ...chip("annotation:dropped", anchor, "19.00"),
+      placedByUser: true,
+      dropOrder: 1,
+    };
+    const placedOnly = {
+      ...chip("annotation:placed", anchor, "19.00"),
+      placedByUser: true,
+    };
+
+    expect(
+      byId(layoutSketchAnnotations([dropped], VIEWPORT, [decoration]))[
+        dropped.id
+      ],
+      "dropped: stays on its anchor inside the decoration",
+    ).toEqual([600, 120]);
+    expect(
+      byId(layoutSketchAnnotations([placedOnly], VIEWPORT, [decoration]))[
+        placedOnly.id
+      ],
+      "never dropped: moved clear of the decoration",
+    ).not.toEqual([600, 120]);
+    expect(
+      byId(layoutSketchAnnotations([dropped], VIEWPORT, [panel]))[dropped.id],
+      "a panel stays an obstacle for a dropped chip",
+    ).not.toEqual([600, 120]);
+  });
+
   test("priority problem > dimension > pinned > preview decides who keeps a shared anchor", () => {
     const anchor = { x: 500, y: 500 };
     // Ids sort against the priority order, so only priority can explain it.

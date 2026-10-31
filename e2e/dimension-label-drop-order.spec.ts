@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { recordAnnotationChips } from "./helpers/annotation-chip-frames";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 // Lane: e2e (docs/testing.md). Seam: a dimension chip dropped onto another
@@ -104,68 +105,6 @@ async function dropChip(
   }
 }
 
-type FrameRecorder = {
-  frames: { id: string; x: number; y: number }[];
-  stop: () => void;
-};
-
-/** Every drawn position of the chips while `action` runs and settles. */
-async function recordChips(
-  workbench: SketchWorkbenchHarness,
-  ids: readonly string[],
-  action: () => Promise<void>,
-) {
-  const page = workbench.page;
-  await page.evaluate((ids) => {
-    const recorder: FrameRecorder = { frames: [], stop: () => {} };
-    const record = () => {
-      for (const id of ids) {
-        const box = document
-          .querySelector(`[data-sketch-annotation-id="${id}"]`)
-          ?.getBoundingClientRect();
-        if (box) {
-          recorder.frames.push({
-            id,
-            x: box.x + box.width / 2,
-            y: box.y + box.height / 2,
-          });
-        }
-      }
-    };
-    const observer = new MutationObserver(record);
-    observer.observe(document.body, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-    });
-    let frame = 0;
-    const tick = () => {
-      record();
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    recorder.stop = () => {
-      observer.disconnect();
-      cancelAnimationFrame(frame);
-    };
-    (
-      window as unknown as { __cadaraChipFrames: FrameRecorder }
-    ).__cadaraChipFrames = recorder;
-  }, ids);
-  await action();
-  for (let round = 0; round < 12; round += 1) {
-    await page.waitForTimeout(round === 11 ? 500 : 0);
-    await workbench.waitForAnimationFrames(2);
-  }
-  return page.evaluate(() => {
-    const recorder = (
-      window as unknown as { __cadaraChipFrames: FrameRecorder }
-    ).__cadaraChipFrames;
-    recorder.stop();
-    return recorder.frames;
-  });
-}
-
 const near = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y) <= 3;
 
 test("undoing a chip's drop onto another chip puts both chips back where they were before the drag", async ({
@@ -193,7 +132,7 @@ test("undoing a chip's drop onto another chip puts both chips back where they we
     "premise: the dropped chip took the anchor and displaced the other",
   ).toBe(true);
 
-  const frames = await recordChips(workbench, [lower, higher], () =>
+  const frames = await recordAnnotationChips(workbench, [lower, higher], () =>
     page.keyboard.press("Control+z"),
   );
   expect(frames.length, "frames were recorded after the undo").toBeGreaterThan(

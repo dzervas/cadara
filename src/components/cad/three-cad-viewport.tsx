@@ -1871,8 +1871,11 @@ function ThreeCadViewportScene({
   ]);
   // T14d (A4): near-gap rings and the active tool's labels are obstacles too
   // (both layers stay `pointer-events-none`; the layout only avoids them).
+  // The rings and the hint slot are decorations a dropped chip keeps its
+  // place over (to the user they are empty canvas). The tool's labels stay
+  // obstacles for every chip: they are live readouts of the tool in use.
   const sketchAnnotationObstacles = useMemo(
-    () => [
+    (): SketchAnnotationLayoutObstacle[] => [
       ...sketchNearGaps.map(({ a, b, distancePx }) => {
         // The ring `SketchNearGapGlyphs` draws.
         const size = Math.max(SKETCH_NEAR_GAP_GLYPH_MIN_PX, distancePx + 10);
@@ -1881,6 +1884,7 @@ function ThreeCadViewportScene({
           y: (a.screen.y + b.screen.y) / 2 - size / 2,
           width: size,
           height: size,
+          decoration: true,
         };
       }),
       ...getSketchToolLabelObstacles(
@@ -1895,6 +1899,7 @@ function ThreeCadViewportScene({
         y: sketchAnnotationDomFrame.viewport.topInset,
         width: SKETCH_PICK_HINT_SLOT_WIDTH_PX,
         height: SKETCH_PICK_HINT_SLOT_HEIGHT_PX,
+        decoration: true,
       },
     ],
     [
