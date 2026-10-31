@@ -60,6 +60,17 @@ test("signed-in account displays profile and membership with registration and si
   expect(html).not.toContain("Continue with Google");
 });
 
+test("quota explains usage and preserves sync when over the limit", () => {
+  const account = makeAccount();
+  account.me.organizations[0]!.usage.storage_bytes = 2048;
+  const html = render({ account });
+  expect(html).toContain("2 KB of 1 KB");
+  expect(html).toContain("0 of 3 private projects");
+  expect(html).toContain("Sync keeps working.");
+  expect(html).toContain('href="/dashboard/plan"');
+  expect(html).toContain('target="_blank"');
+});
+
 test("unreachable account API is distinguished from a known signed-out session", () => {
   expect(render({ offline: true })).toContain(
     "Account offline · unable to check your session.",

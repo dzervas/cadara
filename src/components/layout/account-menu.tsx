@@ -1,15 +1,20 @@
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 import {
   ActionIcon,
+  Anchor,
+  Indicator,
+  Progress,
   Button,
   Popover,
   Stack,
   Text,
   TextInput,
   Tooltip,
+  VisuallyHidden,
 } from "@mantine/core";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { Account } from "@/contracts/account/account";
+import { summarizeQuota } from "@/core/account/quota-summary";
 
 export interface AccountPanelProps {
   account: Account | null;
@@ -60,6 +65,50 @@ export function AccountPanel(props: AccountPanelProps) {
               }
             </Text>
           ))}
+          {props.account.me.organizations.map((organization) => {
+            const quota = summarizeQuota(organization);
+            const color =
+              quota.severity === "over"
+                ? "red"
+                : quota.severity === "warning"
+                  ? "yellow"
+                  : "workbench";
+            return (
+              <Stack gap={4} key={organization.organizationId}>
+                <Text size="xs" fw={600}>
+                  {props.account?.organizations.find(
+                    (org) => org.id === organization.organizationId,
+                  )?.name ?? "Account"}{" "}
+                  storage
+                </Text>
+                <Text size="xs" ff="monospace">
+                  {quota.storageLabel}
+                </Text>
+                <Progress
+                  value={quota.storagePercent}
+                  color={color}
+                  aria-label="Storage usage"
+                />
+                <Text size="xs" ff="monospace">
+                  {quota.privateProjectsLabel}
+                </Text>
+                {quota.severity === "over" && (
+                  <Text size="xs" c="red" role="status">
+                    Over quota. New projects, uploads and publishing are
+                    blocked. Sync keeps working.
+                  </Text>
+                )}
+              </Stack>
+            );
+          })}
+          <Anchor
+            href="/dashboard/plan"
+            target="_blank"
+            rel="noopener noreferrer"
+            size="xs"
+          >
+            Change plan
+          </Anchor>
           {props.passkeyRegistered && (
             <Text size="xs" role="status">
               Passkey registered.
@@ -151,6 +200,22 @@ export function AccountPanel(props: AccountPanelProps) {
 }
 
 export function AccountMenu(props: AccountPanelProps & { onOpen: () => void }) {
+  const severities =
+    props.account?.me.organizations.map(
+      (org) => summarizeQuota(org).severity,
+    ) ?? [];
+  const severity = severities.includes("over")
+    ? "over"
+    : severities.includes("warning")
+      ? "warning"
+      : "normal";
+  const quotaDescriptionId = useId();
+  const quotaDescription =
+    severity === "over"
+      ? "Account over quota"
+      : severity === "warning"
+        ? "Account quota above 80%"
+        : undefined;
   return (
     <Popover
       position="bottom-end"
@@ -166,9 +231,23 @@ export function AccountMenu(props: AccountPanelProps & { onOpen: () => void }) {
             size={32}
             variant="subtle"
             color="workbench"
+            aria-describedby={quotaDescription && quotaDescriptionId}
             aria-label="Account"
           >
-            <WorkbenchIcon name="account" className="h-4 w-4" />
+            <Indicator
+              disabled={severity === "normal"}
+              color={severity === "over" ? "red" : "yellow"}
+              size={6}
+              aria-label={quotaDescription}
+            >
+              <WorkbenchIcon name="account" className="h-4 w-4" />
+            </Indicator>
+            {/* The button's name stays "Account"; the quota state is its description. */}
+            {quotaDescription && (
+              <VisuallyHidden id={quotaDescriptionId}>
+                {quotaDescription}
+              </VisuallyHidden>
+            )}
           </ActionIcon>
         </Tooltip>
       </Popover.Target>
