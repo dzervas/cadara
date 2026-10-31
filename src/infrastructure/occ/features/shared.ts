@@ -117,9 +117,11 @@ export function requireSketchSnapshot(
 ) {
   const sketch = context.sketches.find((entry) => entry.sketchId === sketchId);
 
+  // Reaches the user as the feature's error (e.g. after the sketch was
+  // deleted), so it says what to do instead of naming the internal id.
   if (!sketch) {
     throw new Error(
-      `Sketch ${sketchId} does not resolve in the current OCC authoring state.`,
+      "A selected sketch is no longer in this document. Edit the feature and select from an existing sketch.",
     );
   }
   if (sketch.sketch.derivedValidity.state !== "current") {

@@ -187,6 +187,7 @@ import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/core/modeling/sketch-feature-input";
+import { COLLABORATIVE_MERGE_DIAGNOSTIC_CODES } from "@/core/modeling/collaborative-authored-document";
 import {
   findDocumentHistoryOrderDependencyViolations,
   getDocumentHistoryOrderEntryKey,
@@ -1961,6 +1962,20 @@ function buildPreviewRenderRecords(
   previewFeatureId: FeatureId,
 ) {
   return records.filter((record) => record.ownerFeatureId === previewFeatureId);
+}
+
+const DOCUMENT_MERGE_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set(
+  Object.values(COLLABORATIVE_MERGE_DIAGNOSTIC_CODES),
+);
+
+function isOtherFeatureDiagnostic(
+  diagnostic: ModelingDiagnostic,
+  featureId: FeatureId,
+) {
+  const ownerFeatureId =
+    diagnostic.featureId ??
+    (diagnostic.target?.kind === "feature" ? diagnostic.target.featureId : null);
+  return ownerFeatureId != null && ownerFeatureId !== featureId;
 }
 
 function filterPreviewInvalidationDiagnostics(
@@ -3957,111 +3972,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       feature,
     );
     return { ...appended, cursor };
-  }
-
-  private buildNextAuthoringState(
-    runtimeState: OccKernelRuntimeState,
-    input: {
-      revisionId: RevisionId;
-      sketches?: readonly SketchSnapshotRecord[];
-      bodyLabels?: ReadonlyMap<BodyId, string>;
-      variables?: OccAuthoringState["variables"];
-      features?: readonly OccAuthoringFeatureRecord[];
-      historyOrder?: OccAuthoringState["historyOrder"];
-      cursor?: OccAuthoringState["cursor"];
-    },
-  ) {
-    const baseState = createOccAuthoringState(runtimeState.authoringState.oc, {
-      documentId: this.documentId,
-      name: runtimeState.authoringState.name,
-      revisionId: input.revisionId,
-      modelingTolerance: runtimeState.authoringState.modelingTolerance,
-      angularToleranceRadians:
-        runtimeState.authoringState.angularToleranceRadians,
-      assetResolver: runtimeState.authoringState.assetResolver,
-      sketches: input.sketches ?? runtimeState.authoringState.sketches,
-      variables: input.variables ?? runtimeState.authoringState.variables,
-      bodies: runtimeState.authoringState.baseBodies,
-      bodyLabels: input.bodyLabels ?? runtimeState.authoringState.bodyLabels,
-      bodyAppearances: runtimeState.authoringState.bodyAppearances,
-      assets: runtimeState.authoringState.assets,
-      assetBlobs: runtimeState.authoringState.assetBlobs,
-      resolvedGeometryAssets:
-        runtimeState.authoringState.resolvedGeometryAssets,
-      bakedShapeCache: runtimeState.authoringState.bakedShapeCache,
-      embeddedBinaryAssets: runtimeState.authoringState.embeddedBinaryAssets,
-      constructions: runtimeState.authoringState.baseConstructions,
-      constructionPlanes: runtimeState.authoringState.baseConstructionPlanes,
-      historyOrder:
-        input.historyOrder ?? runtimeState.authoringState.historyOrder,
-      previousFeatureTopologyStages:
-        runtimeState.authoringState.featureTopologyStages,
-      previousFeatureTopologyLineage:
-        runtimeState.authoringState.previousFeatureTopologyLineage,
-      diagnostics: getPersistentAuthoringDiagnostics(
-        runtimeState.authoringState.diagnostics,
-      ),
-    });
-
-    const features = input.features ?? runtimeState.authoringState.features;
-    const cursor = input.cursor ?? runtimeState.authoringState.cursor;
-    // Resume after the leading features the runtime evaluated unchanged
-    // (cadara-afj3), as tryBuildNextAuthoringState does. The replay starts
-    // from `baseState` without the runtime's reference history, and so does
-    // the resumed prefix.
-    const appliedFeatures = getAppliedFeatures(
-      features,
-      cursor,
-      baseState.historyOrder,
-    );
-    const reusable = findReusableOccFeatureCheckpoint(
-      runtimeState.authoringState.featureTopologyStages,
-      baseState,
-      appliedFeatures,
-      () => true,
-    );
-    let current = reusable
-      ? resumeOccAuthoringStateFromCheckpoint(
-          baseState,
-          reusable.checkpoint,
-          runtimeState.authoringState.featureTopologyStages,
-          reusable.prefixFeatures,
-          baseState.referenceState,
-        )
-      : baseState;
-
-    try {
-      for (const feature of appliedFeatures.slice(
-        reusable?.prefixFeatures.length ?? 0,
-      )) {
-        const previous = current;
-        current = applyOccFeatureToAuthoringState(current, feature);
-        this.releaseIntermediateState(previous, [
-          current,
-          runtimeState.authoringState,
-        ]);
-      }
-    } catch (error) {
-      try {
-        this.releaseDiscardedState(current, [runtimeState.authoringState]);
-      } catch (cleanupError) {
-        throw combineOccCleanupError(error, cleanupError);
-      }
-      throw error;
-    }
-
-    const rebuiltFeatures = new Map(
-      current.features.map((feature) => [feature.featureId, feature]),
-    );
-
-    return {
-      ...current,
-      features: features.map(
-        (feature) => rebuiltFeatures.get(feature.featureId) ?? feature,
-      ),
-      cursor,
-      previousFeatureTopologyLineage: new Map(),
-    };
   }
 
   private requireLiveConstructionPlane(
@@ -7523,12 +7433,6 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     const currentRevisionId = this.getCurrentRevisionId(runtimeState);
     const previewFeatureId =
       `feature_preview_${request.previewId}` as FeatureId;
-    const previewFeature: OccAuthoringFeatureRecord = {
-      featureId: previewFeatureId,
-      label: `Preview ${request.previewId}`,
-      suppressed: false,
-      definition: request.definition,
-    };
     const replacedFeatureIndex = request.replacesFeatureId
       ? runtimeState.authoringState.features.findIndex(
           (feature) => feature.featureId === request.replacesFeatureId,
@@ -7551,6 +7455,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         `Preview replacement cannot change ${replacedFeature.definition.kind} into ${request.definition.kind}.`,
       );
     }
+    // An edited feature keeps its label and a new one gets the label its
+    // create gives it, so the preview's diagnostics name it as the user does.
+    const previewFeature: OccAuthoringFeatureRecord = {
+      featureId: previewFeatureId,
+      label:
+        replacedFeature?.label ??
+        createNewFeatureRecord(runtimeState.authoringState, request.definition)
+          .label,
+      suppressed: false,
+      definition: request.definition,
+    };
     const previewInsertionIndex =
       replacedFeatureIndex >= 0
         ? replacedFeatureIndex
@@ -7591,9 +7506,12 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     let previewState: OccAuthoringState | null = null;
     let keptForCommit = false;
     try {
+      // A replay past earlier features rebuilds them the way a commit does:
+      // an earlier failure stays that feature's diagnostic, and the previewed
+      // feature is blocked only when it consumes what the failure affects.
       previewState = tailFeature
         ? this.appendTailFeature(runtimeState, tailFeature)
-        : this.buildNextAuthoringState(runtimeState, {
+        : this.tryBuildNextAuthoringState(runtimeState, {
             revisionId: currentRevisionId,
             features: previewFeatures,
             historyOrder: replacedFeature
@@ -7610,7 +7528,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
                   { kind: "feature", featureId: previewFeatureId },
                 ),
             cursor: { kind: "feature", featureId: previewFeatureId },
-          });
+          }).state;
       // Use the display-read builder: it clears inherited OCC triangulations
       // before meshing at the viewport tier, including tighter angular budgets.
       const nativeTopologyResult = this.buildNativeTopologyPayloadForState(
@@ -7633,12 +7551,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
             : undefined,
       });
       // An unplaced sketch's own diagnostic is the document's, not the
-      // previewed feature's (a consumer of it reports its own).
+      // previewed feature's (a consumer of it reports its own); so are the
+      // diagnostics of loading the document and another feature's failure,
+      // which its timeline item already reports.
       const previewDiagnostics = filterPreviewInvalidationDiagnostics(
         runtimeState.authoringState,
         previewState,
         snapshot.document.diagnostics.filter(
-          (diagnostic) => diagnostic.code !== SKETCH_SUPPORT_UNRESOLVED_CODE,
+          (diagnostic) =>
+            diagnostic.code !== SKETCH_SUPPORT_UNRESOLVED_CODE &&
+            !DOCUMENT_MERGE_DIAGNOSTIC_CODES.has(diagnostic.code) &&
+            !isOtherFeatureDiagnostic(diagnostic, evaluatedFeatureId),
         ),
       );
       const diagnostics =
@@ -7693,10 +7616,7 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
               ),
             ]),
         createFeaturePreviewFailureDiagnostic(
-          {
-            ...previewFeature,
-            label: replacedFeature?.label ?? previewFeature.label,
-          },
+          previewFeature,
           error,
           runtimeState.authoringState.sketches,
         ),
