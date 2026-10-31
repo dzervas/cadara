@@ -44,6 +44,22 @@ export function isValidDocumentVariableName(name: string) {
   return DOCUMENT_VARIABLE_NAME_PATTERN.test(name);
 }
 
+/**
+ * The name Add variable proposes: the smallest unused `var{K}`, K >= 1. Counting
+ * the variables instead collides once one is deleted or renamed.
+ */
+export function getNextDocumentVariableName(
+  variables: readonly Pick<DocumentVariableRecord, "name">[],
+) {
+  const usedNames = new Set(variables.map((variable) => variable.name));
+  let ordinal = 1;
+  while (usedNames.has(`var${ordinal}`)) {
+    ordinal += 1;
+  }
+
+  return `var${ordinal}`;
+}
+
 export function createDocumentVariableExpressionDiagnostics(
   diagnostics: readonly DocumentVariableExpressionDiagnostic[],
 ): ModelingDiagnostic[] {

@@ -153,6 +153,48 @@ test("document owner accepts variable mutations and refreshes the snapshot", asy
   ).toBeTruthy();
 });
 
+test("document owner proposes an unused variable name after a variable was deleted", async () => {
+  // {var1, var2} with var1 deleted, and {var1, var2, var3} with var2 deleted:
+  // counting the variables would propose the surviving var2 / var3.
+  for (const [survivingNames, expectedName] of [
+    [["var2"], "var1"],
+    [["var1", "var3"], "var2"],
+  ] as const) {
+    const snapshot = await createSeedDocumentSnapshot();
+    snapshot.document.variables = survivingNames.map((name) => ({
+      variableId: `variable_${name}` as DocumentVariableId,
+      name,
+      valueText: "1",
+    }));
+    const proposedNames: string[] = [];
+    const owner = createOwner({
+      machineState: { snapshot } as EditorState,
+      modelingService: {
+        async getCurrentDocumentSnapshot() {
+          return snapshot;
+        },
+        async addDocumentVariable(input) {
+          proposedNames.push(input.name);
+          return ok({
+            revisionState: { kind: "accepted" as const },
+            diagnostics: [],
+          });
+        },
+      },
+    });
+
+    await owner.addDocumentVariable({
+      operation: "Add variable",
+      fallbackMessage: "Add variable failed.",
+    });
+
+    expect(
+      proposedNames,
+      `Add variable over ${survivingNames.join(", ")} must take the smallest unused var{K}.`,
+    ).toEqual([expectedName]);
+  }
+});
+
 test("document owner updates variables against the modeling service's latest revision", async () => {
   const staleSnapshot = await createSeedDocumentSnapshot();
   staleSnapshot.document.revisionId = "rev_0010" as RevisionId;

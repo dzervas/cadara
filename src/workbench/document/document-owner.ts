@@ -23,6 +23,7 @@ import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
 import { requireAcceptedModelingResult } from "@/lib/reported-action";
 import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
+import { getNextDocumentVariableName } from "@/core/modeling/document-variable-expressions";
 import type { ImportHistoryProbeCapabilities } from "@/contracts/import/capabilities";
 import type { RuntimeExtensionRegistryComposition } from "@/core/extensions/runtime-extension-registries";
 import type { EditorEvent, EditorState } from "@/core/editor/state-machine";
@@ -60,7 +61,7 @@ interface WorkbenchDocumentOwnerDependencies {
 
 /**
  * cadara-5nz: a second Add variable issued while one is in flight would reuse
- * the same base revision and `var{N+1}` name and be refused. The owner is
+ * the same base revision and next `var{K}` name and be refused. The owner is
  * recreated per snapshot, so the in-flight add is tracked per modeling service.
  */
 const inFlightDocumentVariableAdds = new WeakMap<
@@ -140,7 +141,7 @@ export function createWorkbenchDocumentOwner({
       }
       const result = await modelingService.addDocumentVariable({
         baseRevisionId: currentSnapshot.document.revisionId,
-        name: `var${currentSnapshot.document.variables.length + 1}`,
+        name: getNextDocumentVariableName(currentSnapshot.document.variables),
         valueText: "0",
       });
 
