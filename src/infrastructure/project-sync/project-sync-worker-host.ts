@@ -54,7 +54,13 @@ const DEFAULT_PRESENCE_TIMING = {
   peerTtlMs: 15_000,
   reannounceDelayMs: 500,
 };
-const PRESENCE_CHANNELS = ["userId", "name", "activeDocumentId"] as const;
+const PRESENCE_CHANNELS = [
+  "userId",
+  "name",
+  "role",
+  "selection",
+  "activeDocumentId",
+] as const;
 
 function sameHeads(left: readonly string[], right: readonly string[]) {
   return (

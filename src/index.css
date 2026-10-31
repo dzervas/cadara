@@ -234,3 +234,9 @@ input {
     opacity: 0.6;
   }
 }
+
+/* Reserve the presence rail only when it contains people or an unhealthy state.
+   The shared inset also moves panels and annotation obstacles below the rail. */
+main:has([data-project-presence-row] :is([role="list"], [role="status"])) {
+  --workbench-viewport-overlay-top: 112px;
+}

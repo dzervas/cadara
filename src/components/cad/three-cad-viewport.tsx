@@ -1,4 +1,8 @@
 // SLOP: Retained viewport renderer while the workbench/viewport port boundary is introduced and hidden context reads are removed.
+import type { ProjectPresencePeer } from "@/contracts/project-sync/project-service";
+import { projectPresenceColor } from "@/theme/project-presence-colors";
+import { resolveProjectPeerSelections } from "@/core/workspace/project-peer-selections";
+import { ProjectPeerSelectionHighlights } from "./project-peer-selection-highlights";
 import { useShortcuts } from "@/hooks/use-shortcuts";
 import { attachViewportWheelNavigation } from "@/infrastructure/viewport/viewport-wheel-navigation";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
@@ -408,6 +412,7 @@ function sketchAnnotationDomFramesEqual(
 
 interface ThreeCadViewportProps {
   model: ViewportModel;
+  presencePeers?: readonly ProjectPresencePeer[];
   commands: readonly ViewportCommand[];
   onIntent: (intent: ViewportIntent) => void;
   performanceTelemetry?: PerformanceTelemetry;
@@ -473,6 +478,7 @@ export function ThreeCadViewport({
 
 function ThreeCadViewportScene({
   model,
+  presencePeers,
   commands,
   onIntent,
   createRenderer,
@@ -3936,8 +3942,27 @@ function ThreeCadViewportScene({
     };
   }, [activeSectionView]);
 
+  const peerHighlights = useMemo(
+    () =>
+      resolveProjectPeerSelections(
+        presencePeers ?? [],
+        model.documentId,
+        renderables,
+      ).map((highlight) => ({
+        ...highlight,
+        color: projectPresenceColor(highlight.userId),
+      })),
+    [presencePeers, model.documentId, renderables],
+  );
   return (
     <div
+      data-project-peer-highlights={JSON.stringify(
+        peerHighlights.map(({ userId, renderable, color }) => ({
+          userId,
+          target: renderable.binding.target,
+          color,
+        })),
+      )}
       ref={viewportRef}
       className="relative"
       style={{
@@ -4030,6 +4055,10 @@ function ThreeCadViewportScene({
         <directionalLight args={[0x91b4d8, 0.52]} position={[-12, 14, 18]} />
         <directionalLight args={[0xb6d6f5, 0.18]} position={[-14, -10, 12]} />
         <WorkspaceSceneScaffold />
+        <ProjectPeerSelectionHighlights
+          highlights={peerHighlights}
+          clippingPlane={activeSectionClippingPlane}
+        />
         <SketchProjectionFrameWatcher
           enabled={Boolean(sketchSession)}
           onCameraChanged={() => {

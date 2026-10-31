@@ -1,4 +1,6 @@
 // SLOP: Retained shell orchestrator while document/object/debug actions and visible regions are split into named workbench modules.
+import type { DurableRef } from "@/contracts/shared/references";
+import type { ProjectPresencePeer } from "@/contracts/project-sync/project-service";
 import { WorkbenchAccount } from "./workbench-account";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
@@ -140,6 +142,7 @@ import {
 import {
   getPrimitiveRefLabel,
   getPrimitiveRefKey,
+  isDurablePrimitiveRef,
   primitiveRefEquals,
   type PrimitiveRef,
 } from "@/core/editor/schema";
@@ -233,6 +236,9 @@ interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
   tabStorageFeedback?: Partial<Record<DocumentId, DocumentTabStorageFeedback>>;
   projectControls?: ReactNode;
+  projectPresence?: ReactNode;
+  presencePeers?: readonly ProjectPresencePeer[];
+  onPresenceSelectionChange?: (selection: readonly DurableRef[]) => void;
   projectLoading?: boolean;
   /** The project could not be opened: the loading cover stays, in its failed state. */
   projectOpenFailed?: boolean;
@@ -263,6 +269,9 @@ export function CadWorkbench({
   tabsState,
   tabStorageFeedback,
   projectControls,
+  projectPresence,
+  presencePeers,
+  onPresenceSelectionChange,
   projectLoading = false,
   projectOpenFailed = false,
   readOnly = false,
@@ -715,6 +724,16 @@ export function CadWorkbench({
     hoverTarget && !isTargetHidden(hoverTarget, effectiveHiddenTargetKeys)
       ? hoverTarget
       : null;
+
+  useEffect(() => {
+    onPresenceSelectionChange?.(
+      visibleSelection.filter(isDurablePrimitiveRef),
+    );
+  }, [visibleSelection, onPresenceSelectionChange]);
+  useEffect(
+    () => () => onPresenceSelectionChange?.([]),
+    [onPresenceSelectionChange],
+  );
 
   const primarySelection = visibleSelection[0] ?? visibleHoverTarget ?? null;
   const selectionDetail =
@@ -1810,6 +1829,7 @@ export function CadWorkbench({
           <main className="relative min-h-0 flex-1 overflow-hidden bg-(--workbench-viewport-background)">
             <ThreeCadViewport
               model={viewportModel}
+              presencePeers={presencePeers}
               commands={viewportCommands}
               onIntent={handleViewportIntent}
               performanceTelemetry={performanceTelemetry}
@@ -2134,6 +2154,7 @@ export function CadWorkbench({
 
             <WorkspaceToolbar
               accountMenu={accountMenu}
+              projectPresence={projectPresence}
               historyAvailability={stableToolbarHistoryAvailability}
               readOnly={readOnly}
               showBrowserStorageWarning={showBrowserStorageWarning}

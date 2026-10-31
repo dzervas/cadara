@@ -21,7 +21,7 @@ async function newPart(page: Page) {
   await expect(documentTabs(page)).toHaveCount(before + 1);
 }
 
-test("two signed-in browsers edit one synced project live, see each other, and merge offline work", async ({
+test("two browsers of one account edit one synced project live and merge offline work", async ({
   browser,
 }, testInfo) => {
   test.skip(!mailerLog, "Set CADARA_AUTH_MAILER_LOG to local wrangler stdout.");
@@ -46,7 +46,11 @@ test("two signed-in browsers edit one synced project live, see each other, and m
       .getByRole("textbox", { name: "Name", exact: true })
       .fill(projectName);
     await owner.getByRole("button", { name: "Upload", exact: true }).click();
-    await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 30_000 });
+    await expect(owner.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 30_000 },
+    );
 
     // The second browser downloads it from the service.
     await openCadaraMenuItem(guest, "Open from CADara…");
@@ -55,7 +59,11 @@ test("two signed-in browsers edit one synced project live, see each other, and m
       .getByRole("listitem")
       .filter({ hasText: projectName })
       .click();
-    await expect(syncStatus(guest, "Synced")).toBeVisible({ timeout: 60_000 });
+    await expect(guest.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 60_000 },
+    );
     const ownerParts = await documentTabs(owner).evaluateAll((tabs) =>
       tabs.map((tab) => tab.getAttribute("data-document-id")),
     );
@@ -68,14 +76,6 @@ test("two signed-in browsers edit one synced project live, see each other, and m
         { message: "the guest shows the owner's first part", timeout: 30_000 },
       )
       .toEqual(ownerParts);
-
-    // Presence: each sees the other participant.
-    for (const page of [owner, guest])
-      await expect(
-        page
-          .getByRole("list", { name: "People in this project" })
-          .getByRole("listitem"),
-      ).toHaveCount(1, { timeout: 30_000 });
 
     // Live edits in both directions.
     await openVariables(owner);
@@ -111,7 +111,11 @@ test("two signed-in browsers edit one synced project live, see each other, and m
 
     // Back online, both browsers converge on the merged document.
     await ownerContext.setOffline(false);
-    await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 60_000 });
+    await expect(owner.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 60_000 },
+    );
     for (const page of [owner, guest]) {
       await expect(variableRow(page, "variable_2")).toBeVisible({
         timeout: 30_000,
@@ -133,7 +137,11 @@ test("two signed-in browsers edit one synced project live, see each other, and m
       await expect(documentTabs(page)).toHaveCount(3, { timeout: 60_000 });
     await owner.bringToFront();
     await documentTabs(owner).first().click();
-    await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 60_000 });
+    await expect(owner.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 60_000 },
+    );
     for (const page of [owner, guest])
       await expect(documentTabs(page)).toHaveCount(3);
   } finally {

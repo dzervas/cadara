@@ -12,7 +12,12 @@ import {
   startProjectSync,
   uploadProjectToService,
 } from "@/application/project-sync/project-service-use-cases";
-import type { Account } from "@/contracts/account/account";
+import type { DurableRef } from "@/contracts/shared/references";
+import {
+  limitPresenceSelection,
+  otherProjectPeers,
+} from "@/core/workspace/project-peer-selections";
+import type { Account, ProjectRole } from "@/contracts/account/account";
 import { normalizeUnknownError } from "@/contracts/errors";
 import type {
   ProjectManifest,
@@ -128,6 +133,8 @@ export function useProjectSync(
     key: string;
     status: ProjectSyncStatus;
   } | null>(null);
+  const selectionRef = useRef<DurableRef[]>([]);
+  const presenceRoleRef = useRef<ProjectRole | null>(null);
   const activeDocumentRef = useRef<DocumentId | null>(null);
   const linkOrgId = link?.orgId;
   const linkProjectId = link?.projectId;
@@ -141,6 +148,8 @@ export function useProjectSync(
       {
         userId,
         name: presenceName,
+        role: presenceRoleRef.current,
+        selection: selectionRef.current,
         activeDocumentId: activeDocumentRef.current,
       },
     );
@@ -149,6 +158,10 @@ export function useProjectSync(
   const [retrySequence, setRetrySequence] = useState(0);
   const statusKey = `${projectId}:${linkOrgId}/${linkProjectId}:${userId}`;
   const status = statusEntry?.key === statusKey ? statusEntry.status : null;
+  const otherPeers = useMemo(
+    () => otherProjectPeers(status?.peers ?? [], userId),
+    [status?.peers, userId],
+  );
 
   // The latest token's role, else the one remembered from the last token
   // this browser received, so a reload or an offline session starts with it.
@@ -176,6 +189,24 @@ export function useProjectSync(
         : null),
     [grantedRole, linkOrgId, linkProjectId, roleStore, userId],
   );
+  useEffect(() => {
+    presenceRoleRef.current = role;
+    publishPresence();
+  }, [role, publishPresence]);
+
+  const setSelection = useCallback(
+    (selection: readonly DurableRef[]) => {
+      const published = limitPresenceSelection(selection);
+      // Selection identity can change on a snapshot refresh or pointer move.
+      // Broadcast only when the actual durable refs change.
+      if (JSON.stringify(selectionRef.current) === JSON.stringify(published))
+        return;
+      selectionRef.current = published;
+      publishPresence();
+    },
+    [publishPresence],
+  );
+
   useEffect(() => {
     if (!transport || !projectId || !linkOrgId || !linkProjectId || !userId)
       return;
@@ -250,6 +281,7 @@ export function useProjectSync(
     (documentId: DocumentId) => {
       if (activeDocumentRef.current === documentId) return;
       activeDocumentRef.current = documentId;
+      selectionRef.current = [];
       publishPresence();
     },
     [publishPresence],
@@ -415,10 +447,12 @@ export function useProjectSync(
     accountChecked,
     refreshAccount,
     status,
+    otherPeers,
     /** The role this project's writes follow; null before any token. */
     role,
     linked: link !== null,
     setActiveDocument,
+    setSelection,
     upload,
     uploadState,
     dismissUploadError,

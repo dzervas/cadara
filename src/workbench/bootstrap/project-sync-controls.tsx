@@ -1,3 +1,5 @@
+import { Group } from "@mantine/core";
+import { projectPresenceColor } from "@/theme/project-presence-colors";
 import { useState } from "react";
 import { projectSlugFromName } from "@/application/project-sync/project-service-use-cases";
 import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
@@ -57,13 +59,6 @@ export function ProjectSyncControls({
       .catch((failure: unknown) => setError(message(failure)))
       .finally(() => setBusy(false));
   };
-  const participants = (sync.status?.peers ?? []).map((peer) => ({
-    key: peer.peerId,
-    name: peer.name,
-    activePartName:
-      project.entries.find((entry) => entry.docId === peer.activeDocumentId)
-        ?.name ?? null,
-  }));
   return (
     <>
       <ProjectServiceMenu
@@ -77,20 +72,6 @@ export function ProjectSyncControls({
           if (organizations[0]) loadProjects(organizations[0].id);
         }}
       />
-      {sync.linked && (
-        <ProjectSyncIndicator
-          connection={sync.status?.connection ?? "offline"}
-          role={sync.role}
-          failed={Boolean(sync.status?.error)}
-          detail={
-            sync.status?.error ??
-            (sync.accountChecked && !sync.account
-              ? "Sign in to CADara to sync this project."
-              : null)
-          }
-        />
-      )}
-      <ProjectPresenceStrip participants={participants} />
       <UploadProjectModal
         opened={dialog === "upload"}
         organizations={organizations}
@@ -132,5 +113,47 @@ export function ProjectSyncControls({
         }}
       />
     </>
+  );
+}
+
+/** Separate slot: service actions stay by the project picker, presence by utilities. */
+export function ProjectSyncPresence({ sync }: { sync: ProjectSync }) {
+  if (!sync.available || !sync.linked) return null;
+  const seen = new Set<string>();
+  const participants = sync.otherPeers
+    .filter((peer) => {
+      if (seen.has(peer.userId)) return false;
+      seen.add(peer.userId);
+      return true;
+    })
+    .map((peer) => ({
+      key: peer.userId,
+      name: peer.name,
+      role: peer.role ?? null,
+      color: projectPresenceColor(peer.userId),
+    }));
+  const signedOut = sync.accountChecked && !sync.account;
+  // Before the first transport status a signed-in project is still
+  // connecting; reporting it offline would flash the badge on every open.
+  const connection =
+    sync.status?.connection ?? (signedOut ? "offline" : "connecting");
+  return (
+    <Group
+      gap={8}
+      wrap="nowrap"
+      data-project-presence-row=""
+      data-project-sync-state={connection}
+    >
+      <ProjectSyncIndicator
+        connection={connection}
+        role={sync.role}
+        failed={Boolean(sync.status?.error)}
+        detail={
+          sync.status?.error ??
+          (signedOut ? "Sign in to CADara to sync this project." : null)
+        }
+      />
+      <ProjectPresenceStrip participants={participants} />
+    </Group>
   );
 }

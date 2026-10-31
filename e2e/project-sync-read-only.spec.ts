@@ -7,7 +7,6 @@ import {
   openVariables,
   openWorkbench,
   signIn,
-  syncStatus,
   variableRow,
 } from "./helpers/project-sync";
 import { expectStaged, openTopSketch } from "./helpers/mirror-workbench";
@@ -35,8 +34,8 @@ async function expectOneReadOnlyNotice(page: Page) {
 }
 
 /**
- * Every connection state the sync badge shows during `durationMs`. A write
- * the room refuses drops the socket, which the badge shows as Connecting or
+ * Every connection state the project transport reports during `durationMs`. A write
+ * the room refuses drops the socket, which the transport reports as Connecting or
  * Offline before it reconnects.
  */
 async function observedConnections(page: Page, durationMs: number) {
@@ -44,16 +43,16 @@ async function observedConnections(page: Page, durationMs: number) {
     const seen = new Set<string>();
     const sample = () => {
       for (const badge of document.querySelectorAll(
-        "[data-project-sync-connection]",
+        "[data-project-sync-state]",
       ))
-        seen.add(badge.getAttribute("data-project-sync-connection") ?? "");
+        seen.add(badge.getAttribute("data-project-sync-state") ?? "");
     };
     const observer = new MutationObserver(sample);
     observer.observe(document.body, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-project-sync-connection"],
+      attributeFilter: ["data-project-sync-state"],
     });
     sample();
     await new Promise((resolve) => setTimeout(resolve, duration));
@@ -100,7 +99,11 @@ test("an invited viewer opens a synced project read only: shortcuts, undo, tab c
     await expect.poll(() => machineState(owner)).toBe("idle");
     await openCadaraMenuItem(owner, "Upload to CADara…");
     await owner.getByRole("button", { name: "Upload", exact: true }).click();
-    await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 30_000 });
+    await expect(owner.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 30_000 },
+    );
 
     // The owner invites the second account and grants it the viewer role.
     const api = async <T>(
@@ -169,7 +172,11 @@ test("an invited viewer opens a synced project read only: shortcuts, undo, tab c
     await expect(
       viewer.getByRole("combobox", { name: "Project", exact: true }),
     ).toHaveValue(projectName, { timeout: 60_000 });
-    await expect(syncStatus(viewer, "Synced")).toBeVisible({ timeout: 30_000 });
+    await expect(viewer.locator("[data-project-presence-row]")).toHaveAttribute(
+      "data-project-sync-state",
+      "synced",
+      { timeout: 30_000 },
+    );
     await expect(
       viewer.getByRole("status", { name: "Read only · Viewer" }),
     ).toBeVisible({ timeout: 30_000 });

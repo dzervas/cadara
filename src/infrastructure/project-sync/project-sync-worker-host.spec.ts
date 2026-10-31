@@ -83,7 +83,13 @@ test("a second participant downloads the project and both see each other's prese
   await owner.host.handle({
     kind: "projectSyncPresence",
     link,
-    state: { userId: "u1", name: "Ada", activeDocumentId: "doc_part" },
+    state: {
+      userId: "u1",
+      name: "Ada",
+      activeDocumentId: "doc_part",
+      role: "editor",
+      selection: [{ kind: "body", bodyId: "body_part" }],
+    },
   });
   await vi.waitFor(() => expect(owner.status()?.connection).toBe("synced"), {
     timeout: 5_000,
@@ -109,9 +115,35 @@ test("a second participant downloads the project and both see each other's prese
           userId: "u1",
           name: "Ada",
           activeDocumentId: "doc_part",
+          role: "editor",
+          selection: [{ kind: "body", bodyId: "body_part" }],
         }),
       ]);
     },
+    { timeout: 5_000 },
+  );
+
+  // Later selection and role changes travel after presence has started.
+  await owner.host.handle({
+    kind: "projectSyncPresence",
+    link,
+    state: {
+      userId: "u1",
+      name: "Ada",
+      activeDocumentId: "doc_part",
+      role: "viewer",
+      selection: [{ kind: "sketch", sketchId: "sketch_1" }],
+    },
+  });
+  await vi.waitFor(
+    () =>
+      expect(guest.status()?.peers).toEqual([
+        expect.objectContaining({
+          userId: "u1",
+          role: "viewer",
+          selection: [{ kind: "sketch", sketchId: "sketch_1" }],
+        }),
+      ]),
     { timeout: 5_000 },
   );
   await owner.host.handle({ kind: "projectSyncStop", link });

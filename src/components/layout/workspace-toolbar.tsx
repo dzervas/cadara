@@ -94,6 +94,7 @@ interface ToolbarMeasurement {
 
 interface WorkspaceToolbarProps {
   accountMenu?: ReactNode;
+  projectPresence?: ReactNode;
   historyAvailability?: EditorHistoryAvailability;
   /** The user's project role cannot edit: only inspection tools stay enabled. */
   readOnly?: boolean;
@@ -121,6 +122,7 @@ interface WorkspaceToolbarProps {
 // its own inputs change.
 export const WorkspaceToolbar = memo(function WorkspaceToolbar({
   accountMenu,
+  projectPresence,
   historyAvailability,
   readOnly = false,
   showBrowserStorageWarning = false,
@@ -786,6 +788,19 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
             <WorkbenchIcon name="github" className="h-4 w-4" />
           </ActionIcon>
         </Tooltip>
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 8px)",
+            right: 0,
+            width: "max-content",
+            pointerEvents: "auto",
+          }}
+          data-viewport-annotation-chrome=""
+          data-project-presence-slot=""
+        >
+          {projectPresence}
+        </div>
       </ToolbarPill>
     </div>
   );
@@ -813,6 +828,7 @@ const pillCommonStyle: CSSProperties = {
 
 const utilityPillStyle: CSSProperties = {
   ...pillCommonStyle,
+  position: "relative",
 };
 
 interface ToolbarPillProps {

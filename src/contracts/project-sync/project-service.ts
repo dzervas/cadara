@@ -1,4 +1,5 @@
 import type { ProjectRole } from "@/contracts/account/account";
+import type { DurableRef } from "@/contracts/shared/references";
 
 export type ProjectVisibility = "private" | "public";
 
@@ -44,6 +45,10 @@ export type ProjectSyncConnection =
 export interface ProjectPresenceState {
   userId: string;
   name: string;
+  /** Display only; never grants permissions. Optional for older clients. */
+  role?: ProjectRole | null;
+  /** Display only: peers render it when they have the same document active. */
+  selection?: DurableRef[];
   /** The part document the participant has open. */
   activeDocumentId: string | null;
 }

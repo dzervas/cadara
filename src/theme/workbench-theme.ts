@@ -18,6 +18,15 @@ export const workbenchColors: MantineColorsTuple = [
   "#333333",
 ];
 
+// Peer colours avoid sketch state blue/red and local selection/hover orange.
+export const workbenchPeerColors = [
+  "#b197fc",
+  "#63e6be",
+  "#e599f7",
+  "#c0eb75",
+  "#66d9e8",
+] as const;
+
 export const workbenchShellTokens = {
   panelShadow:
     "0 24px 48px rgba(0, 0, 0, 0.48), 0 8px 20px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.06)",

@@ -16,18 +16,19 @@ function render(node: ReactNode) {
   );
 }
 
-test.each([
-  ["synced", "Synced"],
-  ["syncing", "Syncing"],
-  ["connecting", "Connecting"],
-  ["offline", "Offline"],
-] as const)("the sync indicator names the %s state", (connection, label) => {
-  const html = render(
-    <ProjectSyncIndicator connection={connection} role="editor" />,
-  );
-  expect(html).toContain(`aria-label="Sync status: ${label}"`);
-  expect(html).toContain(`data-project-sync-connection="${connection}"`);
-  expect(html).not.toContain("Read only");
+test.each(["synced", "syncing", "connecting"] as const)(
+  "healthy %s has no badge",
+  (connection) => {
+    expect(
+      render(<ProjectSyncIndicator connection={connection} role="editor" />),
+    ).not.toContain('role="status"');
+  },
+);
+
+test("offline has a visible connection badge", () => {
+  expect(
+    render(<ProjectSyncIndicator connection="offline" role="editor" />),
+  ).toContain('aria-label="Sync status: Offline"');
 });
 
 test.each([
@@ -56,19 +57,29 @@ test("editors and admins see no read-only badge", () => {
     ).not.toContain("Read only");
 });
 
-test("the presence strip lists other participants with initials and their open part", () => {
+test("the presence strip lists other participants with initials, roles and colour rings", () => {
   const html = render(
     <ProjectPresenceStrip
       participants={[
-        { key: "a", name: "Ada Lovelace", activePartName: "Lid" },
-        { key: "b", name: "grace", activePartName: null },
+        {
+          key: "a",
+          name: "Ada Lovelace",
+          role: "editor",
+          color: "#b197fc",
+        },
+        {
+          key: "b",
+          name: "grace",
+          role: "viewer",
+          color: "#63e6be",
+        },
       ]}
     />,
   );
   expect(html).toContain('aria-label="People in this project"');
-  expect(html).toContain('aria-label="Ada Lovelace · Lid"');
+  expect(html).toContain('aria-label="Ada Lovelace · editor"');
   expect(html).toContain(">AL<");
-  expect(html).toContain('aria-label="grace"');
+  expect(html).toContain('aria-label="grace · viewer"');
   expect(html).toContain(">GR<");
 });
 
@@ -78,23 +89,30 @@ test("an empty project shows no presence strip", () => {
   );
 });
 
-test("healthy states stay graphite; offline and failures carry status colour", () => {
-  const color = (html: string) =>
-    html.match(/--badge-dot-color:var\(--mantine-color-([a-z]+)/)?.[1];
-  expect(
-    color(render(<ProjectSyncIndicator connection="synced" role="editor" />)),
-  ).toBe("gray");
-  expect(
-    color(render(<ProjectSyncIndicator connection="syncing" role="editor" />)),
-  ).toBe("gray");
-  expect(
-    color(render(<ProjectSyncIndicator connection="offline" role="editor" />)),
-  ).toBe("yellow");
-  expect(
-    color(
-      render(
-        <ProjectSyncIndicator connection="offline" role="editor" failed />,
-      ),
-    ),
-  ).toBe("red");
+test("failures are named explicitly and use the danger colour", () => {
+  const html = render(
+    <ProjectSyncIndicator
+      connection="synced"
+      role="editor"
+      failed
+      detail="Rejected"
+    />,
+  );
+  expect(html).toContain('aria-label="Sync status: Sync error"');
+  expect(html).toContain("--mantine-color-red");
+});
+
+test("at most four avatars show before the overflow list trigger", () => {
+  const html = render(
+    <ProjectPresenceStrip
+      participants={Array.from({ length: 7 }, (_, i) => ({
+        key: String(i),
+        name: `Peer ${i}`,
+        role: "editor",
+        color: "#b197fc",
+      }))}
+    />,
+  );
+  expect(html.match(/data-project-presence-name=/g)).toHaveLength(4);
+  expect(html).toContain('aria-label="3 more people in this project"');
 });

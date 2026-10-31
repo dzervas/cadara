@@ -37,7 +37,10 @@ import { createProjectWriteGatedDocumentRepository } from "@/application/project
 import { useWorkbenchProject } from "./use-workbench-project";
 import { useTabStorageStatus } from "./use-tab-storage-status";
 import { useProjectSync, type ProjectSync } from "./use-project-sync";
-import { ProjectSyncControls } from "./project-sync-controls";
+import {
+  ProjectSyncControls,
+  ProjectSyncPresence,
+} from "./project-sync-controls";
 
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
@@ -775,6 +778,9 @@ function ProjectWorkbenchApp({
                 )
               }
               projectWriteGate={projectWriteGate}
+              projectPresence={<ProjectSyncPresence sync={sync} />}
+              presencePeers={sync.otherPeers}
+              onPresenceSelectionChange={sync.setSelection}
               projectControls={
                 project && (
                   <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
