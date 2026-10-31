@@ -561,12 +561,22 @@ export type DimensionLineAnnotationPlacement = {
    * diameter at its rim end).
    */
   labelPosition?: number;
+  /**
+   * Written by a label drag: one more than every other dimension's drop
+   * order in the sketch, so the most recently dropped label has the highest.
+   * Labels sharing screen space keep the latest drop in front across undo,
+   * reload and sketch reopen. Absent: never dragged (the Dimension tool's
+   * placing click, or an older document).
+   */
+  dropOrder?: number;
 };
 
 export type DimensionAngleAnnotationPlacement = {
   kind: "angleArc";
   radius: number;
   side: "minor" | "major";
+  /** As on a dimension-line placement. */
+  dropOrder?: number;
 };
 
 export type DimensionAnnotationPlacement =

@@ -7,10 +7,9 @@ import { SketchViewportFeedbackLayer } from "@/components/cad/sketch-viewport-fe
 import {
   estimateSketchAnnotationExtent,
   getOverlayProjectionId,
-  getSketchDimensionLabelDropRank,
+  getSketchDimensionLabelRank,
   getSketchToolLabelObstacles,
   layoutSketchAnnotations,
-  recordSketchDimensionLabelDrop,
   type SketchAnnotationLayoutItem,
   type SketchAnnotationLayoutPriority,
   type SketchAnnotationLayoutObstacle as SketchAnnotationLayoutRect,
@@ -305,10 +304,10 @@ describe("T14d layoutSketchAnnotations (T-8)", () => {
       ...chip("annotation:b-placed", anchor, "10.00"),
       placedByUser: true,
     };
-    const dropped = (id: string, dropRank: number) => ({
+    const dropped = (id: string, dropOrder: number) => ({
       ...chip(id, anchor, "10.00"),
       placedByUser: true,
-      dropRank,
+      dropOrder,
     });
 
     expect(
@@ -316,71 +315,51 @@ describe("T14d layoutSketchAnnotations (T-8)", () => {
       "persisted: a user-placed label keeps its anchor over an auto-placed one (a reload keeps the drop)",
     ).toBe("annotation:b-placed");
     expect(
-      at([auto, placed, dropped("annotation:c-dropped", 0)]),
-      "session: a dropped chip outranks the other user-placed labels",
+      at([auto, placed, dropped("annotation:c-dropped", 1)]),
+      "a dropped chip outranks the other user-placed labels",
     ).toBe("annotation:c-dropped");
     expect(
       at([
         auto,
         placed,
-        dropped("annotation:c-earlier", 1),
-        dropped("annotation:d-last", 0),
+        dropped("annotation:c-later", 2),
+        dropped("annotation:d-earlier", 1),
       ]),
-      "session: the most recent drop wins among dropped chips",
-    ).toBe("annotation:d-last");
+      "the most recent drop (the highest drop order) wins among dropped chips",
+    ).toBe("annotation:c-later");
     expect(
       at([
-        dropped("annotation:c-dropped", 0),
+        dropped("annotation:c-dropped", 1),
         glyph("annotation:z-problem", anchor, "problem"),
       ]),
       "A-14: a problem still outranks a dropped chip",
     ).toBe("annotation:z-problem");
   });
 
-  test("cadara-0atd: recorded drops rank chips dropped on their anchor by recency, and an angle dropped at its displacement keeps its pre-drag rank although its drag committed a placement", () => {
-    const live = new Set(["h-length", "h-angle", "h-width"]);
-    let drops = recordSketchDimensionLabelDrop(
-      [],
-      { handleId: "h-width", placedByUserBeforeDrag: null },
-      live,
-    );
-    drops = recordSketchDimensionLabelDrop(
-      drops,
-      { handleId: "h-length", placedByUserBeforeDrag: null },
-      live,
-    );
-    drops = recordSketchDimensionLabelDrop(
-      drops,
-      { handleId: "h-angle", placedByUserBeforeDrag: false },
-      live,
-    );
-    // A re-drop moves the chip to the front; a chip that is gone leaves.
-    drops = recordSketchDimensionLabelDrop(
-      [...drops, { handleId: "h-deleted", placedByUserBeforeDrag: null }],
-      { handleId: "h-width", placedByUserBeforeDrag: null },
-      live,
-    );
-    expect(drops.map((drop) => drop.handleId)).toEqual([
-      "h-width",
-      "h-angle",
-      "h-length",
-    ]);
-    expect(getSketchDimensionLabelDropRank(drops, "h-width", true)).toEqual({
-      placedByUser: true,
-      dropRank: 0,
+  test("a label's rank comes from its committed placement, so undoing a drop (which restores the previous placement) restores the previous rank", () => {
+    const placing = { kind: "dimensionLine", offset: 1 } as const;
+    const dropped = { ...placing, offset: 2, dropOrder: 4 };
+    expect(getSketchDimensionLabelRank(undefined), "auto-placed").toEqual({
+      placedByUser: false,
+      dropOrder: null,
     });
     expect(
-      getSketchDimensionLabelDropRank(drops, "h-length", true),
-      "the displaced angle drop takes no recency slot",
-    ).toEqual({ placedByUser: true, dropRank: 1 });
+      getSketchDimensionLabelRank(placing),
+      "the Dimension tool's placing click: user-placed, never dropped",
+    ).toEqual({ placedByUser: true, dropOrder: null });
+    expect(getSketchDimensionLabelRank(dropped), "dropped").toEqual({
+      placedByUser: true,
+      dropOrder: 4,
+    });
     expect(
-      getSketchDimensionLabelDropRank(drops, "h-angle", true),
-      "an angle dropped at its displacement stays auto-placed for this session (else it would outrank the label displacing it and jump onto its anchor)",
-    ).toEqual({ placedByUser: false, dropRank: null });
-    expect(
-      getSketchDimensionLabelDropRank(drops, "h-other", true),
-      "never dropped: its committed placement alone",
-    ).toEqual({ placedByUser: true, dropRank: null });
+      getSketchDimensionLabelRank({
+        kind: "angleArc",
+        radius: 2,
+        side: "minor",
+        dropOrder: 5,
+      }),
+      "an angle placement ranks the same way",
+    ).toEqual({ placedByUser: true, dropOrder: 5 });
   });
 
   test("A-14: adding or removing lower-priority items (a hover preview, a newly pinned glyph) never moves a higher-priority one", () => {

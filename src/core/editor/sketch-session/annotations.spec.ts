@@ -489,6 +489,67 @@ test("T17j F-1: for every draggable dimension kind a placement at the label's ow
   ]);
 });
 
+// Logic lane (sketch-session seam `patchSketchDimensionAnnotationPlacement`):
+// a label drag stores the label's drop order in its placement, so the layout
+// can keep the latest drop in front; undo restores the previous placement and
+// with it the previous order, and a reload keeps it.
+test("a label drag puts the label's drop order above every other dimension's, the same on every frame of one drag", () => {
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  for (const y of [0, 3]) {
+    session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), [0, y]),
+      [4, y],
+    );
+  }
+  const dimensions = session.definition.entities.map((entity, index) => ({
+    kind: "lineLength",
+    entityId: entity.entityId,
+    dimensionId: `dimension_drop_${index}`,
+    label: "Length",
+    reference: true as const,
+  }));
+  session = {
+    ...session,
+    definition: {
+      ...session.definition,
+      dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+      dimensions,
+    } as unknown as SketchSessionState["definition"],
+  };
+  const drag = (state: SketchSessionState, id: string, point: SketchPoint) =>
+    patchSketchDimensionAnnotationPlacement(state, {
+      intent: "setDimensionAnnotationPlacement",
+      dimensionId: id,
+      point,
+    });
+  const orders = (state: SketchSessionState) =>
+    state.definition.dimensions.map((dimension) =>
+      "annotationPlacement" in dimension
+        ? dimension.annotationPlacement?.dropOrder
+        : undefined,
+    );
+
+  expect(orders(session), "premise: never dragged").toEqual([
+    undefined,
+    undefined,
+  ]);
+  session = drag(session, "dimension_drop_0", [2, 1]);
+  expect(orders(session), "the first drop").toEqual([1, undefined]);
+  session = drag(session, "dimension_drop_1", [2, 2]);
+  expect(orders(session), "a later drop goes above it").toEqual([1, 2]);
+  session = drag(session, "dimension_drop_0", [2, 1.5]);
+  session = drag(session, "dimension_drop_0", [2.5, 1.5]);
+  expect(
+    orders(session),
+    "every frame of one drag writes the same order",
+  ).toEqual([3, 2]);
+});
+
 test("unsupported constraint diagnostics reach annotation and list explanations", () => {
   const session = drawWith(newSpecSession(), "rectangle", [
     [1, 1],

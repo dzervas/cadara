@@ -63,20 +63,34 @@ export function updateDimensionAnnotationPlacementInDefinition(
   target: SketchDimensionRef,
   point: SketchPoint,
 ): SketchDefinition {
+  // The dragged label goes in front of every earlier drop. Every frame of one
+  // drag writes the same order, and undo restores the previous one.
+  const dropOrder =
+    Math.max(
+      0,
+      ...definition.dimensions.flatMap((dimension) =>
+        dimension.dimensionId !== target.dimensionId &&
+        "annotationPlacement" in dimension &&
+        dimension.annotationPlacement?.dropOrder !== undefined
+          ? [dimension.annotationPlacement.dropOrder]
+          : [],
+      ),
+    ) + 1;
   const dimensions = definition.dimensions.map((dimension) => {
     if (dimension.dimensionId !== target.dimensionId) {
       return dimension;
     }
 
-    const placement = inferCommittedDimensionAnnotationPlacement(
+    const inferred = inferCommittedDimensionAnnotationPlacement(
       session,
       definition,
       dimension,
       point,
     );
-    if (!placement) {
+    if (!inferred) {
       return dimension;
     }
+    const placement = { ...inferred, dropOrder };
 
     switch (dimension.kind) {
       case "distance":

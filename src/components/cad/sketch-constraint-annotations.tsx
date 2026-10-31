@@ -38,11 +38,10 @@ import {
 import {
   estimateSketchAnnotationExtent,
   getAnnotationProjectionId,
-  getSketchDimensionLabelDropRank,
-  recordSketchDimensionLabelDrop,
+  getSketchDimensionLabelRank,
   type SketchAnnotationLayoutObstacle,
   type SketchAnnotationLayoutViewport,
-  type SketchDimensionLabelDrop,
+  type SketchDimensionLabelRank,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import {
@@ -231,31 +230,37 @@ export function SketchConstraintAnnotations({
     untilAnchorMoves: { x: number; y: number; dx: number; dy: number } | null;
   } | null>(null);
   const labelDragPressShiftRef = useRef({ dx: 0, dy: 0 });
-  // cadara-0atd: the label drags' drops in the open sketch session, most
-  // recent first. Released, a chip is no longer `fixed`; laid out by id it
-  // could lose its anchor to the chip it was dropped on and jump a ring away
-  // while that one snapped back. Ranked first in their priority, the chips
-  // dropped on their anchor stay where they were dropped and the labels
-  // under them stay displaced. An angle label dropped at a displacement
-  // keeps the rank it had before the drag (the layout keeps displacing it).
-  const [labelDrops, setLabelDrops] = useState<
-    readonly SketchDimensionLabelDrop[]
-  >([]);
-  // Session-only: cleared once the sketch session ends (no definition).
-  if (definition === null && labelDrops.length > 0) {
-    setLabelDrops([]);
-  }
-  // cadara-0atd: the persisted half of that precedence: a committed
-  // placement is only written by the Dimension tool's placing click or a
-  // label drag, so it marks a label the user placed.
-  const userPlacedDimensionIds = new Set(
+  // Released, a chip is no longer `fixed`. Its committed
+  // placement ranks it (user-placed, then the latest drop first), so it
+  // stays where it was dropped and the labels under it stay displaced.
+  const placementByDimensionId = new Map(
     (definition?.dimensions ?? []).flatMap((dimension) =>
       "annotationPlacement" in dimension && dimension.annotationPlacement
-        ? [dimension.dimensionId as string]
+        ? [[dimension.dimensionId as string, dimension.annotationPlacement]]
         : [],
     ),
   );
-  const labelDropRef = useRef<SketchDimensionLabelDrop | null>(null);
+  // An angle label's placement cannot follow the pointer off its bisector,
+  // so a layout-displaced angle chip is dropped at its displacement. Its
+  // drag commits a placement that would let it outrank the label displacing
+  // it and jump onto its anchor at the release, so for the open sketch
+  // session it keeps the rank it had before the drag.
+  const [heldLabelRanks, setHeldLabelRanks] = useState<
+    ReadonlyMap<string, SketchDimensionLabelRank>
+  >(new Map());
+  // Session-only: cleared once the sketch session ends (no definition).
+  if (definition === null && heldLabelRanks.size > 0) {
+    setHeldLabelRanks(new Map());
+  }
+  const getLabelRank = (handle: { id: string; dimensionId: string }) =>
+    heldLabelRanks.get(handle.id) ??
+    getSketchDimensionLabelRank(
+      placementByDimensionId.get(handle.dimensionId),
+    );
+  const labelDropRef = useRef<{
+    handleId: string;
+    heldRank: SketchDimensionLabelRank | null;
+  } | null>(null);
   const onTrackedDimensionDrag: DimensionAnnotationDragListener = (
     handle,
     clientX,
@@ -280,10 +285,10 @@ export function SketchConstraintAnnotations({
         : { dx: 0, dy: 0 };
       labelDropRef.current = {
         handleId: handle.id,
-        placedByUserBeforeDrag:
+        heldRank:
           followsAlongLine || (displacement.dx === 0 && displacement.dy === 0)
             ? null
-            : userPlacedDimensionIds.has(handle.dimensionId),
+            : getLabelRank(handle),
       };
       setLabelDragOffset({
         handleId: handle.id,
@@ -302,9 +307,16 @@ export function SketchConstraintAnnotations({
             entry.dragHandle ? [entry.dragHandle.id] : [],
           ),
         );
-        setLabelDrops((drops) =>
-          recordSketchDimensionLabelDrop(drops, drop, liveHandleIds),
-        );
+        setHeldLabelRanks((ranks) => {
+          const next = new Map(
+            [...ranks].filter(
+              ([handleId]) =>
+                handleId !== drop.handleId && liveHandleIds.has(handleId),
+            ),
+          );
+          if (drop.heldRank) next.set(drop.handleId, drop.heldRank);
+          return next;
+        });
       }
     }
     const { dx, dy } = labelDragPressShiftRef.current;
@@ -383,11 +395,7 @@ export function SketchConstraintAnnotations({
               ? getDraggedLabelCentre(anchor, labelDragOffset)
               : null,
           ...(annotation.dragHandle
-            ? getSketchDimensionLabelDropRank(
-                labelDrops,
-                annotation.dragHandle.id,
-                userPlacedDimensionIds.has(annotation.dragHandle.dimensionId),
-              )
+            ? getLabelRank(annotation.dragHandle)
             : {}),
           // T14f (T-9): dimensions and problems are never clustered.
           cluster:

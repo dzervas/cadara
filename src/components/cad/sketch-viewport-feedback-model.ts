@@ -1,3 +1,4 @@
+import type { DimensionAnnotationPlacement } from "@/contracts/sketch/schema";
 import { SKETCH_POINT_RADII_PX } from "@/core/sketch-interaction/screen-radii";
 
 import type {
@@ -118,63 +119,32 @@ export interface SketchAnnotationLayoutItem {
    */
   placedByUser?: boolean;
   /**
-   * cadara-0atd: a chip a drag dropped on its anchor in this sketch session,
-   * by recency (0: the last drop). Among the user-placed labels of its
-   * priority it is placed first, so after the release it stays where it was
-   * dropped and the labels it was dropped on stay displaced.
+   * A chip a label drag dropped: its committed placement's `dropOrder`
+   * (persisted, so undo restores the previous one and a reload keeps it).
+   * Among the user-placed labels of its priority the highest order is placed
+   * first, so after the release a chip stays where it was dropped and the
+   * labels it was dropped on stay displaced.
    */
-  dropRank?: number | null;
+  dropOrder?: number | null;
 }
+
+/** A dimension label's layout rank: who placed it, and its drop order. */
+export type SketchDimensionLabelRank = Pick<
+  SketchAnnotationLayoutItem,
+  "placedByUser" | "dropOrder"
+>;
 
 /**
- * cadara-0atd: one label drag's drop, kept (most recent first) for the open
- * sketch session only. `placedByUserBeforeDrag` is null for a chip dropped on
- * its anchor. An angle label dropped at its layout displacement (its
- * placement cannot follow the pointer off the bisector) records whether it
- * was user-placed before the drag instead: the drag commits a placement,
- * which would otherwise let it outrank the label displacing it and jump
- * onto its anchor at the release.
+ * The rank its committed placement gives a label. A placement
+ * is only written by the Dimension tool's placing click or a label drag, so
+ * any placement marks a label the user placed.
  */
-export interface SketchDimensionLabelDrop {
-  handleId: string;
-  placedByUserBeforeDrag: boolean | null;
-}
-
-/** cadara-0atd: `drop` first, then the earlier drops whose chips still exist. */
-export function recordSketchDimensionLabelDrop(
-  drops: readonly SketchDimensionLabelDrop[],
-  drop: SketchDimensionLabelDrop,
-  liveHandleIds: ReadonlySet<string>,
-): readonly SketchDimensionLabelDrop[] {
-  return [
-    drop,
-    ...drops.filter(
-      (entry) =>
-        entry.handleId !== drop.handleId && liveHandleIds.has(entry.handleId),
-    ),
-  ];
-}
-
-/**
- * cadara-0atd: a label's layout rank inputs from the session's drops and
- * whether its dimension has a committed placement now.
- */
-export function getSketchDimensionLabelDropRank(
-  drops: readonly SketchDimensionLabelDrop[],
-  handleId: string,
-  placedByUser: boolean,
-): Pick<SketchAnnotationLayoutItem, "placedByUser" | "dropRank"> {
-  const onAnchor = drops.filter(
-    (entry) => entry.placedByUserBeforeDrag === null,
-  );
-  const rank = onAnchor.findIndex((entry) => entry.handleId === handleId);
-  if (rank >= 0) {
-    return { placedByUser, dropRank: rank };
-  }
-  const displaced = drops.find((entry) => entry.handleId === handleId);
+export function getSketchDimensionLabelRank(
+  placement: DimensionAnnotationPlacement | undefined,
+): SketchDimensionLabelRank {
   return {
-    placedByUser: displaced?.placedByUserBeforeDrag ?? placedByUser,
-    dropRank: null,
+    placedByUser: placement !== undefined,
+    dropOrder: placement?.dropOrder ?? null,
   };
 }
 
@@ -257,7 +227,7 @@ export function layoutSketchAnnotations(
       SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[left.priority] -
         SKETCH_ANNOTATION_LAYOUT_PRIORITY_RANK[right.priority] ||
       Number(!left.placedByUser) - Number(!right.placedByUser) ||
-      (left.dropRank ?? Infinity) - (right.dropRank ?? Infinity) ||
+      (right.dropOrder ?? -Infinity) - (left.dropOrder ?? -Infinity) ||
       (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );
   const clear = (
