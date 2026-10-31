@@ -1,4 +1,5 @@
 import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
+import type { DocumentId } from "@/contracts/shared/ids";
 import type { WorkbenchTabsState } from "./workbench-tabs";
 
 /** Manifest membership and names are durable; cached tabs supply presentation and the active part. */
@@ -25,19 +26,31 @@ export function createWorkbenchProjectTabs(
   };
 }
 
-/** New/Open can finish while discovery is pending; their real documents must join the project. */
+/**
+ * New/Open can finish while discovery is pending; their real documents must
+ * join the project. A first-part placeholder (the part a browser without a
+ * project session mounts before discovery) joins only when the discovered
+ * project lists it, so finding an existing project never adds a stray part.
+ */
 export function mergeDiscoveredWorkbenchProjectTabs(
   project: ProjectManifest,
   current: WorkbenchTabsState,
+  placeholderDocumentId: DocumentId | null = null,
 ): WorkbenchTabsState {
   const discovered = createWorkbenchProjectTabs(project, current, current);
   const ids = new Set(discovered.tabs.map((tab) => tab.documentId));
+  const joining = current.tabs.filter(
+    (tab) =>
+      !ids.has(tab.documentId) && tab.documentId !== placeholderDocumentId,
+  );
+  const tabs = [...discovered.tabs, ...joining];
   return {
-    tabs: [
-      ...discovered.tabs,
-      ...current.tabs.filter((tab) => !ids.has(tab.documentId)),
-    ],
-    activeDocumentId: current.activeDocumentId,
+    tabs,
+    activeDocumentId: tabs.some(
+      (tab) => tab.documentId === current.activeDocumentId,
+    )
+      ? current.activeDocumentId
+      : discovered.activeDocumentId,
   };
 }
 

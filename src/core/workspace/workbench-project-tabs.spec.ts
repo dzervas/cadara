@@ -103,3 +103,44 @@ test("an unchanged part list keeps the tabs state, and the last tab never closes
     followWorkbenchProjectManifest(project, { ...project, entries: [] }, open),
   ).toBe(open);
 });
+
+test("a first-part placeholder joins a discovered project only when the project lists it", () => {
+  const placeholder: WorkbenchTab = {
+    ...first,
+    documentId: "doc_placeholder",
+    title: "Workspace",
+  };
+  const mounted: WorkbenchTabsState = {
+    tabs: [placeholder],
+    activeDocumentId: placeholder.documentId,
+  };
+
+  expect(
+    mergeDiscoveredWorkbenchProjectTabs(
+      project,
+      mounted,
+      placeholder.documentId,
+    ),
+    "an existing project opens its own first part",
+  ).toEqual({ tabs: [first, second], activeDocumentId: first.documentId });
+
+  const created = {
+    ...project,
+    entries: [
+      {
+        kind: "part" as const,
+        automergeDocumentId: "automerge_doc_placeholder",
+        docId: placeholder.documentId,
+        name: placeholder.title,
+      },
+    ],
+  };
+  expect(
+    mergeDiscoveredWorkbenchProjectTabs(
+      created,
+      mounted,
+      placeholder.documentId,
+    ),
+    "the project created from the placeholder keeps it",
+  ).toEqual(mounted);
+});

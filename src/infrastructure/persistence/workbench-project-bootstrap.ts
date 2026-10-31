@@ -168,6 +168,14 @@ export function createWorkbenchProjectBootstrap(
     sessionStore,
     session,
     initialTabs,
+    /**
+     * Invariant: without a project session the mounted first part is only a
+     * placeholder until discovery. A reload between creating the first
+     * project and recording its session finds that project with no session
+     * and mounts a newly generated id; discovery drops it unless the project
+     * lists it, so the project's own first part opens instead.
+     */
+    firstPartPlaceholder: session ? null : defaultTab.documentId,
     initialFailure,
     partReadiness,
     registerPartReadiness: (

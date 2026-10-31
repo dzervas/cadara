@@ -191,7 +191,11 @@ function ProjectWorkbenchApp({
   if (project && !projectApplied) {
     tabsDispatch({
       type: "restoreProject",
-      state: mergeDiscoveredWorkbenchProjectTabs(project, tabsState),
+      state: mergeDiscoveredWorkbenchProjectTabs(
+        project,
+        tabsState,
+        projects.firstPartPlaceholder,
+      ),
     });
     setProjectApplied(true);
   }

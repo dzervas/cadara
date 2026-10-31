@@ -219,6 +219,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     persistenceEnabled: context.persistenceEnabled,
     registerPartReadiness: context.registerPartReadiness,
     initialTabs: context.initialTabs,
+    firstPartPlaceholder: context.firstPartPlaceholder,
     initialFailure: context.initialFailure,
     busy: busy || saving > 0,
     failure,

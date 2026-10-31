@@ -107,6 +107,7 @@ test("with a document repository the workbench restores the stored project sessi
     activeDocumentId: "doc_lid",
   });
   expect(bootstrap.initialTabs.activeDocumentId).toBe("doc_lid");
+  expect(bootstrap.firstPartPlaceholder, "a session part is real").toBeNull();
   expect(storage.writes).toEqual([]);
 });
 
@@ -144,6 +145,14 @@ test("a fresh persistent browser gives its first part a generated identity, uniq
     first.documentId,
   );
   expect(first.title).toBe("Workspace");
+  expect(
+    createWorkbenchProjectBootstrap(
+      createRecordingStorage().storage,
+      search,
+      true,
+    ).firstPartPlaceholder,
+    "without a session the mounted first part is a placeholder",
+  ).toMatch(/^doc_/);
 });
 
 test.each([

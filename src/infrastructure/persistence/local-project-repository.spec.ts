@@ -431,6 +431,58 @@ test("setParts on a mixed-document manifest preserves plain readme and discussio
   }
 });
 
+test("a reload that finds the first project before its session was recorded opens the project's part and adds no stray part", async () => {
+  const { repo, projects } = setup();
+  const emptyStorage = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  };
+  try {
+    const created = createWorkbenchProjectBootstrap(emptyStorage, "", true);
+    const project = unwrap(
+      await projects.create(
+        "My project",
+        created.initialTabs.tabs.map((tab) => ({
+          name: tab.title,
+          kind: "part" as const,
+          docId: tab.documentId,
+        })),
+      ),
+    );
+    const [firstPart] = created.initialTabs.tabs;
+
+    // The session record was never written: the reload mounts a new placeholder.
+    const reloaded = createWorkbenchProjectBootstrap(emptyStorage, "", true);
+    expect(reloaded.firstPartPlaceholder).toBe(
+      reloaded.initialTabs.activeDocumentId,
+    );
+    expect(reloaded.firstPartPlaceholder).not.toBe(firstPart!.documentId);
+    const merged = mergeDiscoveredWorkbenchProjectTabs(
+      project,
+      reloaded.initialTabs,
+      reloaded.firstPartPlaceholder,
+    );
+
+    expect(merged.tabs.map((tab) => tab.documentId)).toEqual([
+      firstPart!.documentId,
+    ]);
+    expect(merged.activeDocumentId).toBe(firstPart!.documentId);
+    const saved = unwrap(
+      await projects.setParts(
+        project.projectId,
+        merged.tabs.map((tab) => ({ docId: tab.documentId, name: tab.title })),
+      ),
+    );
+    expect(
+      saved.entries.map((entry) => entry.docId),
+      "no extra part",
+    ).toEqual([firstPart!.documentId]);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
 test("a document opened during discovery joins the manifest and survives repository reopen", async () => {
   const { repo, urls, documents, projects } = setup();
   try {
