@@ -79,12 +79,22 @@ import type {
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { FeatureId, SketchId } from "@/contracts/shared/ids";
+import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
+import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
+import {
+  IndexedDbAutomergeDocumentRepository,
+  type AutomergeRepositoryLike,
+} from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
+import { SharedMemoryStorage } from "@/infrastructure/persistence/shared-memory-automerge-storage.fixtures";
 
 import {
   appliedFeatureIds,
+  enclosureSessionWithTailFaceSketch,
   evaluatedModel,
   expectColdEquivalent,
   keptTailCheckpoints,
+  loadLandingModel,
   occInstance,
   open,
   previewModel,
@@ -384,17 +394,6 @@ test("document variable edits and removal on the landing enclosure rerun only th
     session.adapter.dispose();
   }
 }, 900_000);
-
-const loadLandingModel = async (model: string) =>
-  JSON.parse(
-    await readFile(
-      new URL(
-        `../../../landing/examples/${model}/model.cadara`,
-        import.meta.url,
-      ),
-      "utf8",
-    ),
-  ) as AuthoredModelDocument;
 
 /**
  * The landing enclosure with an empty sketch on the top face of its base
@@ -1244,46 +1243,6 @@ const spyOnSketchRebuilds = (session: Session) =>
     "rebuildAuthoredSketchRecord",
   );
 
-/**
- * Opens the landing enclosure and commits a copy of its footprint sketch on
- * the highest horizontal face of the evaluated model, at the history tail
- * (Finish Sketch of a new face sketch).
- */
-async function enclosureSessionWithTailFaceSketch() {
-  const source = await loadLandingModel("enclosure");
-  const session = await open(source);
-  const faces = (await session.snapshot()).document.render.records.flatMap(
-    ({ binding, geometry }) => {
-      if (binding.target.kind !== "face" || geometry.kind !== "mesh") {
-        return [];
-      }
-      const z = geometry.vertexPositions[2]!;
-      return readRenderMeshPoints(geometry.vertexPositions).every(
-        (position) => Math.abs(position[2] - z) < 1e-9,
-      )
-        ? [{ support: binding.target, z }]
-        : [];
-    },
-  );
-  const top = faces.reduce((highest, face) =>
-    face.z > highest.z ? face : highest,
-  );
-  const footprint = source.sketches[0]!;
-  const sketchId = await session.commitSketch({
-    label: "On top",
-    plane: {
-      support: top.support as Extract<
-        AuthoredModelDocument["sketches"][number]["plane"]["support"],
-        { kind: "face" }
-      >,
-      frame: { ...footprint.plane.frame, origin: [0, 0, top.z] },
-      key: null,
-    },
-    definition: footprint.definition,
-  });
-  return { session, sketchId };
-}
-
 // Finish Sketch of a face sketch publishes it and restores the committed
 // document. The commit registers its record with the inputs that restore
 // reads, so the restore neither re-solves it nor evaluates the history the
@@ -1325,6 +1284,49 @@ test("a restore of the session's own export after a new face sketch at the tail 
     sketchRebuilds.mockRestore();
     await expectColdEquivalent(session, exported, "published sketch", "exact");
   } finally {
+    session.adapter.dispose();
+  }
+}, 900_000);
+
+// The browser publishes through the Automerge repository, which keeps the
+// authored record order, so the publication has the key the commit
+// registered and its restore reuses the committed record.
+test("a restore of a new face sketch's publication through the Automerge repository evaluates and re-solves nothing (cadara-dx2k.12)", async () => {
+  const { session, opened } = await enclosureSessionWithTailFaceSketch();
+  await initializeBase64Wasm(automergeWasmBase64);
+  const repo = new Repo({ storage: new SharedMemoryStorage() });
+  try {
+    const repository = new IndexedDbAutomergeDocumentRepository({
+      repo: repo as unknown as AutomergeRepositoryLike,
+      assetStore: createMemoryGeometryAssetStore(),
+    });
+    const { documentId } = opened;
+    await repository.initialize({ documentId, document: opened });
+    const exported = await session.exported();
+    const ids = exported.sketches.at(-1)!.definition.constraintIds;
+    expect(ids, "premise: out of id order").not.toEqual(ids.toSorted());
+    const published = await repository.mutate({
+      documentId,
+      expected: opened,
+      document: exported,
+    });
+    if (!published.ok) throw new Error(JSON.stringify(published.status));
+
+    const sketchRebuilds = spyOnSketchRebuilds(session);
+    const { runs } = await restoreAndSnapshot(session, published.document);
+    expect(
+      { runs, sketchRebuilds: sketchRebuilds.mock.calls.length },
+      "the publication's restore evaluates and re-solves nothing",
+    ).toEqual({ runs: 0, sketchRebuilds: 0 });
+    sketchRebuilds.mockRestore();
+    await expectColdEquivalent(
+      session,
+      published.document,
+      "repository publication",
+      "exact",
+    );
+  } finally {
+    repo.networkSubsystem.disconnect();
     session.adapter.dispose();
   }
 }, 900_000);

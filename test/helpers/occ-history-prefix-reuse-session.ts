@@ -17,6 +17,7 @@ import type {
   FeatureId,
   PreviewId,
 } from "@/contracts/shared/ids";
+import { readRenderMeshPoints } from "@/contracts/render/render-mesh-geometry";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import type { OpenCascadeInstance } from "@/infrastructure/occ/kernel-capabilities";
@@ -393,3 +394,53 @@ export const appliedFeatureIds = (document: AuthoredModelDocument) => {
     .slice(0, end + 1)
     .flatMap((item) => (item.kind === "feature" ? [item.featureId] : []));
 };
+
+export const loadLandingModel = async (model: string) =>
+  JSON.parse(
+    await readFile(
+      new URL(`../../landing/examples/${model}/model.cadara`, import.meta.url),
+      "utf8",
+    ),
+  ) as AuthoredModelDocument;
+
+/**
+ * Opens the landing enclosure and commits a copy of its footprint sketch on
+ * the highest horizontal face of the evaluated model, at the history tail
+ * (Finish Sketch of a new face sketch). `opened` is the session's export
+ * before the commit.
+ */
+export async function enclosureSessionWithTailFaceSketch() {
+  const source = await loadLandingModel("enclosure");
+  const session = await open(source);
+  const faces = (await session.snapshot()).document.render.records.flatMap(
+    ({ binding, geometry }) => {
+      if (binding.target.kind !== "face" || geometry.kind !== "mesh") {
+        return [];
+      }
+      const z = geometry.vertexPositions[2]!;
+      return readRenderMeshPoints(geometry.vertexPositions).every(
+        (position) => Math.abs(position[2] - z) < 1e-9,
+      )
+        ? [{ support: binding.target, z }]
+        : [];
+    },
+  );
+  const top = faces.reduce((highest, face) =>
+    face.z > highest.z ? face : highest,
+  );
+  const footprint = source.sketches[0]!;
+  const opened = await session.exported();
+  const sketchId = await session.commitSketch({
+    label: "On top",
+    plane: {
+      support: top.support as Extract<
+        AuthoredModelDocument["sketches"][number]["plane"]["support"],
+        { kind: "face" }
+      >,
+      frame: { ...footprint.plane.frame, origin: [0, 0, top.z] },
+      key: null,
+    },
+    definition: footprint.definition,
+  });
+  return { session, sketchId, opened };
+}
