@@ -1,5 +1,6 @@
 import {
   getFeatureEditorFormField,
+  getFeatureEditorReferenceTargets,
   patchFeatureEditSession,
   getSelectionFilterForFeatureType,
 } from "@/core/editor/feature-editing";
@@ -8,7 +9,10 @@ import {
   getSketchPlaneEditPreviewLabel,
   getSketchPlaneEditSelectionTarget,
 } from "@/core/editor/sketch-plane-editing";
-import { getDefaultSelectionFilterForMode } from "@/core/editor/schema";
+import {
+  getDefaultSelectionFilterForMode,
+  primitiveRefEquals,
+} from "@/core/editor/schema";
 import type { EditorEvent, EditorTransitionResult, EditorState } from "./types";
 import type { EditorExtensionDependencies } from "./dependencies";
 import {
@@ -31,9 +35,22 @@ export function handleFormFeaturePatched(
     ...patchFeatureEditSession(state.session, event.patch),
     status: "idle" as const,
   };
+  // A reference the patch removed from the draft stops being highlighted
+  // as selected in the viewport.
+  const remainingReferences = getFeatureEditorReferenceTargets(nextSession);
+  const removedReferences = getFeatureEditorReferenceTargets(
+    state.session,
+  ).filter(
+    (target) =>
+      !remainingReferences.some((entry) => primitiveRefEquals(entry, target)),
+  );
 
   return emitFeaturePreview({
     ...state,
+    selection: state.selection.filter(
+      (target) =>
+        !removedReferences.some((entry) => primitiveRefEquals(entry, target)),
+    ),
     session: nextSession,
     pendingPreviewRequestId: null,
     preview: createFeatureSelectionPreview(nextSession),

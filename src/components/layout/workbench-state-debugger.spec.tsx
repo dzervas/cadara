@@ -27,6 +27,7 @@ test("src/components/layout/workbench-state-debugger.spec.tsx", async () => {
       selectableTargets: ["sketch_1.region_profile", "body_1"],
       featureIds: ["feature_extrude-1"],
       previewDiagnostics: "No diagnostics reported for the current preview.",
+      previewTargets: [],
       hoverTarget: "none",
       requirements: [
         {

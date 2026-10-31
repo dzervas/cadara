@@ -43,6 +43,7 @@ test("src/app/cadara-debug-platform.spec.ts installs the formal dev namespace an
     selectableTargets: ["body_feature_extrude-1"],
     featureIds: [],
     previewDiagnostics: "",
+    previewTargets: [],
     requirements: [],
     selectionDetail: {
       label: "none",

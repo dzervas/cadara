@@ -198,10 +198,14 @@ export function emitFeaturePreview(
   const definition = buildFeatureDefinition(state.session);
 
   if (!definition) {
+    // The draft cannot be previewed (a required input is missing or a
+    // parameter is invalid): the previous preview shows inputs that no
+    // longer apply.
     return {
       state: {
         ...state,
         pendingPreviewRequestId: null,
+        previewRenderables: null,
         session: {
           ...state.session,
           status: "idle",

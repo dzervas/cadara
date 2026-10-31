@@ -889,6 +889,10 @@ export function CadWorkbench({
       activeEditSession?.diagnostics
         .map((diagnostic) => `${diagnostic.severity}: ${diagnostic.message}`)
         .join("\n") ?? "",
+    previewTargets:
+      previewRenderables?.map((renderable) =>
+        getPrimitiveRefLabel(renderable.binding.target),
+      ) ?? [],
     requirements:
       selectionFilter?.requirements.map((requirement) => ({
         id: requirement.id,

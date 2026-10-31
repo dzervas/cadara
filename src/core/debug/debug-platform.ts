@@ -34,6 +34,8 @@ export interface WorkbenchDebugState {
   selectableTargets: readonly string[];
   featureIds: readonly string[];
   previewDiagnostics: string;
+  /** Target labels of the feature preview renderables the viewport draws. */
+  previewTargets: readonly string[];
   requirements: readonly WorkbenchDebugRequirement[];
   selectionDetail: WorkbenchDebugSelectionDetail;
   hoverTarget: string;

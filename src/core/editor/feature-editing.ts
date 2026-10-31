@@ -299,6 +299,21 @@ export function getFeatureEditorFormSchema(
   return definition.getFormSchema(session as never);
 }
 
+/** Every target the draft references through its form's reference fields. */
+export function getFeatureEditorReferenceTargets(
+  session: FeatureEditSessionState,
+): PrimitiveRef[] {
+  return getFeatureEditorFormSchema(session).sections.flatMap((section) =>
+    section.fields.flatMap((field) =>
+      field.kind === "referenceCollection"
+        ? [...field.value]
+        : field.kind === "referencePicker" && field.value
+          ? [field.value]
+          : [],
+    ),
+  );
+}
+
 export function getFeatureEditorFormField(
   session: FeatureEditSessionState,
   fieldId: string,
