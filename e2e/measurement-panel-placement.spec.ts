@@ -150,15 +150,27 @@ for (const viewport of [
     await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
     await expect(readout(page)).toHaveCount(0);
+    // While the new line's regions are derived the sketch is stale, and the
+    // readout adds a note saying so (a taller panel). Select once they are
+    // current, so both placement samples measure the same readout.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              window.__cadaraDebug?.getSketchSnapshot()?.liveRegions?.status,
+          ),
+        { timeout: 15_000 },
+      )
+      .toBe("current");
 
     await workbench.clickViewportAt(at(0.65));
     await expect(readout(page)).toBeVisible({ timeout: 15_000 });
     await expect(readout(page)).toContainText("Length");
-    // A pending solve temporarily adds a stale-geometry warning, changing
-    // the panel height independently of the debugger's expansion.
-    await expect(readout(page)).not.toContainText("is stale", {
-      timeout: 15_000,
-    });
+    expect(
+      await readout(page).innerText(),
+      "the readout of a current sketch carries no stale note",
+    ).not.toContain("is stale");
     await expectBottomLeftPlacement(page, "Sketch contents");
   });
 }
