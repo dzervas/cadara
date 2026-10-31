@@ -19,7 +19,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "preview:cf": "wrangler dev --local --ip 127.0.0.1 --port 4175 --show-interactive-dev-session=false",
-    "landing:models:build": "bun landing/scripts/build-bracket.ts && bun landing/scripts/build-wheel.ts && bun landing/scripts/build-enclosure.ts",
+    "landing:models:build": "bun scripts/build-cli.mjs && bun landing/scripts/build-bracket.ts && bun landing/scripts/build-wheel.ts && bun landing/scripts/build-enclosure.ts",
     "bench:init": "bun ./scripts/init-time-benchmark.ts",
     "bench:sketch": "bun ./scripts/sketch-solver-benchmark.ts",
     "bench:mutation": "bun ./scripts/mutation-latency-benchmark.ts",

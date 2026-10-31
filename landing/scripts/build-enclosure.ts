@@ -1,4 +1,5 @@
-// Run from the repository root:
+// Run from the repository root: `bun run landing:models:build` builds the
+// CLI into dist-cli first. Alone, against another CLI build:
 // bun scripts/build-cli.mjs /tmp/cadara-cli
 // bun landing/scripts/build-enclosure.ts /tmp/cadara-cli
 // Only the built production CLI authors native data and tessellates exports.
