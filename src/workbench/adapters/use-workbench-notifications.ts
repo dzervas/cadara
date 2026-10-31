@@ -6,11 +6,22 @@ import {
   type ErrorReporter,
 } from "@/contracts/errors";
 import type { ModelingService } from "@/application/modeling/modeling-service";
+import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
+import type { FeatureId } from "@/contracts/shared/ids";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import { subscribeBrowserOccWorkerFailure } from "@/infrastructure/occ/browser-kernel-runtime";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
+import {
+  followFeatureErrorNotification,
+  type FeatureErrorNotificationTie,
+} from "@/workbench/adapters/feature-error-notification";
 
 interface WorkbenchNotificationsInput {
+  /** The current document snapshot's identity and diagnostics; null before one loads. */
+  currentDocument?: Pick<
+    WorkspaceSnapshot["document"],
+    "documentId" | "diagnostics"
+  > | null;
   errorReporter: ErrorReporter;
   modelingService: Pick<
     ModelingService,
@@ -19,6 +30,7 @@ interface WorkbenchNotificationsInput {
 }
 
 export function useWorkbenchNotifications({
+  currentDocument,
   errorReporter,
   modelingService,
 }: WorkbenchNotificationsInput) {
@@ -37,8 +49,19 @@ export function useWorkbenchNotifications({
         : { owner: modelingService, message },
     );
   }, [modelingService]);
-  const [workbenchStatusNotification, setWorkbenchStatusNotification] =
-    useState<WorkbenchNotificationModel | null>(null);
+  const [workbenchStatus, setWorkbenchStatus] = useState<{
+    notification: WorkbenchNotificationModel;
+    featureError: FeatureErrorNotificationTie | null;
+  } | null>(null);
+  const workbenchStatusNotification = workbenchStatus?.notification ?? null;
+  const setWorkbenchStatusNotification = useCallback(
+    (notification: WorkbenchNotificationModel | null) => {
+      setWorkbenchStatus(
+        notification ? { notification, featureError: null } : null,
+      );
+    },
+    [],
+  );
 
   const showWorkbenchInfo = useCallback((message: string) => {
     setWorkbenchStatusNotification({
@@ -46,15 +69,40 @@ export function useWorkbenchNotifications({
       title: "Workbench action",
       message,
     });
-  }, []);
+  }, [setWorkbenchStatusNotification]);
 
-  const showWorkbenchError = useCallback((message: string) => {
-    setWorkbenchStatusNotification({
-      type: "error",
-      title: "Workbench action failed",
-      message,
-    });
-  }, []);
+  /** `featureId` ties the error to that feature's diagnostic in the document. */
+  const showWorkbenchError = useCallback(
+    (message: string, featureId?: FeatureId | null) => {
+      setWorkbenchStatus({
+        notification: {
+          type: "error",
+          title: "Workbench action failed",
+          message,
+        },
+        featureError: featureId
+          ? {
+              documentId: modelingService.currentDocumentId,
+              featureId,
+              observed: false,
+            }
+          : null,
+      });
+    },
+    [modelingService],
+  );
+
+  // A feature's error stops being news once the document no longer has it
+  // (state adjusted during render; settles once the tie stops changing).
+  if (workbenchStatus?.featureError && currentDocument) {
+    const featureError = followFeatureErrorNotification(
+      workbenchStatus.featureError,
+      currentDocument,
+    );
+    if (featureError === "outlived") setWorkbenchStatus(null);
+    else if (featureError !== workbenchStatus.featureError)
+      setWorkbenchStatus({ ...workbenchStatus, featureError });
+  }
 
   const reportDocumentFileActionFailure = useCallback(
     (source: string, message: string, error: unknown) => {

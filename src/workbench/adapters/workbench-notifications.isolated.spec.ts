@@ -405,3 +405,68 @@ test("a prior service result arriving before effect cleanup cannot label the new
   expect(first.listeners.size).toBe(0);
   expect(second.listeners.size).toBe(1);
 });
+
+test("a feature's status error clears once the document stops reporting it; an untied error stays", () => {
+  const reporter = createTestErrorReporter();
+  const documentId = "doc_feature_errors" as const;
+  const modelingService = {
+    currentDocumentId: documentId,
+    subscribeToDocumentChanges() { return () => undefined; },
+    async getHistoryRestoreState() { return restored; },
+  };
+  const filletError = {
+    code: "feature-reference-missing",
+    severity: "error" as const,
+    message: "Fillet 1 edge selection is incorrect.",
+    featureId: "feature_fillet-1" as const,
+    target: null,
+    detail: null,
+  };
+  let diagnostics: (typeof filletError)[] = [];
+  const useNotifications = () =>
+    useWorkbenchNotifications({
+      currentDocument: { documentId, diagnostics },
+      errorReporter: reporter,
+      modelingService,
+    });
+  // A state update made during render shows on the next render.
+  const renderSettled = () => {
+    hookHarness.render(useNotifications);
+    return hookHarness.render(useNotifications);
+  };
+
+  for (const [label, featureId] of [
+    ["tied", filletError.featureId],
+    ["untied", undefined],
+  ] as const) {
+    diagnostics = [];
+    renderSettled().showWorkbenchError(filletError.message, featureId);
+    expect(
+      renderSettled().workbenchStatusNotification?.message,
+      `${label}: shown before the snapshot that carries its error`,
+    ).toBe(filletError.message);
+
+    diagnostics = [filletError];
+    expect(
+      renderSettled().workbenchStatusNotification?.message,
+      `${label}: kept while the document reports the error`,
+    ).toBe(filletError.message);
+
+    // Undo restored what the fillet was built on.
+    diagnostics = [];
+    expect(
+      renderSettled().workbenchStatusNotification?.message ?? null,
+      `${label}: after the document stops reporting the error`,
+    ).toBe(label === "tied" ? null : filletError.message);
+    renderSettled().setWorkbenchStatusNotification(null);
+  }
+
+  renderSettled().showWorkbenchError("Name cannot be empty.");
+  diagnostics = [filletError];
+  renderSettled();
+  diagnostics = [];
+  expect(
+    renderSettled().workbenchStatusNotification?.message,
+    "An error not tied to a feature survives document changes.",
+  ).toBe("Name cannot be empty.");
+});

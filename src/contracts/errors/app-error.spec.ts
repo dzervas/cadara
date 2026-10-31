@@ -214,3 +214,40 @@ test("src/contracts/errors/app-error.spec.ts", () => {
     "Console reporter should emit actionable records.",
   ).toBe("[app-error]");
 });
+
+test("an error built from a feature's diagnostic names that feature", () => {
+  const featureError = appErrorFromModelingResult({
+    operation: "Delete Extrude 1",
+    fallbackMessage: "Delete Extrude 1 failed.",
+    diagnostics: [
+      {
+        code: "feature-reference-missing",
+        severity: "error",
+        message: "Fillet 1 edge selection is incorrect.",
+        featureId: "feature_fillet-1",
+        target: null,
+        detail: null,
+      },
+    ],
+    revisionState: { kind: "accepted" },
+  });
+  expect(
+    featureError.featureId,
+    "The workbench ties the error to the feature it reports.",
+  ).toBe("feature_fillet-1");
+
+  const documentError = appErrorFromModelingDiagnostic(
+    {
+      code: "document-variable-unresolved-reference",
+      severity: "error",
+      message: "Variable x references missing.",
+      target: null,
+      detail: null,
+    },
+    { operation: "Update variable" },
+  );
+  expect(
+    documentError.featureId,
+    "A diagnostic without a feature yields an untied error.",
+  ).toBeUndefined();
+});

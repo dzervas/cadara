@@ -2,7 +2,7 @@ import { err, ok, ResultAsync, type Result } from "neverthrow";
 
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { ContractValidationIssue } from "@/contracts/shared/validation";
-import type { RequestId } from "@/contracts/shared/ids";
+import type { FeatureId, RequestId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 
 export type AppErrorSeverity = "info" | "warning" | "error" | "fatal";
@@ -32,6 +32,8 @@ export interface AppError {
   cause?: unknown;
   requestId?: RequestId;
   target?: DurableRef | null;
+  /** The authored feature whose diagnostic this error reports, when known. */
+  featureId?: FeatureId | null;
   recoverable?: boolean;
 }
 
@@ -67,6 +69,7 @@ export function createAppError(input: {
   cause?: unknown;
   requestId?: RequestId;
   target?: DurableRef | null;
+  featureId?: FeatureId | null;
   recoverable?: boolean;
 }): AppError {
   return {
@@ -78,6 +81,7 @@ export function createAppError(input: {
     cause: input.cause,
     requestId: input.requestId,
     target: input.target,
+    ...(input.featureId ? { featureId: input.featureId } : {}),
     recoverable: input.recoverable ?? true,
   } as MarkedAppError;
 }
@@ -241,6 +245,7 @@ export function appErrorFromModelingDiagnostic(
     ],
     requestId: input.requestId,
     target: diagnostic.target,
+    featureId: diagnostic.featureId,
     recoverable: true,
   });
 }

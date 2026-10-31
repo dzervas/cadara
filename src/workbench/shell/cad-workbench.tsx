@@ -337,6 +337,7 @@ export function CadWorkbench({
     showWorkbenchInfo,
     workbenchStatusNotification,
   } = useWorkbenchNotifications({
+    currentDocument: snapshot?.document ?? null,
     errorReporter,
     modelingService,
   });

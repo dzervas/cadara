@@ -17,6 +17,7 @@ import type {
   EditorHistoryAvailability,
 } from "@/core/editor/state-machine";
 import type { DurableHistoryAvailability } from "@/contracts/modeling/durable-history";
+import type { FeatureId } from "@/contracts/shared/ids";
 import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {
   createAppError,
@@ -47,7 +48,7 @@ interface WorkbenchHistoryControllerInput {
   setInvalidVariableValueMessages: Dispatch<
     SetStateAction<Record<string, string>>
   >;
-  showWorkbenchError: (message: string) => void;
+  showWorkbenchError: (message: string, featureId?: FeatureId | null) => void;
   sketchSession: SketchSessionState | null;
   snapshot: WorkspaceSnapshot | null;
 }
@@ -239,7 +240,7 @@ export function useWorkbenchHistory({
         ...current,
         [variableId]: error.message,
       }));
-      showWorkbenchError(error.message);
+      showWorkbenchError(error.message, error.featureId);
     },
     [setInvalidVariableValueMessages, showWorkbenchError],
   );
@@ -384,7 +385,7 @@ export function useWorkbenchHistory({
             ],
           }),
         mapSuccess: (output) => ok(output),
-        onError: (error) => showWorkbenchError(error.message),
+        onError: (error) => showWorkbenchError(error.message, error.featureId),
       })
         .then((result) => {
           if (result.isErr()) {

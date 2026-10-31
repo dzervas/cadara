@@ -11,6 +11,7 @@ import type {
   WorkspaceSnapshot,
 } from "@/contracts/modeling/schema";
 import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
+import type { FeatureId } from "@/contracts/shared/ids";
 import { ok, type ErrorReporter } from "@/contracts/errors";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
@@ -25,7 +26,7 @@ interface WorkbenchObjectActionContext {
   documentOwner: WorkbenchDocumentOwner;
   errorReporter: ErrorReporter;
   snapshot: WorkspaceSnapshot | null;
-  showWorkbenchError: (message: string) => void;
+  showWorkbenchError: (message: string, featureId?: FeatureId | null) => void;
   showWorkbenchInfo: (message: string) => void;
 }
 
@@ -68,7 +69,7 @@ export function deleteWorkbenchTarget({
         ],
       }),
     mapSuccess: (result) => ok(result),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   }).then((result) => {
     if (result.isErr()) {
       return;
@@ -105,7 +106,7 @@ export async function addWorkbenchVariable({
         ],
       }),
     mapSuccess: (result) => ok(result.mutation.variableId),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   });
   return result.isOk() ? result.value : null;
 }
@@ -140,7 +141,7 @@ export function removeWorkbenchVariable({
         context,
       }),
     mapSuccess: (result) => ok(result),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   });
 }
 
@@ -181,7 +182,7 @@ export function setWorkbenchFeatureSuppression({
         ],
       }),
     mapSuccess: (result) => ok(result),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   }).then((result) => {
     if (result.isErr()) {
       return;
@@ -254,7 +255,7 @@ export function renameWorkbenchTarget({
         ],
       }),
     mapSuccess: (result) => ok(result),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   }).then((result) => {
     if (result.isErr()) {
       return;
@@ -303,6 +304,6 @@ export function setWorkbenchBodyAppearance({
         context,
       }),
     mapSuccess: (result) => ok(result),
-    onError: (error) => showWorkbenchError(error.message),
+    onError: (error) => showWorkbenchError(error.message, error.featureId),
   }).then(() => undefined);
 }
