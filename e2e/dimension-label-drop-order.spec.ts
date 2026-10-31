@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 // Lane: e2e (docs/testing.md). Seam: a dimension chip dropped onto another
-// chip, then the editor's undo, through the real annotation layout. Which of
+// chip, then the editor's undo, a sketch reopen or a reload, through the real
+// annotation layout and the persisted document. Which of
 // two chips sharing an anchor keeps it is decided by the layout from the
 // committed placements (user-placed first, then the latest drop), which only
 // the browser renders. The row records both chips at every frame and DOM
@@ -32,9 +33,12 @@ async function leaveTool(workbench: SketchWorkbenchHarness) {
  * the Dimension tool on one anchor between the lines: the lower id keeps the
  * anchor, the higher id is displaced.
  */
-async function twoChipsOnOneAnchor(workbench: SketchWorkbenchHarness) {
+async function twoChipsOnOneAnchor(
+  workbench: SketchWorkbenchHarness,
+  open = () => workbench.open(),
+) {
   const page = workbench.page;
-  await workbench.open();
+  await open();
   await workbench.activateTool("Start a new sketch.");
   await page
     .getByRole("button", { name: /Top Plane/ })
@@ -144,8 +148,9 @@ async function recordChips(
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-    (window as unknown as { __cadaraChipFrames: FrameRecorder }).__cadaraChipFrames =
-      recorder;
+    (
+      window as unknown as { __cadaraChipFrames: FrameRecorder }
+    ).__cadaraChipFrames = recorder;
   }, ids);
   await action();
   for (let round = 0; round < 12; round += 1) {
@@ -213,3 +218,58 @@ test("undoing a chip's drop onto another chip puts both chips back where they we
     ).toBe(true);
   }
 });
+
+const leader = (id: string) => `[data-sketch-annotation-leader="${id}"]`;
+
+async function reopenSketch(workbench: SketchWorkbenchHarness) {
+  await workbench.page
+    .getByRole("button", { name: /^Select .*Double-click to reopen\.$/ })
+    .filter({ hasText: /Sketch/ })
+    .first()
+    .dblclick({ timeout: 30_000 });
+  await workbench.expectSketchSessionActive();
+  await workbench.waitForAnimationFrames(3);
+}
+
+// The drop order is authored data: after the sketch is finished and reopened,
+// or the page reloaded, the chip dropped last still holds the shared anchor
+// and the chip it was dropped on is still drawn displaced (with a leader).
+for (const after of ["a sketch reopen", "a reload"] as const) {
+  test(`a chip dropped onto another chip keeps the shared anchor after ${after}`, async ({
+    page,
+  }) => {
+    const workbench = new SketchWorkbenchHarness(page);
+    const { lower, higher } = await twoChipsOnOneAnchor(
+      workbench,
+      after === "a reload"
+        ? () => workbench.openWithRepository()
+        : () => workbench.open(),
+    );
+    await expect(
+      page.locator(leader(higher)),
+      "premise: the higher-id chip is displaced off the shared anchor",
+    ).toBeAttached();
+    await dropChip(workbench, higher, await centreOf(page, lower));
+    await expect(
+      page.locator(leader(lower)),
+      "premise: the dropped chip took the anchor and displaced the other",
+    ).toBeAttached();
+    await expect(page.locator(leader(higher))).toHaveCount(0);
+
+    await workbench.activateTool("Exit the active sketch.");
+    await workbench.expectMachine("idle");
+    if (after === "a reload") {
+      await workbench.reloadPreservingRepositoryStorage();
+    }
+    await reopenSketch(workbench);
+    await expect(page.locator(chip(higher))).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.locator(leader(lower)),
+      `after ${after}, the chip it was dropped on is still displaced`,
+    ).toBeAttached();
+    await expect(
+      page.locator(leader(higher)),
+      `after ${after}, the dropped chip still holds the shared anchor`,
+    ).toHaveCount(0);
+  });
+}
