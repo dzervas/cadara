@@ -274,6 +274,7 @@ export function createModelingService(
   let displayedViewportLodTierId: OccTessellationTierId = "startup";
   let initializationSettled = false;
   let initializationPromise: Promise<void> | null = null;
+  let initializationThrew = false;
   let unsubscribeDocumentRepository: (() => void) | undefined;
   const documentChangeListeners = new Set<
     (event: ModelingServiceDocumentChangeEvent) => void
@@ -1805,6 +1806,7 @@ export function createModelingService(
     });
     initializationPromise = initialize
       .catch((error: unknown) => {
+        initializationThrew = true;
         canPersistOperationHistory = false;
         canPersistAuthoredDocument = false;
         historyRestoreState = createRestoreFailure(
@@ -1838,6 +1840,11 @@ export function createModelingService(
   }
 
   function resetOperationHistory() {
+    // A thrown initialization says nothing about the stored history, and the
+    // runtime may be half-restored: a reset would replace the intact stored
+    // copy with it while every edit keeps failing on the initialization. The
+    // failure stays; only a reload retries.
+    if (initializationThrew) return;
     const resetLocalHistory = () => {
       operationHistoryStore?.clear();
       operationHistoryPayload = createEmptyOperationHistory(currentDocumentId);

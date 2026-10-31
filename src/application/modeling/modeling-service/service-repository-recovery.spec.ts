@@ -273,6 +273,33 @@ it.each(["peer first", "reset first"] as const)(
   },
 );
 
+it("reset after a thrown initialization keeps the failure and the stored document instead of claiming recovery", async () => {
+  const original = await createSeedAuthoredModelDocument();
+  const repository = new MemoryDocumentRepository([original]);
+  const adapter = new MockKernelAdapter();
+  const initializationError = new Error("Geometry engine failed to start");
+  vi.spyOn(adapter, "restoreAuthoredModelDocument").mockRejectedValueOnce(initializationError);
+  const service = createModelingService(adapter, { currentDocumentId: original.documentId, documentRepository: repository });
+  try {
+    await expect(service.getHistoryRestoreState()).rejects.toBe(initializationError);
+    const reset = vi.spyOn(repository, "reset");
+    const initialize = vi.spyOn(repository, "initialize");
+    const statusBefore = service.getLocalSaveStatus();
+
+    service.resetOperationHistory();
+    // waitForPersistence rejects with the initialization error itself.
+    await service.waitForLocalMutations();
+
+    expect(reset, "the intact stored copy is not deleted").not.toHaveBeenCalled();
+    expect(initialize, "the half-restored runtime does not replace it").not.toHaveBeenCalled();
+    expect(await repository.load({ documentId: original.documentId, seedDocument: original }))
+      .toMatchObject({ ok: true, document: original });
+    expect(service.getLocalSaveStatus(), "no recovery is published").toBe(statusBefore);
+    await expect(service.getHistoryRestoreState()).rejects.toBe(initializationError);
+    await expect(service.renameDocument({ name: "After reset" })).rejects.toBe(initializationError);
+  } finally { service.dispose(); }
+});
+
 it.each(["new", "import", "reset"] as const)("explicit %s can resolve a failed initial repository load", async (resolution) => {
   const original = await createSeedAuthoredModelDocument();
   const repository = new InitiallyUnavailableRepository([original]);
