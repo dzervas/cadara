@@ -26,6 +26,11 @@ import {
   FILLET_FEATURE_SCHEMA_VERSION,
 } from "@/contracts/shared/versioning";
 
+/**
+ * The fixed first-part id of in-memory sessions, local peer channels and
+ * legacy browsers; persistent browsers generate their first part's id
+ * (see createWorkbenchProjectBootstrap).
+ */
 export const OCC_KERNEL_DOCUMENT_ID = "doc_workspace" as DocumentId;
 export const OCC_KERNEL_DOCUMENT_NAME = "Workspace";
 export const OCC_KERNEL_INITIAL_REVISION_ID = "rev_0001" as RevisionId;

@@ -31,6 +31,7 @@ import { SketchConstraintSolverAdapter } from "@/application/solver/sketch-const
 import { getBrowserSketchRegionDerivation } from "@/infrastructure/occ/sketch-derivation-worker-runtime";
 import { createInstrumentedSketchSolverAdapter } from "@/application/solver/instrumented-sketch-solver-adapter";
 import {
+  generateDocumentId,
   reduceWorkbenchTabs,
   type WorkbenchTab,
   type WorkbenchTabsAction,
@@ -48,7 +49,10 @@ import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-regi
 import { CadWorkbench } from "@/workbench/shell/cad-workbench";
 import { WorkbenchModelingServices } from "@/application/workspace/workbench-modeling-services";
 import { createDurableHistoryService } from "@/application/history/durable-history";
-import { createLocalStorageOperationHistoryStore } from "@/infrastructure/persistence/local-storage-operation-history-store";
+import {
+  createLocalStorageOperationHistoryStore,
+  createOperationHistoryStorageKey,
+} from "@/infrastructure/persistence/local-storage-operation-history-store";
 import { createLocalStorageWorkbenchTabsStore } from "@/infrastructure/persistence/local-storage-workbench-tabs-store";
 import {
   createDocumentRepositoryUrlStorageKey,
@@ -69,14 +73,6 @@ import {
 
 const DEFAULT_WORKBENCH_DOCUMENT_NAME = "Workspace";
 
-function generateDocumentId(): DocumentId {
-  const slug =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID().replaceAll("-", "")
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-  return `doc_${slug}` as DocumentId;
-}
-
 function createDefaultWorkbenchTab(documentId: DocumentId): WorkbenchTab {
   return {
     documentId,
@@ -84,10 +80,6 @@ function createDefaultWorkbenchTab(documentId: DocumentId): WorkbenchTab {
     storageKind: "browser",
     storageDescriptor: null,
   };
-}
-
-function createWorkbenchOperationHistoryKey(documentId: DocumentId) {
-  return `cad.modeling.operationHistory.${documentId}.v1`;
 }
 
 interface WorkbenchAppProps {
@@ -242,7 +234,7 @@ function ProjectWorkbenchApp({
                 ? null
                 : createLocalStorageOperationHistoryStore(
                     window.localStorage,
-                    createWorkbenchOperationHistoryKey(documentId),
+                    createOperationHistoryStorageKey(documentId),
                   ),
             documentRepositoryPersistence: "background",
             documentRepository,

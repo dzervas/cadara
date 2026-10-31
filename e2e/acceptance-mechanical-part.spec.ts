@@ -250,5 +250,5 @@ test("§5 saving failure: a linked save whose write fails says so and reports no
   expect(
     JSON.parse(await readEmulatedSavedFile(page, "part.cadara")),
     "the document was written",
-  ).toMatchObject({ documentId: "doc_workspace" });
+  ).toMatchObject({ documentId: await workbench.activeDocumentId() });
 });

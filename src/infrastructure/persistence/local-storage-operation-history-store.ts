@@ -8,6 +8,11 @@ import type {
 const MODELING_OPERATION_HISTORY_STORAGE_KEY =
   "cad.modeling.operationHistory.v1";
 
+/** The workbench's per-part operation history key. */
+export function createOperationHistoryStorageKey(documentId: string) {
+  return `cad.modeling.operationHistory.${documentId}.v1`;
+}
+
 export function createLocalStorageOperationHistoryStore(
   storage: StorageLike,
   key = MODELING_OPERATION_HISTORY_STORAGE_KEY,

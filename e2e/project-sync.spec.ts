@@ -103,21 +103,12 @@ test("two signed-in browsers edit one synced project live, see each other, and m
     await openWorkbench(guest, appUrl);
     await signIn(guest, email);
 
-    // The owner creates a project and uploads it.
-    await owner.bringToFront();
-    await owner
-      .getByRole("button", { name: "New project", exact: true })
-      .click();
-    await owner
-      .getByRole("textbox", { name: "Project name", exact: true })
-      .fill(projectName);
-    await owner
-      .getByRole("button", { name: "Create project", exact: true })
-      .click();
-    await expect(
-      owner.getByRole("combobox", { name: "Project", exact: true }),
-    ).toHaveValue(projectName, { timeout: 30_000 });
+    // The owner uploads its browser's first project; the guest browser has a
+    // first project of its own, so their first parts must not share an id.
     await openCadaraMenuItem(owner, "Upload to CADara…");
+    await owner
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill(projectName);
     await owner.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 30_000 });
 
@@ -128,10 +119,19 @@ test("two signed-in browsers edit one synced project live, see each other, and m
       .getByRole("listitem")
       .filter({ hasText: projectName })
       .click();
-    await expect(
-      guest.getByRole("combobox", { name: "Project", exact: true }),
-    ).toHaveValue(projectName, { timeout: 60_000 });
-    await expect(syncStatus(guest, "Synced")).toBeVisible({ timeout: 30_000 });
+    await expect(syncStatus(guest, "Synced")).toBeVisible({ timeout: 60_000 });
+    const ownerParts = await documentTabs(owner).evaluateAll((tabs) =>
+      tabs.map((tab) => tab.getAttribute("data-document-id")),
+    );
+    await expect
+      .poll(
+        () =>
+          documentTabs(guest).evaluateAll((tabs) =>
+            tabs.map((tab) => tab.getAttribute("data-document-id")),
+          ),
+        { message: "the guest shows the owner's first part", timeout: 30_000 },
+      )
+      .toEqual(ownerParts);
 
     // Presence: each sees the other participant.
     for (const page of [owner, guest])

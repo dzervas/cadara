@@ -20,6 +20,7 @@ import {
 import type { AutomergeHandleLike } from "./indexeddb-automerge-document-repository";
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import type { DocumentRepositoryUrlStore } from "./document-repository-url-store";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 
 const CATALOG_ID = "doc_project_catalog" as DocumentId;
 
@@ -516,7 +517,10 @@ export class LocalProjectRepository {
       if (known && known !== entryUrl) {
         if (conflict === "throw")
           throw new Error(
-            `${entry.name} is already stored in this browser as another document.`,
+            // Only parts that kept the legacy first-part id can collide.
+            entry.docId === OCC_KERNEL_DOCUMENT_ID
+              ? `${entry.name} uses the legacy first-part identity, and this browser already holds a different document under it. Open the project from a new browser profile.`
+              : `${entry.name} is already stored in this browser as another document.`,
           );
         continue;
       }

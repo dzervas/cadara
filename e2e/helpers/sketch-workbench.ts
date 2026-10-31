@@ -8,6 +8,10 @@ export function sketchDiagnosticMessage(page: Page): Locator {
   return page.locator("[data-sketch-diagnostic] [data-notification-message]");
 }
 
+/**
+ * Seeded histories use the legacy fixed first-part id: a stored history under
+ * it is legacy state, so the workbench keeps that id for its first part.
+ */
 const WORKSPACE_DOCUMENT_ID = "doc_workspace";
 const MODELING_OPERATION_HISTORY_STORAGE_KEY = `cad.modeling.operationHistory.${WORKSPACE_DOCUMENT_ID}.v1`;
 /** The default namespace's Automerge URL store (`document-repository-url-store.ts`). */
@@ -108,31 +112,39 @@ export class SketchWorkbenchHarness {
   }
 
   /**
-   * T17j3: the production document repository holds the workspace document
-   * (its Automerge URL is stored); never true with the repository disabled.
+   * T17j3: the production document repository holds the active part's
+   * document (its Automerge URL is stored); never true with the repository
+   * disabled.
    */
   async expectWorkspaceInRepository() {
     await expect
       .poll(() => this.workspaceRepositoryUrlStored(), {
-        message: "the document repository holds the workspace document",
+        message: "the document repository holds the active part's document",
         timeout: 30_000,
       })
       .toBe(true);
   }
 
-  private workspaceRepositoryUrlStored() {
+  /** The active document tab's part identity. */
+  activeDocumentId() {
+    return this.page
+      .locator('[data-document-tab][aria-selected="true"]')
+      .getAttribute("data-document-id");
+  }
+
+  private async workspaceRepositoryUrlStored() {
+    const documentId = await this.activeDocumentId();
     return this.page.evaluate(
       ({ urlKey, documentId }) =>
-        (
+        documentId !== null &&
+        ((
           JSON.parse(window.localStorage.getItem(urlKey) ?? "{}") as Record<
             string,
             string
           >
-        )[documentId]?.startsWith("automerge:") ?? false,
-      {
-        urlKey: DOCUMENT_REPOSITORY_URL_STORAGE_KEY,
-        documentId: WORKSPACE_DOCUMENT_ID,
-      },
+        )[documentId]?.startsWith("automerge:") ??
+          false),
+      { urlKey: DOCUMENT_REPOSITORY_URL_STORAGE_KEY, documentId },
     );
   }
 

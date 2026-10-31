@@ -89,6 +89,11 @@ export function createDocumentRepositoryUrlStorageKey(
     : `${DEFAULT_DOCUMENT_REPOSITORY_URL_STORAGE_KEY}:${namespace}`;
 }
 
+/** Local peer channels share one part-pointer store between repository databases. */
+export function isLocalPeerDocumentRepositoryNamespace(namespace: string) {
+  return namespace.startsWith(LOCAL_PEER_DOCUMENT_REPOSITORY_NAMESPACE_PREFIX);
+}
+
 export function getDocumentRepositoryStorageNamespace(search: string) {
   const searchParams = new URLSearchParams(search);
   if (searchParams.get("cadLocalPeerSync") === "1") {

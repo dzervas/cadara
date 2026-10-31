@@ -6,6 +6,8 @@ import { currentRevision } from "./helpers/acceptance";
 test.setTimeout(240_000);
 test.use({ viewport: { width: 1440, height: 960 } });
 
+const draftRecoveryKey = (documentId: string | null) => `cad.sketchDraftRecovery.${documentId}.v1`;
+
 async function drawPrivateDraft(workbench: SketchWorkbenchHarness) {
   const { page } = workbench;
   await workbench.openWithRepository();
@@ -21,11 +23,12 @@ async function drawPrivateDraft(workbench: SketchWorkbenchHarness) {
   await page.keyboard.press("Escape");
   await expect.poll(() => page.evaluate(() => window.__cadaraDebug?.getSketchSnapshot()?.entities.length), { timeout: 30_000 }).toBe(10);
   // Assert the action trigger BEFORE navigating: pagehide alone must not make this green.
-  await expect.poll(() => page.evaluate(() => {
-    const key = localStorage.getItem("cad.sketchDraftRecovery.doc_workspace.v1");
+  const draftKey = draftRecoveryKey(await workbench.activeDocumentId());
+  await expect.poll(() => page.evaluate((draftKey) => {
+    const key = localStorage.getItem(draftKey);
     const record = JSON.parse(key ? localStorage.getItem(key) ?? "null" : "null");
     return record ? { actions: record.completedActions, entities: record.definition.entities.length } : null;
-  }), { timeout: 65_000 }).toEqual({ actions: 10, entities: 10 });
+  }, draftKey), { timeout: 65_000 }).toEqual({ actions: 10, entities: 10 });
   expect(await currentRevision(page)).toBe(revision);
   return revision;
 }
@@ -48,7 +51,8 @@ test("reload offers Resume, restores geometry privately, and only Finish publish
   await workbench.expectMachine("idle", 30_000);
   await expect(page.locator("[data-history-sketch-id]")).toHaveCount(1);
   await expect.poll(() => currentRevision(page), { timeout: 30_000 }).not.toBe(revision);
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("cad.sketchDraftRecovery.doc_workspace.v1"))).toBeNull();
+  const draftKey = draftRecoveryKey(await workbench.activeDocumentId());
+  await expect.poll(() => page.evaluate((draftKey) => localStorage.getItem(draftKey), draftKey)).toBeNull();
 });
 
 test("Discard removes the recovered draft without publishing or offering it again", async ({ page }) => {

@@ -19,6 +19,8 @@ import type { AutomergeRepositoryLike } from "./indexeddb-automerge-document-rep
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import { MemoryDocumentRepositoryUrlStore } from "./document-repository-url-store";
 import { LocalProjectRepository } from "./local-project-repository";
+import { createWorkbenchProjectBootstrap } from "./workbench-project-bootstrap";
+import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { createSeedAuthoredModelDocument } from "@/application/modeling/modeling-test-fixtures";
 import type {
@@ -35,8 +37,10 @@ function unwrap<T>(result: ProjectResult<T>) {
   return result.value;
 }
 
-function setup(urls = new MemoryDocumentRepositoryUrlStore()) {
-  const repo = new Repo();
+function setup(
+  urls = new MemoryDocumentRepositoryUrlStore(),
+  repo = new Repo(),
+) {
   const documents = new IndexedDbAutomergeDocumentRepository({
     repo: repo as unknown as AutomergeRepositoryLike,
     urlStore: urls,
@@ -795,6 +799,89 @@ test("an uploaded project records its service link, and a synced manifest joins 
       adopted,
     );
     expect(unwrap(await guest.list())).toHaveLength(1);
+  } finally {
+    await owner.repo.shutdown();
+  }
+});
+
+/**
+ * Two browsers' first projects, each made of the part its workbench
+ * bootstrap opened first; sync delivers both into one Repo.
+ */
+async function twoBrowsersFirstProjects(firstPartId: () => DocumentId) {
+  const owner = setup();
+  const guest = setup(new MemoryDocumentRepositoryUrlStore(), owner.repo);
+  const create = async (browser: typeof owner) => {
+    const docId = firstPartId();
+    const project = unwrap(
+      await browser.projects.create("My project", [
+        { name: "Workspace", kind: "part", docId },
+      ]),
+    );
+    return { docId, project, url: browser.urls.get(docId) };
+  };
+  const owned = await create(owner);
+  const guestOwn = await create(guest);
+  return {
+    owner,
+    guest,
+    owned,
+    guestOwn,
+    manifestDocumentId: unwrap(
+      await owner.projects.manifestDocumentId(owned.project.projectId),
+    ),
+  };
+}
+
+const freshBrowserFirstPartId = () =>
+  createWorkbenchProjectBootstrap(
+    { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    "",
+    true,
+  ).initialTabs.activeDocumentId;
+
+test("another browser opens a fresh browser's first project beside its own first project", async () => {
+  const { owner, guest, owned, guestOwn, manifestDocumentId } =
+    await twoBrowsersFirstProjects(freshBrowserFirstPartId);
+  try {
+    const adopted = unwrap(
+      await guest.projects.adoptManifest(manifestDocumentId),
+    );
+
+    expect(adopted.projectId).toBe(owned.project.projectId);
+    expect(
+      guest.urls.get(owned.docId),
+      "the owner's part opens from the synced document",
+    ).toBe(owned.url);
+    expect(
+      guest.urls.get(guestOwn.docId),
+      "the guest's own first part is untouched",
+    ).toBe(guestOwn.url);
+    expect(
+      unwrap(await guest.projects.list()).map((listed) => listed.projectId),
+    ).toEqual([guestOwn.project.projectId, owned.project.projectId]);
+  } finally {
+    await owner.repo.shutdown();
+  }
+});
+
+test("two legacy browsers' first parts collide and the refusal names the legacy identity", async () => {
+  const { owner, guest, owned, guestOwn, manifestDocumentId } =
+    await twoBrowsersFirstProjects(() => OCC_KERNEL_DOCUMENT_ID);
+  try {
+    const refused = await guest.projects.adoptManifest(manifestDocumentId);
+
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.diagnostic.message).toBe(
+      "Workspace uses the legacy first-part identity, and this browser already holds a different document under it. Open the project from a new browser profile.",
+    );
+    expect(
+      guest.urls.get(owned.docId),
+      "the guest keeps its own document",
+    ).toBe(guestOwn.url);
+    expect(
+      unwrap(await guest.projects.list()).map((listed) => listed.projectId),
+    ).toEqual([guestOwn.project.projectId]);
   } finally {
     await owner.repo.shutdown();
   }

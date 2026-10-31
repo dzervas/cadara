@@ -26,6 +26,15 @@ export type WorkbenchTabsAction =
       storageDescriptor: string | null;
     };
 
+/** A new part's document identity, unique across browsers. */
+export function generateDocumentId(): DocumentId {
+  const slug =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().replaceAll("-", "")
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return `doc_${slug}` as DocumentId;
+}
+
 export function createInitialWorkbenchTabsState(
   seed: WorkbenchTab,
 ): WorkbenchTabsState {

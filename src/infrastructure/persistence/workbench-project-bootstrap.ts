@@ -6,6 +6,7 @@ import type {
   WorkbenchTab,
   WorkbenchTabsState,
 } from "@/core/workspace/workbench-tabs";
+import { generateDocumentId } from "@/core/workspace/workbench-tabs";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { WorkbenchPartReadiness } from "@/application/workspace/workbench-part-readiness";
 import type { PendingLocalWrites } from "@/application/workspace/local-save-guard";
@@ -16,7 +17,9 @@ import {
   createDocumentRepositoryUrlStorageKey,
   createLocalStorageDocumentRepositoryUrlStore,
   getDocumentRepositoryStorageNamespace,
+  isLocalPeerDocumentRepositoryNamespace,
 } from "./document-repository-url-store";
+import { createOperationHistoryStorageKey } from "./local-storage-operation-history-store";
 import {
   createLocalStorageWorkbenchTabsStore,
   type StorageLike,
@@ -70,8 +73,34 @@ export function createWorkbenchProjectBootstrap(
           : undefined,
       ).load()
     : null;
+  const urls = createLocalStorageDocumentRepositoryUrlStore(
+    storage,
+    createDocumentRepositoryUrlStorageKey(namespace),
+  );
+  /*
+   * Invariant: with persistence on, a fresh browser's first part gets a
+   * generated identity like any other part, so another browser can open the
+   * project without its own first part claiming the same id. The fixed
+   * OCC_KERNEL_DOCUMENT_ID survives only where it cannot collide or must be
+   * shared:
+   * - no persistence: in-memory tabs, never a project, never shared;
+   * - legacy state: this browser already stored a part (or a pre-repository
+   *   operation history) under the fixed id, which keeps it; renaming would
+   *   rewrite the identity embedded in an already shared document;
+   * - a local peer channel: its peers share one part-pointer store and find
+   *   their common document by this id.
+   */
+  const firstDocumentId =
+    !persistenceEnabled ||
+    isLocalPeerDocumentRepositoryNamespace(namespace) ||
+    urls.get(OCC_KERNEL_DOCUMENT_ID) !== null ||
+    storage.getItem(
+      createOperationHistoryStorageKey(OCC_KERNEL_DOCUMENT_ID),
+    ) !== null
+      ? OCC_KERNEL_DOCUMENT_ID
+      : generateDocumentId();
   const defaultTab: WorkbenchTab = {
-    documentId: session?.activeDocumentId ?? OCC_KERNEL_DOCUMENT_ID,
+    documentId: session?.activeDocumentId ?? firstDocumentId,
     title: "Workspace",
     storageKind: "browser",
     storageDescriptor: null,
@@ -112,10 +141,6 @@ export function createWorkbenchProjectBootstrap(
         { LocalProjectRepository },
         { IndexedDbAutomergeDocumentRepository },
       ]) => {
-        const urls = createLocalStorageDocumentRepositoryUrlStore(
-          storage,
-          createDocumentRepositoryUrlStorageKey(namespace),
-        );
         const catalogUrls = createLocalStorageDocumentRepositoryUrlStore(
           storage,
           createDocumentRepositoryUrlStorageKey(projectNamespace),

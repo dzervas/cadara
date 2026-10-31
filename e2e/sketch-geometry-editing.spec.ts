@@ -4,6 +4,8 @@ import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 const MODELING_OPERATION_HISTORY_STORAGE_KEY =
   "cad.modeling.operationHistory.doc_workspace.v1";
+const operationHistoryKey = (documentId: string | null) =>
+  `cad.modeling.operationHistory.${documentId}.v1`;
 
 test.setTimeout(60_000);
 test.use({ viewport: { width: 1440, height: 960 } });
@@ -207,32 +209,35 @@ test("repository-backed sketch commit waits for publication acknowledgement and 
     timeout: 30_000,
   });
 
-  const persistedSketch = await page.evaluate((storageKey) => {
-    const serialized =
-      window.__cadLastOperationHistoryPayload ??
-      window.localStorage.getItem(storageKey);
-    if (!serialized) {
-      return null;
-    }
+  const persistedSketch = await page.evaluate(
+    (storageKey) => {
+      const serialized =
+        window.__cadLastOperationHistoryPayload ??
+        window.localStorage.getItem(storageKey);
+      if (!serialized) {
+        return null;
+      }
 
-    const payload = JSON.parse(serialized) as {
-      entries?: Array<{
-        kind: string;
-        payload?: {
-          definition?: {
-            entities?: unknown[];
+      const payload = JSON.parse(serialized) as {
+        entries?: Array<{
+          kind: string;
+          payload?: {
+            definition?: {
+              entities?: unknown[];
+            };
           };
-        };
-      }>;
-    };
-    const commitSketch = payload.entries
-      ?.filter((entry) => entry.kind === "commitSketch")
-      .at(-1);
+        }>;
+      };
+      const commitSketch = payload.entries
+        ?.filter((entry) => entry.kind === "commitSketch")
+        .at(-1);
 
-    return {
-      entityCount: commitSketch?.payload?.definition?.entities?.length ?? 0,
-    };
-  }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
+      return {
+        entityCount: commitSketch?.payload?.definition?.entities?.length ?? 0,
+      };
+    },
+    operationHistoryKey(await workbench.activeDocumentId()),
+  );
 
   expect(persistedSketch?.entityCount).toBeGreaterThanOrEqual(1);
 
