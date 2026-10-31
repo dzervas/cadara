@@ -128,8 +128,10 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
         setProjects(available);
         setProject(opened);
         setSessionKey(opened.projectId);
+        return true;
       } catch (error) {
         report(error);
+        return false;
       } finally {
         finish();
         setBusy(false);
@@ -138,14 +140,22 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     [context, pendingWrites, report, saveSession, unwrap],
   );
 
+  /** Writes the change from `previous` to `tabs` (see LocalProjectRepository.setParts). */
   const saveParts = useCallback(
-    async (projectId: string, tabs: readonly WorkbenchTab[]) => {
+    async (
+      projectId: string,
+      tabs: readonly WorkbenchTab[],
+      previous?: readonly WorkbenchTab[],
+    ) => {
+      const parts = (list: readonly WorkbenchTab[]) =>
+        list.map((tab) => ({ docId: tab.documentId, name: tab.title }));
       try {
         const result = await pendingWrites.persist(projectId, async () => {
           const repository = await context.getRepository();
           return repository.setParts(
             projectId,
-            tabs.map((tab) => ({ docId: tab.documentId, name: tab.title })),
+            parts(tabs),
+            previous && parts(previous),
           );
         });
         if (!result.ok) report(new Error(result.diagnostic.message));
@@ -156,6 +166,37 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     },
     [context, pendingWrites, report],
   );
+
+  // Collaborators edit a synced manifest too: follow it while it is open.
+  const openProjectId = project?.projectId;
+  useEffect(() => {
+    if (!openProjectId) return;
+    let live = true;
+    let unsubscribe: (() => void) | null = null;
+    void context
+      .getRepository()
+      .then((repository) =>
+        repository.subscribe(openProjectId, (manifest) => {
+          setProject((current) =>
+            current?.projectId === manifest.projectId &&
+            JSON.stringify(current) !== JSON.stringify(manifest)
+              ? manifest
+              : current,
+          );
+        }),
+      )
+      .then((stop) => {
+        if (live) unsubscribe = stop;
+        else stop();
+      })
+      .catch((error: unknown) => {
+        if (live) report(error);
+      });
+    return () => {
+      live = false;
+      unsubscribe?.();
+    };
+  }, [context, openProjectId, report]);
 
   /** Shows a manifest the active project gained in place (e.g. its service link). */
   const replaceProject = useCallback(

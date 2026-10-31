@@ -18,7 +18,7 @@ afterEach(() => {
 
 const link = { orgId: "org", projectId: "remote" };
 
-async function makeTransport() {
+async function makeTransport({ online = true } = {}) {
   await initializeBase64Wasm(automergeWasmBase64);
   const repo = new Repo();
   repos.push(repo);
@@ -35,6 +35,8 @@ async function makeTransport() {
     },
     apiOrigin: "https://api.cadara.test",
     getProjectRepo: async () => repo,
+    watchNetwork: () => () => undefined,
+    isOnline: () => online,
   });
   return {
     transport,
@@ -58,6 +60,7 @@ test("the worker starts after the bridge is up and receives presence set before 
   transport.start({
     link,
     manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
     issueGrant: async () => ({ token: "t", expiresIn: 600, role: "editor" }),
   });
   transport.setPresence(link, {
@@ -85,6 +88,7 @@ test("token requests are answered with a fresh grant whose role reaches subscrib
   transport.start({
     link,
     manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
     issueGrant: async () => ({
       token: `token${++issued}`,
       expiresIn: 600,
@@ -109,6 +113,7 @@ test("a refused grant is reported to the worker so it backs off", async () => {
   transport.start({
     link,
     manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
     issueGrant: async () => {
       throw new Error("Sign in to CADara to sync projects.");
     },
@@ -130,6 +135,7 @@ test("waiting for a download resolves once synced and fails when sync stops", as
     transport.start({
       link,
       manifestDocumentId: "manifest",
+      foreignDocumentIds: [],
       issueGrant: async () => ({ token: "t", expiresIn: 600, role: "editor" }),
     });
   start();
@@ -153,4 +159,40 @@ test("waiting for a download resolves once synced and fails when sync stops", as
   const stopped = transport.whenSynced(link);
   transport.stop(link);
   await expect(stopped).rejects.toThrow("stopped");
+});
+
+test("the connection stays up until every start is released", async () => {
+  const { transport, posted } = await makeTransport();
+  const start = () =>
+    transport.start({
+      link,
+      manifestDocumentId: "manifest",
+      foreignDocumentIds: ["other"],
+      issueGrant: async () => ({ token: "t", expiresIn: 600, role: "editor" }),
+    });
+  start();
+  start();
+  await vi.waitFor(() =>
+    expect(posted[0]).toMatchObject({
+      kind: "projectSyncStart",
+      foreignDocumentIds: ["other"],
+    }),
+  );
+  transport.stop(link);
+  expect(posted.some((message) => message.kind === "projectSyncStop")).toBe(
+    false,
+  );
+  transport.stop(link);
+  expect(posted.at(-1)).toEqual({ kind: "projectSyncStop", link });
+});
+
+test("a page that starts offline tells the worker", async () => {
+  const { transport, posted } = await makeTransport({ online: false });
+  transport.start({
+    link,
+    manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
+    issueGrant: async () => ({ token: "t", expiresIn: 600, role: "editor" }),
+  });
+  expect(posted[0]).toEqual({ kind: "projectSyncNetwork", online: false });
 });

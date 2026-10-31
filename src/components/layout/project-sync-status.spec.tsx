@@ -67,3 +67,24 @@ test("an empty project shows no presence strip", () => {
     "People in this project",
   );
 });
+
+test("healthy states stay graphite; offline and failures carry status colour", () => {
+  const color = (html: string) =>
+    html.match(/--badge-dot-color:var\(--mantine-color-([a-z]+)/)?.[1];
+  expect(
+    color(render(<ProjectSyncIndicator connection="synced" role="editor" />)),
+  ).toBe("gray");
+  expect(
+    color(render(<ProjectSyncIndicator connection="syncing" role="editor" />)),
+  ).toBe("gray");
+  expect(
+    color(render(<ProjectSyncIndicator connection="offline" role="editor" />)),
+  ).toBe("yellow");
+  expect(
+    color(
+      render(
+        <ProjectSyncIndicator connection="offline" role="editor" failed />,
+      ),
+    ),
+  ).toBe("red");
+});

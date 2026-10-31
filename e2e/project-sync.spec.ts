@@ -69,6 +69,18 @@ async function addVariable(page: Page, variableId: string) {
     .press("Enter");
 }
 
+function documentTabs(page: Page) {
+  return page.locator("[data-document-tab]");
+}
+
+async function newPart(page: Page) {
+  await page.bringToFront();
+  const before = await documentTabs(page).count();
+  await page.getByRole("button", { name: "File", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New", exact: true }).click();
+  await expect(documentTabs(page)).toHaveCount(before + 1);
+}
+
 function variableRow(page: Page, variableId: string) {
   return page.locator(`[data-variable-row="${variableId}"]`);
 }
@@ -172,6 +184,22 @@ test("two signed-in browsers edit one synced project live, see each other, and m
         timeout: 30_000,
       });
     }
+
+    // Both add a part while the owner is offline, and the guest switches
+    // tabs: after reconnecting, neither part list overwrites the other.
+    await ownerContext.setOffline(true);
+    await expect(syncStatus(owner, "Offline")).toBeVisible({ timeout: 30_000 });
+    await newPart(owner);
+    await newPart(guest);
+    await documentTabs(guest).first().click();
+    await ownerContext.setOffline(false);
+    for (const page of [owner, guest])
+      await expect(documentTabs(page)).toHaveCount(3, { timeout: 60_000 });
+    await owner.bringToFront();
+    await documentTabs(owner).first().click();
+    await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 60_000 });
+    for (const page of [owner, guest])
+      await expect(documentTabs(page)).toHaveCount(3);
   } finally {
     await ownerContext.close();
     await guestContext.close();

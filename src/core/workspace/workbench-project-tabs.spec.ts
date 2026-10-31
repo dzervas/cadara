@@ -4,6 +4,7 @@ import type { WorkbenchTab, WorkbenchTabsState } from "./workbench-tabs";
 import { reduceWorkbenchTabs } from "./workbench-tabs";
 import {
   createWorkbenchProjectTabs,
+  followWorkbenchProjectManifest,
   mergeDiscoveredWorkbenchProjectTabs,
 } from "./workbench-project-tabs";
 
@@ -64,4 +65,41 @@ test("New and Open during project discovery survive manifest reconciliation", ()
   expect(
     mergeDiscoveredWorkbenchProjectTabs({ ...project }, reconciled),
   ).toEqual(reconciled);
+});
+
+test("a collaborator's manifest change opens added parts, closes removed ones and follows renames", () => {
+  const open: WorkbenchTabsState = {
+    tabs: [second, first],
+    activeDocumentId: second.documentId,
+  };
+  const next: ProjectManifest = {
+    ...project,
+    entries: [
+      { ...project.entries[0]!, name: "Body" },
+      {
+        kind: "part",
+        automergeDocumentId: "automerge_doc_c",
+        docId: "doc_c",
+        name: "Hinge",
+      },
+    ],
+  };
+  expect(followWorkbenchProjectManifest(project, next, open)).toEqual({
+    tabs: [
+      { ...first, title: "Body" },
+      { ...first, documentId: "doc_c", title: "Hinge" },
+    ],
+    activeDocumentId: first.documentId,
+  });
+});
+
+test("an unchanged part list keeps the tabs state, and the last tab never closes", () => {
+  const open: WorkbenchTabsState = {
+    tabs: [first],
+    activeDocumentId: first.documentId,
+  };
+  expect(followWorkbenchProjectManifest(project, project, open)).toBe(open);
+  expect(
+    followWorkbenchProjectManifest(project, { ...project, entries: [] }, open),
+  ).toBe(open);
 });

@@ -8,7 +8,7 @@ import {
 import {
   nextRoomAllowList,
   sameDocumentSet,
-} from "@/application/project-sync/room-allow-list";
+} from "@/core/project-sync/room-allow-list";
 import type { ProjectServiceLink } from "@/contracts/modeling/project-manifest";
 import { parseProjectManifest } from "@/contracts/modeling/project-manifest.runtime-schema";
 import type {
@@ -77,6 +77,7 @@ interface HostContext {
   knownRoomPeers: Set<PeerId>;
   requestToken(link: ProjectServiceLink): Promise<SyncTokenResponse>;
   watchNetwork(onChange: (online: boolean) => void): () => void;
+  online(): boolean;
 }
 
 /**
@@ -104,29 +105,33 @@ class HostedProject {
   readonly manifestId: string;
   private readonly host: HostContext;
 
+  /** Documents of other local projects: never shared, whatever the manifest lists. */
+  private readonly foreignDocumentIds: ReadonlySet<string>;
+
   constructor(
-    link: ProjectServiceLink,
-    manifestId: string,
-    roomUrl: string,
+    request: Extract<ProjectSyncWorkerRequest, { kind: "projectSyncStart" }>,
     host: HostContext,
   ) {
-    this.link = link;
-    this.manifestId = manifestId;
+    this.link = request.link;
+    this.manifestId = request.manifestDocumentId;
+    this.foreignDocumentIds = new Set(request.foreignDocumentIds);
     this.host = host;
     this.adapter = new ProjectRoomNetworkAdapter({
       watchNetwork: host.watchNetwork,
+      initiallyOnline: host.online(),
       ...host.options.roomAdapterOptions,
-      url: roomUrl,
-      issueToken: () => host.requestToken(link),
+      url: request.roomUrl,
+      issueToken: () => host.requestToken(request.link),
       onConnectionChange: (connection) => {
         this.connection = connection;
-        if (connection === "connected") this.scheduleReannounce();
         this.refresh();
       },
     });
     this.adapter.on("peer-candidate", ({ peerId }) => {
       host.knownRoomPeers.add(peerId);
       host.roomPeers.set(peerId, this);
+      // Also after a token renewal, which re-registers this peer in the room.
+      this.scheduleReannounce();
     });
     this.adapter.on("peer-disconnected", ({ peerId }) => {
       if (host.roomPeers.get(peerId) === this) host.roomPeers.delete(peerId);
@@ -201,7 +206,11 @@ class HostedProject {
     const manifest = this.manifest;
     const next = nextRoomAllowList(
       this.allowList,
-      manifest?.isReady() ? manifestEntryIds(manifest.doc()) : [],
+      manifest?.isReady()
+        ? manifestEntryIds(manifest.doc()).filter(
+            (id) => !this.foreignDocumentIds.has(id),
+          )
+        : [],
       this.connection === "connected" && this.roomHas(manifest),
     );
     if (!sameDocumentSet(next, this.allowList)) {
@@ -316,7 +325,13 @@ export function createProjectSyncWorkerHost(
   >();
   let nextTokenRequestId = 0;
   const networkListeners = new Set<(online: boolean) => void>();
+  let online =
+    (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine ??
+    true;
+  /** Starts awaiting the Repo; a stop arriving meanwhile cancels them. */
+  const startsPending = new Map<string, { cancelled: boolean }>();
   let bridge: ProjectSyncBridge | null = null;
+  const retiredBridgePeers = new Set<PeerId>();
   let context: Promise<HostContext> | null = null;
 
   const isStartedManifest = (documentId: string) =>
@@ -327,7 +342,8 @@ export function createProjectSyncWorkerHost(
       const project = roomPeers.get(peerId);
       if (project)
         return documentId === undefined || project.allows(documentId);
-      if (knownRoomPeers.has(peerId)) return false;
+      if (knownRoomPeers.has(peerId) || retiredBridgePeers.has(peerId))
+        return false;
       if (bridge?.peers.has(peerId))
         return (
           bridgeAnnounces &&
@@ -347,6 +363,7 @@ export function createProjectSyncWorkerHost(
         options,
         roomPeers,
         knownRoomPeers,
+        online: () => online,
         watchNetwork(onChange) {
           const unwatch = browserNetworkWatcher(onChange);
           networkListeners.add(onChange);
@@ -372,21 +389,32 @@ export function createProjectSyncWorkerHost(
   async function start(
     request: Extract<ProjectSyncWorkerRequest, { kind: "projectSyncStart" }>,
   ) {
-    if (projects.has(request.link.projectId)) return;
-    const host = await getContext();
-    if (projects.has(request.link.projectId)) return;
-    if (!bridge && options.createBridge !== null) {
+    const key = request.link.projectId;
+    if (projects.has(key) || startsPending.has(key)) return;
+    const pending = { cancelled: false };
+    startsPending.set(key, pending);
+    let host: HostContext;
+    try {
+      host = await getContext();
+    } finally {
+      startsPending.delete(key);
+    }
+    if (pending.cancelled) return;
+    // A remounted page joins with a new bridge channel; follow it.
+    if (
+      options.createBridge !== null &&
+      bridge?.channelName !== request.bridgeChannel
+    ) {
+      if (bridge) {
+        for (const peerId of bridge.peers) retiredBridgePeers.add(peerId);
+        host.repo.networkSubsystem.removeNetworkAdapter(bridge.adapter);
+      }
       bridge = (
         options.createBridge ?? ((name) => new ProjectSyncBridge(name))
       )(request.bridgeChannel);
       host.repo.networkSubsystem.addNetworkAdapter(bridge.adapter);
     }
-    const project = new HostedProject(
-      request.link,
-      request.manifestDocumentId,
-      request.roomUrl,
-      host,
-    );
+    const project = new HostedProject(request, host);
     projects.set(request.link.projectId, project);
     host.repo.shareConfigChanged();
     await project.start();
@@ -414,6 +442,8 @@ export function createProjectSyncWorkerHost(
           }
           return;
         case "projectSyncStop": {
+          const pending = startsPending.get(request.link.projectId);
+          if (pending) pending.cancelled = true;
           const project = projects.get(request.link.projectId);
           projects.delete(request.link.projectId);
           project?.stop();
@@ -433,6 +463,7 @@ export function createProjectSyncWorkerHost(
           projects.get(request.link.projectId)?.setPresence(request.state);
           return;
         case "projectSyncNetwork":
+          online = request.online;
           for (const listener of networkListeners) listener(request.online);
           return;
       }

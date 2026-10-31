@@ -38,8 +38,10 @@ import {
 } from "@/core/workspace/workbench-tabs";
 import {
   createWorkbenchProjectTabs,
+  followWorkbenchProjectManifest,
   mergeDiscoveredWorkbenchProjectTabs,
 } from "@/core/workspace/workbench-project-tabs";
+import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
 import { EditorProvider } from "@/hooks/editor-provider";
 import { ModelingServiceProvider } from "@/hooks/modeling-service-provider";
 import { RuntimeExtensionRegistryProvider } from "@/hooks/runtime-extension-registry-provider";
@@ -179,11 +181,18 @@ function ProjectWorkbenchApp({
       state: WorkbenchTabsState,
       action:
         | WorkbenchTabsAction
-        | { type: "restoreProject"; state: WorkbenchTabsState },
+        | { type: "restoreProject"; state: WorkbenchTabsState }
+        | {
+            type: "followProject";
+            previous: ProjectManifest;
+            next: ProjectManifest;
+          },
     ) =>
       action.type === "restoreProject"
         ? action.state
-        : reduceWorkbenchTabs(state, action),
+        : action.type === "followProject"
+          ? followWorkbenchProjectManifest(action.previous, action.next, state)
+          : reduceWorkbenchTabs(state, action),
     undefined,
     projectTabs,
   );
@@ -304,11 +313,33 @@ function ProjectWorkbenchApp({
       });
   }, [errorReporter, modelingServices, tabsState.tabs]);
 
+  // The manifest follows collaborators; the tabs follow the manifest.
+  const followedProjectRef = useRef(project);
+  useEffect(() => {
+    const previous = followedProjectRef.current;
+    followedProjectRef.current = project;
+    if (
+      previous &&
+      project &&
+      previous !== project &&
+      previous.projectId === project.projectId
+    )
+      tabsDispatch({ type: "followProject", previous, next: project });
+  }, [project]);
+
+  // Each save writes only the change since the previous save, so a
+  // collaborator's concurrent part edits are kept.
+  const savedTabsRef = useRef<readonly WorkbenchTab[] | null>(null);
   useEffect(() => {
     if (!tabsStorage || !project || !projectApplied) return;
     tabsStorage.save(tabsState);
     saveSession(project.projectId, tabsState.activeDocumentId);
-    void saveParts(project.projectId, tabsState.tabs);
+    void saveParts(
+      project.projectId,
+      tabsState.tabs,
+      savedTabsRef.current ?? undefined,
+    );
+    savedTabsRef.current = tabsState.tabs;
   }, [tabsState, tabsStorage, project, projectApplied, saveParts, saveSession]);
 
   useEffect(() => {
@@ -488,15 +519,18 @@ function ProjectWorkbenchApp({
                     <ProjectSyncControls
                       sync={sync}
                       project={project}
-                      onOpened={(manifest) => {
-                        void waitForLocalChanges()
+                      onOpened={(manifest) =>
+                        waitForLocalChanges()
                           .then(() =>
                             projects.select((repository) =>
                               repository.open(manifest.projectId),
                             ),
                           )
-                          .catch(projects.report);
-                      }}
+                          .catch((error: unknown) => {
+                            projects.report(error);
+                            return false;
+                          })
+                      }
                     />
                   </Group>
                 )

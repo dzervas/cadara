@@ -1,4 +1,7 @@
-import type { ProjectServicePort } from "@/application/project-sync/project-service-port";
+import {
+  ProjectSlugConflictError,
+  type ProjectServicePort,
+} from "@/application/project-sync/project-service-port";
 import {
   parseRemoteProject,
   parseRemoteProjects,
@@ -7,8 +10,6 @@ import {
 } from "@/contracts/project-sync/project-service.runtime-schema";
 
 const SERVICE_ERRORS: Record<string, string> = {
-  slug_conflict:
-    "Another project in this organization already uses that URL name.",
   quota_exceeded: "This organization has reached its plan's project limit.",
   manifest_conflict: "This service project already syncs another manifest.",
 };
@@ -20,6 +21,7 @@ async function failure(response: Response, fallback: string) {
     body && typeof body === "object" && "error" in body
       ? String(body.error)
       : "";
+  if (code === "slug_conflict") return new ProjectSlugConflictError();
   if (SERVICE_ERRORS[code]) return new Error(SERVICE_ERRORS[code]);
   if (response.status === 401)
     return new Error("Sign in to CADara to sync projects.");

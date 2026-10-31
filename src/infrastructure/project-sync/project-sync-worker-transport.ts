@@ -1,4 +1,3 @@
-import type { Repo } from "@automerge/automerge-repo/slim";
 import type {
   ProjectSyncStatus,
   ProjectSyncTransport,
@@ -17,6 +16,7 @@ import {
   createProjectSyncBridgeChannelName,
   ProjectSyncBridge,
   shareOnlyManifestsOverBridge,
+  type ProjectSyncRepo,
 } from "./project-sync-bridge";
 
 /** The page's channel to the document sync worker (DocumentSyncWorkerClient). */
@@ -32,6 +32,8 @@ const PROJECT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
 interface StartedProject {
   link: ProjectServiceLink;
+  /** Starts not yet released by a stop; the worker stops at zero. */
+  holders: number;
   manifestDocumentId: string;
   issueGrant: () => Promise<ProjectSyncGrant>;
   status: ProjectSyncStatus;
@@ -58,17 +60,21 @@ export function createProjectSyncWorkerTransport({
   apiOrigin,
   getProjectRepo,
   watchNetwork = browserNetworkWatcher,
+  isOnline = () =>
+    (globalThis as { navigator?: { onLine?: boolean } }).navigator?.onLine ??
+    true,
 }: {
   channel: ProjectSyncWorkerChannel;
   apiOrigin: string;
   /** The page's online/offline events, forwarded to the worker. */
   watchNetwork?: (onChange: (online: boolean) => void) => () => void;
+  isOnline?: () => boolean;
   /** The page's project Repo; manifests reach the worker over the bridge. */
-  getProjectRepo: () => Promise<Repo>;
+  getProjectRepo: () => Promise<ProjectSyncRepo>;
 }): ProjectSyncTransport & { dispose(): void } {
   const started = new Map<string, StartedProject>();
   const bridgeChannel = createProjectSyncBridgeChannelName();
-  let projectRepo: Promise<Repo> | null = null;
+  let projectRepo: Promise<ProjectSyncRepo> | null = null;
 
   const connectBridge = () =>
     (projectRepo ??= getProjectRepo().then((repo) => {
@@ -147,6 +153,11 @@ export function createProjectSyncWorkerTransport({
     const unwatchNetwork = watchNetwork((online) =>
       channel.postProjectSyncMessage({ kind: "projectSyncNetwork", online }),
     );
+    if (!isOnline())
+      channel.postProjectSyncMessage({
+        kind: "projectSyncNetwork",
+        online: false,
+      });
     return () => {
       unsubscribeWorker();
       unwatchNetwork();
@@ -154,15 +165,17 @@ export function createProjectSyncWorkerTransport({
   };
 
   return {
-    start({ link, manifestDocumentId, issueGrant }) {
+    start({ link, manifestDocumentId, foreignDocumentIds, issueGrant }) {
       const existing = started.get(link.projectId);
       if (existing) {
+        existing.holders += 1;
         existing.issueGrant = issueGrant;
         return;
       }
       unsubscribe ??= subscribe();
       started.set(link.projectId, {
         link,
+        holders: 1,
         manifestDocumentId,
         issueGrant,
         status: {
@@ -189,6 +202,7 @@ export function createProjectSyncWorkerTransport({
             manifestDocumentId,
             roomUrl: projectRoomUrl(apiOrigin, link.projectId),
             bridgeChannel,
+            foreignDocumentIds,
           });
           project.startPosted = true;
           if (project.presence)
@@ -216,6 +230,8 @@ export function createProjectSyncWorkerTransport({
     stop(link) {
       const project = started.get(link.projectId);
       if (!project) return;
+      project.holders -= 1;
+      if (project.holders > 0) return;
       started.delete(link.projectId);
       for (const waiter of project.syncWaiters)
         waiter.reject(new Error("Project sync stopped."));
@@ -270,7 +286,10 @@ export function createProjectSyncWorkerTransport({
       };
     },
     dispose() {
-      for (const project of [...started.values()]) this.stop(project.link);
+      for (const project of [...started.values()]) {
+        project.holders = 1;
+        this.stop(project.link);
+      }
       unsubscribe?.();
       unsubscribe = null;
     },

@@ -2,18 +2,20 @@ import { Avatar, Badge, Group, Tooltip } from "@mantine/core";
 import type { ProjectRole } from "@/contracts/account/account";
 import type { ProjectSyncConnection } from "@/contracts/project-sync/project-service";
 
+// Quiet Chrome Rule (DESIGN.md): healthy states stay graphite; only states
+// the user must notice (offline, a failure) carry status colour.
 const CONNECTION_PRESENTATION: Record<
   ProjectSyncConnection,
   { label: string; color: string; description: string }
 > = {
   synced: {
     label: "Synced",
-    color: "green",
+    color: "gray",
     description: "Every document matches the CADara copy.",
   },
   syncing: {
     label: "Syncing",
-    color: "yellow",
+    color: "gray",
     description: "Exchanging changes with CADara.",
   },
   connecting: {
@@ -23,7 +25,7 @@ const CONNECTION_PRESENTATION: Record<
   },
   offline: {
     label: "Offline",
-    color: "gray",
+    color: "yellow",
     description:
       "Changes are kept in this browser and sync when the connection returns.",
   },
@@ -35,6 +37,8 @@ export interface ProjectSyncIndicatorProps {
   role: ProjectRole | null;
   /** Why syncing is unavailable, shown instead of the connection detail. */
   detail?: string | null;
+  /** Syncing failed to start: the badge shows the danger colour. */
+  failed?: boolean;
 }
 
 /** The synced project's connection state and the user's edit permission. */
@@ -42,6 +46,7 @@ export function ProjectSyncIndicator({
   connection,
   role,
   detail,
+  failed = false,
 }: ProjectSyncIndicatorProps) {
   const presentation = CONNECTION_PRESENTATION[connection];
   return (
@@ -49,7 +54,7 @@ export function ProjectSyncIndicator({
       <Tooltip label={detail ?? presentation.description} multiline maw={260}>
         <Badge
           variant="dot"
-          color={presentation.color}
+          color={failed ? "red" : presentation.color}
           size="sm"
           role="status"
           aria-label={`Sync status: ${presentation.label}`}

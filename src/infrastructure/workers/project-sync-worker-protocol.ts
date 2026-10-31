@@ -41,6 +41,11 @@ export type ProjectSyncWorkerRequest =
       manifestDocumentId: string;
       roomUrl: string;
       bridgeChannel: string;
+      /**
+       * Documents of the page's other local projects. A collaborator's
+       * manifest entry naming one of them must not upload it.
+       */
+      foreignDocumentIds: string[];
     }
   | { kind: "projectSyncStop"; link: ProjectServiceLink }
   | {

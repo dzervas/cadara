@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { ProjectSlugConflictError } from "@/application/project-sync/project-service-port";
 import { createProjectServiceHttpClient } from "./project-service-http-client";
 
 interface RecordedRequest {
@@ -101,7 +102,7 @@ test("service refusals become readable errors", async () => {
       slug: "bracket",
       visibility: "private",
     }),
-  ).rejects.toThrow("already uses that URL name");
+  ).rejects.toBeInstanceOf(ProjectSlugConflictError);
 });
 
 test("a sync grant carries the role the room will enforce", async () => {

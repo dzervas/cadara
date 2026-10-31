@@ -12,8 +12,10 @@ import type { PeerId, Repo } from "@automerge/automerge-repo/slim";
 export class ProjectSyncBridge {
   readonly peers = new Set<PeerId>();
   readonly adapter: BroadcastChannelNetworkAdapter;
+  readonly channelName: string;
 
   constructor(channelName: string) {
+    this.channelName = channelName;
     this.adapter = new BroadcastChannelNetworkAdapter({
       channelName,
       peerWaitMs: 50,
@@ -30,6 +32,9 @@ export class ProjectSyncBridge {
     });
   }
 }
+
+/** The page's project Repo as the bridge sees it. */
+export type ProjectSyncRepo = Repo;
 
 export function createProjectSyncBridgeChannelName() {
   return `cadara-project-sync:${crypto.randomUUID()}`;

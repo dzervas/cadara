@@ -40,3 +40,62 @@ export function mergeDiscoveredWorkbenchProjectTabs(
     activeDocumentId: current.activeDocumentId,
   };
 }
+
+/**
+ * A manifest change (a collaborator's, or this browser's own write) applied
+ * to the open tabs: parts the change added open, parts it removed close and
+ * parts it renamed follow. Local presentation (order, storage) is kept, and
+ * the last tab never closes.
+ */
+export function followWorkbenchProjectManifest(
+  previous: ProjectManifest,
+  next: ProjectManifest,
+  current: WorkbenchTabsState,
+): WorkbenchTabsState {
+  const parts = (manifest: ProjectManifest) =>
+    new Map(
+      manifest.entries
+        .filter((entry) => entry.kind === "part")
+        .map((entry) => [entry.docId, entry.name] as const),
+    );
+  const before = parts(previous);
+  const after = parts(next);
+  let changed = false;
+  const tabs = current.tabs.flatMap((tab) => {
+    if (before.has(tab.documentId) && !after.has(tab.documentId)) {
+      changed = true;
+      return [];
+    }
+    const name = after.get(tab.documentId);
+    if (
+      name === undefined ||
+      before.get(tab.documentId) === name ||
+      tab.title === name
+    )
+      return [tab];
+    changed = true;
+    return [{ ...tab, title: name }];
+  });
+  for (const [documentId, title] of after)
+    if (
+      !before.has(documentId) &&
+      !tabs.some((tab) => tab.documentId === documentId)
+    ) {
+      changed = true;
+      tabs.push({
+        documentId,
+        title,
+        storageKind: "browser",
+        storageDescriptor: null,
+      });
+    }
+  if (!changed || tabs.length === 0) return current;
+  return {
+    tabs,
+    activeDocumentId: tabs.some(
+      (tab) => tab.documentId === current.activeDocumentId,
+    )
+      ? current.activeDocumentId
+      : tabs[0]!.documentId,
+  };
+}

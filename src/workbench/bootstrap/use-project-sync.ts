@@ -5,6 +5,7 @@ import type {
 } from "@/application/project-sync/project-service-port";
 import {
   openServiceProject,
+  presenceDisplayName,
   startProjectSync,
   uploadProjectToService,
 } from "@/application/project-sync/project-service-use-cases";
@@ -42,6 +43,8 @@ function syncedProjectStore(
     linkService: async (projectId, link) =>
       unwrap(await repository.linkService(projectId, link)),
     adoptManifest: async (id) => unwrap(await repository.adoptManifest(id)),
+    foreignDocumentIds: async (id) =>
+      unwrap(await repository.foreignDocumentIds(id)),
   };
 }
 
@@ -126,7 +129,7 @@ export function useProjectSync(
   const linkProjectId = link?.projectId;
   const projectId = project?.projectId;
   const userId = account?.user.id;
-  const presenceName = account ? account.user.name || account.user.email : "";
+  const presenceName = account ? presenceDisplayName(account.user) : "";
   const publishPresence = useCallback(() => {
     if (!transport || !linkOrgId || !linkProjectId || !userId) return;
     transport.setPresence(
@@ -149,16 +152,25 @@ export function useProjectSync(
     let stop: (() => void) | null = null;
     let unsubscribe: (() => void) | null = null;
     void getRepository()
-      .then(async (repository) =>
-        unwrap(await repository.manifestDocumentId(projectId)),
-      )
-      .then((manifestDocumentId) => {
+      .then(async (repository) => {
+        const manifestDocumentId = unwrap(
+          await repository.manifestDocumentId(projectId),
+        );
         if (!live) return;
-        stop = startProjectSync(
-          { service, transport },
+        const release = await startProjectSync(
+          {
+            service,
+            transport,
+            projects: syncedProjectStore(repository),
+          },
           syncLink,
           manifestDocumentId,
         );
+        if (!live) {
+          release();
+          return;
+        }
+        stop = release;
         publishPresence();
         let reported: string | null = null;
         unsubscribe = transport.subscribe(syncLink, (next) => {
@@ -218,7 +230,9 @@ export function useProjectSync(
   );
 
   const openRemote = useCallback(
-    async (remote: RemoteProject): Promise<ProjectManifest> => {
+    async (
+      remote: RemoteProject,
+    ): Promise<{ manifest: ProjectManifest; release: () => void }> => {
       if (!transport) throw new Error("Project sync needs browser storage.");
       const repository = await getRepository();
       return openServiceProject(

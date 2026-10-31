@@ -32,7 +32,12 @@ test("test/static/document-repository-boundary.spec.ts", () => {
         "src/infrastructure/persistence/shared-memory-automerge-storage.fixtures.ts",
       ) &&
       // Project sync's network adapters join the repository's own Repo.
-      !relativePath.startsWith("src/infrastructure/project-sync/")
+      ![
+        "src/infrastructure/project-sync/project-room-network-adapter.ts",
+        "src/infrastructure/project-sync/project-sync-bridge.ts",
+        "src/infrastructure/project-sync/project-sync-worker-host.ts",
+        "src/infrastructure/project-sync/project-sync-room.fixtures.ts",
+      ].includes(relativePath)
     ) {
       offenders.push(relativePath);
     }

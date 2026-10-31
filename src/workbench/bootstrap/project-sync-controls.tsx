@@ -24,8 +24,8 @@ export function ProjectSyncControls({
 }: {
   sync: ProjectSync;
   project: ProjectManifest;
-  /** Switches the workbench to a project opened from the service. */
-  onOpened: (manifest: ProjectManifest) => void;
+  /** Switches the workbench to a project opened from the service; false if it failed. */
+  onOpened: (manifest: ProjectManifest) => Promise<boolean>;
 }) {
   const [dialog, setDialog] = useState<"upload" | "open" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,6 +81,7 @@ export function ProjectSyncControls({
         <ProjectSyncIndicator
           connection={sync.status?.connection ?? "offline"}
           role={sync.status?.role ?? null}
+          failed={Boolean(sync.status?.error)}
           detail={
             sync.status?.error ??
             (sync.accountChecked && !sync.account
@@ -118,7 +119,16 @@ export function ProjectSyncControls({
         onOpen={(id) => {
           const remote = remoteProjects?.find((entry) => entry.id === id);
           if (!remote) return;
-          run(async () => onOpened(await sync.openRemote(remote)));
+          run(async () => {
+            const opened = await sync.openRemote(remote);
+            // The switched-to project holds its own connection; a failed
+            // switch leaves nothing syncing in the background.
+            try {
+              await onOpened(opened.manifest);
+            } finally {
+              opened.release();
+            }
+          });
         }}
       />
     </>

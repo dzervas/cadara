@@ -67,9 +67,11 @@ function makeHarness(
   const connections: ProjectRoomConnection[] = [];
   const events: string[] = [];
   let network: ((online: boolean) => void) | null = null;
+  const clock = { now: 0 };
   const adapter = new ProjectRoomNetworkAdapter({
     url: "ws://api.test/sync/p1",
     issueToken,
+    now: () => clock.now,
     createSocket: (url, protocols) => {
       const socket = new FakeRoomSocket(url, protocols);
       sockets.push(socket);
@@ -99,6 +101,7 @@ function makeHarness(
   const pendingTimers = () => timers.filter((timer) => timer.live);
   return {
     adapter,
+    clock,
     sockets,
     connections,
     events,
@@ -137,7 +140,7 @@ test("the socket authenticates with the token subprotocol and joins with protoco
   expect(harness.connections).toEqual(["connecting", "connected"]);
 });
 
-test("the token is renewed one minute before expiry by reopening the socket", async () => {
+test("the token is renewed one minute before expiry on a second socket that replaces the first once accepted", async () => {
   const harness = makeHarness();
   harness.adapter.connect("client" as PeerId);
   await settle();
@@ -146,17 +149,24 @@ test("the token is renewed one minute before expiry by reopening the socket", as
     540_000,
   ]);
   await harness.fireTimer();
-  expect(harness.sockets[0]!.closedWith).toBe(1000);
   expect(harness.sockets[1]!.protocols).toEqual(["cadara-sync.token2"]);
+  expect(harness.sockets[0]!.closedWith, "the old socket still serves").toBe(
+    null,
+  );
   harness.sockets[1]!.accept();
+  expect(harness.sockets[0]!.closedWith).toBe(1000);
   expect(harness.events).toEqual([
     "peer room-p1",
     "gone room-p1",
     "peer room-p1",
   ]);
+  expect(harness.connections, "no Connecting flash").toEqual([
+    "connecting",
+    "connected",
+  ]);
 });
 
-test("failed attempts back off exponentially and a successful join resets the backoff", async () => {
+test("failed token requests back off exponentially", async () => {
   let attempts = 0;
   const harness = makeHarness(async () => {
     attempts += 1;
@@ -171,8 +181,35 @@ test("failed attempts back off exponentially and a successful join resets the ba
     await harness.fireTimer();
   }
   expect(delays).toEqual([1_000, 2_000, 4_000]);
-  harness.sockets[0]!.accept();
-  harness.sockets[0]!.drop(1006);
+  expect(harness.sockets).toHaveLength(1);
+});
+
+test("a room that accepts the join and then refuses the socket is retried ever more slowly", async () => {
+  const harness = makeHarness();
+  harness.adapter.connect("client" as PeerId);
+  await settle();
+  const delays: number[] = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    harness.sockets.at(-1)!.accept();
+    harness.sockets.at(-1)!.drop(1008);
+    delays.push(harness.pendingTimers()[0]!.delayMs);
+    await harness.fireTimer();
+  }
+  expect(delays).toEqual([1_000, 2_000, 4_000]);
+});
+
+test("a socket that stayed up longer than the longest backoff resets it", async () => {
+  const harness = makeHarness();
+  harness.adapter.connect("client" as PeerId);
+  await settle();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    harness.sockets.at(-1)!.accept();
+    harness.sockets.at(-1)!.drop(1006);
+    await harness.fireTimer();
+  }
+  harness.sockets.at(-1)!.accept();
+  harness.clock.now += 30_000;
+  harness.sockets.at(-1)!.drop(1006);
   expect(harness.pendingTimers().map((timer) => timer.delayMs)).toEqual([
     1_000,
   ]);
@@ -189,14 +226,16 @@ test("a socket the room refuses before joining counts as a failure", async () =>
   expect(harness.connections.at(-1)).toBe("offline");
 });
 
-test("an expired-token close reconnects at once with a fresh token", async () => {
+test("an expired or revoked token backs off like any refusal", async () => {
   const harness = makeHarness();
   harness.adapter.connect("client" as PeerId);
   await settle();
   harness.sockets[0]!.accept();
   harness.sockets[0]!.drop(4001);
-  await settle();
-  expect(harness.sockets).toHaveLength(2);
+  expect(harness.pendingTimers().map((timer) => timer.delayMs)).toEqual([
+    1_000,
+  ]);
+  await harness.fireTimer();
   expect(harness.sockets[1]!.protocols).toEqual(["cadara-sync.token2"]);
 });
 
@@ -267,4 +306,29 @@ test("presence relayed from other peers is not echoed to the room", async () => 
     "join",
     "ephemeral",
   ]);
+});
+
+test("an adapter started offline waits for the network", async () => {
+  const sockets: unknown[] = [];
+  let network: ((online: boolean) => void) | null = null;
+  const adapter = new ProjectRoomNetworkAdapter({
+    url: "ws://api.test/sync/p1",
+    issueToken: async () => ({ token: "t", expiresIn: 600 }),
+    createSocket: (url, protocols) => {
+      const socket = new FakeRoomSocket(url, protocols);
+      sockets.push(socket);
+      return socket;
+    },
+    watchNetwork(onChange) {
+      network = onChange;
+      return () => undefined;
+    },
+    initiallyOnline: false,
+  });
+  adapter.connect("client" as PeerId);
+  await settle();
+  expect(sockets).toEqual([]);
+  network!(true);
+  await settle();
+  expect(sockets).toHaveLength(1);
 });

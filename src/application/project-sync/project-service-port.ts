@@ -12,6 +12,14 @@ import type {
   RemoteProject,
 } from "@/contracts/project-sync/project-service";
 
+/** The organization already has a project with the requested slug. */
+export class ProjectSlugConflictError extends Error {
+  constructor() {
+    super("Another project in this organization already uses that URL name.");
+    this.name = "ProjectSlugConflictError";
+  }
+}
+
 /** The CADara service's project endpoints, authenticated by the session cookie. */
 export interface ProjectServicePort {
   createProject(
@@ -37,6 +45,11 @@ export interface SyncedProjectStore {
   ): Promise<ProjectManifest>;
   /** Adds a manifest that arrived through sync to the local catalog. */
   adoptManifest(automergeDocumentId: string): Promise<ProjectManifest>;
+  /**
+   * Automerge ids of the catalog, other projects' manifests and their
+   * documents, excluding documents the given manifest lists itself.
+   */
+  foreignDocumentIds(manifestDocumentId: string): Promise<string[]>;
 }
 
 export interface ProjectSyncStatus {
@@ -48,11 +61,16 @@ export interface ProjectSyncStatus {
   error: string | null;
 }
 
-/** Runs the live connection of one project (the document sync worker). */
+/**
+ * Runs the live connection of one project (the document sync worker). Each
+ * start is released by one stop; the connection closes with the last one.
+ */
 export interface ProjectSyncTransport {
   start(input: {
     link: ProjectServiceLink;
     manifestDocumentId: string;
+    /** Documents of other local projects, never shared with this room. */
+    foreignDocumentIds: string[];
     issueGrant: () => Promise<ProjectSyncGrant>;
   }): void;
   stop(link: ProjectServiceLink): void;

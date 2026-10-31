@@ -23,6 +23,57 @@ import type { DocumentRepositoryUrlStore } from "./document-repository-url-store
 
 const CATALOG_ID = "doc_project_catalog" as DocumentId;
 
+interface ProjectPartEdits {
+  removed: ReadonlySet<string>;
+  renamed: ReadonlyMap<string, string>;
+  added: readonly ProjectEntry[];
+  /** The part entries' docIds in their wanted order, when it applies. */
+  order: readonly string[] | null;
+}
+
+/**
+ * Edits part entries in place, on a plain manifest or inside an Automerge
+ * change: entries are spliced and renamed individually, never replaced as a
+ * whole list, so concurrent edits to other entries merge.
+ */
+function applyProjectPartEdits(
+  entries: ProjectEntry[],
+  { removed, renamed, added, order }: ProjectPartEdits,
+) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (entry.kind === "part" && removed.has(entry.docId))
+      entries.splice(index, 1);
+  }
+  for (const entry of entries) {
+    const name = renamed.get(entry.docId);
+    if (entry.kind === "part" && name !== undefined && entry.name !== name)
+      entry.name = name;
+  }
+  for (const entry of added) {
+    let after = -1;
+    entries.forEach((current, index) => {
+      if (current.kind === "part") after = index;
+    });
+    entries.splice(after + 1, 0, { ...entry });
+  }
+  if (!order) return;
+  const slots: number[] = [];
+  entries.forEach((entry, index) => {
+    if (entry.kind === "part") slots.push(index);
+  });
+  order.forEach((docId, position) => {
+    const slot = slots[position]!;
+    const index = entries.findIndex(
+      (entry) => entry.kind === "part" && entry.docId === docId,
+    );
+    if (index === slot) return;
+    const moved = JSON.parse(JSON.stringify(entries[index])) as ProjectEntry;
+    entries.splice(index, 1);
+    entries.splice(slot, 0, moved);
+  });
+}
+
 /** Manifests reference part identities; linking or removing an entry never rewrites its part. */
 export class LocalProjectRepository {
   private queue: Promise<unknown> = Promise.resolve();
@@ -350,27 +401,148 @@ export class LocalProjectRepository {
     );
   }
 
-  /** Tab order/membership is authored in the manifest, not in a second tab index. */
-  setParts(projectId: string, parts: { docId: DocumentId; name: string }[]) {
+  /**
+   * Applies a change of the workbench's part tabs to the manifest as entry
+   * edits, so edits collaborators made meanwhile survive. Parts in
+   * `previous` but not in `parts` are removed, parts in neither the
+   * baseline nor the manifest are added, renamed parts are renamed, and the
+   * local tab order is kept while no collaborator's part is missing from
+   * it. Without `previous` the manifest's current parts are the baseline.
+   */
+  setParts(
+    projectId: string,
+    parts: { docId: DocumentId; name: string }[],
+    previous?: { docId: DocumentId; name: string }[],
+  ) {
     return this.run(async () => {
       const handle = await this.handle(projectId);
-      const next = this.checked(handle);
-      const entries: ProjectEntry[] = [];
-      for (const part of parts) {
-        const existing = next.entries.find(
-          (entry) => entry.kind === "part" && entry.docId === part.docId,
-        );
-        entries.push(
-          existing
-            ? { ...existing, name: part.name }
-            : await this.partEntry(part),
-        );
+      const current = this.checked(handle);
+      const isPart = (entry: ProjectEntry) => entry.kind === "part";
+      const baseline =
+        previous ??
+        current.entries
+          .filter(isPart)
+          .map(({ docId, name }) => ({ docId, name }));
+      const wanted = new Set(parts.map((part) => part.docId));
+      const baselineNames = new Map(
+        baseline.map((part) => [part.docId, part.name]),
+      );
+      const listed = new Set(
+        current.entries.filter(isPart).map((e) => e.docId),
+      );
+      const added: ProjectEntry[] = [];
+      for (const part of parts)
+        if (!baselineNames.has(part.docId) && !listed.has(part.docId))
+          added.push(await this.partEntry(part));
+      const edits: ProjectPartEdits = {
+        removed: new Set(
+          baseline
+            .filter((part) => !wanted.has(part.docId))
+            .map((part) => part.docId),
+        ),
+        renamed: new Map(
+          parts
+            .filter(
+              (part) =>
+                baselineNames.has(part.docId) &&
+                baselineNames.get(part.docId) !== part.name,
+            )
+            .map((part) => [part.docId, part.name]),
+        ),
+        added,
+        order: null,
+      };
+      const next = JSON.parse(JSON.stringify(current)) as ProjectManifest;
+      applyProjectPartEdits(next.entries, edits);
+      const nextParts = next.entries.filter(isPart).map((e) => e.docId);
+      if (
+        nextParts.length === parts.length &&
+        nextParts.every((docId) => wanted.has(docId))
+      ) {
+        edits.order = parts.map((part) => part.docId);
+        applyProjectPartEdits(next.entries, {
+          removed: new Set(),
+          renamed: new Map(),
+          added: [],
+          order: edits.order,
+        });
       }
-      next.entries = [
-        ...entries,
-        ...next.entries.filter((entry) => entry.kind !== "part"),
-      ];
-      return this.write(handle, next);
+      const parsed = parseProjectManifest(next);
+      if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+      if (JSON.stringify(next) === JSON.stringify(current)) return current;
+      handle.change((draft) => {
+        applyProjectPartEdits(draft.entries, edits);
+      });
+      await (
+        await this.documents.getAutomergeRepository()
+      ).flush?.([handle.documentId]);
+      return this.checked(handle);
+    });
+  }
+
+  /**
+   * Follows the project's manifest, including collaborators' changes, and
+   * records the Automerge URLs of entries this browser has not seen yet.
+   */
+  async subscribe(
+    projectId: string,
+    listener: (manifest: ProjectManifest) => void,
+  ) {
+    const opened = await this.run(() => this.handle(projectId));
+    if (!opened.ok) throw new Error(opened.diagnostic.message);
+    const handle = opened.value;
+    const changed = () => {
+      const parsed = parseProjectManifest(handle.doc());
+      if (!parsed.ok) return;
+      const manifest = JSON.parse(
+        JSON.stringify(parsed.value),
+      ) as ProjectManifest;
+      this.mapEntryUrls(manifest, "skip");
+      listener(manifest);
+    };
+    handle.on("change", changed);
+    return () => handle.off?.("change", changed);
+  }
+
+  private mapEntryUrls(manifest: ProjectManifest, conflict: "throw" | "skip") {
+    for (const entry of manifest.entries) {
+      const entryUrl = `automerge:${entry.automergeDocumentId}`;
+      if (!isValidAutomergeUrl(entryUrl)) {
+        if (conflict === "throw")
+          throw new Error(`Invalid document identity for ${entry.name}.`);
+        continue;
+      }
+      const known = this.urls.get(entry.docId);
+      if (known && known !== entryUrl) {
+        if (conflict === "throw")
+          throw new Error(
+            `${entry.name} is already stored in this browser as another document.`,
+          );
+        continue;
+      }
+      if (!known) this.urls.set(entry.docId, entryUrl);
+    }
+  }
+
+  /**
+   * Automerge ids of this browser's catalog, of other projects' manifests
+   * and of their documents, minus the documents the given manifest lists.
+   */
+  foreignDocumentIds(manifestDocumentId: string) {
+    return this.run(async () => {
+      const catalog = await this.catalog();
+      const ids = new Set<string>([catalog.documentId]);
+      const own = new Set<string>([manifestDocumentId]);
+      for (const project of catalog.doc().projects) {
+        const handle = await this.handle(project.projectId);
+        const entries = this.checked(handle).entries.map(
+          (entry) => entry.automergeDocumentId,
+        );
+        const target = handle.documentId === manifestDocumentId ? own : ids;
+        target.add(handle.documentId);
+        for (const id of entries) target.add(id);
+      }
+      return [...ids].filter((id) => !own.has(id));
     });
   }
 
@@ -401,17 +573,7 @@ export class LocalProjectRepository {
       const handle = await repo.find<ProjectManifest>(url);
       await handle.whenReady();
       const manifest = this.checked(handle);
-      for (const entry of manifest.entries) {
-        const entryUrl = `automerge:${entry.automergeDocumentId}`;
-        if (!isValidAutomergeUrl(entryUrl))
-          throw new Error(`Invalid document identity for ${entry.name}.`);
-        const known = this.urls.get(entry.docId);
-        if (known && known !== entryUrl)
-          throw new Error(
-            `${entry.name} is already stored in this browser as another document.`,
-          );
-        if (!known) this.urls.set(entry.docId, entryUrl);
-      }
+      this.mapEntryUrls(manifest, "throw");
       const catalog = await this.catalog();
       if (
         !catalog

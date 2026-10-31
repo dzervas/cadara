@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import type { DocumentId } from "@/contracts/shared/ids";
 import { mergeDiscoveredWorkbenchProjectTabs } from "@/core/workspace/workbench-project-tabs";
 import {
   reduceWorkbenchTabs,
@@ -796,5 +797,51 @@ test("an uploaded project records its service link, and a synced manifest joins 
     expect(unwrap(await guest.list())).toHaveLength(1);
   } finally {
     await owner.repo.shutdown();
+  }
+});
+
+test("a stale tab list applies only its own change: a collaborator's part and order survive", async () => {
+  const { repo, projects } = setup();
+  try {
+    const project = unwrap(
+      await projects.create("Parts", [
+        { name: "Base", kind: "part", docId: "doc_base" },
+        { name: "Lid", kind: "part", docId: "doc_lid" },
+      ]),
+    );
+    const local = [
+      { name: "Base", docId: "doc_base" as DocumentId },
+      { name: "Lid", docId: "doc_lid" as DocumentId },
+    ];
+    // A collaborator adds a part; this browser's tabs do not show it yet.
+    unwrap(
+      await projects.setParts(project.projectId, [
+        ...local,
+        { name: "Hinge", docId: "doc_hinge" as DocumentId },
+      ]),
+    );
+    const renamed = unwrap(
+      await projects.setParts(
+        project.projectId,
+        [local[1]!, { ...local[0]!, name: "Body" }],
+        local,
+      ),
+    );
+    expect(
+      renamed.entries.map((entry) => `${entry.docId}:${entry.name}`),
+    ).toEqual(["doc_base:Body", "doc_lid:Lid", "doc_hinge:Hinge"]);
+    const removed = unwrap(
+      await projects.setParts(
+        project.projectId,
+        [{ ...local[0]!, name: "Body" }],
+        [local[1]!, { ...local[0]!, name: "Body" }],
+      ),
+    );
+    expect(removed.entries.map((entry) => entry.docId)).toEqual([
+      "doc_base",
+      "doc_hinge",
+    ]);
+  } finally {
+    await repo.shutdown();
   }
 });

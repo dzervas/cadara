@@ -6,9 +6,10 @@ import {
   type PeerMetadata,
 } from "@automerge/automerge-repo/slim";
 import {
+  SYNC_RECONNECT_MAX_DELAY_MS,
   syncReconnectDelayMs,
   syncTokenRefreshDelayMs,
-} from "@/application/project-sync/sync-connection-schedule";
+} from "@/core/project-sync/sync-connection-schedule";
 import type { SyncTokenResponse } from "@/contracts/project-sync/project-service";
 
 /** The subset of the browser WebSocket the adapter uses. */
@@ -39,11 +40,12 @@ export interface ProjectRoomNetworkAdapterOptions {
   /** Registers browser online/offline callbacks; returns the unsubscribe. */
   watchNetwork?: (onChange: (online: boolean) => void) => () => void;
   onConnectionChange?: (connection: ProjectRoomConnection) => void;
+  /** Whether the network is up when the adapter starts (navigator.onLine). */
+  initiallyOnline?: boolean;
+  now?: () => number;
 }
 
 const SOCKET_OPEN = 1;
-/** The room's close code for an expired or revoked token. */
-const ROOM_TOKEN_REJECTED = 4001;
 
 /** The online/offline events of the current global scope (window or worker). */
 export function browserNetworkWatcher(onChange: (online: boolean) => void) {
@@ -66,28 +68,37 @@ export function browserNetworkWatcher(onChange: (online: boolean) => void) {
  *
  * The room speaks the automerge-repo wire protocol (CBOR messages, join/peer
  * handshake, protocol "1") and authenticates the upgrade with the
- * `cadara-sync.<token>` subprotocol. Tokens are fixed per socket, so the
- * adapter reopens the socket with a fresh token before expiry, and after any
- * close it reconnects with exponential backoff until `disconnect`. The
- * adapter is always "ready": an offline room must not delay local loads.
+ * `cadara-sync.<token>` subprotocol. Tokens are fixed per socket, so before
+ * expiry the adapter opens a second socket with a fresh token and switches
+ * to it once the room accepted it. After any other close it reconnects with
+ * exponential backoff until `disconnect`; the backoff only resets once a
+ * socket has lasted (its renewal fired, or it stayed up longer than the
+ * longest backoff) or the room closed it cleanly, so a room that accepts the
+ * join and then refuses every message (1008) is retried ever more slowly.
+ * The adapter is always "ready": an offline room must not delay local loads.
  */
 export class ProjectRoomNetworkAdapter extends NetworkAdapter {
   readonly #options: ProjectRoomNetworkAdapterOptions;
   readonly #timers: ProjectRoomTimers;
+  readonly #now: () => number;
   #socket: ProjectRoomSocket | null = null;
+  /** The renewal socket, until the room accepts it. */
+  #pending: ProjectRoomSocket | null = null;
   #roomPeerId: PeerId | null = null;
+  #joinedAt = 0;
   #timer: unknown = null;
   #failures = 0;
-  #renewing = false;
   #opening = false;
   #stopped = true;
-  #online = true;
+  #online: boolean;
   #unwatchNetwork: (() => void) | null = null;
   #connection: ProjectRoomConnection = "offline";
 
   constructor(options: ProjectRoomNetworkAdapterOptions) {
     super();
     this.#options = options;
+    this.#online = options.initiallyOnline ?? true;
+    this.#now = options.now ?? Date.now;
     this.#timers = options.timers ?? {
       set: (callback, delayMs) => setTimeout(callback, delayMs),
       clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
@@ -135,10 +146,19 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     this.#stopped = true;
     this.#unwatchNetwork?.();
     this.#unwatchNetwork = null;
+    this.#closeAll("Disconnected");
+  }
+
+  #closeAll(reason: string) {
     this.#clearTimer();
+    const pending = this.#pending;
+    if (pending) {
+      pending.close(1000, reason);
+      this.#closed(pending, 1000);
+    }
     const socket = this.#socket;
     if (socket) {
-      socket.close(1000, "Disconnected");
+      socket.close(1000, reason);
       this.#closed(socket, 1000);
     }
     this.#setConnection("offline");
@@ -166,21 +186,21 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
   #networkChanged(online: boolean) {
     this.#online = online;
     if (this.#stopped) return;
-    if (!online) {
-      // Emulated or flaky offline states can leave a dead socket open.
-      this.#clearTimer();
-      const socket = this.#socket;
-      if (socket) {
-        socket.close(1000, "Offline");
-        this.#closed(socket, 1000);
-      }
-      this.#setConnection("offline");
-      return;
-    }
-    if (!this.#socket) {
+    // Emulated or flaky offline states can leave a dead socket open.
+    if (!online) this.#closeAll("Offline");
+    else if (!this.#socket) {
       this.#failures = 0;
       this.#clearTimer();
       void this.#open();
+    }
+  }
+
+  async #grant() {
+    try {
+      return await this.#options.issueToken();
+    } catch {
+      // Signed out or unreachable: keep working locally and retry later.
+      return null;
     }
   }
 
@@ -188,27 +208,26 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     if (this.#stopped || !this.#online || this.#socket || this.#opening) return;
     this.#opening = true;
     this.#setConnection("connecting");
-    let grant: SyncTokenResponse;
-    try {
-      grant = await this.#options.issueToken();
-    } catch {
-      // Signed out or unreachable: keep working locally and retry later.
-      this.#opening = false;
-      if (!this.#stopped && this.#online) this.#retry();
-      return;
-    }
+    const grant = await this.#grant();
     this.#opening = false;
     if (this.#stopped || !this.#online) {
       this.#setConnection("offline");
       return;
     }
+    if (!grant) {
+      this.#retry();
+      return;
+    }
+    this.#socket = this.#createSocket(grant);
+  }
+
+  #createSocket(grant: SyncTokenResponse) {
     const socket = (
       this.#options.createSocket ??
       ((url, protocols) =>
         new WebSocket(url, protocols) as unknown as ProjectRoomSocket)
     )(this.#options.url, [`cadara-sync.${grant.token}`]);
     socket.binaryType = "arraybuffer";
-    this.#socket = socket;
     socket.onopen = () => {
       socket.send(
         cbor.encode({
@@ -223,6 +242,7 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     socket.onclose = (event) => this.#closed(socket, event.code);
     // Every error is followed by a close event, which schedules the retry.
     socket.onerror = () => undefined;
+    return socket;
   }
 
   #retry() {
@@ -234,55 +254,97 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     );
   }
 
+  #joined(
+    socket: ProjectRoomSocket,
+    message: Message,
+    grant: SyncTokenResponse,
+  ) {
+    const previous = this.#roomPeerId;
+    this.#roomPeerId = message.senderId;
+    this.#joinedAt = this.#now();
+    this.#schedule(
+      () => void this.#renew(socket),
+      syncTokenRefreshDelayMs(grant.expiresIn),
+    );
+    this.#setConnection("connected");
+    // A renewed socket restarts the sync handshake: messages sent on the old
+    // socket after the room replaced it are lost.
+    if (previous) this.emit("peer-disconnected", { peerId: previous });
+    this.emit("peer-candidate", {
+      peerId: message.senderId,
+      peerMetadata:
+        (message as Message & { peerMetadata?: PeerMetadata }).peerMetadata ??
+        {},
+    });
+  }
+
   #receive(socket: ProjectRoomSocket, data: unknown, grant: SyncTokenResponse) {
-    if (socket !== this.#socket || !(data instanceof ArrayBuffer)) return;
-    const message = cbor.decode(new Uint8Array(data)) as Message & {
-      peerMetadata?: PeerMetadata;
-    };
+    if (!(data instanceof ArrayBuffer)) return;
+    if (socket !== this.#socket && socket !== this.#pending) return;
+    const message = cbor.decode(new Uint8Array(data)) as Message;
+    if (socket === this.#pending) {
+      if (message.type !== "peer") return;
+      const previous = this.#socket;
+      this.#pending = null;
+      this.#socket = socket;
+      if (previous) {
+        this.#detach(previous);
+        previous.close(1000, "Token renewal");
+      }
+      this.#joined(socket, message, grant);
+      return;
+    }
     if (message.type === "peer") {
-      this.#roomPeerId = message.senderId;
-      this.#failures = 0;
-      this.#schedule(
-        () => this.#renew(socket),
-        syncTokenRefreshDelayMs(grant.expiresIn),
-      );
-      this.#setConnection("connected");
-      this.emit("peer-candidate", {
-        peerId: message.senderId,
-        peerMetadata: message.peerMetadata ?? {},
-      });
+      this.#joined(socket, message, grant);
       return;
     }
     if (this.#roomPeerId) this.emit("message", message);
   }
 
-  #renew(socket: ProjectRoomSocket) {
+  /** The socket lasted a whole token: open its successor before closing it. */
+  async #renew(socket: ProjectRoomSocket) {
     if (socket !== this.#socket) return;
-    this.#renewing = true;
-    socket.close(1000, "Token renewal");
-    this.#closed(socket, 1000);
+    this.#failures = 0;
+    const grant = await this.#grant();
+    // Without a new token the current socket serves until the room closes it.
+    if (!grant || this.#stopped || !this.#online || socket !== this.#socket)
+      return;
+    this.#pending = this.#createSocket(grant);
+  }
+
+  #detach(socket: ProjectRoomSocket) {
+    socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
   }
 
   #closed(socket: ProjectRoomSocket, code: number) {
+    if (socket === this.#pending) {
+      // A failed renewal: the current socket serves until it closes.
+      this.#detach(socket);
+      this.#pending = null;
+      return;
+    }
     if (socket !== this.#socket) return;
-    socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+    this.#detach(socket);
     this.#socket = null;
     this.#clearTimer();
     const roomPeerId = this.#roomPeerId;
     this.#roomPeerId = null;
     if (roomPeerId) this.emit("peer-disconnected", { peerId: roomPeerId });
-    const renewing = this.#renewing;
-    this.#renewing = false;
     if (this.#stopped || !this.#online) {
       this.#setConnection("offline");
       return;
     }
-    if (renewing || (roomPeerId && code === ROOM_TOKEN_REJECTED)) {
-      // A planned renewal or an expired token: reconnect at once with a new one.
-      this.#failures = 0;
-      void this.#open();
+    if (this.#pending) {
+      // The room replaced this socket with the renewal; it joins shortly.
+      this.#socket = this.#pending;
+      this.#pending = null;
       return;
     }
+    const lasted =
+      roomPeerId !== null &&
+      this.#now() - this.#joinedAt >= SYNC_RECONNECT_MAX_DELAY_MS;
+    if (lasted || (roomPeerId !== null && (code === 1000 || code === 1001)))
+      this.#failures = 0;
     this.#retry();
   }
 }
