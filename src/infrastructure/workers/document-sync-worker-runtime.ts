@@ -66,6 +66,8 @@ export function createDocumentSyncWorkerMessageHandler(
       metadata: LocalFileBindingRecord["metadata"];
     }
   >();
+  // Keep the latest unsaved document for permission/error recovery without a new model mutation.
+  const latestFileDocuments = new Map<string, AuthoredModelDocument>();
   const activeWrites = new Set<string>();
   const writeSequences = new Map<string, number>();
 
@@ -99,7 +101,7 @@ export function createDocumentSyncWorkerMessageHandler(
 
   async function restoreBoundFileRecord(
     documentId: DocumentId,
-    restoreOptions?: { throwOnFailure?: boolean },
+    restoreOptions?: { throwOnFailure?: boolean; announce?: boolean },
   ) {
     const restored = await options.bindingStore?.load(documentId);
     if (restored && !restored.ok) {
@@ -125,7 +127,7 @@ export function createDocumentSyncWorkerMessageHandler(
       sequence: nextWriteSequence(documentId),
       metadata: record.metadata,
     };
-    publishWriteStatus(status);
+    if (restoreOptions?.announce !== false) publishWriteStatus(status);
     return record;
   }
 
@@ -180,6 +182,7 @@ export function createDocumentSyncWorkerMessageHandler(
       return;
     }
 
+    latestFileDocuments.set(documentId, document);
     pendingWrites.set(documentId, {
       document,
       metadata: binding.metadata,
@@ -223,6 +226,9 @@ export function createDocumentSyncWorkerMessageHandler(
         }
 
         if (result.ok) {
+          if (latestFileDocuments.get(documentId) === pending.document) {
+            latestFileDocuments.delete(documentId);
+          }
           publishWriteStatus({
             kind: "synced",
             documentId: pending.metadata.documentId,
@@ -362,8 +368,10 @@ export function createDocumentSyncWorkerMessageHandler(
         }
         case "reset": {
           const status = await options.repository.reset(request.documentId);
-          if (status.kind === "reset")
+          if (status.kind === "reset") {
             options.repositoryUrlStore?.delete(request.documentId);
+            latestFileDocuments.delete(request.documentId);
+          }
           postMessage({
             kind: "reset",
             requestId: request.requestId,
@@ -472,10 +480,36 @@ export function createDocumentSyncWorkerMessageHandler(
           });
           return;
         }
+        case "retryFileWrite": {
+          if (!bindings.has(request.documentId)) {
+            await restoreBoundFileRecord(request.documentId, {
+              throwOnFailure: true,
+            });
+          }
+          if (!bindings.has(request.documentId)) {
+            throw new Error("The linked file is no longer available; re-link it.");
+          }
+          const document = latestFileDocuments.get(request.documentId);
+          if (document) queueBoundFileWrite(request.documentId, document);
+          else {
+            publishWriteStatus({
+              kind: "binding-restored",
+              documentId: request.documentId,
+              sequence: nextWriteSequence(request.documentId),
+              metadata: bindings.get(request.documentId)!.metadata,
+            });
+          }
+          postMessage({ kind: "fileWriteRetried", requestId: request.requestId });
+          return;
+        }
         case "restoreBinding": {
-          const record = await restoreBoundFileRecord(request.documentId, {
-            throwOnFailure: true,
-          });
+          const record =
+            request.announce === false && bindings.has(request.documentId)
+              ? bindings.get(request.documentId)!
+              : await restoreBoundFileRecord(request.documentId, {
+                  throwOnFailure: true,
+                  announce: request.announce,
+                });
           postMessage({
             kind: "bindingRestored",
             requestId: request.requestId,

@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { ProjectSlugConflictError } from "@/application/project-sync/project-service-port";
+import {
+  ProjectServiceAccessError,
+  ProjectSlugConflictError,
+} from "@/application/project-sync/project-service-port";
 import { createProjectServiceHttpClient } from "./project-service-http-client";
 
 interface RecordedRequest {
@@ -103,6 +106,26 @@ test("service refusals become readable errors", async () => {
       visibility: "private",
     }),
   ).rejects.toBeInstanceOf(ProjectSlugConflictError);
+});
+
+test("only signed-out and forbidden answers are access refusals; outages are not", async () => {
+  for (const [status, refused] of [
+    [401, true],
+    [403, true],
+    [503, false],
+  ] as const) {
+    const { fetcher } = makeFakeFetch(() => ({ status, body: {} }));
+    const client = createProjectServiceHttpClient({
+      apiOrigin: "http://api.test",
+      fetcher,
+    });
+    const error = await client
+      .issueSyncGrant({ orgId: "org", projectId: "p1" })
+      .catch((caught: unknown) => caught);
+    expect(error instanceof ProjectServiceAccessError, `HTTP ${status}`).toBe(
+      refused,
+    );
+  }
 });
 
 test("a sync grant carries the role the room will enforce", async () => {

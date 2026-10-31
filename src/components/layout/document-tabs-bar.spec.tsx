@@ -234,3 +234,41 @@ test("document-tabs-bar exposes a title-editing seam for double-click rename", (
     "tab title should expose a stable hook the rename interaction can attach to.",
   ).toBeTruthy();
 });
+
+test("browser-only tabs expose the warning triangle and loss explanation, while cloud and file tabs keep their storage identity", () => {
+  const markup = renderBar({
+    tabs: [
+      tab(docA),
+      tab(docB, { storageKind: "cloud" }),
+      tab("doc_file", { storageKind: "filesystem" }),
+    ],
+    activeDocumentId: docA,
+  });
+  expect(markup).toContain('data-icon="shell-warning.svg"');
+  expect(markup).toContain("could be lost if site data is cleared");
+  expect(markup).toContain('data-storage-glyph="cloud"');
+  expect(markup).toContain('data-storage-glyph="filesystem"');
+  expect(markup).not.toContain("data-tab-storage-state");
+});
+
+test("only unsettled storage states have corner badges, with an accessible reason", () => {
+  const state: WorkbenchTabsState = {
+    tabs: [tab(docA), tab(docB)],
+    activeDocumentId: docA,
+  };
+  for (const kind of ["syncing", "pending", "error"] as const) {
+    const markup = renderBar(state, {
+      storageFeedback: {
+        [docB]: {
+          kind,
+          reason: "File permission lost",
+          actionLabel: "Restore access",
+          onFix: () => undefined,
+        },
+      },
+    });
+    expect(markup).toContain(`data-tab-storage-state="${kind}"`);
+    expect(markup.match(/data-tab-storage-state=/g)).toHaveLength(1);
+    expect(markup).toContain("File permission lost");
+  }
+});

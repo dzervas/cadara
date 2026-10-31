@@ -2,6 +2,36 @@ import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { WorkbenchTabsState } from "./workbench-tabs";
 
+/**
+ * Where the project's tabs live, applied to every tab state the workbench
+ * shows, so cached, restored and newly opened tabs agree: account-project
+ * tabs are cloud, local-project tabs are never cloud, and a file-linked tab
+ * keeps its linked-file identity in either.
+ */
+export function deriveWorkbenchProjectTabStorage(
+  project: ProjectManifest | null,
+  state: WorkbenchTabsState,
+): WorkbenchTabsState {
+  const tabs = state.tabs.map((tab) => {
+    if (tab.storageKind === "filesystem") return tab;
+    if (project?.service)
+      return tab.storageKind === "cloud" &&
+        tab.storageDescriptor === project.name
+        ? tab
+        : {
+            ...tab,
+            storageKind: "cloud" as const,
+            storageDescriptor: project.name,
+          };
+    return tab.storageKind === "cloud"
+      ? { ...tab, storageKind: "browser" as const, storageDescriptor: null }
+      : tab;
+  });
+  return tabs.every((tab, index) => tab === state.tabs[index])
+    ? state
+    : { ...state, tabs };
+}
+
 /** Manifest membership and names are durable; cached tabs supply presentation and the active part. */
 export function createWorkbenchProjectTabs(
   project: ProjectManifest,

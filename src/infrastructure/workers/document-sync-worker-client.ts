@@ -238,6 +238,15 @@ export class DocumentSyncWorkerClient {
     ).metadata;
   }
 
+  async retryFileWrite(
+    input: Omit<
+      Extract<DocumentSyncWorkerRequest, { kind: "retryFileWrite" }>,
+      "kind" | "requestId"
+    >,
+  ) {
+    await this.request("retryFileWrite", "fileWriteRetried", input);
+  }
+
   async getWriteStatus(
     input: Omit<
       Extract<DocumentSyncWorkerRequest, { kind: "getWriteStatus" }>,

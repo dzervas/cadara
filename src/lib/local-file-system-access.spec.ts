@@ -292,3 +292,23 @@ test("src/lib/local-file-system-access.spec.ts", async () => {
   await testCadaraDocumentsStaySingleJsonObjects();
   testStableSerialization();
 });
+
+test("re-linking opens the save picker beside the previously linked file", async () => {
+  const previous: LocalFileSystemFileHandle = {
+    name: "Bracket.cadara",
+    getFile: async () => new File([], "Bracket.cadara"),
+    createWritable: async () => ({ write() {}, close() {} }),
+  };
+  const options: LocalFileSystemSavePickerOptions[] = [];
+  const environment = {
+    isSecureContext: true,
+    async showSaveFilePicker(next: LocalFileSystemSavePickerOptions) {
+      options.push(next);
+      return previous;
+    },
+  };
+  await showSaveLocalDocumentPicker(environment, previous);
+  await showSaveLocalDocumentPicker(environment);
+  expect(options[0]?.startIn).toBe(previous);
+  expect(options[1]).not.toHaveProperty("startIn");
+});

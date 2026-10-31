@@ -102,6 +102,7 @@ export type DocumentSyncWorkerRequest =
       kind: "restoreBinding";
       requestId: RequestId;
       documentId: DocumentId;
+      announce?: boolean;
     }
   | {
       kind: "bindFileHandle";
@@ -109,6 +110,11 @@ export type DocumentSyncWorkerRequest =
       documentId: DocumentId;
       handle: LocalFileSystemFileHandle;
       metadata: LocalFileBindingMetadata;
+    }
+  | {
+      kind: "retryFileWrite";
+      requestId: RequestId;
+      documentId: DocumentId;
     }
   | {
       kind: "getWriteStatus";
@@ -200,6 +206,10 @@ export type DocumentSyncWorkerResponse =
       kind: "fileHandleBound";
       requestId: RequestId;
       metadata: LocalFileBindingMetadata;
+    }
+  | {
+      kind: "fileWriteRetried";
+      requestId: RequestId;
     }
   | {
       kind: "writeStatus";

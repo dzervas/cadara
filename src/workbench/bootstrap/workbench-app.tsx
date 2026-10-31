@@ -35,6 +35,7 @@ import { useBrowserOnline } from "@/hooks/use-browser-online";
 import { summarizeQuota } from "@/core/account/quota-summary";
 import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
 import { useWorkbenchProject } from "./use-workbench-project";
+import { useTabStorageStatus } from "./use-tab-storage-status";
 import { useProjectSync, type ProjectSync } from "./use-project-sync";
 import { ProjectSyncControls } from "./project-sync-controls";
 
@@ -62,6 +63,7 @@ import {
 } from "@/core/workspace/workbench-tabs";
 import {
   createWorkbenchProjectTabs,
+  deriveWorkbenchProjectTabStorage,
   followWorkbenchProjectManifest,
   mergeDiscoveredWorkbenchProjectTabs,
 } from "@/core/workspace/workbench-project-tabs";
@@ -218,7 +220,7 @@ function ProjectWorkbenchApp({
       ? { ...tabs, activeDocumentId: requestedDocumentId! }
       : tabs;
   }, [project, projects.initialTabs, requestedDocumentId, tabsStorage]);
-  const [tabsState, tabsDispatch] = useReducer(
+  const [rawTabsState, tabsDispatch] = useReducer(
     (
       state: WorkbenchTabsState,
       action:
@@ -237,6 +239,10 @@ function ProjectWorkbenchApp({
           : reduceWorkbenchTabs(state, action),
     undefined,
     projectTabs,
+  );
+  const tabsState = useMemo(
+    () => deriveWorkbenchProjectTabStorage(project, rawTabsState),
+    [project, rawTabsState],
   );
   if (project && !projectApplied) {
     tabsDispatch({
@@ -499,6 +505,15 @@ function ProjectWorkbenchApp({
         });
     }
   }, [documentRepository, tabsState.tabs]);
+
+  const tabStorageFeedback = useTabStorageStatus({
+    repository: documentRepository,
+    client: documentSyncWorkerClient,
+    services: modelingServices,
+    tabs: tabsState,
+    sync,
+    report: projects.report,
+  });
 
   const { setActiveDocument } = sync;
   useEffect(() => {
@@ -802,6 +817,7 @@ function ProjectWorkbenchApp({
                 )
               }
               tabsState={tabsState}
+              tabStorageFeedback={tabStorageFeedback}
               onActivateDocumentTab={activateDocumentTab}
               onCloseDocumentTab={closeDocumentTab}
               onCreateNewDocument={createNewDocumentTab}

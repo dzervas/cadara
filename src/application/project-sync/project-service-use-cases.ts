@@ -75,6 +75,7 @@ export async function uploadProjectToService(
     input.manifest.projectId,
   );
   let remote: RemoteProject;
+  let registered = false;
   try {
     remote = await service.createProject(input.orgId, {
       name: input.name,
@@ -83,17 +84,20 @@ export async function uploadProjectToService(
     });
   } catch (error) {
     if (!(error instanceof ProjectSlugConflictError)) throw error;
-    const unregistered = (await service.listProjects(input.orgId)).find(
+    // A retry after a failed attempt reuses the project that attempt
+    // created: unregistered, or already holding this manifest.
+    const created = (await service.listProjects(input.orgId)).find(
       (project) =>
         project.slug === input.slug &&
-        project.name === input.name &&
-        project.manifest_doc_id === null,
+        (project.manifest_doc_id === manifestDocumentId ||
+          (project.manifest_doc_id === null && project.name === input.name)),
     );
-    if (!unregistered) throw error;
-    remote = unregistered;
+    if (!created) throw error;
+    remote = created;
+    registered = created.manifest_doc_id === manifestDocumentId;
   }
   const link = { orgId: remote.organization_id, projectId: remote.id };
-  await service.registerManifest(link, manifestDocumentId);
+  if (!registered) await service.registerManifest(link, manifestDocumentId);
   return projects.linkService(input.manifest.projectId, link);
 }
 

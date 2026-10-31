@@ -218,7 +218,7 @@ export function workbenchTabsStorageDescriptor(
 ): string {
   switch (storageKind) {
     case "browser":
-      return "Stored in this browser only";
+      return "This document lives only in this browser and could be lost if site data is cleared.";
     case "filesystem":
       return descriptor ? `Synced to ${descriptor}` : "Synced to a local file";
     case "cloud":

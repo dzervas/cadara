@@ -197,7 +197,7 @@ A 10-step graphite scale carries the entire shell — background, surfaces, text
 
 ### Tertiary: Geometry Highlights (viewport-only)
 
-- **Spark Orange** (`#f0a14a`): Selected geometry in the 3D viewport, plus the four Spark Affordances in chrome (logo mark, active-state Variables FAB, active-tab dot, tool-icon click targets).
+- **Spark Orange** (`#f0a14a`): Selected geometry in the 3D viewport, plus the four Spark Affordances in chrome (logo mark, active-state Variables FAB, active-tab storage glyph, tool-icon click targets).
 - **Ember Hover** (`#f6b777`): Hovered geometry in the 3D viewport.
 - **Spark Emissive** (`#a85a16`) / **Ember Emissive** (`#8f4c13`): Self-lit selection/hover for shaded faces; tuned darker so they read as glow under viewport lighting, not as paint.
 
@@ -362,10 +362,11 @@ Components are Mantine primitives configured through the central `workbench-them
 
 - **Position:** `position: absolute; left: 0; right: 0; bottom: 0;` — anchored to the bottom of the workspace, full width, 32–40px height.
 - **Style:** Opaque `--workbench-shell-overlay-strong` (Graphite Deep at 96% opacity), 1px `--workbench-shell-border` top edge, **Tabs** elevation shadow casting upward to lift the history timeline above. The bar is _not_ glass — it defines the workspace boundary.
-- **Default tab:** 12.5px medium `Graphite 300`, 14px hit-target padding, 14px storage glyph (browser circle / filesystem doc / cloud) at the leading edge.
-- **Active tab:** 13px semibold `Graphite Bone`, plus a 1px Workshop-Steel hairline along the top edge, plus a 6px **Spark Orange** dot in the storage-glyph slot — the third Spark Affordance, signaling which document the viewport currently renders.
+- **Default tab:** 12.5px medium `Graphite 300`, 14px hit-target padding, 14px storage glyph (browser-only warning triangle / linked file / cloud for account projects) at the leading edge.
+- **Storage state badge:** A corner badge on the storage glyph appears only for unsettled or bad states: an animated ring while uploading or syncing, an amber dot when offline or pending, a red dot for an error (file access lost, upload or sync failed). Its tooltip names the reason; clicking it activates the tab and offers the fix. Healthy tabs have no badge.
+- **Active tab:** 13px semibold `Graphite Bone`, plus a 1px Workshop-Steel hairline along the top edge, plus its storage glyph tinted **Spark Orange** — the third Spark Affordance, signaling which document the viewport currently renders.
 - **Pending recompute:** The same hairline becomes a 1.5px sweep animation `workbench-tab-loading-sweep` 1100ms — loading "becomes" the active state when the recompute resolves.
-- **Error:** The hairline turns Mantine `red-8`. Active dot stays spark.
+- **Error:** The hairline turns Mantine `red-8`. The active glyph stays spark.
 - **Close button:** 18×18, only visible on hover or when active, fades the close glyph in over 120ms.
 - **Reorder:** Drag-to-reorder with an 8px translate on the drop-target slot (160ms `cubic-bezier(0.25, 1, 0.5, 1)`).
 

@@ -20,6 +20,14 @@ export class ProjectSlugConflictError extends Error {
   }
 }
 
+/** The service refused the request for this account (signed out or not permitted), unlike an outage. */
+export class ProjectServiceAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectServiceAccessError";
+  }
+}
+
 /** The CADara service's project endpoints, authenticated by the session cookie. */
 export interface ProjectServicePort {
   createProject(

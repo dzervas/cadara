@@ -14,7 +14,17 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
-import { Tooltip } from "@mantine/core";
+import {
+  ActionIcon,
+  Button,
+  Loader,
+  Popover,
+  Stack,
+  Text,
+  Tooltip,
+} from "@mantine/core";
+import { SvgIcon } from "@/components/ui/svg-icon";
+import type { WorkbenchTabStorageStatus } from "@/core/workspace/workbench-tab-storage-status";
 
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
 import {
@@ -41,7 +51,15 @@ import {
  *   - The leading glyph communicates *where the document lives* (browser-only / filesystem-bound
  *     / cloud) rather than dirty state, because CADara saves automatically.
  */
+export interface DocumentTabStorageFeedback extends WorkbenchTabStorageStatus {
+  actionLabel?: string;
+  /** Without it, the action shows disabled (the fix is not ready yet). */
+  onFix?: () => void;
+  secondaryAction?: { label: string; onClick: () => void };
+}
+
 export interface DocumentTabsBarProps {
+  storageFeedback?: Partial<Record<DocumentId, DocumentTabStorageFeedback>>;
   state: WorkbenchTabsState;
   /** Document currently mid-recompute. The active hairline becomes a sweep while present. */
   pendingDocumentId?: DocumentId | null;
@@ -86,6 +104,7 @@ export const DocumentTabsBar = forwardRef(DocumentTabsBarComponent);
 function DocumentTabsBarComponent(
   {
     state,
+    storageFeedback = {},
     pendingDocumentId = null,
     errorDocumentId = null,
     onActivate,
@@ -225,6 +244,13 @@ function DocumentTabsBarComponent(
               onCommitRename={commitRename}
               onCancelRename={cancelRename}
             />
+            {storageFeedback[tab.documentId] && (
+              <StorageStateBadge
+                feedback={storageFeedback[tab.documentId]!}
+                title={tab.title}
+                onOpen={() => onActivate(tab.documentId)}
+              />
+            )}
           </div>
         );
         return tabMenuItems ? (
@@ -391,7 +417,7 @@ function DocumentTabButton({
           className="relative inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center"
           aria-hidden="true"
         >
-          <StorageGlyph kind={tab.storageKind} active={isActive || isHover} />
+          <StorageGlyph kind={tab.storageKind} active={isActive} />
         </span>
         {isEditing ? (
           <DocumentTabTitleEditor
@@ -511,6 +537,83 @@ function ActiveOrPendingHairline({
   );
 }
 
+function StorageStateBadge({
+  feedback,
+  title,
+  onOpen,
+}: {
+  feedback: DocumentTabStorageFeedback;
+  title: string;
+  onOpen: () => void;
+}) {
+  return (
+    <Popover position="top" width={250} withArrow={false} onOpen={onOpen}>
+      <Popover.Target>
+        <Tooltip label={feedback.reason} position="top" multiline w={250}>
+          <ActionIcon
+            size={14}
+            variant="transparent"
+            radius="xl"
+            aria-label={`${title}: ${feedback.reason}`}
+            data-tab-storage-state={feedback.kind}
+            style={{
+              // Bottom-right corner of the 14px storage glyph.
+              position: "absolute",
+              left: 11,
+              top: 16,
+              zIndex: 1,
+              color: "var(--workbench-shell-text-muted)",
+            }}
+          >
+            {feedback.kind === "syncing" ? (
+              <Loader size={9} color="currentColor" />
+            ) : (
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background:
+                    feedback.kind === "error"
+                      ? "var(--workbench-shell-danger-border)"
+                      : "var(--workbench-shell-warning-border)",
+                  boxShadow:
+                    "0 0 0 1.5px var(--workbench-shell-overlay-strong)",
+                }}
+              />
+            )}
+          </ActionIcon>
+        </Tooltip>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap="xs">
+          <Text size="xs">{feedback.reason}</Text>
+          {feedback.kind !== "syncing" && feedback.actionLabel && (
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!feedback.onFix}
+              onClick={feedback.onFix}
+            >
+              {feedback.actionLabel}
+            </Button>
+          )}
+          {feedback.secondaryAction && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={feedback.secondaryAction.onClick}
+            >
+              {feedback.secondaryAction.label}
+            </Button>
+          )}
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 function StorageGlyph({
   kind,
   active,
@@ -526,50 +629,44 @@ function StorageGlyph({
 
   switch (kind) {
     case "browser":
-      // 6px filled circle: the document only lives in this browser's IndexedDB.
       return (
-        <svg
-          viewBox="0 0 14 14"
-          width="14"
-          height="14"
-          data-storage-glyph="browser"
-        >
-          <circle cx="7" cy="7" r="3" fill={tone} />
-        </svg>
+        <span data-storage-glyph="browser" style={{ color: tone }}>
+          <SvgIcon fileName="shell-warning.svg" size={14} />
+        </span>
       );
     case "filesystem":
       // Tiny linked-file: a document with a chain link, communicating "synced to disk".
       return (
         <svg
-          viewBox="0 0 14 14"
+          viewBox="0 0 20 20"
           width="14"
           height="14"
           data-storage-glyph="filesystem"
           fill="none"
           stroke={tone}
-          strokeWidth="1.4"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <path d="M3 2.4h5.2L11 5v5.2a1.4 1.4 0 0 1-1.4 1.4H3a1.4 1.4 0 0 1-1.4-1.4V3.8A1.4 1.4 0 0 1 3 2.4Z" />
-          <path d="M8 2.6V5h2.6" />
-          <path d="M5.2 8.6h3.6" />
+          <path d="M4 2.5h7l4 4V17H4Z" />
+          <path d="M11 2.5v4h4" />
+          <path d="M8 10.5h4M8 13.5h4" />
         </svg>
       );
     case "cloud":
       return (
         <svg
-          viewBox="0 0 14 14"
+          viewBox="0 0 20 20"
           width="14"
           height="14"
           data-storage-glyph="cloud"
           fill="none"
           stroke={tone}
-          strokeWidth="1.4"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
         >
-          <path d="M4 10.4h6.2a2.6 2.6 0 0 0 .3-5.18 3.4 3.4 0 0 0-6.55-.84A2.6 2.6 0 0 0 4 10.4Z" />
+          <path d="M5 15.5h10a3.5 3.5 0 0 0 .3-7A5 5 0 0 0 5.7 7a4.3 4.3 0 0 0-.7 8.5Z" />
         </svg>
       );
   }

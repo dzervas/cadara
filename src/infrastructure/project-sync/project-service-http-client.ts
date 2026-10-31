@@ -1,4 +1,5 @@
 import {
+  ProjectServiceAccessError,
   ProjectSlugConflictError,
   type ProjectServicePort,
 } from "@/application/project-sync/project-service-port";
@@ -24,9 +25,11 @@ async function failure(response: Response, fallback: string) {
   if (code === "slug_conflict") return new ProjectSlugConflictError();
   if (SERVICE_ERRORS[code]) return new Error(SERVICE_ERRORS[code]);
   if (response.status === 401)
-    return new Error("Sign in to CADara to sync projects.");
+    return new ProjectServiceAccessError("Sign in to CADara to sync projects.");
   if (response.status === 403)
-    return new Error("Your role does not allow this on the project.");
+    return new ProjectServiceAccessError(
+      "Your role does not allow this on the project.",
+    );
   return new Error(`${fallback} (HTTP ${response.status}).`);
 }
 

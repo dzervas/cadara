@@ -146,6 +146,7 @@ export function useProjectSync(
     );
   }, [transport, linkOrgId, linkProjectId, userId, presenceName]);
 
+  const [retrySequence, setRetrySequence] = useState(0);
   const statusKey = `${projectId}:${linkOrgId}/${linkProjectId}:${userId}`;
   const status = statusEntry?.key === statusKey ? statusEntry.status : null;
 
@@ -213,7 +214,18 @@ export function useProjectSync(
         });
       })
       .catch((error: unknown) => {
-        if (live) report(error);
+        if (live) {
+          setStatusEntry({
+            key: statusKey,
+            status: {
+              connection: "offline",
+              role: null,
+              peers: [],
+              error: error instanceof Error ? error.message : String(error),
+            },
+          });
+          report(error);
+        }
       });
     return () => {
       live = false;
@@ -231,6 +243,7 @@ export function useProjectSync(
     statusKey,
     publishPresence,
     report,
+    retrySequence,
   ]);
 
   const setActiveDocument = useCallback(
@@ -242,6 +255,22 @@ export function useProjectSync(
     [publishPresence],
   );
 
+  const [uploadEntry, setUploadState] = useState<{
+    projectId?: string;
+    busy: boolean;
+    error: string | null;
+  }>({ busy: false, error: null });
+  const uploadState =
+    uploadEntry.projectId === projectId
+      ? uploadEntry
+      : { busy: false, error: null };
+  const uploadInputRef = useRef<{
+    orgId: string;
+    name: string;
+    slug: string;
+    visibility: ProjectVisibility;
+    projectId: string;
+  } | null>(null);
   const upload = useCallback(
     async (input: {
       orgId: string;
@@ -250,15 +279,47 @@ export function useProjectSync(
       visibility: ProjectVisibility;
     }) => {
       if (!project) throw new Error("No project is open.");
-      const repository = await getRepository();
-      const linked = await uploadProjectToService(
-        { service, projects: syncedProjectStore(repository) },
-        { manifest: project, ...input },
-      );
-      await replaceProject(linked);
+      uploadInputRef.current = { ...input, projectId: project.projectId };
+      setUploadState({ projectId: project.projectId, busy: true, error: null });
+      try {
+        const repository = await getRepository();
+        const linked = await uploadProjectToService(
+          { service, projects: syncedProjectStore(repository) },
+          { manifest: project, ...input },
+        );
+        await replaceProject(linked);
+        setUploadState({
+          projectId: project.projectId,
+          busy: false,
+          error: null,
+        });
+      } catch (error: unknown) {
+        setUploadState({
+          projectId: project.projectId,
+          busy: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
     },
     [getRepository, project, replaceProject, service],
   );
+  /** The user chose not to upload after a failure: the project stays local and quiet. */
+  const dismissUploadError = useCallback(() => {
+    setUploadState((previous) =>
+      previous.busy ? previous : { busy: false, error: null },
+    );
+  }, []);
+  const retry = useCallback(async () => {
+    const retryInput = uploadInputRef.current;
+    if (!link && retryInput && retryInput.projectId === projectId) {
+      await upload(retryInput);
+      return;
+    }
+    await refreshAccount();
+    setStatusEntry(null);
+    setRetrySequence((sequence) => sequence + 1);
+  }, [link, projectId, refreshAccount, upload]);
 
   const openRemote = useCallback(
     async (
@@ -359,6 +420,9 @@ export function useProjectSync(
     linked: link !== null,
     setActiveDocument,
     upload,
+    uploadState,
+    dismissUploadError,
+    retry,
     listProjects: (orgId: string) => service.listProjects(orgId),
     openRemote,
   };

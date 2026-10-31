@@ -4,6 +4,7 @@ import type { WorkbenchTab, WorkbenchTabsState } from "./workbench-tabs";
 import { reduceWorkbenchTabs } from "./workbench-tabs";
 import {
   createWorkbenchProjectTabs,
+  deriveWorkbenchProjectTabStorage,
   followWorkbenchProjectManifest,
   mergeDiscoveredWorkbenchProjectTabs,
 } from "./workbench-project-tabs";
@@ -143,4 +144,68 @@ test("a first-part placeholder joins a discovered project only when the project 
     ),
     "the project created from the placeholder keeps it",
   ).toEqual(mounted);
+});
+
+test("account project tabs are cloud across cached, newly opened and active-session tabs, while a linked file keeps its identity", () => {
+  const accountProject: ProjectManifest = {
+    ...project,
+    service: { orgId: "org", projectId: "remote" },
+  };
+  const local: WorkbenchTabsState = {
+    tabs: [
+      first,
+      { ...second, storageKind: "filesystem", storageDescriptor: "lid.cadara" },
+    ],
+    activeDocumentId: first.documentId,
+  };
+  const restored = deriveWorkbenchProjectTabStorage(
+    accountProject,
+    createWorkbenchProjectTabs(accountProject, local, local),
+  );
+  expect(restored.tabs.map((tab) => tab.storageKind)).toEqual([
+    "cloud",
+    "filesystem",
+  ]);
+  expect(restored.tabs[1]?.storageDescriptor).toBe("lid.cadara");
+  const sessionUpdate = reduceWorkbenchTabs(restored, {
+    type: "syncActive",
+    tab: first,
+  });
+  expect(
+    deriveWorkbenchProjectTabStorage(accountProject, sessionUpdate).tabs[0]
+      ?.storageKind,
+  ).toBe("cloud");
+  const opened = reduceWorkbenchTabs(restored, {
+    type: "open",
+    tab: { ...first, documentId: "doc_new" },
+  });
+  expect(
+    deriveWorkbenchProjectTabStorage(accountProject, opened).tabs.map(
+      (tab) => tab.storageKind,
+    ),
+  ).toEqual(["cloud", "filesystem", "cloud"]);
+  expect(deriveWorkbenchProjectTabStorage(project, local)).toBe(local);
+  expect(deriveWorkbenchProjectTabStorage(accountProject, restored)).toBe(
+    restored,
+  );
+});
+
+test("a Local project's tab cache cannot keep stale cloud storage, while linked files keep their file identity", () => {
+  const local: WorkbenchTabsState = {
+    tabs: [
+      {
+        ...first,
+        storageKind: "cloud",
+        storageDescriptor: "Old account project",
+      },
+      { ...second, storageKind: "filesystem", storageDescriptor: "Lid.cadara" },
+    ],
+    activeDocumentId: first.documentId,
+  };
+  expect(
+    deriveWorkbenchProjectTabStorage(
+      project,
+      createWorkbenchProjectTabs(project, local, local),
+    ).tabs.map((tab) => tab.storageKind),
+  ).toEqual(["browser", "filesystem"]);
 });

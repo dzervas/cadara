@@ -1,6 +1,7 @@
-import type {
-  ProjectSyncStatus,
-  ProjectSyncTransport,
+import {
+  ProjectServiceAccessError,
+  type ProjectSyncStatus,
+  type ProjectSyncTransport,
 } from "@/application/project-sync/project-service-port";
 import type { ProjectServiceLink } from "@/contracts/modeling/project-manifest";
 import type {
@@ -44,6 +45,10 @@ interface StartedProject {
   manifestDocumentId: string;
   issueGrant: () => Promise<ProjectSyncGrant>;
   status: ProjectSyncStatus;
+  /** The worker's own sync failure; only this ends a wait for sync. */
+  workerError: string | null;
+  /** The service refused this account a token (signed out or not permitted). */
+  grantError: string | null;
   listeners: Set<(status: ProjectSyncStatus) => void>;
   syncWaiters: Set<{
     automergeDocumentId?: string;
@@ -105,7 +110,7 @@ export function createProjectSyncWorkerTransport({
   const publish = (project: StartedProject) => {
     for (const listener of project.listeners) listener(project.status);
     for (const waiter of project.syncWaiters) {
-      if (project.status.error) waiter.reject(new Error(project.status.error));
+      if (project.workerError) waiter.reject(new Error(project.workerError));
       else if (isSynced(project.status, waiter.automergeDocumentId))
         waiter.resolve();
       else continue;
@@ -117,12 +122,13 @@ export function createProjectSyncWorkerTransport({
     const project = started.get(message.link.projectId);
     if (message.kind === "projectSyncStatus") {
       if (!project) return;
+      project.workerError = message.error ?? null;
       project.status = {
         ...project.status,
         connection: message.connection,
         syncedDocumentIds: message.syncedDocumentIds ?? [],
         peers: message.peers,
-        error: message.error ?? null,
+        error: project.workerError ?? project.grantError,
       };
       publish(project);
       return;
@@ -142,13 +148,28 @@ export function createProjectSyncWorkerTransport({
     }
     project.issueGrant().then(
       (grant) => {
-        if (project.status.role !== grant.role) {
-          project.status = { ...project.status, role: grant.role };
+        project.grantError = null;
+        const error = project.workerError;
+        if (
+          project.status.role !== grant.role ||
+          project.status.error !== error
+        ) {
+          project.status = { ...project.status, role: grant.role, error };
           publish(project);
         }
         channel.postProjectSyncMessage(reply(grant));
       },
       (error: unknown) => {
+        // Outages stay a quiet offline state the worker retries; only a
+        // refusal for this account needs the user.
+        if (error instanceof ProjectServiceAccessError) {
+          project.grantError = error.message;
+          project.status = {
+            ...project.status,
+            error: project.workerError ?? project.grantError,
+          };
+          publish(project);
+        }
         channel.postProjectSyncMessage(
           reply(
             null,
@@ -191,6 +212,8 @@ export function createProjectSyncWorkerTransport({
         holders: 1,
         manifestDocumentId,
         issueGrant,
+        workerError: null,
+        grantError: null,
         status: {
           connection: "connecting",
           role: null,

@@ -1,7 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
-import type { ProjectSyncStatus } from "@/application/project-sync/project-service-port";
+import {
+  ProjectServiceAccessError,
+  type ProjectSyncStatus,
+} from "@/application/project-sync/project-service-port";
 import type {
   ProjectSyncWorkerRequest,
   ProjectSyncWorkerResponse,
@@ -241,4 +244,90 @@ test("waiting for one document resolves once the room holds it, not when the res
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("an access refusal is an error that survives offline updates, never ends a wait for sync, and clears on the next grant", async () => {
+  const { transport, posted, fromWorker } = await makeTransport();
+  let permitted = false;
+  transport.start({
+    link,
+    manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
+    issueGrant: async () => {
+      if (!permitted)
+        throw new ProjectServiceAccessError("Project access was revoked.");
+      return { token: "restored", expiresIn: 600, role: "editor" };
+    },
+  });
+  const statuses: ProjectSyncStatus[] = [];
+  transport.subscribe(link, (status) => statuses.push(status));
+  let waitEnded = false;
+  const synced = transport.whenSynced(link).finally(() => {
+    waitEnded = true;
+  });
+  fromWorker({ kind: "projectSyncTokenRequest", tokenRequestId: 1, link });
+  await vi.waitFor(() =>
+    expect(statuses.at(-1)?.error).toBe("Project access was revoked."),
+  );
+  fromWorker({
+    kind: "projectSyncStatus",
+    link,
+    connection: "offline",
+    peers: [],
+  });
+  expect(statuses.at(-1)?.error).toBe("Project access was revoked.");
+  permitted = true;
+  fromWorker({ kind: "projectSyncTokenRequest", tokenRequestId: 2, link });
+  await vi.waitFor(() =>
+    expect(posted).toContainEqual(
+      expect.objectContaining({ kind: "projectSyncToken", tokenRequestId: 2 }),
+    ),
+  );
+  expect(statuses.at(-1)).toMatchObject({ error: null, role: "editor" });
+  expect(waitEnded).toBe(false);
+  fromWorker({
+    kind: "projectSyncStatus",
+    link,
+    connection: "synced",
+    peers: [],
+  });
+  await expect(synced).resolves.toBeUndefined();
+});
+
+test("an unreachable service leaves the project quietly offline and the wait for sync open", async () => {
+  const { transport, posted, fromWorker } = await makeTransport();
+  transport.start({
+    link,
+    manifestDocumentId: "manifest",
+    foreignDocumentIds: [],
+    issueGrant: async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  });
+  const statuses: ProjectSyncStatus[] = [];
+  transport.subscribe(link, (status) => statuses.push(status));
+  let waitEnded = false;
+  void transport
+    .whenSynced(link)
+    .catch(() => undefined)
+    .finally(() => {
+      waitEnded = true;
+    });
+  fromWorker({
+    kind: "projectSyncStatus",
+    link,
+    connection: "offline",
+    peers: [],
+  });
+  fromWorker({ kind: "projectSyncTokenRequest", tokenRequestId: 1, link });
+  await vi.waitFor(() =>
+    expect(posted).toContainEqual(
+      expect.objectContaining({ kind: "projectSyncToken", grant: null }),
+    ),
+  );
+  expect(statuses.every((status) => status.error === null)).toBe(true);
+  expect(statuses.at(-1)?.connection).toBe("offline");
+  await Promise.resolve();
+  expect(waitEnded).toBe(false);
+  transport.stop(link);
 });

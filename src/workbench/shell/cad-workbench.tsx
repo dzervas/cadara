@@ -41,6 +41,7 @@ import {
   DocumentTabsBar,
   type DocumentTabsBarHandle,
   type DocumentTabsBarProps,
+  type DocumentTabStorageFeedback,
 } from "@/components/layout/document-tabs-bar";
 import { BrowserTabCloseWarningModal } from "@/components/layout/browser-tab-close-warning-modal";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
@@ -230,6 +231,7 @@ const VARIABLES_FAB_RESERVE_PX =
 
 interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
+  tabStorageFeedback?: Partial<Record<DocumentId, DocumentTabStorageFeedback>>;
   projectControls?: ReactNode;
   projectLoading?: boolean;
   /** The project could not be opened: the loading cover stays, in its failed state. */
@@ -259,6 +261,7 @@ interface CadWorkbenchProps {
 
 export function CadWorkbench({
   tabsState,
+  tabStorageFeedback,
   projectControls,
   projectLoading = false,
   projectOpenFailed = false,
@@ -2228,6 +2231,7 @@ export function CadWorkbench({
                       <DocumentTabsBar
                         ref={tabsBarRef}
                         state={tabsState}
+                        storageFeedback={tabStorageFeedback}
                         onActivate={onActivateDocumentTab}
                         onClose={handleTabClose}
                         onReorder={handleTabReorder}

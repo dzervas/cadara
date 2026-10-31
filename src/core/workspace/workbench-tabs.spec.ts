@@ -329,7 +329,7 @@ describe("reconcileWorkbenchTabsForActiveDocument", () => {
 describe("workbenchTabsStorageDescriptor", () => {
   it("describes the storage backend for tooltip copy", () => {
     expect(workbenchTabsStorageDescriptor("browser", null)).toBe(
-      "Stored in this browser only",
+      "This document lives only in this browser and could be lost if site data is cleared.",
     );
     expect(workbenchTabsStorageDescriptor("filesystem", "bracket.cadara")).toBe(
       "Synced to bracket.cadara",

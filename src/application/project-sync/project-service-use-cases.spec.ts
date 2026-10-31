@@ -214,7 +214,12 @@ test("retrying an upload whose registration failed reuses the project the first 
     throw new ProjectSlugConflictError();
   };
   fakes.service.listProjects = async () => [
-    makeRemote({ id: "someone_else", slug: "bracket", name: "Other" }),
+    makeRemote({
+      id: "someone_else",
+      slug: "bracket",
+      name: "Other",
+      manifest_doc_id: "another_manifest",
+    }),
     makeRemote({ id: "orphan", slug: "bracket", manifest_doc_id: null }),
   ];
   const linked = await uploadProjectToService(fakes, {
@@ -228,12 +233,14 @@ test("retrying an upload whose registration failed reuses the project the first 
   expect(linked.service?.projectId).toBe("orphan");
 });
 
-test("a slug taken by a registered project is still refused", async () => {
+test("a slug taken by a project registered to another manifest is still refused", async () => {
   const fakes = makeFakes();
   fakes.service.createProject = async () => {
     throw new ProjectSlugConflictError();
   };
-  fakes.service.listProjects = async () => [makeRemote({ slug: "bracket" })];
+  fakes.service.listProjects = async () => [
+    makeRemote({ slug: "bracket", manifest_doc_id: "another_manifest" }),
+  ];
   await expect(
     uploadProjectToService(fakes, {
       manifest: makeManifest(),
@@ -243,6 +250,59 @@ test("a slug taken by a registered project is still refused", async () => {
       visibility: "private",
     }),
   ).rejects.toBeInstanceOf(ProjectSlugConflictError);
+});
+
+test("retrying an upload whose project was created but a later step failed never creates a second project", async () => {
+  for (const failingStep of ["register", "link"] as const) {
+    const fakes = makeFakes();
+    // A service that keeps what it created, like the real one.
+    const server: RemoteProject[] = [];
+    fakes.service.createProject = async (orgId, input) => {
+      if (server.some((project) => project.slug === input.slug))
+        throw new ProjectSlugConflictError();
+      const created = makeRemote({
+        id: `created_${server.length}`,
+        organization_id: orgId,
+        slug: input.slug,
+        name: input.name,
+        manifest_doc_id: null,
+      });
+      server.push(created);
+      return created;
+    };
+    fakes.service.listProjects = async () => server;
+    let failNext = true;
+    const register = fakes.service.registerManifest;
+    fakes.service.registerManifest = async (link, id) => {
+      if (failingStep === "register" && failNext) {
+        failNext = false;
+        throw new Error("network down");
+      }
+      await register(link, id);
+      server.find((project) => project.id === link.projectId)!.manifest_doc_id =
+        id;
+    };
+    const linkService = fakes.projects.linkService;
+    fakes.projects.linkService = async (projectId, link) => {
+      if (failingStep === "link" && failNext) {
+        failNext = false;
+        throw new Error("storage busy");
+      }
+      return linkService(projectId, link);
+    };
+    const input = {
+      manifest: makeManifest(),
+      orgId: "org_one",
+      name: "Bracket",
+      slug: "bracket",
+      visibility: "private" as const,
+    };
+    await expect(uploadProjectToService(fakes, input)).rejects.toThrow();
+    const linked = await uploadProjectToService(fakes, input);
+    expect(server, failingStep).toHaveLength(1);
+    expect(linked.service?.projectId, failingStep).toBe("created_0");
+    expect(server[0]!.manifest_doc_id, failingStep).toBe("manifest_doc");
+  }
 });
 
 test("projects without a registered manifest cannot be opened", async () => {

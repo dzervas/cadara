@@ -15,6 +15,7 @@ export interface LocalFileSystemOpenPickerOptions {
 
 export interface LocalFileSystemSavePickerOptions {
   suggestedName: string;
+  startIn?: LocalFileSystemFileHandle;
   excludeAcceptAllOption: boolean;
   types: LocalFileSystemPickerType[];
 }
@@ -129,6 +130,7 @@ export async function showOpenLocalDocumentPicker(
 
 export async function showSaveLocalDocumentPicker(
   environment: LocalFileSystemPickerEnvironment = globalThis,
+  startIn?: LocalFileSystemFileHandle,
 ): Promise<LocalFilePickerResult> {
   const support = getLocalFileSystemSaveSupport(environment);
   if (!support.supported) {
@@ -139,7 +141,11 @@ export async function showSaveLocalDocumentPicker(
   try {
     return {
       ok: true,
-      handle: await showSaveFilePicker(CADARA_SAVE_FILE_PICKER_OPTIONS),
+      handle: await showSaveFilePicker(
+        startIn
+          ? { ...CADARA_SAVE_FILE_PICKER_OPTIONS, startIn }
+          : CADARA_SAVE_FILE_PICKER_OPTIONS,
+      ),
     };
   } catch (error: unknown) {
     return isPickerAbort(error)
