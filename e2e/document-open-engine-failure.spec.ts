@@ -46,6 +46,10 @@ test("a geometry engine that fails to start shows only the could-not-open notice
     "Local file sync restore failed",
   ])
     await expect(page.getByText(title)).toHaveCount(0);
+  // The loading cover stops claiming the document is still opening.
+  await expect(
+    page.getByRole("status", { name: "Initial model render pending" }),
+  ).toContainText("Unable to prepare the document.");
   // Nothing covers the notice: a trial click hit-tests its Reload button.
   await notice
     .getByRole("button", { name: "Reload" })

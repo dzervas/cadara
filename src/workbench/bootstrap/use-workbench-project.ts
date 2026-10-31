@@ -36,6 +36,10 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     () => pendingWrites.getPendingWriteCount(),
   );
   const [failure, setFailure] = useState<string | null>(null);
+  // The initial discovery ended without a project. Nothing opens until a
+  // reload discovers one: editing without a project would leave the part
+  // unlisted, since the next load mounts a newly generated first part.
+  const [discoveryFailed, setDiscoveryFailed] = useState(false);
   const context = useMemo(
     () =>
       createWorkbenchProjectBootstrap(
@@ -105,6 +109,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
       })
       .catch((error: unknown) => {
         if (!live) return;
+        setDiscoveryFailed(true);
         // Creating the project needs its parts' documents open. When the
         // active part's initialization threw, its own "could not be opened"
         // notice is the outcome; this message-only copy is not news. Any
@@ -241,6 +246,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     initialFailure: context.initialFailure,
     busy: busy || saving > 0,
     failure,
+    discoveryFailed,
     select,
     saveParts,
     saveSession,

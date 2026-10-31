@@ -295,17 +295,28 @@ function ProjectWorkbenchApp({
   const localSaving = useLocalSaveStatus(modelingServices).saving;
   const kernelVersionRetired = useOccKernelVersionRetired();
   // A retired kernel fails the part readiness the project waits for; the
-  // update notification's reload is the outcome.
+  // update notification's reload is the outcome. A failed discovery leaves
+  // nothing to edit, so its only recovery is a reload.
   const projectNotification = useMemo(
     (): WorkbenchNotificationModel | null =>
-      projects.failure && !kernelVersionRetired
-        ? {
-            type: "error",
-            title: "Project could not be saved",
-            message: projects.failure,
-          }
-        : null,
-    [kernelVersionRetired, projects.failure],
+      !projects.failure || kernelVersionRetired
+        ? null
+        : projects.discoveryFailed
+          ? {
+              type: "error",
+              title: "Project could not be opened",
+              message: projects.failure,
+              action: {
+                label: "Reload",
+                onClick: () => window.location.reload(),
+              },
+            }
+          : {
+              type: "error",
+              title: "Project could not be saved",
+              message: projects.failure,
+            },
+    [kernelVersionRetired, projects.discoveryFailed, projects.failure],
   );
 
   const durableHistory = useMemo(
@@ -523,6 +534,7 @@ function ProjectWorkbenchApp({
           >
             <CadWorkbench
               projectLoading={!projectApplied}
+              projectOpenFailed={projects.discoveryFailed}
               readOnly={
                 !projectAccessAllows(
                   { linked: projectLinked, role: projectRole },

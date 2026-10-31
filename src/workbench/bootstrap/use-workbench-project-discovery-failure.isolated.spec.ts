@@ -66,6 +66,8 @@ test("a discovery that failed on the active part's initialization is left to tha
   discovery.message = engineFailure.message;
   const project = await discover();
   expect(project.failure).toBeNull();
+  // Either way no project opened, so the opening cover shows the failure.
+  expect(project.discoveryFailed).toBe(true);
   expect(project.busy).toBe(false);
   expect(reporter.reports).toHaveLength(0);
 });
@@ -86,6 +88,7 @@ test("any other discovery failure is shown and reported as the project's", async
   discovery.message = "Invalid local project catalog.";
   const project = await discover();
   expect(project.failure).toBe("Invalid local project catalog.");
+  expect(project.discoveryFailed).toBe(true);
   expect(project.busy).toBe(false);
   expect(reporter.reports).toHaveLength(1);
 });

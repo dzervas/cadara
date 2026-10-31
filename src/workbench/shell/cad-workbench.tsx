@@ -231,6 +231,8 @@ interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
   projectControls?: ReactNode;
   projectLoading?: boolean;
+  /** The project could not be opened: the loading cover stays, in its failed state. */
+  projectOpenFailed?: boolean;
   /** The synced project's role cannot edit: authoring tools are disabled. */
   readOnly?: boolean;
   /** Refuses writes the project role does not allow; each refusal shows a notice. */
@@ -256,6 +258,7 @@ export function CadWorkbench({
   tabsState,
   projectControls,
   projectLoading = false,
+  projectOpenFailed = false,
   readOnly = false,
   projectWriteGate,
   onActivateDocumentTab,
@@ -1810,7 +1813,13 @@ export function CadWorkbench({
                 className="absolute inset-0 z-30 grid place-items-center bg-(--workbench-viewport-background)/85"
               >
                 <InitialLoadingStatus
-                  phase={projectLoading ? "opening-document" : loading.phase}
+                  phase={
+                    !projectLoading
+                      ? loading.phase
+                      : projectOpenFailed
+                        ? "failed"
+                        : "opening-document"
+                  }
                   progress={loading.progress}
                 />
               </div>
