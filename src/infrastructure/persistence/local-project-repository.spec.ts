@@ -272,14 +272,15 @@ test("database-local catalogs stay independent when peer channels share part poi
       ]),
     );
     expect(unwrap(await secondProjects.list())).toEqual([]);
-    const part = await first.repo.find(sharedPartUrls.get("doc_workspace")!);
-    second.repo.import(Automerge.save(part.doc()), {
-      docId: part.documentId,
-    });
+    // The second database holds no copy of the shared part and has no peer
+    // network: its project still lists the part by the shared URL's identity.
     const secondProject = unwrap(
       await secondProjects.create("Second database", [
         { name: "Part", kind: "part", docId: "doc_workspace" },
       ]),
+    );
+    expect(secondProject.entries[0].automergeDocumentId).toBe(
+      firstProject.entries[0].automergeDocumentId,
     );
     expect(unwrap(await firstProjects.list())).toEqual([firstProject]);
     expect(unwrap(await secondProjects.list())).toEqual([secondProject]);

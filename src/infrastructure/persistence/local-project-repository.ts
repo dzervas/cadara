@@ -1,6 +1,9 @@
 import { getHeads } from "@automerge/automerge/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
-import { isValidAutomergeUrl } from "@automerge/automerge-repo/slim";
+import {
+  isValidAutomergeUrl,
+  parseAutomergeUrl,
+} from "@automerge/automerge-repo/slim";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { ProjectCatalog } from "@/contracts/modeling/project-catalog.runtime-schema";
@@ -162,10 +165,15 @@ export class LocalProjectRepository {
       throw new Error("Project entries require names and document identities.");
     // The workbench's document owner initializes unsaved tabs; a second repository must not seed them.
     if (!this.urls.get(entry.docId)) await this.ensurePartReady?.(entry.docId);
+    const url = this.urls.get(entry.docId);
+    if (!url)
+      throw new Error(`Document ${entry.docId} has no stored Automerge URL.`);
+    // The identity is part of the URL. A local peer's part (URL shared, data
+    // only in the peer's storage and the sync worker) is not loadable here.
     return {
       ...entry,
       kind: "part",
-      automergeDocumentId: await this.resolveDocumentId(entry.docId),
+      automergeDocumentId: parseAutomergeUrl(url).documentId,
     };
   }
 
