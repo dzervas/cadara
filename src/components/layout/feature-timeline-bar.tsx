@@ -369,6 +369,30 @@ function HistoryTimelineSurface({
     };
   }, [activeCursorIndex, updateHandlePosition, items.length]);
 
+  // A long history would otherwise open scrolled to its start, and a cursor
+  // move (roll back, roll to end, a new item) could land outside the visible
+  // range. Only the committed cursor scrolls: a live handle drag must not.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const item = itemRefs.current[cursorIndex];
+    if (!scroller) {
+      return;
+    }
+
+    if (!item) {
+      scroller.scrollLeft = 0;
+      return;
+    }
+
+    const scrollerRect = scroller.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    if (itemRect.left < scrollerRect.left) {
+      scroller.scrollLeft += itemRect.left - scrollerRect.left;
+    } else if (itemRect.right > scrollerRect.right) {
+      scroller.scrollLeft += itemRect.right - scrollerRect.right;
+    }
+  }, [cursorIndex, itemRefs, items.length]);
+
   const handleWindowPointerMove = useCallback(
     (event: PointerEvent) => {
       if (cursorDisabled || dragPointerIdRef.current !== event.pointerId) {
@@ -486,7 +510,11 @@ function HistoryTimelineSurface({
         : null}
 
       <div className="min-w-0 overflow-hidden">
-        <div ref={scrollerRef} className="overflow-x-auto overflow-y-hidden">
+        <div
+          ref={scrollerRef}
+          data-history-scroller
+          className="overflow-x-auto overflow-y-hidden"
+        >
           <div ref={trackRef} className="relative min-w-full w-max">
             <div
               role="tree"

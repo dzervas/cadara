@@ -530,6 +530,27 @@ export function createRectangleProfileOperationHistory(): ModelingOperationHisto
   };
 }
 
+/** A document history of `count` independent rectangle sketches labelled "Sketch 1" onwards, ids `sketch_series-1` onwards. */
+export function createRectangleSketchSeriesOperationHistory(
+  count: number,
+): ModelingOperationHistoryPayload {
+  return {
+    ...createEmptyOperationHistory(DOCUMENT_ID),
+    entries: Array.from({ length: count }, (_, index) => {
+      const sketchId = `sketch_series-${index + 1}` as const;
+      return createCommitSketchHistoryEntry(
+        createCommitSketchRequest(
+          sketchId,
+          `Sketch ${index + 1}`,
+          `${index + 1}`,
+          { minX: -15.5, minY: -5, maxX: -5, maxY: 4.5 },
+        ),
+        sketchId,
+      );
+    }),
+  };
+}
+
 export function createBaseExtrudeOperationHistory(): ModelingOperationHistoryPayload {
   const sketchRequest = createCommitSketchRequest(
     "sketch_primary",
