@@ -2060,8 +2060,10 @@ export function CadWorkbench({
                 />
               ) : null}
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col">
-              <div className="flex flex-col gap-3">
+            {/* No z-index here, so the tab row below can stack above the
+                initial loading cover (z 30) while the rest stays under it. */}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col">
+              <div className="relative z-20 flex flex-col gap-3">
                 <div className="flex items-end gap-3 px-4">
                   <div className="contents" data-viewport-annotation-chrome="">
                     {/* The readout leads the row so it stays pinned at the
@@ -2104,7 +2106,10 @@ export function CadWorkbench({
                   />
                 </div>
               </div>
-              <div className="pointer-events-auto mt-3">
+              {/* The document tabs navigate between documents, not inside the
+                  open one: they stay usable above the loading cover, so a
+                  document that failed to open does not trap the user. */}
+              <div className="pointer-events-auto relative z-[31] mt-3">
                 <div
                   className="flex items-center"
                   data-viewport-annotation-bottom-band=""
