@@ -1,5 +1,6 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
+import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import { nonAcceptedDerivedOutputs } from "@/contracts/sketch/offset-publication";
 import type { SketchSessionState } from "@/core/editor/sketch-session";
 import {
@@ -143,6 +144,9 @@ export function composeViewportDocumentRenderables(
   );
   const nonAcceptedDerivedOutputsById =
     createCommittedNonAcceptedOffsetOutputLookup(snapshotSketches);
+  const snapshotSketchesById = new Map(
+    snapshotSketches.map((sketch) => [sketch.sketchId, sketch]),
+  );
   const layeredRenderables = [
     ...input.snapshotRenderables.map((renderable) => ({
       origin: "document" as const,
@@ -156,6 +160,7 @@ export function composeViewportDocumentRenderables(
         nonAcceptedDerivedOutputsById,
         nonCurrentSketchStates,
       ),
+      ...getCommittedSketchPointPlaneFrame(renderable, snapshotSketchesById),
     })),
     ...(input.previewRenderables ?? []).map((renderable) => ({
       origin: "preview" as const,
@@ -231,6 +236,19 @@ function getCommittedSketchConstraintDisplay(
   return summary
     ? getSketchConstraintDisplayForTarget(target, summary)
     : undefined;
+}
+
+/** The sketch plane a committed sketch point's marker is laid into. */
+function getCommittedSketchPointPlaneFrame(
+  renderable: RenderableEntityRecord,
+  sketchesById: ReadonlyMap<string, SketchSnapshotRecord>,
+): { sketchPlaneFrame?: SketchPlaneFrame } {
+  const target = renderable.binding.target;
+  const sketchPlaneFrame =
+    target.kind === "sketchPoint"
+      ? sketchesById.get(target.sketchId)?.plane.frame
+      : undefined;
+  return sketchPlaneFrame ? { sketchPlaneFrame } : {};
 }
 
 /** [TECH] G19: the non-accepted offset outputs of each committed sketch. */

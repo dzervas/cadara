@@ -146,3 +146,120 @@ test("a viewport re-render with the same record does not re-render the document 
   ).toBe("marker");
   await act(async () => root.unmount());
 });
+
+/**
+ * Seam: the drawn marker of a committed sketch point after one frame
+ * (`advance` runs its `useFrame` placement). A sphere centred on the
+ * point loses its half below a coplanar part face to the depth test at
+ * oblique views; the marker must instead lie in its sketch plane, covering
+ * a round screen disc. A marker without a sketch plane (a body vertex)
+ * keeps its sphere.
+ */
+test("a committed sketch point on a sketch plane is drawn as a round disc lying in that plane at oblique views; a body vertex keeps its sphere", async () => {
+  const anchor = [1, 2, 5] as const;
+  const markerEntry = (
+    sketchPlaneFrame?: ViewportRenderableRecord["sketchPlaneFrame"],
+  ): ViewportRenderableRecord => ({
+    origin: "document",
+    ...(sketchPlaneFrame ? { sketchPlaneFrame } : {}),
+    renderable: {
+      id: "renderable_point_1" as never,
+      label: "Sketch 1 point",
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: "pick_point_1" as never,
+        pickPriority: 30,
+        target: {
+          kind: "sketchPoint",
+          sketchId: "sketch_1" as never,
+          pointId: "point_1" as never,
+        },
+        topology: null,
+        semanticClass: "sketchPoint",
+      },
+      geometry: { kind: "marker", position: anchor, displayRadius: 0.25 },
+    },
+  });
+  const frame = {
+    origin: [0, 0, 5],
+    xAxis: [1, 0, 0],
+    yAxis: [0, 1, 0],
+    normal: [0, 0, 1],
+    linearUnit: "documentLength",
+    handedness: "rightHanded",
+  } as const;
+  const root = await createStubR3fRoot();
+  const groupRef = createRef<THREE.Group>();
+  const drawnMarker = async (entry: ViewportRenderableRecord) => {
+    const store = await act(async () =>
+      root.render(
+        <group ref={groupRef}>
+          <DocumentRenderableNode
+            entry={entry}
+            palette={palette}
+            clippingPlane={null}
+          />
+        </group>,
+      ),
+    );
+    return { store, mesh: drawnMesh(groupRef.current) };
+  };
+
+  for (const camera of [
+    new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000),
+    new THREE.PerspectiveCamera(45, 1, 0.1, 1000),
+  ]) {
+    camera.position.set(14, -9, 13);
+    camera.lookAt(...anchor);
+    camera.updateMatrixWorld(true);
+    const { store, mesh } = await drawnMarker(markerEntry(frame));
+    store.setState({ camera });
+    store.getState().advance(1);
+    mesh.updateMatrixWorld(true);
+
+    const toScreen = (point: THREE.Vector3) => {
+      const ndc = point.clone().project(camera);
+      return new THREE.Vector2(ndc.x, ndc.y);
+    };
+    const center = toScreen(new THREE.Vector3(...anchor));
+    const positions = mesh.geometry.getAttribute("position");
+    const rimRadii: number[] = [];
+    for (let index = 0; index < positions.count; index += 1) {
+      const world = new THREE.Vector3()
+        .fromBufferAttribute(positions, index)
+        .applyMatrix4(mesh.matrixWorld);
+      expect(
+        world.z,
+        `${camera.type}: every marker vertex lies in the sketch plane`,
+      ).toBeCloseTo(5, 9);
+      const radius = toScreen(world).distanceTo(center);
+      if (radius > 0) rimRadii.push(radius);
+    }
+    expect(
+      Math.min(...rimRadii) / Math.max(...rimRadii),
+      // Perspective lays the disc in along the anchor's view ray only.
+      `${camera.type}: the marker covers a round screen disc`,
+    ).toBeGreaterThan(0.95);
+  }
+
+  const { mesh: vertexMarker } = await drawnMarker(markerEntry());
+  expect(vertexMarker.geometry).toBeInstanceOf(THREE.SphereGeometry);
+  await act(async () => root.unmount());
+});
+
+/** The drawn (not pick-proxy) mesh of a document marker node. */
+function drawnMesh(root: THREE.Object3D | null) {
+  let found: THREE.Mesh | null = null;
+  root?.traverse((object) => {
+    if (
+      object instanceof THREE.Mesh &&
+      object.userData.highlightExcluded !== true &&
+      !found
+    ) {
+      found = object;
+    }
+  });
+  if (!found) throw new Error("Expected a drawn marker mesh.");
+  return found as THREE.Mesh;
+}

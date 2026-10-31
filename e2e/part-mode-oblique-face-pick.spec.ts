@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import { openDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
+import { clickViewCubeAt } from "./helpers/view-cube";
 
 test.setTimeout(300_000);
 
@@ -71,42 +72,6 @@ async function settledCamera(workbench: FeatureWorkbenchHarness) {
   >;
 }
 
-/**
- * Clicks the view cube where `point` (cube units, half size 0.58) shows:
- * the cube's camera looks at its centre along the viewport camera's
- * orbit offset (`three-cad-viewport.tsx`, `renderCube`). Mirrors the cube
- * camera of `createViewCubeScene` (`three-cad-viewport-view-cube.ts`:
- * PerspectiveCamera(35, …) at distance 4): keep in step with it.
- */
-async function clickViewCubeAt(
-  workbench: FeatureWorkbenchHarness,
-  point: readonly [number, number, number],
-) {
-  const page = workbench.page;
-  const box = (await page
-    .locator('[data-testid="view-cube"] canvas')
-    .boundingBox())!;
-  const frame = await settledCamera(workbench);
-  const camera = new THREE.PerspectiveCamera(
-    35,
-    box.width / box.height,
-    0.1,
-    100,
-  );
-  camera.position
-    .fromArray(frame.position)
-    .sub(new THREE.Vector3().fromArray(frame.target))
-    .setLength(4);
-  camera.up.set(0, 0, 1);
-  camera.lookAt(0, 0, 0);
-  camera.updateMatrixWorld();
-  const ndc = new THREE.Vector3(...point).project(camera);
-  await page.mouse.click(
-    box.x + ((ndc.x + 1) / 2) * box.width,
-    box.y + ((1 - ndc.y) / 2) * box.height,
-  );
-}
-
 /** Screen points of the top face (z = 8) at polar (radius, degrees). */
 async function topFaceProjector(workbench: FeatureWorkbenchHarness) {
   const ids = Object.values(TOP_FACE_FRAME).map((vertex) => vertex.id);
@@ -154,10 +119,10 @@ test("cadara-1lzw: from every top view-cube corner the wheel's top face is picke
 
   for (const corner of TOP_CORNERS) {
     // Every top corner is on screen from the top view.
-    await clickViewCubeAt(workbench, [0, 0, 0.58]);
-    await settledCamera(workbench);
+    await clickViewCubeAt(page, await settledCamera(workbench), [0, 0, 0.58]);
     await clickViewCubeAt(
-      workbench,
+      page,
+      await settledCamera(workbench),
       corner.direction.map((value) => value * 0.48) as [number, number, number],
     );
     const frame = await settledCamera(workbench);

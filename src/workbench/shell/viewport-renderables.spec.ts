@@ -613,6 +613,7 @@ test("T17d2 (T17d review R-1): every committed curve and point of a sketch that 
   ): SketchSnapshotRecord =>
     ({
       sketchId,
+      plane: createStandardPlaneDefinition("xy"),
       sketch: {
         definition: {
           schemaVersion: "sketch-definition/v1alpha2",
@@ -795,4 +796,100 @@ test("cadara-01k: body faces carry their body's display colour (a picker preview
   expect(getDocumentRenderableMaterialOptions(byId.get("edge_a")!, palette)).toEqual(
     {},
   );
+});
+
+test("a committed sketch point carries its own sketch's plane frame, so its marker lies in that plane; curves, body vertices and previews do not", () => {
+  const sketch = (
+    sketchId: string,
+    planeKey: "xy" | "yz",
+  ): SketchSnapshotRecord =>
+    ({
+      sketchId,
+      plane: createStandardPlaneDefinition(planeKey),
+      sketch: {
+        definition: {
+          schemaVersion: "sketch-definition/v1alpha2",
+          referenceIds: [],
+          references: [],
+          pointIds: [],
+          points: [],
+          entityIds: [],
+          entities: [],
+          constraintIds: [],
+          constraints: [],
+          dimensionIds: [],
+          dimensions: [],
+        },
+        solvedSnapshot: {
+          schemaVersion: "solved-sketch/v1alpha2",
+          status: { solveState: "solved", constraintState: "underConstrained" },
+          solvedEntities: [],
+          solvedPoints: [],
+          constraintStatuses: [],
+          dimensionStatuses: [],
+          diagnostics: [],
+        },
+        derivedValidity: { state: "current", diagnostics: [] },
+        projectedReferences: [],
+        regions: [],
+      },
+    }) as unknown as SketchSnapshotRecord;
+  const record = (
+    label: string,
+    target: RenderableEntityRecord["binding"]["target"],
+    semanticClass: RenderableEntityRecord["binding"]["semanticClass"],
+  ): RenderableEntityRecord =>
+    ({
+      id: `render_${label}`,
+      label,
+      ownerBodyId: null,
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${label}`,
+        pickPriority: 1,
+        target,
+        topology: null,
+        semanticClass,
+      },
+      geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 0.1 },
+    }) as unknown as RenderableEntityRecord;
+  const point = (sketchId: string) =>
+    record(
+      `${sketchId} point`,
+      { kind: "sketchPoint", sketchId, pointId: "point_1" } as never,
+      "sketchPoint",
+    );
+  const composed = composeViewportRenderables({
+    snapshotRenderables: [
+      point("sketch_xy"),
+      point("sketch_yz"),
+      record(
+        "sketch_xy curve",
+        { kind: "sketchEntity", sketchId: "sketch_xy", entityId: "e" } as never,
+        "sketchCurve",
+      ),
+      record(
+        "body vertex",
+        { kind: "vertex", bodyId: "body_1", vertexId: "v" } as never,
+        "bodyVertex",
+      ),
+    ],
+    snapshotSketches: [sketch("sketch_xy", "xy"), sketch("sketch_yz", "yz")],
+    previewRenderables: [point("sketch_xy")],
+    sketchSession: null,
+    hiddenTargetKeys: {},
+  });
+  expect(
+    composed.documentRenderables.map((entry) => [
+      entry.origin,
+      entry.renderable.label,
+      entry.sketchPlaneFrame,
+    ]),
+  ).toEqual([
+    ["document", "sketch_xy point", createStandardPlaneDefinition("xy").frame],
+    ["document", "sketch_yz point", createStandardPlaneDefinition("yz").frame],
+    ["document", "sketch_xy curve", undefined],
+    ["document", "body vertex", undefined],
+    ["preview", "sketch_xy point", undefined],
+  ]);
 });

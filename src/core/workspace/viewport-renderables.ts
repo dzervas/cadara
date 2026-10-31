@@ -1,4 +1,5 @@
 import type { RenderableEntityRecord } from "@/contracts/render/schema";
+import type { SketchPlaneFrame } from "@/contracts/shared/sketch-plane";
 import type { SketchConstraintDisplayTargetState } from "@/core/editor/sketch-session";
 
 export type ViewportRenderableOrigin = "document" | "preview";
@@ -19,6 +20,11 @@ export interface ViewportRenderableRecord {
    *   the normal colour, as a stale output does in sketch mode (U-A).
    */
   sketchGeometryValidity?: "invalid" | "stale";
+  /**
+   * Plane of a committed sketch point's sketch: its marker lies in that
+   * plane, so a coplanar part face cannot clip it; display only.
+   */
+  sketchPlaneFrame?: SketchPlaneFrame;
   /** Display colour (0xrrggbb) of the owning body's faces; display only. */
   bodyColor?: number;
 }

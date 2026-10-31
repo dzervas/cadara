@@ -1,8 +1,12 @@
-import { memo, useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 import type { SketchRenderingPalette } from "@/components/cad/sketch-rendering-palette";
-import { getDocumentRenderableMaterialOptions } from "@/components/cad/sketch-display-style";
+import {
+  getDocumentRenderableMaterialOptions,
+  placeFlatPointMarker,
+} from "@/components/cad/sketch-display-style";
 import {
   MARKER_SPHERE_GEOMETRY,
   GEOMETRY_HIGHLIGHT_COLORS,
@@ -312,17 +316,73 @@ export function DocumentMarkerNode({
       }}
       renderOrder={getRenderableRenderOrder(renderable, origin)}
     >
-      <mesh
-        geometry={MARKER_SPHERE_GEOMETRY}
-        material={material}
-        position={geometryData?.position}
-        scale={
-          geometryData ? getVisibleMarkerRadius(geometryData.displayRadius) : 1
-        }
-        renderOrder={getRenderableRenderOrder(renderable, origin)}
-      />
+      {geometryData && entry.sketchPlaneFrame ? (
+        <SketchPlaneMarkerDisc
+          position={geometryData.position}
+          radius={getVisibleMarkerRadius(geometryData.displayRadius)}
+          planeNormal={entry.sketchPlaneFrame.normal}
+          material={material}
+          renderOrder={getRenderableRenderOrder(renderable, origin)}
+        />
+      ) : (
+        <mesh
+          geometry={MARKER_SPHERE_GEOMETRY}
+          material={material}
+          position={geometryData?.position}
+          scale={
+            geometryData
+              ? getVisibleMarkerRadius(geometryData.displayRadius)
+              : 1
+          }
+          renderOrder={getRenderableRenderOrder(renderable, origin)}
+        />
+      )}
       <primitive object={pickProxy} />
     </group>
+  );
+}
+
+const SKETCH_PLANE_MARKER_DISC_GEOMETRY = new THREE.CircleGeometry(1, 32);
+
+/**
+ * A committed sketch point drawn flat, as the sphere's silhouette, but laid
+ * into its sketch plane every frame (`placeFlatPointMarker`). A sphere
+ * centred on a coplanar part face loses the half below the face to the
+ * depth test, reading as a half disc at oblique views.
+ */
+function SketchPlaneMarkerDisc({
+  position,
+  radius,
+  planeNormal,
+  material,
+  renderOrder,
+}: {
+  position: readonly [number, number, number];
+  radius: number;
+  planeNormal: readonly [number, number, number];
+  material: THREE.Material;
+  renderOrder: number;
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  useFrame(({ camera }) => {
+    if (meshRef.current) {
+      placeFlatPointMarker(
+        meshRef.current,
+        camera,
+        position,
+        radius,
+        planeNormal,
+      );
+    }
+  });
+  return (
+    <mesh
+      ref={meshRef}
+      geometry={SKETCH_PLANE_MARKER_DISC_GEOMETRY}
+      material={material}
+      position={position}
+      renderOrder={renderOrder}
+    />
   );
 }
 

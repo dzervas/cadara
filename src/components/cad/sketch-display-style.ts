@@ -393,12 +393,8 @@ export function createScreenSpacePointMarkerGeometry(
 const MIN_IN_PLANE_MARKER_VIEW_COSINE = 0.2;
 
 /**
- * Sizes a screen-space marker in pixels. A marker on a sketch plane
- * (`planeNormal`) is laid into that plane along the view direction: it
- * covers the same screen disc as a camera-facing marker, but every
- * fragment has the sketch plane's depth. A part face coplanar with the
- * sketch is pushed behind that depth by its polygon offset, as for sketch
- * curves, so it cannot clip half of a camera-facing disc at oblique views.
+ * Sizes a screen-space marker in pixels and places it as
+ * `placeFlatPointMarker` does.
  */
 export function updateScreenSpacePointMarker(
   mesh: THREE.Mesh,
@@ -408,9 +404,32 @@ export function updateScreenSpacePointMarker(
   radiusScale: number,
   planeNormal?: readonly [number, number, number],
 ) {
-  const scale =
+  placeFlatPointMarker(
+    mesh,
+    camera,
+    position,
     getSketchFeedbackWorldUnitsPerPixel(camera, viewportHeight, [position]) *
-    radiusScale;
+      radiusScale,
+    planeNormal,
+  );
+}
+
+/**
+ * Places a flat marker (geometry in its local XY plane) at `position`,
+ * scaled by `scale`. A marker on a sketch plane (`planeNormal`) is laid into
+ * that plane along the view direction: it covers the same screen disc as a
+ * camera-facing marker, but every fragment has the sketch plane's depth. A
+ * part face coplanar with the sketch is pushed behind that depth by its
+ * polygon offset, as for sketch curves, so it cannot clip half of a
+ * camera-facing disc at oblique views.
+ */
+export function placeFlatPointMarker(
+  mesh: THREE.Mesh,
+  camera: THREE.Camera,
+  position: readonly [number, number, number],
+  scale: number,
+  planeNormal?: readonly [number, number, number],
+) {
   const basis = planeNormal
     ? getInPlaneMarkerBasis(camera, position, planeNormal)
     : null;
