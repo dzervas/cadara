@@ -5,8 +5,10 @@ import type {
   AuthoredValue,
 } from "@/contracts/modeling/authored-actions";
 import {
+  authoredCollectionOrders,
   encodeAuthoredActionState,
   decodeAuthoredActionState,
+  type AuthoredCollectionOrders,
 } from "./authored-action-history";
 
 type Fields = Record<string, AuthoredValue>;
@@ -19,6 +21,12 @@ export interface CollaborativeDocument {
   revisionId: AuthoredModelDocument["revisionId"];
   provenance: Record<string, Fields>;
   topologyLineage: Fields;
+  /** Authored record order of every keyed collection in `authored`, whose
+   * map key order is not durable. Absent in documents saved before it was
+   * persisted: they materialize in a deterministic fallback order and gain it
+   * with their next write. Ids it misses (a peer's concurrent records) or
+   * repeats are placed the same way; it never decides membership. */
+  collectionOrder?: AuthoredCollectionOrders;
 }
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const object = (value: unknown): value is Fields =>
@@ -84,6 +92,7 @@ export function createCollaborativeDocument(
     revisionId: document.revisionId,
     provenance: metadata.sketches,
     topologyLineage: metadata.topologyLineage,
+    collectionOrder: authoredCollectionOrders(document),
   };
 }
 export function materializeCollaborativeDocument(
@@ -97,6 +106,7 @@ export function materializeCollaborativeDocument(
       context: { kind: "document" },
     } as AuthoredActionState,
     plain(storage.authored),
+    plain(storage.collectionOrder ?? {}),
   );
   const document = state.data as AuthoredModelDocument;
   document.revisionId = storage.revisionId;
@@ -112,12 +122,30 @@ export function materializeCollaborativeDocument(
 }
 /** LCS edit script preserves every unchanged interior list element, not just prefix/suffix.
  * Deleting/reinserting equal elements would resurrect a concurrent peer deletion on merge.
+ * The shared prefix and suffix are kept without entering the quadratic table, so
+ * appending to or removing from a long record order stays linear.
  */
 function updateSequence(
   list: AuthoredValue[],
-  next: AuthoredValue[],
-  before: readonly AuthoredValue[] = plain(list),
+  nextList: AuthoredValue[],
+  beforeList: readonly AuthoredValue[] = plain(list),
 ) {
+  let prefix = 0;
+  while (
+    prefix < beforeList.length &&
+    prefix < nextList.length &&
+    equal(beforeList[prefix], nextList[prefix])
+  )
+    prefix++;
+  let suffix = 0;
+  while (
+    suffix < beforeList.length - prefix &&
+    suffix < nextList.length - prefix &&
+    equal(beforeList.at(-1 - suffix), nextList.at(-1 - suffix))
+  )
+    suffix++;
+  const before = beforeList.slice(prefix, beforeList.length - suffix);
+  const next = nextList.slice(prefix, nextList.length - suffix);
   const lengths = Array.from(
     { length: before.length + 1 },
     () => new Uint32Array(next.length + 1),
@@ -129,7 +157,7 @@ function updateSequence(
         : Math.max(lengths[i + 1]![j]!, lengths[i]![j + 1]!);
   let i = 0,
     j = 0,
-    position = 0;
+    position = prefix;
   while (i < before.length || j < next.length) {
     if (i < before.length && j < next.length && equal(before[i], next[j])) {
       i++;
@@ -146,11 +174,20 @@ function updateSequence(
     }
   }
 }
+/** Writes an applied ledger action: its granular field writes, then the
+ * record order of its resulting state (`applied.state`). `read` is a plain
+ * copy of `storage` from before this transaction; an Automerge change proxy
+ * materializes every value it compares (see updateDocumentProvenance).
+ */
 export function applyCollaborativeWrites(
   storage: CollaborativeDocument,
-  writes: readonly AuthoredFieldWrite[],
+  applied: {
+    writes: readonly AuthoredFieldWrite[];
+    state: AuthoredActionState;
+  },
+  read: CollaborativeDocument = storage,
 ) {
-  for (const change of writes) {
+  for (const change of applied.writes) {
     let parent = storage.authored;
     for (const key of change.address.slice(0, -1))
       parent = parent[key] as Fields;
@@ -166,6 +203,39 @@ export function applyCollaborativeWrites(
     else if (Array.isArray(parent[key]) && Array.isArray(change.after.value))
       updateSequence(parent[key] as AuthoredValue[], change.after.value);
     else parent[key] = structuredClone(change.after.value);
+  }
+  updateCollectionOrder(
+    storage,
+    authoredCollectionOrders(applied.state.data as AuthoredModelDocument),
+    read,
+  );
+}
+/** Edits each persisted order list in place (an LCS edit script), so peers'
+ * concurrent insertions into one collection both survive a merge; lists of
+ * removed collections go with them. */
+function updateCollectionOrder(
+  storage: CollaborativeDocument,
+  next: AuthoredCollectionOrders,
+  read: CollaborativeDocument,
+) {
+  const current = read.collectionOrder;
+  if (!current) {
+    storage.collectionOrder = next;
+    return;
+  }
+  const target = storage.collectionOrder!;
+  for (const address of Object.keys(current))
+    if (!Object.hasOwn(next, address)) delete target[address];
+  for (const [address, ids] of Object.entries(next)) {
+    const before = current[address];
+    if (!before) target[address] = ids;
+    else if (!equal(before, ids))
+      updateSequence(
+        target[address]!,
+        ids,
+        // In place (`read` is `storage`), the list is its own baseline.
+        read === storage ? undefined : before,
+      );
   }
 }
 export class DocumentProvenanceConflict extends Error {

@@ -8,6 +8,7 @@ import type {
   AuthoredPresence,
   AuthoredValue,
 } from "@/contracts/modeling/authored-actions";
+import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { SketchId } from "@/contracts/shared/ids";
 
 export {
@@ -110,10 +111,66 @@ function equal(a: unknown, b: unknown): boolean {
     keys.every((key) => Object.hasOwn(b, key) && equal(a[key], b[key]))
   );
 }
+/** Record order of every keyed collection of a document, by the collection's
+ * JSON address in the encoded state (e.g. `["sketches","<id>","definition","points"]`).
+ * The encoded collections are maps, and Automerge does not keep map key
+ * order: a key added to an existing map is appended, and a loaded document
+ * lists its keys in code-unit order. Repositories persist these orders beside
+ * the records so a round trip returns every collection in authored order.
+ */
+export type AuthoredCollectionOrders = Record<string, string[]>;
+export function authoredCollectionOrders(
+  document: AuthoredModelDocument,
+): AuthoredCollectionOrders {
+  const orders: AuthoredCollectionOrders = {};
+  const add = (address: string[], records: unknown, id: string) => {
+    if (Array.isArray(records))
+      orders[JSON.stringify(address)] = (records as Fields[]).map((record) =>
+        String(record[id]),
+      );
+  };
+  const data = document as unknown as Fields;
+  for (const [key, id] of Object.entries(documentCollections))
+    add([key], data[key], id);
+  add(["assets", "records"], document.assets?.records, "assetId");
+  for (const sketch of document.sketches ?? [])
+    for (const [key, id] of Object.entries(sketchCollections))
+      add(
+        ["sketches", sketch.sketchId, "definition", key],
+        (sketch.definition as unknown as Fields)[key],
+        id,
+      );
+  return orders;
+}
+/** Kernels allocate `variable_<n>` ids in creation order, so for variables
+ * without a persisted order (documents saved before orders were persisted,
+ * or a peer's merged records) the id ordinal is the creation order, and an
+ * undone variable delete does not come back last. Other records without one
+ * follow in code-unit id order, which is the order Automerge loads map keys in.
+ */
+const byVariableOrdinal = new Intl.Collator("en", { numeric: true }).compare;
+const byCodeUnit = (left: string, right: string) =>
+  left < right ? -1 : left > right ? 1 : 0;
+/** Records in `order` (ids that are live, each once), then the records it
+ * does not list, in the fallback order. */
+function orderedRecords(
+  records: Fields,
+  order: readonly string[] | undefined,
+  fallback: (left: string, right: string) => number,
+) {
+  const ids = new Set<string>();
+  for (const id of order ?? []) if (Object.hasOwn(records, id)) ids.add(id);
+  const unlisted = Object.keys(records)
+    .filter((id) => !ids.has(id))
+    .sort(fallback);
+  return [...ids, ...unlisted].map((id) => records[id]!);
+}
 function collections(
   data: Fields,
   schema: Record<string, string>,
   encode: boolean,
+  address: string[] = [],
+  orders?: AuthoredCollectionOrders,
 ) {
   for (const [key, id] of Object.entries(schema)) {
     if (data[key] === undefined) continue;
@@ -125,7 +182,16 @@ function collections(
       if (new Set(entries.map(([key]) => key)).size !== entries.length)
         throw new Error(`Duplicate authored identity in ${key}`);
       data[key] = Object.fromEntries(entries);
-    } else data[key] = Object.values(data[key] as Fields);
+    } else
+      data[key] = orders
+        ? orderedRecords(
+            data[key] as Fields,
+            orders[JSON.stringify([...address, key])],
+            address.length === 0 && key === "variables"
+              ? byVariableOrdinal
+              : byCodeUnit,
+          )
+        : Object.values(data[key] as Fields);
   }
 }
 function splineOccurrences(definition: Fields, encode: boolean) {
@@ -150,10 +216,21 @@ function splineOccurrences(definition: Fields, encode: boolean) {
     }
   }
 }
-function sketch(data: Fields, encode: boolean) {
+function sketch(
+  data: Fields,
+  encode: boolean,
+  address: string[] = [],
+  orders?: AuthoredCollectionOrders,
+) {
   const definition = data.definition as Fields;
   if (encode) splineOccurrences(definition, true);
-  collections(definition, sketchCollections, encode);
+  collections(
+    definition,
+    sketchCollections,
+    encode,
+    [...address, "definition"],
+    orders,
+  );
   if (!encode) splineOccurrences(definition, false);
   for (const [records, ids] of Object.entries(canonicalIds)) {
     if (encode) delete definition[ids];
@@ -180,24 +257,27 @@ function encode(state: AuthoredActionState): Fields {
   }
   return data;
 }
-/** Encoded collections are maps whose key order is not durable: Automerge sorts
- * keys on load and appends a re-created key, so an undone variable delete came
- * back last (cadara-1ui8). Kernels allocate `variable_<n>` ids in creation
- * order, so that ordinal order is the canonical variable order.
+/** Collections decode in map key order, which is the record order inside
+ * this ledger. Data read from storage whose key order is not durable passes
+ * the persisted `orders` (see AuthoredCollectionOrders).
  */
-const byVariableOrdinal = new Intl.Collator("en", { numeric: true });
-function decode(state: AuthoredActionState, data: Fields): AuthoredActionState {
+function decode(
+  state: AuthoredActionState,
+  data: Fields,
+  orders?: AuthoredCollectionOrders,
+): AuthoredActionState {
   if (state.context.kind === "sketch") sketch(data, false);
   else {
-    collections(data, documentCollections, false);
-    (data.variables as Fields[] | undefined)?.sort((left, right) =>
-      byVariableOrdinal.compare(
-        String(left.variableId),
-        String(right.variableId),
-      ),
+    collections(data, documentCollections, false, [], orders);
+    collections(
+      data.assets as Fields,
+      { records: "assetId" },
+      false,
+      ["assets"],
+      orders,
     );
-    collections(data.assets as Fields, { records: "assetId" }, false);
-    for (const record of data.sketches as Fields[]) sketch(record, false);
+    for (const record of data.sketches as Fields[])
+      sketch(record, false, ["sketches", String(record.sketchId)], orders);
   }
   return { ...state, data } as unknown as AuthoredActionState;
 }

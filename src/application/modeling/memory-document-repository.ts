@@ -288,8 +288,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         history: this.historyOf(input.documentId),
       });
     const storage = structuredClone(this.documents.get(input.documentId)!);
-    if (action.status === "applied")
-      applyCollaborativeWrites(storage, action.writes);
+    if (action.status === "applied") applyCollaborativeWrites(storage, action);
     try {
       updateDocumentProvenance(storage, result.document, input.expected);
     } catch (error) {
@@ -365,8 +364,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         history: this.historyOf(document.documentId),
       });
     const storage = structuredClone(this.documents.get(document.documentId)!);
-    if (action.status === "applied")
-      applyCollaborativeWrites(storage, action.writes);
+    if (action.status === "applied") applyCollaborativeWrites(storage, action);
     try {
       updateDocumentProvenance(storage, document, expected);
     } catch (error) {
@@ -598,7 +596,7 @@ export class MemoryDocumentRepository implements GeometryAssetDocumentRepository
         history: this.historyOf(documentId),
       });
     const storage = structuredClone(this.documents.get(documentId)!);
-    applyCollaborativeWrites(storage, action.writes);
+    applyCollaborativeWrites(storage, action);
     // Compensation is a new intent, not a return to an older revision. Distinct
     // heads/revisions also prevent old recipe bases and replayed notifications
     // from certifying the newly compensated state.

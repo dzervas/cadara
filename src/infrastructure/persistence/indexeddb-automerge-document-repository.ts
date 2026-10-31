@@ -677,7 +677,7 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
             );
         if (result.status === "blocked") return;
         if (result.status === "applied")
-          applyCollaborativeWrites(storage, result.writes);
+          applyCollaborativeWrites(storage, result, snapshot);
         if (input)
           updateDocumentProvenance(
             storage,

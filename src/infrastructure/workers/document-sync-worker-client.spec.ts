@@ -1,4 +1,6 @@
-import { test, expect, assert } from "vitest";
+import { test, expect, assert, vi } from "vitest";
+import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
+import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { GeometryAssetAvailability } from "@/contracts/modeling/geometry-assets";
@@ -29,6 +31,12 @@ import type { DocumentRepositoryUrlStore } from "@/infrastructure/persistence/do
 import { createLocalAuthoredDocumentPayload } from "@/lib/local-file-system-access";
 import { type LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
+import {
+  IndexedDbAutomergeDocumentRepository,
+  type AutomergeRepositoryLike,
+} from "@/infrastructure/persistence/indexeddb-automerge-document-repository";
+import { SharedMemoryStorage } from "@/infrastructure/persistence/shared-memory-automerge-storage.fixtures";
+import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 
 test("src/infrastructure/workers/document-sync-worker-client.spec.ts", async () => {
   async function testRequestOrderingAndStructuredFailures() {
@@ -1152,6 +1160,98 @@ test("worker transport preserves candidate bases, conflict atomicity, actor iden
     ).toMatchObject({ canUndo: false, canRedo: false });
   } finally {
     client.dispose();
+  }
+});
+
+// Seam: the worker's load of a document bound to a local file,
+// over the Automerge repository reopened cold from its storage. The bound file
+// holds what the last write returned. Records are stored as maps keyed by id,
+// and a reloaded map lists its keys in id order, so the reload must restore
+// their authored order to certify that file; otherwise every reload of a
+// document with a record added out of id order re-initializes the repository
+// from the file.
+test("a bound file with a record added out of id order reloads from the Automerge repository without re-initializing it (cadara-yt1)", async () => {
+  await initializeBase64Wasm(automergeWasmBase64);
+  const storage = new SharedMemoryStorage();
+  const urlStore = new MemoryDocumentRepositoryUrlStore();
+  const repos: Repo[] = [];
+  const open = () => {
+    const repo = new Repo({ storage });
+    repos.push(repo);
+    return new IndexedDbAutomergeDocumentRepository({
+      repo: repo as unknown as AutomergeRepositoryLike,
+      urlStore,
+      assetStore: createMemoryGeometryAssetStore(),
+    });
+  };
+  try {
+    const seed = await createSeedAuthoredModelDocument();
+    const definition = seed.sketches[0]!.definition;
+    // A point added last whose id sorts before every other.
+    const point = {
+      ...structuredClone(definition.points[0]!),
+      pointId: "sketch_point_0_added" as const,
+    };
+    point.target = { ...point.target, pointId: point.pointId };
+    const document = {
+      ...seed,
+      sketches: [
+        {
+          ...seed.sketches[0]!,
+          definition: {
+            ...definition,
+            points: [...definition.points, point],
+            pointIds: [...definition.pointIds, point.pointId],
+          },
+        },
+        ...seed.sketches.slice(1),
+      ],
+    };
+    const writer = open();
+    await writer.initialize({ documentId: seed.documentId, document: seed });
+    const written = await writer.mutate({
+      documentId: seed.documentId,
+      expected: seed,
+      document,
+    });
+    if (!written.ok) throw new Error("write failed");
+
+    const repository = open();
+    const initialize = vi.spyOn(repository, "initialize");
+    const bindingStore = new MemoryLocalFileBindingStore();
+    const writes: string[] = [];
+    await saveBinding(
+      bindingStore,
+      seed,
+      createWritableHandle({
+        name: "added-out-of-id-order.cadara",
+        writes,
+        fileText: createLocalAuthoredDocumentPayload(written.document),
+        permission: "granted",
+      }).handle,
+    );
+    const posted: DocumentSyncWorkerResponse[] = [];
+    const handle = createDocumentSyncWorkerMessageHandler(
+      { repository, bindingStore },
+      (message) => posted.push(message),
+    );
+    await handle(createLoadRequest(seed, "request_out_of_id_order_load"));
+    const loaded = findLoaded(posted, "request_out_of_id_order_load");
+    assert(loaded?.result.ok);
+    expect(
+      {
+        initializations: initialize.mock.calls.length,
+        heads: loaded.result.metadata.heads,
+        fileWrites: writes.length,
+      },
+      "the reload certifies the bound file: no re-initialization, same heads, no file write",
+    ).toEqual({
+      initializations: 0,
+      heads: written.metadata.heads,
+      fileWrites: 0,
+    });
+  } finally {
+    for (const repo of repos) repo.networkSubsystem.disconnect();
   }
 });
 

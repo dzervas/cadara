@@ -13,6 +13,8 @@ import {
   type CollaborativeDocument,
 } from "./collaborative-document";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
+import type { AuthoredActionState } from "@/contracts/modeling/authored-actions";
+import { authoredModelDocumentsEqual } from "@/contracts/modeling/authored-document-equality";
 import { createNewSketchSession } from "@/core/editor/sketch-session";
 import { createStandardPlaneDefinition } from "./opencascade-kernel-seed";
 import { OCC_KERNEL_SETTINGS } from "@/core/modeling/opencascade-kernel-seed";
@@ -83,8 +85,7 @@ function change(
       documentActionState(expected),
     );
     expect(result.status).toBe("applied");
-    if (result.status === "applied")
-      applyCollaborativeWrites(storage, result.writes);
+    if (result.status === "applied") applyCollaborativeWrites(storage, result);
   });
 }
 test("separated list deletions retain interior CRDT identities across a peer deletion", async () => {
@@ -281,8 +282,7 @@ test("stale candidate field conflict applies none of its writes inside an Autome
       documentActionState(seed),
     );
     expect(result.status).toBe("blocked");
-    if (result.status === "applied")
-      applyCollaborativeWrites(storage, result.writes);
+    if (result.status === "applied") applyCollaborativeWrites(storage, result);
   });
   expect(Automerge.getHeads(after)).toEqual(Automerge.getHeads(peer));
   expect(
@@ -447,9 +447,10 @@ test("variables materialize in creation (id ordinal) order, also after a delete 
     );
   const order = ["variable_1", "variable_2", "variable_3", "variable_10"];
   const loaded = Automerge.from(createCollaborativeDocument(seed));
-  expect(ids(loaded), "Automerge sorts map keys as text on load").toEqual(
-    order,
-  );
+  expect(
+    ids(loaded),
+    "a new document lists variables in creation order",
+  ).toEqual(order);
 
   const history = new AuthoredActionHistory();
   const identity = {
@@ -464,7 +465,7 @@ test("variables materialize in creation (id ordinal) order, also after a delete 
     expect(result.status).toBe("applied");
     stored = Automerge.change(stored, (storage) => {
       if (result.status === "applied")
-        applyCollaborativeWrites(storage, result.writes);
+        applyCollaborativeWrites(storage, result);
     });
   };
   const without = structuredClone(seed);
@@ -481,4 +482,343 @@ test("variables materialize in creation (id ordinal) order, also after a delete 
   expect(ids(stored)).toEqual(order.filter((id) => id !== "variable_2"));
   apply(history.undo(identity, current()));
   expect(ids(stored), "Undo puts the variable back in place").toEqual(order);
+});
+
+// Seam: the collaborative codec over a real Automerge document.
+// Records are stored as maps keyed by id, and Automerge does not keep map key
+// order: a map created in one change lists its keys in code-unit order, a key
+// added to an existing map is appended (a deleted key re-created too), a clone
+// keeps the live order, and a loaded document lists its keys in code-unit
+// order again. The codec persists each collection's order beside its records,
+// so every one of those copies returns the authored order.
+type PointId = SketchDefinition["pointIds"][number];
+/** `Automerge.from` types plain records only. */
+const automergeFrom = (
+  storage: Omit<CollaborativeDocument, "collectionOrder">,
+) =>
+  Automerge.from(
+    storage as unknown as Record<string, unknown>,
+  ) as unknown as Automerge.Doc<CollaborativeDocument>;
+const pointRecord = (pointId: PointId) => ({
+  pointId,
+  label: pointId,
+  target: {
+    kind: "sketchPoint" as const,
+    sketchId: "sketch_merge" as const,
+    pointId,
+  },
+  position: [1, 2] as [number, number],
+  isConstruction: false,
+});
+async function outOfIdOrderFixture() {
+  const seed = await fixture();
+  const definition = seed.sketches[0]!.definition;
+  definition.pointIds = ["sketch_point_q", "sketch_point_p"];
+  definition.points = definition.pointIds.map(pointRecord);
+  // Not in id ordinal order either, which is the variables' fallback.
+  seed.variables = ["3", "1"].map((ordinal) => ({
+    variableId: `variable_${ordinal}` as const,
+    name: `v${ordinal}`,
+    valueText: ordinal,
+  }));
+  const feature = (await createSeedAuthoredModelDocument()).features[0]!;
+  seed.features = ["b", "a"].map((id) => ({
+    ...structuredClone(feature),
+    featureId: `feature_${id}` as const,
+  }));
+  seed.featureOrder = seed.features.map((f) => f.featureId);
+  seed.historyOrder = [
+    { kind: "sketch", sketchId: "sketch_merge" },
+    ...seed.featureOrder.map((featureId) => ({
+      kind: "feature" as const,
+      featureId,
+    })),
+  ];
+  return seed;
+}
+/** `document` with `pointId` inserted into its sketch before `before` (else last). */
+function withPoint(
+  document: AuthoredModelDocument,
+  pointId: PointId,
+  before?: PointId,
+) {
+  const next = structuredClone(document);
+  const definition = next.sketches[0]!.definition;
+  const index = before ? definition.pointIds.indexOf(before) : -1;
+  const at = index < 0 ? definition.points.length : index;
+  definition.points.splice(at, 0, pointRecord(pointId));
+  definition.pointIds.splice(at, 0, pointId);
+  return next;
+}
+function withoutPoint(document: AuthoredModelDocument, pointId: PointId) {
+  const next = structuredClone(document);
+  const definition = next.sketches[0]!.definition;
+  definition.points = definition.points.filter((p) => p.pointId !== pointId);
+  definition.pointIds = definition.pointIds.filter((id) => id !== pointId);
+  return next;
+}
+const pointIdsOf = (document: AuthoredModelDocument) =>
+  document.sketches[0]!.definition.points.map((point) => point.pointId);
+/** The stored document in a live copy, a clone and after save/load. */
+const copies = (stored: Automerge.Doc<CollaborativeDocument>) =>
+  Object.entries({
+    live: stored,
+    clone: Automerge.clone(stored),
+    reload: Automerge.load<CollaborativeDocument>(Automerge.save(stored)),
+  }).map(
+    ([copy, doc]) => [copy, materializeCollaborativeDocument(doc)] as const,
+  );
+function expectStoredAs(
+  stored: Automerge.Doc<CollaborativeDocument>,
+  expected: AuthoredModelDocument,
+  step: string,
+) {
+  for (const [copy, document] of copies(stored))
+    expect(
+      authoredModelDocumentsEqual(document, expected),
+      `${step}: the ${copy} copy returns the authored document, records in order`,
+    ).toBe(true);
+}
+/** One actor's ledger over a stored Automerge document. */
+function storedActions(initial: Automerge.Doc<CollaborativeDocument>) {
+  const history = new AuthoredActionHistory();
+  const identity = {
+    actorId: Automerge.getActorId(initial),
+    documentId: materializeCollaborativeDocument(initial).documentId,
+    context: { kind: "document" as const },
+  };
+  let stored = initial;
+  const run = (
+    act: (
+      current: AuthoredActionState,
+    ) => ReturnType<AuthoredActionHistory["undo"]>,
+  ) => {
+    const snapshot = stored;
+    const current = documentActionState(
+      materializeCollaborativeDocument(snapshot),
+    );
+    const result = act(current);
+    if (result.status !== "applied")
+      throw new Error(`Action not applied: ${JSON.stringify(result)}`);
+    stored = Automerge.change(snapshot, (storage) =>
+      applyCollaborativeWrites(storage, result, snapshot),
+    );
+    // The ledger holds authored fields only.
+    const { revisionId, topologyLineage } =
+      materializeCollaborativeDocument(stored);
+    return {
+      ...(result.state.data as AuthoredModelDocument),
+      revisionId,
+      topologyLineage,
+    };
+  };
+  return {
+    get stored() {
+      return stored;
+    },
+    set stored(next) {
+      stored = next;
+    },
+    commit: (candidate: AuthoredModelDocument) =>
+      run((current) =>
+        history.commit(
+          identity,
+          current,
+          documentActionState(candidate),
+          "Edit",
+          current,
+        ),
+      ),
+    undo: () => run((current) => history.undo(identity, current)),
+    redo: () => run((current) => history.redo(identity, current)),
+  };
+}
+
+test("record collections keep their authored order through a new map, keys added to it, delete and re-create, clone and save/load (cadara-yt1)", async () => {
+  const seed = await outOfIdOrderFixture();
+  const actions = storedActions(
+    automergeFrom(createCollaborativeDocument(seed)),
+  );
+  expectStoredAs(actions.stored, seed, "a map created in one change");
+
+  // "…_a" sorts first and "…_zz" last in code-unit order; both are authored
+  // elsewhere, added to the existing points map.
+  const added = withPoint(
+    withPoint(seed, "sketch_point_a", "sketch_point_p"),
+    "sketch_point_zz",
+  );
+  actions.commit(added);
+  expectStoredAs(actions.stored, added, "keys added to an existing map");
+  const withVariable = {
+    ...added,
+    variables: [
+      ...added.variables,
+      { variableId: "variable_2" as const, name: "v2", valueText: "2" },
+    ],
+  };
+  actions.commit(withVariable);
+  expectStoredAs(actions.stored, withVariable, "a variable added last");
+
+  actions.commit(withoutPoint(withVariable, "sketch_point_q"));
+  expect(
+    pointIdsOf(actions.undo()),
+    "premise: Undo puts the deleted first point back first",
+  ).toEqual([
+    "sketch_point_q",
+    "sketch_point_a",
+    "sketch_point_p",
+    "sketch_point_zz",
+  ]);
+  expectStoredAs(actions.stored, withVariable, "a deleted key re-created");
+});
+
+test("a document stored without record orders opens in a deterministic order and keeps it from its next write (cadara-yt1)", async () => {
+  const seed = await outOfIdOrderFixture();
+  const { collectionOrder, ...legacy } = createCollaborativeDocument(seed);
+  expect(collectionOrder, "premise: orders are stored").toBeDefined();
+  // A live copy whose map key order differs from the loaded one.
+  const live = Automerge.change(automergeFrom(legacy), (storage) => {
+    const points = (
+      (storage.authored.sketches as Record<string, Record<string, unknown>>)
+        .sketch_merge!.definition as Record<string, Record<string, unknown>>
+    ).points!;
+    const record = points.sketch_point_q;
+    delete points.sketch_point_q;
+    points.sketch_point_q = JSON.parse(JSON.stringify(record));
+  });
+  const opened = copies(live).map(([copy, document]) => {
+    expect(
+      parseAuthoredModelDocument(structuredClone(document)).ok,
+      `${copy} opens`,
+    ).toBe(true);
+    return {
+      points: pointIdsOf(document),
+      pointIds: document.sketches[0]!.definition.pointIds,
+      variables: document.variables.map((variable) => variable.variableId),
+      features: document.features.map((f) => f.featureId),
+    };
+  });
+  const fallback = {
+    points: ["sketch_point_p", "sketch_point_q"],
+    pointIds: ["sketch_point_p", "sketch_point_q"],
+    variables: ["variable_1", "variable_3"],
+    features: ["feature_a", "feature_b"],
+  };
+  expect(
+    opened,
+    "every record, once; variables by id ordinal, others by id; live, clone and reload agree",
+  ).toEqual([fallback, fallback, fallback]);
+
+  const actions = storedActions(live);
+  const renamed = actions.commit({
+    ...materializeCollaborativeDocument(live),
+    name: "Renamed",
+  });
+  const appended = withPoint(renamed, "sketch_point_a");
+  actions.commit(appended);
+  expectStoredAs(
+    actions.stored,
+    appended,
+    "the next writes store the opened order and the new record's place",
+  );
+});
+
+test("concurrent record additions and deletions merge every live record once, in one order on every peer, and Undo/Redo keep it (cadara-yt1)", async () => {
+  const seed = await outOfIdOrderFixture();
+  const base = automergeFrom(createCollaborativeDocument(seed));
+  const a = storedActions(Automerge.clone(base));
+  const b = storedActions(Automerge.clone(base));
+  a.commit(withPoint(seed, "sketch_point_z"));
+  b.commit(
+    withoutPoint(
+      withPoint(seed, "sketch_point_m", "sketch_point_p"),
+      "sketch_point_q",
+    ),
+  );
+  const ab = Automerge.merge(Automerge.clone(a.stored), b.stored);
+  const ba = Automerge.merge(Automerge.clone(b.stored), a.stored);
+  const merged = materializeCollaborativeDocument(ab);
+  expect(pointIdsOf(merged).toSorted(), "each live record once").toEqual([
+    "sketch_point_m",
+    "sketch_point_p",
+    "sketch_point_z",
+  ]);
+  expect(merged.sketches[0]!.definition.pointIds).toEqual(pointIdsOf(merged));
+  expect(
+    pointIdsOf(materializeCollaborativeDocument(ba)),
+    "both peers materialize one order",
+  ).toEqual(pointIdsOf(merged));
+  expectStoredAs(ab, merged, "the merged order");
+
+  a.stored = ab;
+  const undone = a.undo();
+  expect(pointIdsOf(undone), "Undo removes only this actor's record").toEqual(
+    pointIdsOf(merged).filter((id) => id !== "sketch_point_z"),
+  );
+  expectStoredAs(a.stored, undone, "after Undo");
+  const redone = a.redo();
+  expect(
+    pointIdsOf(redone).toSorted(),
+    "Redo restores the record once",
+  ).toEqual(["sketch_point_m", "sketch_point_p", "sketch_point_z"]);
+  expect(
+    pointIdsOf(redone).indexOf("sketch_point_z"),
+    "after its predecessor",
+  ).toBeGreaterThan(pointIdsOf(redone).indexOf("sketch_point_p"));
+  expectStoredAs(a.stored, redone, "after Redo");
+});
+
+test("stale, repeated and missing order entries never change membership, and the next write converges without later order-only changes (cadara-yt1)", async () => {
+  const seed = await outOfIdOrderFixture();
+  // An order naming a removed record twice and a record named twice, and a
+  // record added by a writer that stores no order.
+  const stored = Automerge.change(
+    automergeFrom(createCollaborativeDocument(seed)),
+    (storage) => {
+      const address = JSON.stringify([
+        "sketches",
+        "sketch_merge",
+        "definition",
+        "points",
+      ]);
+      storage.collectionOrder![address]!.unshift(
+        "sketch_point_gone",
+        "sketch_point_p",
+      );
+      storage.collectionOrder![address]!.push("sketch_point_gone");
+      const points = (
+        (storage.authored.sketches as Record<string, Record<string, unknown>>)
+          .sketch_merge!.definition as Record<string, Record<string, unknown>>
+      ).points!;
+      points.sketch_point_b = pointRecord("sketch_point_b");
+    },
+  );
+  const opened = copies(stored).map(([, document]) => pointIdsOf(document));
+  expect(
+    opened,
+    "listed live records first, once, then unlisted ones; every copy agrees",
+  ).toEqual([
+    ["sketch_point_p", "sketch_point_q", "sketch_point_b"],
+    ["sketch_point_p", "sketch_point_q", "sketch_point_b"],
+    ["sketch_point_p", "sketch_point_q", "sketch_point_b"],
+  ]);
+
+  const actions = storedActions(stored);
+  const renamed = actions.commit({
+    ...materializeCollaborativeDocument(stored),
+    name: "Renamed",
+  });
+  expectStoredAs(actions.stored, renamed, "the converged order");
+  const converged = actions.stored;
+  const again = Automerge.change(converged, (storage) =>
+    applyCollaborativeWrites(
+      storage,
+      { writes: [], state: documentActionState(renamed) },
+      converged,
+    ),
+  );
+  expect(
+    Automerge.getHeads(again),
+    "materializing and writing the same records again changes nothing",
+  ).toEqual(Automerge.getHeads(converged));
 });

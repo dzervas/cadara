@@ -8,12 +8,11 @@
 //
 // Automerge does not keep the order of map keys: a map created in one change
 // materializes in id order, a key added to an existing map is appended, and a
-// loaded document is in id order again. The codec rebuilds sketch record
-// arrays and their *Ids from that map order, so a new sketch authored out of
-// id order publishes reordered and its key misses; records added to an
-// existing sketch keep their order in the live document and miss only after
-// a reload. The rows marked to fail turn green once the repository persists
-// collection order (cadara-yt1); then drop `.fails`.
+// loaded document is in id order again. The codec stores sketch records as
+// maps, so it persists each collection's record order beside them; without
+// that a new sketch authored out of id order would publish reordered and its
+// key would miss, and records added to an existing sketch would miss after a
+// reload.
 import { readFile } from "node:fs/promises";
 import * as Automerge from "@automerge/automerge";
 import { describe, expect, test } from "vitest";
@@ -65,7 +64,7 @@ function publish(
     );
     if (result.status !== "applied")
       throw new Error(`Commit not applied: ${result.status}`);
-    applyCollaborativeWrites(storage, result.writes);
+    applyCollaborativeWrites(storage, result);
   });
 }
 
@@ -149,20 +148,13 @@ describe("RestoredSketchInputs key of a committed face sketch after the Automerg
     expect(ids).not.toEqual([...ids].sort());
   });
 
-  // cadara-yt1 (expected to fail until the repository keeps collection order).
-  test.fails(
-    "a new face sketch publishes with the key its commit registered",
-    async () => {
-      const { base, committed, repository } =
-        await enclosureWithNewFaceSketch();
-      const published = materializeCollaborativeDocument(
-        publish(repository, base, committed),
-      );
-      expect(keyOf(published, faceSketchId)).toBe(
-        keyOf(committed, faceSketchId),
-      );
-    },
-  );
+  test("a new face sketch publishes with the key its commit registered", async () => {
+    const { base, committed, repository } = await enclosureWithNewFaceSketch();
+    const published = materializeCollaborativeDocument(
+      publish(repository, base, committed),
+    );
+    expect(keyOf(published, faceSketchId)).toBe(keyOf(committed, faceSketchId));
+  });
 
   test("records added to the published face sketch keep the commit's key in the live document", async () => {
     const { base, committed, repository } = await enclosureWithNewFaceSketch();
@@ -175,21 +167,16 @@ describe("RestoredSketchInputs key of a committed face sketch after the Automerg
     expect(keyOf(published, faceSketchId)).toBe(keyOf(edited, faceSketchId));
   });
 
-  // cadara-yt1 (expected to fail until the repository keeps collection order).
-  test.fails(
-    "records added to the published face sketch keep the commit's key after a reload",
-    async () => {
-      const { base, committed, repository } =
-        await enclosureWithNewFaceSketch();
-      const first = publish(repository, base, committed);
-      const reopened = materializeCollaborativeDocument(first);
-      const edited = withAddedPoint(reopened);
-      const reloaded = Automerge.load<CollaborativeDocument>(
-        Automerge.save(publish(first, reopened, edited)),
-      );
-      expect(
-        keyOf(materializeCollaborativeDocument(reloaded), faceSketchId),
-      ).toBe(keyOf(edited, faceSketchId));
-    },
-  );
+  test("records added to the published face sketch keep the commit's key after a reload", async () => {
+    const { base, committed, repository } = await enclosureWithNewFaceSketch();
+    const first = publish(repository, base, committed);
+    const reopened = materializeCollaborativeDocument(first);
+    const edited = withAddedPoint(reopened);
+    const reloaded = Automerge.load<CollaborativeDocument>(
+      Automerge.save(publish(first, reopened, edited)),
+    );
+    expect(
+      keyOf(materializeCollaborativeDocument(reloaded), faceSketchId),
+    ).toBe(keyOf(edited, faceSketchId));
+  });
 });

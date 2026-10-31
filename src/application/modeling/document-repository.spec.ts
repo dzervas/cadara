@@ -57,6 +57,66 @@ function persistent(
     assetStore: createMemoryGeometryAssetStore(),
   });
 }
+/** `seed` plus a sketch and variables whose records are authored in an order
+ * that is neither their ids' code-unit nor ordinal order. */
+function withRecordsOutOfIdOrder(seed: AuthoredModelDocument) {
+  const definition = literalAuthoredDefinition(makeEqualCircleDefinition());
+  for (const [records, ids] of [
+    ["points", "pointIds"],
+    ["entities", "entityIds"],
+    ["constraints", "constraintIds"],
+  ] as const) {
+    definition[records].reverse();
+    definition[ids].reverse();
+  }
+  const sketch = {
+    sketchId: "sketch_out_of_id_order" as const,
+    label: "Out of id order",
+    plane: createStandardPlaneDefinition("xy"),
+    definition,
+  };
+  return {
+    ...seed,
+    variables: ["3", "1"].map((ordinal) => ({
+      variableId: `variable_${ordinal}` as const,
+      name: `v${ordinal}`,
+      valueText: ordinal,
+    })),
+    sketches: [...seed.sketches, sketch],
+    historyOrder: [
+      ...seed.historyOrder,
+      { kind: "sketch" as const, sketchId: sketch.sketchId },
+    ],
+  };
+}
+/** Appends a point whose id sorts before every other and a variable whose
+ * ordinal falls between the others. */
+function withAddedRecords(document: AuthoredModelDocument) {
+  return {
+    ...document,
+    variables: [
+      ...document.variables,
+      { variableId: "variable_2" as const, name: "v2", valueText: "2" },
+    ],
+    sketches: document.sketches.map((sketch) => {
+      if (sketch.sketchId !== "sketch_out_of_id_order") return sketch;
+      const point = {
+        ...structuredClone(sketch.definition.points[0]!),
+        pointId: "sketch_point_0_added" as const,
+        label: "Added",
+      };
+      point.target = { ...point.target, pointId: point.pointId };
+      return {
+        ...sketch,
+        definition: {
+          ...sketch.definition,
+          points: [...sketch.definition.points, point],
+          pointIds: [...sketch.definition.pointIds, point.pointId],
+        },
+      };
+    }),
+  };
+}
 for (const [name, make] of [
   ["memory", () => createMemoryDocumentRepository()],
   ["Automerge", () => persistent()],
@@ -245,18 +305,10 @@ for (const [name, make] of [
       repository = make();
     const lineage = createRebuiltTopologyLineage(seed);
     const original = { ...seed, topologyLineage: lineage.original };
-    // Automerge also reorders authored sketch records on a plain round trip,
-    // outside this lineage seam, so it is held to lineage certification only.
     const certifies = (
       candidate: AuthoredModelDocument,
       stored: AuthoredModelDocument,
-    ) =>
-      authoredModelDocumentsEqual(
-        name === "memory"
-          ? candidate
-          : { ...stored, topologyLineage: candidate.topologyLineage },
-        stored,
-      );
+    ) => authoredModelDocumentsEqual(candidate, stored);
     const initialized = await repository.initialize({
       documentId: seed.documentId,
       document: original,
@@ -304,6 +356,72 @@ for (const [name, make] of [
       "source:b": ["edge_stable_b"],
       "source:fallback:g9": ["edge_fallback_g9"],
     });
+  });
+  // Repositories store records keyed by id; every collection
+  // still comes back in authored order, through writes and Undo/Redo.
+  test(`${name}: records authored out of id order keep their order through initialize, load, writes, Undo and Redo`, async () => {
+    const seed = await createSeedAuthoredModelDocument(),
+      repository = make();
+    const original = withRecordsOutOfIdOrder(seed);
+    const initialized = await repository.initialize({
+      documentId: seed.documentId,
+      document: original,
+    });
+    expect(
+      initialized.ok &&
+        authoredModelDocumentsEqual(original, initialized.document),
+      "the initialize receipt",
+    ).toBe(true);
+    const loaded = await repository.load({
+      documentId: seed.documentId,
+      seedDocument: seed,
+    });
+    expect(
+      loaded.ok && authoredModelDocumentsEqual(original, loaded.document),
+      "a load",
+    ).toBe(true);
+    const added = withAddedRecords(original);
+    const written = await repository.mutate({
+      documentId: seed.documentId,
+      expected: original,
+      document: added,
+    });
+    expect(
+      written.ok && authoredModelDocumentsEqual(added, written.document),
+      "records added after records whose ids sort later",
+    ).toBe(true);
+    const removed = {
+      ...added,
+      variables: added.variables.filter((v) => v.variableId !== "variable_1"),
+    };
+    expect(
+      (
+        await repository.mutate({
+          documentId: seed.documentId,
+          expected: added,
+          document: removed,
+        })
+      ).ok,
+    ).toBe(true);
+    const undone = await repository.undoDurableHistory(seed.documentId);
+    expect(
+      undone?.ok &&
+        authoredModelDocumentsEqual(
+          { ...added, revisionId: undone.document.revisionId },
+          undone.document,
+        ),
+      "Undo puts the deleted middle variable back in place",
+    ).toBe(true);
+    await repository.undoDurableHistory(seed.documentId);
+    const redone = await repository.redoDurableHistory(seed.documentId);
+    expect(
+      redone?.ok &&
+        authoredModelDocumentsEqual(
+          { ...added, revisionId: redone.document.revisionId },
+          redone.document,
+        ),
+      "Redo puts the added records back in place",
+    ).toBe(true);
   });
   test(`${name}: a rebuilt lineage sequence is stored exactly`, async () => {
     const seed = await createSeedAuthoredModelDocument(),
