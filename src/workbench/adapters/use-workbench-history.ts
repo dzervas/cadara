@@ -41,6 +41,11 @@ import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 type DocumentVariablePatch = Pick<DocumentVariableRecord, "name" | "valueText">;
 
 interface WorkbenchHistoryControllerInput {
+  /**
+   * Asks whether the document may be written (and announces a refusal).
+   * Document Undo/Redo writes it; a sketch's private undo does not.
+   */
+  authorizeDocumentWrite?: () => boolean;
   deps?: Partial<WorkbenchHistoryDependencies>;
   dispatch: (event: EditorEvent) => void;
   errorReporter: ErrorReporter;
@@ -67,6 +72,7 @@ const EMPTY_HISTORY_AVAILABILITY: EditorHistoryAvailability = {
 };
 
 export function useWorkbenchHistory({
+  authorizeDocumentWrite,
   deps,
   dispatch,
   errorReporter,
@@ -249,6 +255,8 @@ export function useWorkbenchHistory({
     (direction: "undo" | "redo", actionSequence?: number) => {
       const currentSnapshot = snapshotRef.current;
       if (!currentSnapshot || isUndoRedoRunning) return;
+      if (!sketchSessionRef.current && authorizeDocumentWrite?.() === false)
+        return;
       setIsUndoRedoRunning(true);
       const historyOperation = createAuthoredHistoryOperation({
     documentHistory: durableHistory,
@@ -303,7 +311,7 @@ export function useWorkbenchHistory({
         })
         .finally(() => setIsUndoRedoRunning(false));
     },
-    [dispatch, durableHistory, errorReporter, isUndoRedoRunning, showWorkbenchError],
+    [authorizeDocumentWrite, dispatch, durableHistory, errorReporter, isUndoRedoRunning, showWorkbenchError],
   );
   const requestUndo = useCallback((sequence?: number) => requestHistory("undo", sequence), [requestHistory]);
   const requestRedo = useCallback((sequence?: number) => requestHistory("redo", sequence), [requestHistory]);

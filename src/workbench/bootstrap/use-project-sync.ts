@@ -23,6 +23,7 @@ import type { DocumentId } from "@/contracts/shared/ids";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { getAccountApiOrigin } from "@/infrastructure/account/api-origin";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
+import { createLocalStorageProjectRoleStore } from "@/infrastructure/persistence/local-storage-project-role-store";
 import { createProjectServiceHttpClient } from "@/infrastructure/project-sync/project-service-http-client";
 import { createProjectSyncWorkerTransport } from "@/infrastructure/project-sync/project-sync-worker-transport";
 import type { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync-worker-client";
@@ -144,6 +145,33 @@ export function useProjectSync(
 
   const statusKey = `${projectId}:${linkOrgId}/${linkProjectId}:${userId}`;
   const status = statusEntry?.key === statusKey ? statusEntry.status : null;
+
+  // The latest token's role, else the one remembered from the last token
+  // this browser received, so a reload or an offline session starts with it.
+  const roleStore = useMemo(
+    () => createLocalStorageProjectRoleStore(window.localStorage),
+    [],
+  );
+  const grantedRole = status?.role ?? null;
+  useEffect(() => {
+    if (grantedRole && linkOrgId && linkProjectId && userId)
+      roleStore.save(
+        { orgId: linkOrgId, projectId: linkProjectId },
+        userId,
+        grantedRole,
+      );
+  }, [grantedRole, linkOrgId, linkProjectId, roleStore, userId]);
+  const role = useMemo(
+    () =>
+      grantedRole ??
+      (linkOrgId && linkProjectId
+        ? roleStore.load(
+            { orgId: linkOrgId, projectId: linkProjectId },
+            userId ?? null,
+          )
+        : null),
+    [grantedRole, linkOrgId, linkProjectId, roleStore, userId],
+  );
   useEffect(() => {
     if (!transport || !projectId || !linkOrgId || !linkProjectId || !userId)
       return;
@@ -249,6 +277,8 @@ export function useProjectSync(
     accountChecked,
     refreshAccount,
     status,
+    /** The role this project's writes follow; null before any token. */
+    role,
     linked: link !== null,
     setActiveDocument,
     upload,

@@ -3,8 +3,6 @@ import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import { requireMeasureTopologyResponse } from "@/contracts/modeling/topology-measure.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { appErrorFromModelingDiagnostic } from "@/contracts/errors/app-error";
-import { PROJECT_READ_ONLY_MESSAGE } from "@/application/project-sync/project-write-gate";
-import { PROJECT_READ_ONLY_REASON_CODE } from "@/application/project-sync/project-write-gated-document-repository";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -151,14 +149,6 @@ interface SaveFailureReason {
 const STORAGE_UNAVAILABLE: SaveFailureReason = {
   reasonCode: "document-storage-unavailable",
   message: "Document storage is unavailable.",
-};
-
-const PROJECT_READ_ONLY_DIAGNOSTIC: ModelingDiagnostic = {
-  code: PROJECT_READ_ONLY_REASON_CODE,
-  severity: "error",
-  message: PROJECT_READ_ONLY_MESSAGE,
-  target: null,
-  detail: null,
 };
 
 function isSameLocalSaveFailure(
@@ -554,6 +544,45 @@ export function createModelingService(
     markRepositorySnapshotFresh(event.metadata, event.document, runtimeRevisionId);
   }
 
+  function authorizeDocumentWrite() {
+    return options.documentWriteGate?.authorize("part") !== false;
+  }
+
+  function documentWriteRefusal() {
+    const refusal = options.documentWriteGate!.refusal;
+    return appErrorFromModelingDiagnostic(
+      {
+        code: refusal.reasonCode,
+        severity: "error",
+        message: refusal.message,
+        target: null,
+        detail: null,
+      },
+      { operation: "Edit document" },
+    );
+  }
+
+  /** The gate refused this write: storage itself still works for later writes. */
+  function isWriteGateRefusal(
+    status: Extract<DocumentRepositoryRestoreStatus, { kind: "failed" }>,
+  ) {
+    return (
+      status.diagnostic.reasonCode ===
+      options.documentWriteGate?.refusal.reasonCode
+    );
+  }
+
+  /**
+   * A role that cannot write keeps this browser's unsaved journal for a later
+   * writer: it is neither replayed into this view nor appended to.
+   */
+  function keepJournalForLaterWriter(kind: "restored" | "empty") {
+    if (options.documentWriteGate?.allows("part") !== false) return false;
+    canPersistOperationHistory = false;
+    historyRestoreState = { kind, entriesReplayed: 0, diagnostics: [] };
+    return true;
+  }
+
   /** T17k3 (A-1): a document mutation runs after the repository changes
    * received before it; a change received during it is restored after it. */
   function runLocalDocumentChange<T>(
@@ -561,14 +590,11 @@ export function createModelingService(
     replaceContext = false,
     countsAsSaving = true,
   ) {
-    // Every change that writes the document stops here while the project is
-    // read-only for this role, before the kernel applies anything.
-    if (countsAsSaving && options.projectWriteGate?.authorize("part") === false)
-      return Promise.reject(
-        appErrorFromModelingDiagnostic(PROJECT_READ_ONLY_DIAGNOSTIC, {
-          operation: "Edit document",
-        }),
-      );
+    // Every change that writes the document stops here while the gate
+    // refuses it, before the kernel applies anything; a change queued behind
+    // others asks again when its turn comes.
+    if (countsAsSaving && !authorizeDocumentWrite())
+      return Promise.reject(documentWriteRefusal());
     const changesBefore = repositoryChangePromise;
     const mutationsBefore = localMutations;
     const run = (async () => {
@@ -578,6 +604,8 @@ export function createModelingService(
       // A new editing context must not be overwritten by an older queued write.
       if (replaceContext) await repositoryPersistencePromise;
       await recoverPublishedDocument();
+      if (countsAsSaving && !authorizeDocumentWrite())
+        throw documentWriteRefusal();
       return action();
     })();
     // Ordering only: the caller still receives `run`'s rejection.
@@ -1050,7 +1078,8 @@ export function createModelingService(
 
       options.observeTransaction?.(writeResult);
       if (!writeResult.ok) {
-        canPersistAuthoredDocument = false;
+        if (!isWriteGateRefusal(writeResult.status))
+          canPersistAuthoredDocument = false;
         if (writeResult.appliedLive) {
           markRepositorySnapshotFresh(writeResult.appliedLive.metadata);
           await restoreAuthoredRepositoryDocument(writeResult.appliedLive.document, writeResult.appliedLive.diagnostics ?? [], assets, undefined, writeResult.appliedLive.metadata);
@@ -1268,7 +1297,8 @@ export function createModelingService(
         ...(committed.diagnostics ?? []),
         ...(!write.ok ? [createDocumentRepositoryDiagnostic(write.status)] : []),
       ];
-      if (!write.ok) canPersistAuthoredDocument = false;
+      if (!write.ok && !isWriteGateRefusal(write.status))
+        canPersistAuthoredDocument = false;
       markRepositorySnapshotFresh(committed.metadata);
       let revisionId = committed.document.revisionId;
       try {
@@ -1692,6 +1722,7 @@ export function createModelingService(
           loadResult.metadata,
         )
       ) {
+        if (keepJournalForLaterWriter("restored")) return;
         await replayOperationHistoryPayload(historyLoadResult.payload);
         if (historyRestoreState.kind === "failed") {
           canPersistAuthoredDocument = false;
@@ -1771,6 +1802,7 @@ export function createModelingService(
         return;
       }
 
+      if (keepJournalForLaterWriter("empty")) return;
       await replayOperationHistoryPayload(historyLoadResult.payload);
       if (historyRestoreState.kind === "failed") {
         await documentRepository!.reset(currentDocumentId);
@@ -2016,7 +2048,8 @@ export function createModelingService(
         authoredDocumentsEqual(document, writeResult.appliedLive.document) ? writeResult.appliedLive.document : undefined,
         document.revisionId);
     }
-    canPersistAuthoredDocument = false;
+    if (!isWriteGateRefusal(writeResult.status))
+      canPersistAuthoredDocument = false;
     unsavedLocalChange = writeResult.status.diagnostic;
     return {
       ...result,
@@ -2110,8 +2143,9 @@ export function createModelingService(
             authoredDocumentsEqual(document, writeResult.appliedLive.document) ? writeResult.appliedLive.document : undefined,
             document.revisionId);
         }
-        canPersistAuthoredDocument = false;
         unsavedLocalChange = writeResult.status.diagnostic;
+        if (isWriteGateRefusal(writeResult.status)) return;
+        canPersistAuthoredDocument = false;
         historyRestoreState = createRestoreFailure(
           writeResult.status.diagnostic.reasonCode,
           writeResult.status.diagnostic.message,

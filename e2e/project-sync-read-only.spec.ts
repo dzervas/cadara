@@ -10,10 +10,29 @@ import {
   syncStatus,
   variableRow,
 } from "./helpers/project-sync";
+import { expectStaged, openTopSketch } from "./helpers/mirror-workbench";
+import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 
 test.setTimeout(300_000);
 
 const READ_ONLY_MESSAGE = "This project is read-only for your role.";
+
+function machineState(page: Page) {
+  return page.evaluate(() => window.__cadaraDebug?.getState()?.machineState);
+}
+
+/**
+ * A refused action shows exactly one read-only notice and no red error;
+ * waits for it to dismiss itself so the next refusal shows a fresh one.
+ */
+async function expectOneReadOnlyNotice(page: Page) {
+  const notices = page
+    .getByRole("status")
+    .filter({ hasText: READ_ONLY_MESSAGE });
+  await expect(notices).toHaveCount(1);
+  await expect(page.getByText("Workbench action failed")).toHaveCount(0);
+  await expect(notices).toHaveCount(0, { timeout: 15_000 });
+}
 
 /**
  * Every connection state the sync badge shows during `durationMs`. A write
@@ -44,7 +63,7 @@ async function observedConnections(page: Page, durationMs: number) {
   }, durationMs);
 }
 
-test("an invited viewer opens a synced project read only: shortcuts and variable edits are refused with a notice and the connection stays synced", async ({
+test("an invited viewer opens a synced project read only: shortcuts, undo, tab changes, reopening and variable edits are each refused with one notice and the connection stays synced", async ({
   browser,
 }, testInfo) => {
   test.skip(!mailerLog, "Set CADARA_AUTH_MAILER_LOG to local wrangler stdout.");
@@ -55,8 +74,9 @@ test("an invited viewer opens a synced project read only: shortcuts and variable
   const ownerEmail = `cadara-owner-${stamp}@example.test`;
   const viewerEmail = `cadara-viewer-${stamp}@example.test`;
   const projectName = `Viewed bracket ${stamp}`;
-  const ownerContext = await browser.newContext({ baseURL });
-  const viewerContext = await browser.newContext({ baseURL });
+  const viewport = { width: 1440, height: 960 };
+  const ownerContext = await browser.newContext({ baseURL, viewport });
+  const viewerContext = await browser.newContext({ baseURL, viewport });
   const owner = await ownerContext.newPage();
   const viewer = await viewerContext.newPage();
   try {
@@ -65,11 +85,19 @@ test("an invited viewer opens a synced project read only: shortcuts and variable
     await openWorkbench(viewer, appUrl);
     await signIn(viewer, viewerEmail);
 
-    // The owner uploads a project holding one variable.
+    // The owner uploads a project holding one variable and one sketch.
     await createProject(owner, projectName);
     await openVariables(owner);
     await addVariable(owner, "variable_1");
     await expect(variableRow(owner, "variable_1")).toContainText("var1");
+    const sketching = new SketchWorkbenchHarness(owner);
+    await openTopSketch(sketching);
+    await sketching.activateTool("Create circular geometry.");
+    await sketching.clickViewportAt({ x: 600, y: 400 });
+    await sketching.clickViewportAt({ x: 660, y: 400 });
+    await expectStaged(sketching, 1);
+    await owner.locator('button[data-tool-id="finishSketch"]').click();
+    await expect.poll(() => machineState(owner)).toBe("idle");
     await openCadaraMenuItem(owner, "Upload to CADara…");
     await owner.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(syncStatus(owner, "Synced")).toBeVisible({ timeout: 30_000 });
@@ -148,34 +176,68 @@ test("an invited viewer opens a synced project read only: shortcuts and variable
     // Opening the part writes nothing the room would refuse.
     expect(await observedConnections(viewer, 10_000)).toEqual(["synced"]);
 
-    // A tool shortcut is refused with the read-only notice.
+    // Every refusal is a user-facing notice, never a reported error.
+    const reportedErrors: string[] = [];
+    viewer.on("console", (message) => {
+      if (message.text().includes("[app-error]"))
+        reportedErrors.push(message.text());
+    });
     await viewer.bringToFront();
     await viewer
       .locator("canvas")
       .first()
       .click({ position: { x: 5, y: 5 } });
+
+    // A tool shortcut.
     await viewer.keyboard.press("e");
-    await expect(viewer.getByText(READ_ONLY_MESSAGE).first()).toBeVisible();
-    expect(
-      await viewer.evaluate(
-        () => window.__cadaraDebug?.getState()?.machineState,
-      ),
-    ).toBe("idle");
+    await expectOneReadOnlyNotice(viewer);
+    expect(await machineState(viewer)).toBe("idle");
 
-    // The notice dismisses itself, so the next refusal shows a fresh one.
-    await expect(viewer.getByText(READ_ONLY_MESSAGE)).toHaveCount(0, {
-      timeout: 15_000,
+    // Document Undo.
+    await viewer.keyboard.press("ControlOrMeta+z");
+    await expectOneReadOnlyNotice(viewer);
+
+    // Renaming, adding and closing parts.
+    const activeTab = viewer.locator(
+      '[data-document-tab][aria-selected="true"]',
+    );
+    const title = await activeTab
+      .locator("[data-document-tab-title]")
+      .textContent();
+    await activeTab.locator("[data-document-tab-title]").dblclick();
+    const rename = viewer.getByRole("textbox", {
+      name: "Rename document",
+      exact: true,
     });
+    await rename.fill("Viewer title");
+    await rename.press("Enter");
+    await expectOneReadOnlyNotice(viewer);
+    await expect(activeTab.locator("[data-document-tab-title]")).toHaveText(
+      title!,
+    );
+    await viewer.getByRole("button", { name: "File", exact: true }).click();
+    await viewer.getByRole("menuitem", { name: "New", exact: true }).click();
+    await expectOneReadOnlyNotice(viewer);
+    await expect(viewer.locator("[data-document-tab]")).toHaveCount(1);
 
-    // So is a variable edit; the variable keeps its name.
+    // Reopening the sketch for editing.
+    await viewer
+      .getByRole("button", { name: /^Select .+\. Double-click to reopen\.$/ })
+      .first()
+      .dblclick();
+    await expectOneReadOnlyNotice(viewer);
+    expect(await machineState(viewer)).toBe("idle");
+
+    // A variable edit; the variable keeps its name.
     await openVariables(viewer);
     await variableRow(viewer, "variable_1").dblclick();
     await viewer
       .getByRole("textbox", { name: "Variable name variable_1" })
       .fill("width");
     await viewer.keyboard.press("Enter");
-    await expect(viewer.getByText(READ_ONLY_MESSAGE).first()).toBeVisible();
+    await expectOneReadOnlyNotice(viewer);
     await expect(variableRow(viewer, "variable_1")).toContainText("var1");
+    expect(reportedErrors).toEqual([]);
 
     // Nothing was written: the room never drops the viewer's connection.
     expect(await observedConnections(viewer, 30_000)).toEqual(["synced"]);

@@ -6,46 +6,68 @@ export type ProjectDocumentKind = "manifest" | ProjectEntry["kind"];
 
 export const PROJECT_READ_ONLY_MESSAGE =
   "This project is read-only for your role.";
+export const PROJECT_READ_ONLY_REASON_CODE = "project-read-only";
 
 /**
  * The room's write rule: editors and admins write every document,
- * commenters only the discussion, viewers nothing. A role of null (a local
- * project, or no sync token yet) writes everything.
+ * commenters only the discussion, viewers nothing.
  */
 export function canWriteProjectDocument(
-  role: ProjectRole | null,
+  role: ProjectRole,
   kind: ProjectDocumentKind,
 ) {
   return (
-    role === null ||
     role === "admin" ||
     role === "editor" ||
     (role === "commenter" && kind === "discussion")
   );
 }
 
+/** A project's write access: local, or synced with the role known so far. */
+export interface ProjectAccess {
+  linked: boolean;
+  role: ProjectRole | null;
+}
+
 /**
- * The one place the workbench asks before it changes a project document.
+ * A local project writes everything. A synced project writes only what its
+ * role allows; until a role is known (no grant remembered or received yet)
+ * it writes nothing.
+ */
+export function projectAccessAllows(
+  access: ProjectAccess,
+  kind: ProjectDocumentKind,
+) {
+  return (
+    !access.linked ||
+    (access.role !== null && canWriteProjectDocument(access.role, kind))
+  );
+}
+
+/**
+ * The workbench asks this gate before it changes a project document through
+ * the funnels that guard it (modeling-service edits, part storage writes and
+ * resets, part tabs, authoring tools, document undo/redo and reopening).
  * Automerge cannot retract a local change, so a write the room refuses
  * would be resent on every reconnect: a refused write never starts, and
  * each refusal is announced so the user sees why nothing happened.
  */
 export class ProjectWriteGate {
-  private currentRole: ProjectRole | null = null;
+  readonly refusal = {
+    reasonCode: PROJECT_READ_ONLY_REASON_CODE,
+    message: PROJECT_READ_ONLY_MESSAGE,
+  };
+  private access: ProjectAccess = { linked: false, role: null };
   private readonly denialListeners = new Set<
     (kind: ProjectDocumentKind) => void
   >();
 
-  get role() {
-    return this.currentRole;
-  }
-
-  setRole(role: ProjectRole | null) {
-    this.currentRole = role;
+  setAccess(access: ProjectAccess) {
+    this.access = access;
   }
 
   allows(kind: ProjectDocumentKind) {
-    return canWriteProjectDocument(this.currentRole, kind);
+    return projectAccessAllows(this.access, kind);
   }
 
   /** Whether a write to `kind` may run; a refusal is announced to the denial listeners. */

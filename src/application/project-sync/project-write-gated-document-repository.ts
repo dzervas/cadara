@@ -5,30 +5,31 @@ import type {
 import type { DocumentId } from "@/contracts/shared/ids";
 import {
   PROJECT_READ_ONLY_MESSAGE,
+  PROJECT_READ_ONLY_REASON_CODE,
   type ProjectWriteGate,
 } from "./project-write-gate";
 
-export const PROJECT_READ_ONLY_REASON_CODE = "project-read-only";
-
-function refused(documentId: DocumentId): DocumentRepositoryMutationResult {
+function refusedStatus(documentId: DocumentId) {
   return {
-    ok: false,
-    status: {
-      kind: "failed",
-      documentId,
-      diagnostic: {
-        reasonCode: PROJECT_READ_ONLY_REASON_CODE,
-        message: PROJECT_READ_ONLY_MESSAGE,
-      },
+    kind: "failed" as const,
+    documentId,
+    diagnostic: {
+      reasonCode: PROJECT_READ_ONLY_REASON_CODE,
+      message: PROJECT_READ_ONLY_MESSAGE,
     },
   };
 }
 
+function refused(documentId: DocumentId): DocumentRepositoryMutationResult {
+  return { ok: false, status: refusedStatus(documentId) };
+}
+
 /**
  * Part documents' repository behind the project write gate: every write
- * (an edit, a replayed journal, an Undo or Redo, a new document) is refused
- * while the role cannot edit parts. Reads, loads and the repository's other
- * capabilities (geometry assets, local files) pass through unchanged.
+ * (an edit, a replayed journal, an Undo or Redo, a new document) and the
+ * reset that deletes this browser's copy are refused while the role cannot
+ * edit parts. Reads, loads and the repository's other capabilities
+ * (geometry assets, local files) pass through unchanged.
  */
 export function createProjectWriteGatedDocumentRepository<
   T extends DocumentRepository | null,
@@ -36,7 +37,11 @@ export function createProjectWriteGatedDocumentRepository<
   if (!repository) return repository;
   const gated: Pick<
     DocumentRepository,
-    "initialize" | "mutate" | "undoDurableHistory" | "redoDurableHistory"
+    | "initialize"
+    | "mutate"
+    | "undoDurableHistory"
+    | "redoDurableHistory"
+    | "reset"
   > = {
     initialize: (input) =>
       gate.authorize("part")
@@ -54,6 +59,10 @@ export function createProjectWriteGatedDocumentRepository<
       gate.authorize("part")
         ? repository.redoDurableHistory(documentId, actionSequence)
         : Promise.resolve(refused(documentId)),
+    reset: (documentId) =>
+      gate.authorize("part")
+        ? repository.reset(documentId)
+        : Promise.resolve(refusedStatus(documentId)),
   };
   return new Proxy(repository, {
     get(target, property, receiver) {

@@ -87,7 +87,6 @@ export function ProjectSyncIndicator({
             size="sm"
             role="status"
             aria-label={readOnly.label}
-            data-project-read-only-role={role}
           >
             {readOnly.label}
           </Badge>

@@ -2,6 +2,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -11,7 +12,7 @@ import {
 import { Alert, Group } from "@mantine/core";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
 import {
-  canWriteProjectDocument,
+  projectAccessAllows,
   ProjectWriteGate,
 } from "@/application/project-sync/project-write-gate";
 import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
@@ -133,13 +134,15 @@ function ProjectWorkbenchApp({
   const errorReporter = useErrorReporter();
   const project = projects.project;
   const { saveParts, saveSession, registerPartReadiness } = projects;
-  // Every write to this project's documents asks this gate first; it
-  // follows the role of the latest sync token (see canWriteProjectDocument).
+  // Part edits and storage writes, part tabs, authoring tools, document
+  // undo/redo and reopening ask this gate (see ProjectWriteGate). It follows
+  // the synced project's role; set before child effects of the same commit.
   const [projectWriteGate] = useState(() => new ProjectWriteGate());
-  const projectRole = sync.status?.role ?? null;
-  useEffect(() => {
-    projectWriteGate.setRole(projectRole);
-  }, [projectRole, projectWriteGate]);
+  const projectLinked = sync.linked;
+  const projectRole = sync.role;
+  useLayoutEffect(() => {
+    projectWriteGate.setAccess({ linked: projectLinked, role: projectRole });
+  }, [projectLinked, projectRole, projectWriteGate]);
   const [projectApplied, setProjectApplied] = useState(
     project !== null || !projects.persistenceEnabled,
   );
@@ -257,7 +260,7 @@ function ProjectWorkbenchApp({
                   ),
             documentRepositoryPersistence: "background",
             documentRepository,
-            projectWriteGate,
+            documentWriteGate: projectWriteGate,
           }),
           performanceTelemetry,
         );
@@ -520,7 +523,12 @@ function ProjectWorkbenchApp({
             )}
             <CadWorkbench
               projectLoading={!projectApplied}
-              readOnly={!canWriteProjectDocument(projectRole, "part")}
+              readOnly={
+                !projectAccessAllows(
+                  { linked: projectLinked, role: projectRole },
+                  "part",
+                )
+              }
               projectWriteGate={projectWriteGate}
               projectControls={
                 project && (

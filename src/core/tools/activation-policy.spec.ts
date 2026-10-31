@@ -3,7 +3,9 @@ import { test, expect } from "vitest";
 import {
   getToolCommandBehavior,
   resolveToolActivationMode,
+  toolAuthorsDocument,
 } from "@/core/tools/activation-policy";
+import { toolDefinitions } from "@/core/tools/tool-registry";
 
 test("src/core/tools/activation-policy.spec.ts", () => {
   expect(
@@ -51,4 +53,12 @@ test("src/core/tools/activation-policy.spec.ts", () => {
     resolveToolActivationMode("extrude", "sketch"),
     "Part-only tools should resolve to part mode from metadata alone.",
   ).toBe("part");
+});
+
+test("only Measure and Section View stay usable without write permission", () => {
+  const inspectionTools = toolDefinitions
+    .filter((tool) => !toolAuthorsDocument(tool.id))
+    .map((tool) => tool.id)
+    .sort();
+  expect(inspectionTools).toEqual(["measure", "sectionView"]);
 });

@@ -80,7 +80,7 @@ export function ProjectSyncControls({
       {sync.linked && (
         <ProjectSyncIndicator
           connection={sync.status?.connection ?? "offline"}
-          role={sync.status?.role ?? null}
+          role={sync.role}
           failed={Boolean(sync.status?.error)}
           detail={
             sync.status?.error ??

@@ -9,6 +9,7 @@ import {
   type ProjectWriteGate,
 } from "@/application/project-sync/project-write-gate";
 import { toolAuthorsDocument } from "@/core/tools/activation-policy";
+import { getNavigationReopenRequest } from "@/core/editor/workbench-interactions";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { useLatestCallbacks } from "@/hooks/use-latest-callbacks";
@@ -345,7 +346,7 @@ export function CadWorkbench({
     restoreFailure,
     setRestoreFailure,
     setWorkbenchStatusNotification,
-    showWorkbenchError,
+    showWorkbenchError: showAnyWorkbenchError,
     showWorkbenchInfo,
     workbenchStatusNotification,
   } = useWorkbenchNotifications({
@@ -354,6 +355,14 @@ export function CadWorkbench({
     modelingService,
   });
   const draftRecoveryNotification = useWorkbenchSketchDraftRecovery(draftRecovery, reportDocumentFileActionFailure);
+  // The gate announces each read-only refusal itself; the failed action's
+  // own error echo would replace that notice with a red one.
+  const showWorkbenchError = useCallback(
+    (...args: Parameters<typeof showAnyWorkbenchError>) => {
+      if (args[0] !== PROJECT_READ_ONLY_MESSAGE) showAnyWorkbenchError(...args);
+    },
+    [showAnyWorkbenchError],
+  );
   useEffect(
     () =>
       projectWriteGate?.subscribeToDenials(() =>
@@ -509,6 +518,8 @@ export function CadWorkbench({
         onActivateDocumentTab(documentId);
         return;
       }
+      // Renaming writes the part and the manifest: refuse it here, like close.
+      if (projectWriteGate?.authorize("part") === false) return;
 
       const previousTitle =
         tabsState.tabs.find((tab) => tab.documentId === documentId)?.title ??
@@ -544,6 +555,7 @@ export function CadWorkbench({
       errorReporter,
       modelingService.currentDocumentId,
       onActivateDocumentTab,
+      projectWriteGate,
       showWorkbenchError,
       showWorkbenchInfo,
       snapshot,
@@ -725,6 +737,10 @@ export function CadWorkbench({
     showWorkbenchInfo,
     snapshot,
   });
+  const authorizeDocumentWrite = useCallback(
+    () => projectWriteGate?.authorize("part") !== false,
+    [projectWriteGate],
+  );
   const {
     contextualActionHistory,
     handleDocumentHistoryReorder,
@@ -735,6 +751,7 @@ export function CadWorkbench({
     requestUndo,
     toolbarHistoryAvailability,
   } = useWorkbenchHistory({
+    authorizeDocumentWrite,
     dispatch,
     errorReporter,
     history,
@@ -762,7 +779,7 @@ export function CadWorkbench({
   };
 
   const {
-    handleNavigationReopen,
+    handleNavigationReopen: reopenTarget,
     handleSectionClear,
     handleSectionFlip,
     handleSectionOffsetChange,
@@ -789,6 +806,16 @@ export function CadWorkbench({
     modelingService,
     snapshot,
   });
+  // Reopening a sketch or feature starts an edit session (and a feature's
+  // temporary history-cursor move) that a read-only role could never commit.
+  const handleNavigationReopen = (target: PrimitiveRef) => {
+    if (
+      getNavigationReopenRequest(snapshot, target) &&
+      projectWriteGate?.authorize("part") === false
+    )
+      return;
+    reopenTarget(target);
+  };
   const [bodyColorPreview, setBodyColorPreview] = useState<{
     bodyId: BodyId;
     hex: string;
@@ -1328,8 +1355,10 @@ export function CadWorkbench({
     activeCommand,
     activeReferencePickerFieldId,
     activateTool: triggerTool,
-    canRedo: toolbarHistoryAvailability.canRedo,
-    canUndo: toolbarHistoryAvailability.canUndo,
+    // In a read-only project, document Undo/Redo keys answer with the
+    // read-only notice instead of doing nothing (sketch undo stays private).
+    canRedo: toolbarHistoryAvailability.canRedo || (readOnly && !sketchSession),
+    canUndo: toolbarHistoryAvailability.canUndo || (readOnly && !sketchSession),
     dispatch,
     mode,
     requestRedo,
