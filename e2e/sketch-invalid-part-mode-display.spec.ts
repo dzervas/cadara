@@ -1,7 +1,7 @@
 import { sketchDiagnosticMessage } from "./helpers/sketch-workbench";
 import { expect, test, type Page } from "@playwright/test";
 
-import { glideDoubleClick } from "./helpers/acceptance";
+import { glideDoubleClick, settledProjections } from "./helpers/acceptance";
 import { openDocumentCopy, saveDocumentCopy } from "./helpers/document-files";
 import { FeatureWorkbenchHarness } from "./helpers/feature-workbench";
 import { dangerColor, glidePress, type Rgb } from "./helpers/mirror-workbench";
@@ -85,18 +85,6 @@ async function reenterAndFinish(
       timeout: 30_000,
     })
     .not.toBe(before);
-}
-
-/** The projected centres of the sketch's sides (viewport-surface pixels). */
-async function sideCentres(
-  workbench: FeatureWorkbenchHarness,
-  targets: readonly string[],
-) {
-  await workbench.waitForAnimationFrames(4);
-  return workbench.page.evaluate(
-    (ids) => ids.map((id) => window.__cadProjectToScreen?.(id) ?? null),
-    targets,
-  );
 }
 
 /** A (2r × 2r) crop centred on a viewport-surface point, as RGB rows. */
@@ -241,8 +229,10 @@ test("T17d2: after Finish, part mode draws an invalid sketch's sides where they 
   // Control: the valid sketch, re-entered and Finished, in part mode.
   await openDocumentCopy(page, valid, "valid.cadara");
   await reenterAndFinish(workbench, null);
-  const held = await sideCentres(workbench, targets);
-  expect(held.every(Boolean), "premise: every side is drawn").toBe(true);
+  // Projected side centres once the camera is still (settledProjections waits
+  // until every side is drawn): after Finish the view can still be moving
+  // back to the part view, and a sample taken mid-motion is pixels off.
+  const held = await settledProjections(workbench, targets);
   // The sides the valid sketch is hoverable along (a side seen through a
   // construction plane may be picked as the plane).
   const hoverable = (await hoverSides(workbench, sketch.sketchId, sides)).map(
@@ -261,7 +251,7 @@ test("T17d2: after Finish, part mode draws an invalid sketch's sides where they 
   const danger = await dangerColor(page);
   const baseline: number[] = [];
   for (const at of held)
-    baseline.push(dangerLean(await cropAt(workbench, at!), danger));
+    baseline.push(dangerLean(await cropAt(workbench, at), danger));
 
   // The same authored sketch with a conflicting pair of Fix requirements on
   // one corner: its solve is rejected, the sketch is invalid.
@@ -295,16 +285,15 @@ test("T17d2: after Finish, part mode draws an invalid sketch's sides where they 
 
   // Part mode: every side is drawn where it is held (where the valid
   // sketch's side is), not where the rejected solve put it.
-  const drawn = await sideCentres(workbench, targets);
+  const drawn = await settledProjections(workbench, targets);
   for (const [index, at] of drawn.entries()) {
     const side = sides[index]!.label;
-    expect(at, `${side} is drawn`).not.toBeNull();
     expect(
-      Math.hypot(at!.x - held[index]!.x, at!.y - held[index]!.y),
+      Math.hypot(at.x - held[index]!.x, at.y - held[index]!.y),
       `${side} is drawn at its held place`,
     ).toBeLessThan(1);
     expect(
-      dangerLean(await cropAt(workbench, at!), danger),
+      dangerLean(await cropAt(workbench, at), danger),
       `${side} is drawn in the danger tint (valid: lean ${baseline[index]})`,
     ).toBeGreaterThan(baseline[index]! + 8);
   }
