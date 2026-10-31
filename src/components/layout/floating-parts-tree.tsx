@@ -192,7 +192,16 @@ export const FloatingPartsTree = memo(function FloatingPartsTree({
       >
         Parts &amp; Objects
       </header>
-      <ScrollArea.Autosize className="min-h-0" type="auto" scrollbars="y">
+      {/* Autosize lets its content grow to the widest row's min-content, so a
+          long name would widen every row past the tree and clip the
+          show/hide toggle. The tree only scrolls vertically: hold rows to its
+          width so long labels truncate instead. */}
+      <ScrollArea.Autosize
+        className="min-h-0"
+        type="auto"
+        scrollbars="y"
+        styles={{ content: { minWidth: 0 } }}
+      >
         {objects.map((item) => {
           const target = item.target;
           const targetKey = getPrimitiveRefKey(target);
@@ -390,6 +399,15 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
       : undefined,
   };
   const trailVisible = isHover || isHidden;
+  const labelHint = isHidden
+    ? "Hidden in the viewport"
+    : errorSummary
+      ? errorSummary
+      : onReopen
+        ? "Double-click to reopen authoring in place"
+        : !isAllowed
+          ? "Filtered out by the current command"
+          : null;
 
   return (
     <div
@@ -439,17 +457,9 @@ const Row = forwardRef<HTMLDivElement, RowProps>(function Row(
         onKeyDown={(event) => handleRenameShortcut(event, onRename)}
         onDoubleClick={onReopen}
         aria-disabled={!isAllowed || isHidden}
-        title={
-          isHidden
-            ? "Hidden in the viewport"
-            : errorSummary
-              ? errorSummary
-              : onReopen
-                ? "Double-click to reopen authoring in place"
-                : !isAllowed
-                  ? "Filtered out by the current command"
-                  : undefined
-        }
+        // The label truncates in the fixed-width tree, so the hover title
+        // always leads with the full name.
+        title={labelHint ? `${label}\n${labelHint}` : label}
         className="min-w-0 flex-1 truncate text-left bg-transparent border-0 p-0"
         style={{
           color: "inherit",
