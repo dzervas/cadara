@@ -510,10 +510,10 @@ const revisionValue = () =>
 /**
  * Reflected signal of an act that publishes a new document revision, to be
  * created before the act: resolves (epoch ms) to the LAST revision change
- * once the editor is idle on a new revision and OCC has been quiet. A
- * sketch publish lands in two revisions (the first lists no bodies, the
- * downstream rebuild arrives seconds later), so the first new revision
- * would end the sample early.
+ * once the editor is idle on a new revision and OCC has been quiet, so
+ * an undo whose restore publishes more than one revision is measured to its
+ * final one. (Finishing an edit session that rolled the history back has its
+ * own end: editSessionFinishedSignal.)
  */
 export async function finalRevisionSignal(page: Page) {
   const before = await debugStateField(page, "revision");
@@ -521,6 +521,59 @@ export async function finalRevisionSignal(page: Page) {
   return async () => {
     await waitInPage(page, idleOnOtherRevision, before);
     await waitForOccQuiet(page);
+    const { changes } = await stopFrameProbe(page);
+    return changes.at(-1)!.atMs;
+  };
+}
+
+const revisionAndCursorRestore = () => {
+  const state = (
+    window as unknown as {
+      __cadaraDebug?: {
+        getState(): {
+          revision: string;
+          editSessionCursorRestorePending?: boolean;
+        } | null;
+      };
+    }
+  ).__cadaraDebug?.getState();
+  return `${state?.revision ?? ""}|${state?.editSessionCursorRestorePending}`;
+};
+
+/** Idle on a revision other than `revision`, with no history roll-forward pending. */
+const idleAfterCursorRestore = (revision: string) => {
+  const state = (
+    window as unknown as {
+      __cadaraDebug?: {
+        getState(): {
+          machineState: string;
+          revision: string;
+          editSessionCursorRestorePending?: boolean;
+        } | null;
+      };
+    }
+  ).__cadaraDebug?.getState();
+  return (
+    !!state &&
+    state.machineState.includes("idle") &&
+    state.revision !== revision &&
+    // Strictly false: a build without the field must not end the sample early.
+    state.editSessionCursorRestorePending === false
+  );
+};
+
+/**
+ * Reflected signal of finishing an edit session that rolled the history
+ * back, to be created before the act: resolves (epoch ms) to the frame the
+ * editor is idle on a new revision with the cursor back at its pre-edit
+ * position. The editor is already idle on the rolled-back revision while the
+ * cursor rolls forward, so idle alone would end the sample early.
+ */
+export async function editSessionFinishedSignal(page: Page) {
+  const before = await debugStateField(page, "revision");
+  await startFrameProbe(page, revisionAndCursorRestore);
+  return async () => {
+    await waitInPage(page, idleAfterCursorRestore, before);
     const { changes } = await stopFrameProbe(page);
     return changes.at(-1)!.atMs;
   };

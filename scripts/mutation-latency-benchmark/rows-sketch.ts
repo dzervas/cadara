@@ -11,7 +11,7 @@ import {
   debugStateContains,
   debugStateField,
   deleteTimelineItemsAfter,
-  finalRevisionSignal,
+  editSessionFinishedSignal,
   findHoverPoint,
   glideClickCanvas,
   glideOnto,
@@ -579,8 +579,9 @@ export async function prepareSketchRow(
     }
     // The in-session Enter only re-solves the sketch (one OCC request, the
     // revision is unchanged); finishing the sketch publishes it and
-    // rebuilds the features downstream, so the clock runs from Exit to the
-    // last new revision of that publish (settled: render-idle after it).
+    // rebuilds the features downstream, so the clock runs from Exit until
+    // the history cursor is back past the downstream features (settled:
+    // render-idle, which waits for that roll-forward too).
     case "sketchEditUpstream": {
       const dimension = await prepareSketchDimension(session);
       if (typeof dimension === "string") return dimension;
@@ -594,7 +595,7 @@ export async function prepareSketchRow(
         return timedSample(
           session,
           () => activateTool(page, EXIT_SKETCH_TOOL),
-          await finalRevisionSignal(page),
+          await editSessionFinishedSignal(page),
         );
       };
     }

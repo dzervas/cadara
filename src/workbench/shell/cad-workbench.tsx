@@ -68,7 +68,10 @@ import {
   hasNonEmptyCommittedGeometry,
   isInitialOccRenderPending,
 } from "@/workbench/runtime/initial-occ-render-state";
-import { isEditSessionCursorRestorePending } from "@/workbench/runtime/edit-session-cursor-restore-status";
+import {
+  isEditorRenderIdle,
+  isEditSessionCursorRestorePending,
+} from "@/workbench/runtime/edit-session-cursor-restore-status";
 import {
   getDocumentRefreshFailureNotification,
   getEditorFailureNotification,
@@ -982,6 +985,7 @@ export function CadWorkbench({
     topologyDebug: createTopologyDebugSummary(snapshot),
     sectionOffset: activeSectionView?.offset ?? null,
     sectionRetainedSide: activeSectionView?.retainedSide ?? null,
+    editSessionCursorRestorePending: editCursorRestorePending,
   };
 
   // cadara-h026.3: the readout follows the plain selection with no tool
@@ -1611,6 +1615,7 @@ export function CadWorkbench({
   );
   // cadara-h026.1: the viewport's click and cycle follow the reducer's rule.
   const multiSelection = isMultiSelectionContext(machineState);
+  const editorRenderIdle = isEditorRenderIdle(machineState);
   const viewportModel = useMemo(
     () =>
       createWorkbenchViewportModel({
@@ -1635,7 +1640,7 @@ export function CadWorkbench({
         selectionFilter,
         selectionCatalog,
         sketchSession,
-        isEditorRenderIdle: machineState.kind === "idle",
+        isEditorRenderIdle: editorRenderIdle,
         multiSelection,
         acceptsSpecialModeTarget,
       }),
@@ -1644,7 +1649,7 @@ export function CadWorkbench({
       multiSelection,
       activeSectionView,
       annotationContext,
-      machineState.kind,
+      editorRenderIdle,
       showAllAnnotations,
       measurementViewModel?.witnesses,
       mode,

@@ -42,6 +42,11 @@ export interface WorkbenchDebugState {
   topologyDebug: TopologyDebugSummary;
   sectionOffset?: number | null;
   sectionRetainedSide?: string | null;
+  /**
+   * A finished edit session is rolling the history cursor forward again:
+   * `machineState` is `idle`, but on the rolled-back snapshot.
+   */
+  editSessionCursorRestorePending?: boolean;
 }
 
 export interface EditorRuntimeTraceStateSummary {

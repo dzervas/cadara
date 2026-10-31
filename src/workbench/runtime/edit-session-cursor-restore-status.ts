@@ -24,3 +24,24 @@ export function isEditSessionCursorRestorePending(
     machineState.documentRefreshFailure === null
   );
 }
+
+/**
+ * The editor is finished, so the viewport may report render readiness
+ * (`[data-render-idle]`) once its scene is stable. A pending roll-forward is
+ * not finished even though the machine is `idle` on the rolled-back snapshot:
+ * waits for render readiness would otherwise sample that rolled-back model.
+ */
+export function isEditorRenderIdle(
+  machineState: Pick<
+    EditorState,
+    | "kind"
+    | "editSessionCursorContext"
+    | "failureNotice"
+    | "documentRefreshFailure"
+  >,
+) {
+  return (
+    machineState.kind === "idle" &&
+    !isEditSessionCursorRestorePending(machineState)
+  );
+}

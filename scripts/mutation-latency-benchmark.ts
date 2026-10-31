@@ -59,7 +59,8 @@
 //   its kernel work drained; Face variant; AfterEdit: right after a
 //   committed depth edit),
 //   sketchEditUpstream (Exit after an untimed dimension edit: the publish
-//   rebuilds the downstream features; until idle on a new revision) and
+//   rebuilds the downstream features; until idle on a new revision with
+//   the history cursor rolled forward again) and
 //   sketchDimensionEdit (the in-session Enter), both on the first visible
 //   dimension chip of the first of 4 timeline sketches that shows one,
 //   x1.1 (x0.9 when x1.1 loses bodies) then restored on alternate samples,

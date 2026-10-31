@@ -82,7 +82,10 @@ export function handleEffectDocumentCursorMoved(
         // debug preview label (a refreshable conflict re-fetches instead).
         ...(refreshable
           ? {}
-          : { failureNotice: { kind: "historyMove" as const, message } }),
+          : {
+              failureNotice: { kind: "historyMove" as const, message },
+              editSessionCursorContext: withoutFailedRestore(state),
+            }),
       },
       {
         kind: "selection",
@@ -124,6 +127,20 @@ function clearedFailureNotice(
   return state.failureNotice?.kind === kind ? null : state.failureNotice;
 }
 
+/**
+ * A refused or failed roll-forward after an edit session ends that session's
+ * restore: nothing retries it, so the context must not keep reporting a
+ * restore in progress once the user dismisses the failure notice. The event
+ * loop resets a failed transient restore to its pre-move state, so the phase
+ * seen here is `restorePending`, or `restoring` without that reset.
+ */
+function withoutFailedRestore(state: EditorState) {
+  const phase = state.editSessionCursorContext?.phase;
+  return phase === "restorePending" || phase === "restoring"
+    ? null
+    : state.editSessionCursorContext;
+}
+
 export function handleEffectDocumentCursorMoveFailed(
   state: EditorState,
   event: Extract<EditorEvent, { type: "effect.documentCursorMoveFailed" }>,
@@ -141,6 +158,7 @@ export function handleEffectDocumentCursorMoveFailed(
         ...state,
         pendingHistoryCursorRequestId: null,
         failureNotice: { kind: "historyMove", message: event.message },
+        editSessionCursorContext: withoutFailedRestore(state),
       },
       {
         kind: "selection",
