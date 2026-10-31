@@ -764,7 +764,7 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
     const throughAllSession = patchFeatureEditSession(
       counterboreSession,
       createFeatureEditorFieldPatch(
-        getFormField(counterboreSession, "hole-termination"),
+        getFormField(counterboreSession, "hole-end-condition"),
         "throughAll",
       ),
     );
@@ -772,6 +772,8 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       getFormField(throughAllSession, "hole-depth"),
       "Through-all holes should not require a blind depth field.",
     ).toBeUndefined();
+    testHoleUpToEndConditions(withBody);
+    testHoleKeepsSketchPointTerminator();
 
     const definition = buildFeatureDefinition(throughAllSession);
     expect(
@@ -795,6 +797,128 @@ test("src/domain/feature-authoring/registry.spec.ts", async () => {
       definition.parameters.operationIntent,
       "Hole definitions should not author arbitrary operation intent.",
     ).toBeUndefined();
+  }
+
+  /** Hole end conditions come from Extrude's end-condition fields and patches. */
+  function testHoleUpToEndConditions(
+    blindSession: ReturnType<typeof createFeatureEditSession>,
+  ) {
+    type Session = ReturnType<typeof createFeatureEditSession>;
+    const face = {
+      kind: "face" as const,
+      bodyId: "body_a" as const,
+      faceId: "face_far" as const,
+    };
+    const patchField = (session: Session, fieldId: string, value: unknown) =>
+      patchFeatureEditSession(
+        session,
+        createFeatureEditorFieldPatch(
+          getFormField(session, fieldId) as Parameters<typeof createFeatureEditorFieldPatch>[0],
+          value,
+        ),
+      );
+    const holeOptions = (session: Session) => {
+      const definition = buildFeatureDefinition(session);
+      return definition?.kind === "hole" ? definition.parameters.options : undefined;
+    };
+    const endField = getFormField(blindSession, "hole-end-condition");
+    expect(
+      endField?.kind === "enum" ? endField.options.map((option) => option.value) : [],
+      "Hole should offer every Extrude end condition.",
+    ).toEqual(["blind", "upToNext", "upToFace", "upToPart", "upToVertex", "throughAll"]);
+    const deeper = patchField(blindSession, "hole-depth", 7);
+    const upToFace = patchField(deeper, "hole-end-condition", "upToFace");
+    const targetField = getFormField(upToFace, "hole-up-to-target");
+    expect(
+      targetField?.kind,
+      "Up-to-face holes should expose a face target picker.",
+    ).toBe("referencePicker");
+    expect(
+      buildFeatureDefinition(upToFace),
+      "An up-to-face hole without a face target must not build.",
+    ).toBe(null);
+
+    const withFace = patchFeatureEditSession(
+      upToFace,
+      createFeatureEditorReferenceSelectionPatch(
+        targetField as Parameters<typeof createFeatureEditorReferenceSelectionPatch>[0],
+        face,
+      ),
+    );
+    const reversed = patchField(withFace, "hole-direction", "negative");
+    expect(
+      holeOptions(reversed),
+      "Up-to-face holes should build with their face target and the reversed hole direction.",
+    ).toMatchObject({
+      termination: { source: "literal", value: "upToFace" },
+      direction: { source: "literal", value: "reverse" },
+      upToTarget: face,
+    });
+    expect(holeOptions(reversed)?.depth).toBeUndefined();
+
+    const blindAgain = patchField(reversed, "hole-end-condition", "blind");
+    expect(
+      getAuthoredLiteralValue(holeOptions(blindAgain)?.depth as number),
+      "Switching back to blind should restore the hole's previous depth.",
+    ).toBe(7);
+    expect(
+      holeOptions(blindAgain)?.upToTarget,
+      "Blind holes must not carry an up-to target.",
+    ).toBeUndefined();
+  }
+
+  /** An SDK-authored hole ending at a sketch point stays complete while edited. */
+  function testHoleKeepsSketchPointTerminator() {
+    const terminator = {
+      kind: "sketchPoint" as const,
+      sketchId: "sketch_top" as const,
+      pointId: "sketch_point_top" as const,
+    };
+    const hydrated = hydrateFeatureEditSession({
+      ownerDocumentId: "doc_workspace",
+      ownerRevisionId: "rev_1",
+      ownerFeatureId: "feature_hole-1",
+      ownerSketchId: null,
+      ownerBodyId: null,
+      featureId: "feature_hole-1",
+      label: "feature_hole-1",
+      definition: {
+        kind: "hole",
+        featureTypeVersion: "advanced-solid-feature/v0",
+        parameters: {
+          participants: [
+            {
+              role: "location",
+              targets: [{ kind: "sketchPoint", sketchId: "sketch_a", pointId: "sketch_point_a" }],
+            },
+            { role: "body", targets: [{ kind: "body", bodyId: "body_a" }] },
+          ],
+          options: {
+            mainDiameter: { source: "literal", value: 2 },
+            termination: { source: "literal", value: "upToVertex" },
+            upToTarget: terminator,
+          },
+        },
+      },
+      producedTargets: [{ kind: "body", bodyId: "body_a" }],
+    } as unknown as Parameters<typeof hydrateFeatureEditSession>[0])!;
+    const targetField = getFormField(hydrated, "hole-up-to-target");
+    expect(
+      targetField?.kind === "referencePicker" ? [targetField.value, targetField.error] : null,
+      "A sketch-point terminator should show as selected, not missing.",
+    ).toEqual([terminator, null]);
+    const widened = patchFeatureEditSession(
+      hydrated,
+      createFeatureEditorFieldPatch(
+        getFormField(hydrated, "hole-main-diameter") as Parameters<typeof createFeatureEditorFieldPatch>[0],
+        3,
+      ),
+    );
+    const definition = buildFeatureDefinition(widened);
+    expect(
+      definition?.kind === "hole" ? definition.parameters.options?.upToTarget : null,
+      "Editing another field must keep the sketch-point terminator.",
+    ).toEqual(terminator);
   }
 
   function testChamferDraftSelectionDistanceAndDefinitionBuilder() {

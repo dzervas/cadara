@@ -6,12 +6,22 @@ import {
   type HoleStyle,
   type HoleTermination,
   type HoleDirection,
+  type HoleFeatureParameters,
 } from "@/contracts/modeling/advanced-solid";
 import type { MaybeAuthoredValue } from "@/contracts/modeling/authored-values";
 import type {
+  ExtrudeFeatureEndConditionDraft,
   FeatureAuthoringDefinition,
   HoleFeatureParameterDraft,
 } from "@/core/feature-authoring/definition";
+import {
+  extrudeEndConditionFields,
+  extrudeEndHasRequiredTarget,
+  extrudeEndHasValidScalars,
+  isExtrudeEndConditionKind,
+  patchExtrudeEndCondition,
+  type ExtrudeEndConditionFieldKeys,
+} from "@/core/feature-authoring/features/extrude-end-condition-fields";
 import {
   createSelectionFilterForRequirement,
   holeSelectionFilter,
@@ -64,6 +74,76 @@ function holeDirection(options: HoleAdvancedOptions): HoleDirection {
   return authoredStringLiteral(options.direction ?? "forward", "forward");
 }
 
+/** Patch keys of the hole's end condition: the hole's existing option names. */
+const HOLE_END_KEYS: ExtrudeEndConditionFieldKeys = {
+  idPrefix: "hole",
+  labelPrefix: "",
+  condition: "termination",
+  direction: "direction",
+  depth: "depth",
+  draftAngle: "draftAngle",
+  target: "upToTarget",
+  offsetDistance: "upToOffsetDistance",
+  offsetDirection: "upToOffsetDirection",
+};
+
+const HOLE_DEFAULT_DEPTH = 5;
+
+/**
+ * The hole's end as an Extrude end-condition draft. Forward follows the sketch
+ * normal, which is Extrude's positive direction.
+ */
+function holeEndDraft(options: HoleAdvancedOptions): ExtrudeFeatureEndConditionDraft {
+  const direction = holeDirection(options) === "reverse" ? "negative" : "positive";
+  const base: ExtrudeFeatureEndConditionDraft = {
+    kind: "blind",
+    direction,
+    distance: options.depth ?? HOLE_DEFAULT_DEPTH,
+  };
+  const termination = holeTermination(options);
+  if (termination === "blind") return base;
+  return keepSketchPointTerminator(
+    patchExtrudeEndCondition(base, {
+      [HOLE_END_KEYS.condition]: termination,
+      [HOLE_END_KEYS.target]: options.upToTarget,
+      [HOLE_END_KEYS.offsetDistance]: options.upToOffset?.distance,
+      [HOLE_END_KEYS.offsetDirection]: options.upToOffset?.direction,
+    }, HOLE_END_KEYS),
+    options,
+  );
+}
+
+/**
+ * Extrude's end patching keeps only body-vertex up-to-vertex targets, because
+ * its picker offers no sketch points. A hole authored through the SDK can end
+ * at a sketch point; keep that target until the user picks another target or
+ * end condition.
+ */
+function keepSketchPointTerminator(
+  end: ExtrudeFeatureEndConditionDraft,
+  options: HoleAdvancedOptions,
+): ExtrudeFeatureEndConditionDraft {
+  return end.kind === "upToVertex" && options.upToTarget?.kind === "sketchPoint"
+    ? { ...end, target: options.upToTarget }
+    : end;
+}
+
+/** Hole end options for an end-condition draft; a blind depth outlives a switch away from blind. */
+function holeEndOptions(
+  end: ExtrudeFeatureEndConditionDraft,
+  previousDepth: HoleAdvancedOptions["depth"],
+): Pick<HoleAdvancedOptions, "direction" | "termination" | "depth" | "upToTarget" | "upToOffset"> {
+  return {
+    direction: end.direction === "negative" ? "reverse" : "forward",
+    termination: end.kind,
+    depth: end.kind === "blind" ? end.distance : (previousDepth ?? HOLE_DEFAULT_DEPTH),
+    ...("target" in end && extrudeEndHasRequiredTarget(end) ? { upToTarget: end.target } : {}),
+    ...("offset" in end && end.offset
+      ? { upToOffset: { distance: end.offset.distance, direction: end.offset.direction } }
+      : {}),
+  } as Pick<HoleAdvancedOptions, "direction" | "termination" | "depth" | "upToTarget" | "upToOffset">;
+}
+
 function normalizeHoleOptions(
   options: Record<string, unknown> | undefined,
 ): HoleAdvancedOptions {
@@ -75,7 +155,13 @@ function normalizeHoleOptions(
     mainDiameter: (options?.mainDiameter ?? 1) as HoleAdvancedOptions["mainDiameter"],
     direction: (options?.direction ?? "forward") as HoleAdvancedOptions["direction"],
     termination: (options?.termination ?? "blind") as HoleAdvancedOptions["termination"],
-    depth: (options?.depth ?? 5) as HoleAdvancedOptions["depth"],
+    depth: (options?.depth ?? HOLE_DEFAULT_DEPTH) as HoleAdvancedOptions["depth"],
+    ...(options?.upToTarget
+      ? { upToTarget: options.upToTarget as HoleAdvancedOptions["upToTarget"] }
+      : {}),
+    ...(options?.upToOffset
+      ? { upToOffset: options.upToOffset as HoleAdvancedOptions["upToOffset"] }
+      : {}),
   };
 
   if (style === "counterbore") {
@@ -120,7 +206,18 @@ function buildHoleOptions(options: HoleAdvancedOptions): Record<string, unknown>
     direction: authoredDefinitionValue(holeDirection(options), "forward"),
     termination: authoredDefinitionValue(termination, "blind"),
     ...(termination === "blind"
-      ? { depth: authoredDefinitionValue(options.depth ?? 5, 5) }
+      ? { depth: authoredDefinitionValue(options.depth ?? HOLE_DEFAULT_DEPTH, HOLE_DEFAULT_DEPTH) }
+      : {}),
+    ...(isHoleUpToTermination(termination) && options.upToTarget
+      ? { upToTarget: options.upToTarget }
+      : {}),
+    ...(termination !== "blind" && termination !== "throughAll" && options.upToOffset
+      ? {
+          upToOffset: {
+            distance: authoredDefinitionValue(options.upToOffset.distance, 0),
+            direction: options.upToOffset.direction,
+          },
+        }
       : {}),
   };
 
@@ -170,28 +267,23 @@ function applyHoleOptionsPatch(
       value === "simple" || value === "counterbore" || value === "countersink",
   );
   const literalStyle = authoredStringLiteral(style, "simple");
-  const termination = acceptAuthoredPatch(
-    patch.termination,
-    options.termination ?? "blind",
-    (value): value is HoleTermination => value === "blind" || value === "throughAll",
+  const patchedEnd = patchExtrudeEndCondition(
+    holeEndDraft(options),
+    patch,
+    HOLE_END_KEYS,
+    options.depth ?? HOLE_DEFAULT_DEPTH,
   );
+  const end =
+    patch[HOLE_END_KEYS.condition] === undefined && patch[HOLE_END_KEYS.target] === undefined
+      ? keepSketchPointTerminator(patchedEnd, options)
+      : patchedEnd;
   const base = {
     mainDiameter: acceptAuthoredPatch(
       patch.mainDiameter,
       options.mainDiameter ?? 1,
       (value): value is number => typeof value === "number",
     ),
-    termination,
-    direction: acceptAuthoredPatch(
-      patch.direction,
-      options.direction ?? "forward",
-      (value): value is HoleDirection => value === "forward" || value === "reverse",
-    ),
-    depth: acceptAuthoredPatch(
-      patch.depth,
-      options.depth ?? 5,
-      (value): value is number => typeof value === "number",
-    ),
+    ...holeEndOptions(end, options.depth),
   };
 
   if (literalStyle === "counterbore") {
@@ -253,6 +345,10 @@ function getHoleValidationDiagnostics(draft: HoleFeatureParameterDraft) {
   });
 }
 
+function isHoleUpToTermination(termination: HoleTermination) {
+  return termination === "upToFace" || termination === "upToPart" || termination === "upToVertex";
+}
+
 function isCountersinkAngle(value: HoleAdvancedOptions["countersinkAngleDegrees"]) {
   if (value === undefined) return false;
   const literal = authoredNumberLiteral(value);
@@ -266,6 +362,7 @@ function getInvalidOptionLabel(draft: HoleFeatureParameterDraft) {
   if (holeTermination(options) === "blind" && !isPositiveAuthoredNumber(options.depth ?? 0)) {
     return "blind depth";
   }
+  if (!extrudeEndHasValidScalars(holeEndDraft(options))) return "up-to offset";
   if (style === "counterbore") {
     if (!isPositiveAuthoredNumber(options.counterboreDiameter ?? 0)) return "counterbore diameter";
     if (!isPositiveAuthoredNumber(options.counterboreDepth ?? 0)) return "counterbore depth";
@@ -311,12 +408,14 @@ function numericField(
 }
 
 /** Refuse unresolved variants before browser transition defaults can coerce them. */
-export function prepareHoleFeatureDefinition(parameters: import("@/contracts/modeling/advanced-solid").HoleFeatureParameters) {
+export function prepareHoleFeatureDefinition(parameters: HoleFeatureParameters) {
   const style = authoredStringLiteral(parameters.options.style ?? "simple", "");
   const termination = authoredStringLiteral<string>(parameters.options.termination, "");
   const direction = authoredStringLiteral(parameters.options.direction ?? "forward", "");
-  if (!["simple", "counterbore", "countersink"].includes(style) || !["blind", "throughAll"].includes(termination) || !["forward", "reverse"].includes(direction)) return null;
-  if (termination === "throughAll" && parameters.options.depth !== undefined) return null;
+  if (!["simple", "counterbore", "countersink"].includes(style) || !isExtrudeEndConditionKind(termination) || !["forward", "reverse"].includes(direction)) return null;
+  if (termination !== "blind" && parameters.options.depth !== undefined) return null;
+  if (!isHoleUpToTermination(termination) && parameters.options.upToTarget !== undefined) return null;
+  if ((termination === "blind" || termination === "throughAll") && parameters.options.upToOffset !== undefined) return null;
   if (parameters.participants.length !== 2 || parameters.participants[0].role !== "location" || parameters.participants[1].role !== "body") return null;
   if (parameters.participants[0].targets.some(t => t.kind !== "sketchPoint") || parameters.participants[1].targets.some(t => t.kind !== "body")) return null;
   return holeAuthoringDefinition.buildDefinition(
@@ -347,7 +446,7 @@ export const holeAuthoringDefinition = {
     return {
       locationTargets: locationTarget ? [locationTarget] : [],
       bodyTargets: bodyTarget ? [bodyTarget] : [],
-      options: { style: "simple", mainDiameter: 1, termination: "blind", depth: 5 },
+      options: { style: "simple", mainDiameter: 1, termination: "blind", depth: HOLE_DEFAULT_DEPTH },
     };
   },
   hydrateDraft(feature) {
@@ -408,6 +507,7 @@ export const holeAuthoringDefinition = {
   getPreviewLabel(draft, prefix) {
     if (draft.locationTargets.length === 0) return "Select one or more sketch points for hole locations";
     if (draft.bodyTargets.length === 0) return "Select one or more bodies for hole targets";
+    if (!extrudeEndHasRequiredTarget(holeEndDraft(draft.options))) return "Select the hole up-to target";
     const invalid = getInvalidOptionLabel(draft);
     if (invalid) return `Enter positive hole ${invalid}`;
     return `${prefix} ${holeStyle(draft.options)} hole on ${draft.locationTargets.length} location${draft.locationTargets.length === 1 ? "" : "s"}`;
@@ -444,7 +544,6 @@ export const holeAuthoringDefinition = {
   getFormSchema(session) {
     const { options } = session.draft;
     const style = holeStyle(options);
-    const termination = holeTermination(options);
     return {
       sections: [
         {
@@ -545,22 +644,12 @@ export const holeAuthoringDefinition = {
                   },
                 ]
               : []),
-            {
-              kind: "enum",
-              id: "hole-termination",
-              label: "Termination",
-              value: termination,
-              options: [
-                { value: "blind", label: "Blind" },
-                { value: "throughAll", label: "Through all" },
-              ],
-              patch: { patchKey: "termination" },
-            },
-            ...(termination === "blind"
-              ? [
-                  numericField("hole-depth", "Blind depth", options.depth, "depth", "Blind depth must be greater than zero."),
-                ]
-              : []),
+            ...extrudeEndConditionFields({
+              end: holeEndDraft(options),
+              keys: HOLE_END_KEYS,
+              includeDraftAngle: false,
+              selectionFilter: holeSelectionFilter,
+            }),
           ],
         },
         {

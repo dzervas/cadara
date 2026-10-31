@@ -8,7 +8,8 @@ import {
 } from "@/contracts/semantic/runtime-schema";
 
 import { SemanticDocument } from "@/application/semantic/sdk";
-import { mapProfileExtentTargets } from "@/application/semantic/target-resolution";
+import { extentTargetKinds, mapProfileExtentTargets } from "@/application/semantic/target-resolution";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import {
   isDiscoveryAlias as isAlias,
 } from "@/application/semantic/target-inputs";
@@ -49,6 +50,14 @@ interface RecipeOperation {
   command: RecipeCommand;
   alias?: string;
 }
+/** Schema-valid stand-ins for aliased extent targets during preflight validation. */
+const EXTENT_TARGET_PLACEHOLDERS = {
+  sketchPoint: { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" },
+  edge: { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" },
+  face: { kind: "face", bodyId: "body_validation", faceId: "face_validation" },
+  body: { kind: "body", bodyId: "body_validation" },
+  vertex: { kind: "vertex", bodyId: "body_validation", vertexId: "vertex_validation" },
+} as const;
 const example = {
   version: 1,
   operations: [
@@ -230,14 +239,7 @@ function parseLegacyRecipe(input: unknown, position: { index: number }): RecipeO
       validationCommand.parameters = mapProfileExtentTargets(validationCommand.parameters as Record<string, unknown>, command.operation.startsWith("revolve."), (target, kinds) => {
         if (!isAlias(target)) return target;
         validateTarget(target, "extent_validation");
-        const placeholders = {
-          sketchPoint: { kind: "sketchPoint", sketchId: "sketch_validation", pointId: "sketch_point_validation" },
-          edge: { kind: "edge", bodyId: "body_validation", edgeId: "edge_validation" },
-          face: { kind: "face", bodyId: "body_validation", faceId: "face_validation" },
-          body: { kind: "body", bodyId: "body_validation" },
-          vertex: { kind: "vertex", bodyId: "body_validation", vertexId: "vertex_validation" },
-        };
-        return kinds[0] ? placeholders[kinds[0]] : target;
+        return kinds[0] ? EXTENT_TARGET_PLACEHOLDERS[kinds[0]] : target;
       });
       const scope = parameters.booleanScope;
       if (scope && typeof scope === "object" && "bodyIds" in scope && Array.isArray(scope.bodyIds))
@@ -289,6 +291,13 @@ function parseLegacyRecipe(input: unknown, position: { index: number }): RecipeO
           return { ...p, targets: p.targets.map((t: unknown) => validateReference(t, p.role === "location" ? "sketchPoint" : p.role === "targetBody" || p.role === "toolBody" || p.role === "body" ? "body" : "face")) };
         }) } : {}),
       };
+      // A hole up-to terminator is an extent target, validated like an Extrude end target.
+      const options = parameters.options;
+      if (options && typeof options === "object" && "upToTarget" in options && isAlias(options.upToTarget)) {
+        validateTarget(options.upToTarget, "extent_validation");
+        const kinds = extentTargetKinds("termination" in options ? getAuthoredLiteralValue(options.termination as never) : undefined, false);
+        validationCommand.parameters = { ...validationCommand.parameters as object, options: { ...options, upToTarget: kinds[0] ? EXTENT_TARGET_PLACEHOLDERS[kinds[0]] : options.upToTarget } };
+      }
     }
     if ((command.operation === "mirror.create" || command.operation === "mirror.update" || command.operation === "transform.create" || command.operation === "transform.update" || command.operation === "linearPattern.create" || command.operation === "linearPattern.update" || command.operation === "circularPattern.create" || command.operation === "circularPattern.update" || command.operation === "loft.create" || command.operation === "loft.update" || command.operation === "sweep.create" || command.operation === "sweep.update") && command.parameters && typeof command.parameters === "object" && "participants" in command.parameters && Array.isArray(command.parameters.participants)) {
       validationCommand.parameters = { ...command.parameters, participants: command.parameters.participants.map(p => {

@@ -9,6 +9,10 @@ import {
   type FeatureValueKindDescriptor,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
+import type {
+  ExtrudeEndCondition,
+  LinearUpToOffset,
+} from "@/contracts/modeling/schema";
 
 export const ADVANCED_SOLID_FEATURE_SCHEMA_VERSION =
   "advanced-solid-feature/v0" as const;
@@ -340,9 +344,27 @@ export interface ChamferAdvancedOptions extends Record<string, unknown> {
 
 export type HoleStyle = "simple" | "counterbore" | "countersink";
 
-export type HoleTermination = "blind" | "throughAll";
+/**
+ * Hole end conditions are Extrude's end-condition kinds. The hole's own
+ * forward/reverse direction plays the extrude end's direction, and holes carry
+ * no draft angle. `throughAll` keeps the hole meaning it had before the other
+ * kinds existed: the bore spans the scoped bodies on both sides of the sketch
+ * plane.
+ */
+export type HoleTermination = ExtrudeEndCondition["kind"];
+
+export type HoleUpToTermination = "upToFace" | "upToPart" | "upToVertex";
+
+/** Terminator of an up-to hole: the target of the matching Extrude end condition. */
+export type HoleUpToTarget<K extends HoleUpToTermination = HoleUpToTermination> =
+  Extract<ExtrudeEndCondition, { kind: K }>["target"];
 
 export type HoleDirection = "forward" | "reverse";
+
+/** Extrude's up-to offset with a draft-friendly plain-number distance. */
+export type HoleAdvancedUpToOffset = Omit<LinearUpToOffset, "distance"> & {
+  distance: MaybeAuthoredValue<number>;
+};
 
 export type HoleAdvancedOptions =
   | {
@@ -351,6 +373,8 @@ export type HoleAdvancedOptions =
       mainDiameter: MaybeAuthoredValue<number>;
       termination: MaybeAuthoredValue<HoleTermination>;
       depth?: MaybeAuthoredValue<number>;
+      upToTarget?: HoleUpToTarget;
+      upToOffset?: HoleAdvancedUpToOffset;
       counterboreDiameter?: never;
       counterboreDepth?: never;
       countersinkDiameter?: never;
@@ -364,6 +388,8 @@ export type HoleAdvancedOptions =
       counterboreDepth: MaybeAuthoredValue<number>;
       termination: MaybeAuthoredValue<HoleTermination>;
       depth?: MaybeAuthoredValue<number>;
+      upToTarget?: HoleUpToTarget;
+      upToOffset?: HoleAdvancedUpToOffset;
       countersinkDiameter?: never;
       countersinkAngleDegrees?: never;
     }
@@ -376,40 +402,83 @@ export type HoleAdvancedOptions =
       countersinkAngleDegrees: MaybeAuthoredValue<number>;
       termination: MaybeAuthoredValue<HoleTermination>;
       depth?: MaybeAuthoredValue<number>;
+      upToTarget?: HoleUpToTarget;
+      upToOffset?: HoleAdvancedUpToOffset;
       counterboreDiameter?: never;
       counterboreDepth?: never;
     };
 
 // Named style/termination combinations keep published schemas readable without
-// intersecting overlapping authored scalar unions.
-export interface SimpleBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style?: MaybeAuthoredValue<"simple"> }>, "termination" | "depth"> {
+// intersecting overlapping authored scalar unions: each one extends a style
+// base and an end base that share no keys.
+type HoleEndOptionKey = "termination" | "depth" | "upToTarget" | "upToOffset";
+type SimpleHoleStyleOptions = Omit<Extract<HoleAdvancedOptions, { style?: MaybeAuthoredValue<"simple"> }>, HoleEndOptionKey>;
+type CounterboreHoleStyleOptions = Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"counterbore"> }>, HoleEndOptionKey>;
+type CountersinkHoleStyleOptions = Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"countersink"> }>, HoleEndOptionKey>;
+
+export interface BlindHoleEndOptions {
   termination: MaybeAuthoredValue<"blind">;
   depth: MaybeAuthoredValue<number>;
+  upToTarget?: never;
+  upToOffset?: never;
 }
-export interface SimpleThroughHoleOptions extends Omit<SimpleBlindHoleOptions, "termination" | "depth"> {
+export interface ThroughAllHoleEndOptions {
   termination: MaybeAuthoredValue<"throughAll">;
   depth?: never;
+  upToTarget?: never;
+  upToOffset?: never;
 }
-export interface CounterboreBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"counterbore"> }>, "termination" | "depth"> {
-  termination: MaybeAuthoredValue<"blind">;
-  depth: MaybeAuthoredValue<number>;
-}
-export interface CounterboreThroughHoleOptions extends Omit<CounterboreBlindHoleOptions, "termination" | "depth"> {
-  termination: MaybeAuthoredValue<"throughAll">;
+export interface UpToNextHoleEndOptions {
+  termination: MaybeAuthoredValue<"upToNext">;
   depth?: never;
+  upToTarget?: never;
+  upToOffset?: LinearUpToOffset;
 }
-export interface CountersinkBlindHoleOptions extends Omit<Extract<HoleAdvancedOptions, { style: MaybeAuthoredValue<"countersink"> }>, "termination" | "depth"> {
-  termination: MaybeAuthoredValue<"blind">;
-  depth: MaybeAuthoredValue<number>;
-}
-export interface CountersinkThroughHoleOptions extends Omit<CountersinkBlindHoleOptions, "termination" | "depth"> {
-  termination: MaybeAuthoredValue<"throughAll">;
+export interface UpToFaceHoleEndOptions {
+  termination: MaybeAuthoredValue<"upToFace">;
   depth?: never;
+  upToTarget: HoleUpToTarget<"upToFace">;
+  upToOffset?: LinearUpToOffset;
+}
+export interface UpToPartHoleEndOptions {
+  termination: MaybeAuthoredValue<"upToPart">;
+  depth?: never;
+  upToTarget: HoleUpToTarget<"upToPart">;
+  upToOffset?: LinearUpToOffset;
+}
+export interface UpToVertexHoleEndOptions {
+  termination: MaybeAuthoredValue<"upToVertex">;
+  depth?: never;
+  upToTarget: HoleUpToTarget<"upToVertex">;
+  upToOffset?: LinearUpToOffset;
 }
 
-export type HoleOptions = SimpleBlindHoleOptions | SimpleThroughHoleOptions
-  | CounterboreBlindHoleOptions | CounterboreThroughHoleOptions
-  | CountersinkBlindHoleOptions | CountersinkThroughHoleOptions;
+export interface SimpleBlindHoleOptions extends SimpleHoleStyleOptions, BlindHoleEndOptions {}
+export interface SimpleThroughHoleOptions extends SimpleHoleStyleOptions, ThroughAllHoleEndOptions {}
+export interface SimpleUpToNextHoleOptions extends SimpleHoleStyleOptions, UpToNextHoleEndOptions {}
+export interface SimpleUpToFaceHoleOptions extends SimpleHoleStyleOptions, UpToFaceHoleEndOptions {}
+export interface SimpleUpToPartHoleOptions extends SimpleHoleStyleOptions, UpToPartHoleEndOptions {}
+export interface SimpleUpToVertexHoleOptions extends SimpleHoleStyleOptions, UpToVertexHoleEndOptions {}
+export interface CounterboreBlindHoleOptions extends CounterboreHoleStyleOptions, BlindHoleEndOptions {}
+export interface CounterboreThroughHoleOptions extends CounterboreHoleStyleOptions, ThroughAllHoleEndOptions {}
+export interface CounterboreUpToNextHoleOptions extends CounterboreHoleStyleOptions, UpToNextHoleEndOptions {}
+export interface CounterboreUpToFaceHoleOptions extends CounterboreHoleStyleOptions, UpToFaceHoleEndOptions {}
+export interface CounterboreUpToPartHoleOptions extends CounterboreHoleStyleOptions, UpToPartHoleEndOptions {}
+export interface CounterboreUpToVertexHoleOptions extends CounterboreHoleStyleOptions, UpToVertexHoleEndOptions {}
+export interface CountersinkBlindHoleOptions extends CountersinkHoleStyleOptions, BlindHoleEndOptions {}
+export interface CountersinkThroughHoleOptions extends CountersinkHoleStyleOptions, ThroughAllHoleEndOptions {}
+export interface CountersinkUpToNextHoleOptions extends CountersinkHoleStyleOptions, UpToNextHoleEndOptions {}
+export interface CountersinkUpToFaceHoleOptions extends CountersinkHoleStyleOptions, UpToFaceHoleEndOptions {}
+export interface CountersinkUpToPartHoleOptions extends CountersinkHoleStyleOptions, UpToPartHoleEndOptions {}
+export interface CountersinkUpToVertexHoleOptions extends CountersinkHoleStyleOptions, UpToVertexHoleEndOptions {}
+
+export type HoleOptions =
+  | SimpleBlindHoleOptions | SimpleThroughHoleOptions | SimpleUpToNextHoleOptions
+  | SimpleUpToFaceHoleOptions | SimpleUpToPartHoleOptions | SimpleUpToVertexHoleOptions
+  | CounterboreBlindHoleOptions | CounterboreThroughHoleOptions | CounterboreUpToNextHoleOptions
+  | CounterboreUpToFaceHoleOptions | CounterboreUpToPartHoleOptions | CounterboreUpToVertexHoleOptions
+  | CountersinkBlindHoleOptions | CountersinkThroughHoleOptions | CountersinkUpToNextHoleOptions
+  | CountersinkUpToFaceHoleOptions | CountersinkUpToPartHoleOptions | CountersinkUpToVertexHoleOptions;
 
 /** Canonical hole inputs retain existing style options and explicit subtractive scope. */
 export interface HoleFeatureParameters {
@@ -456,7 +525,14 @@ const HOLE_TERMINATION_OPTION_DESCRIPTOR = {
   label: "Termination",
   required: true,
   valueKind: "enum",
-  enumValues: ["blind", "throughAll"],
+  enumValues: [
+    "blind",
+    "upToNext",
+    "upToFace",
+    "upToPart",
+    "upToVertex",
+    "throughAll",
+  ],
   patchTarget: { patchKey: "options", valuePath: ["termination"] },
 } as const satisfies AdvancedFeatureScalarOptionDescriptor;
 
@@ -1150,6 +1226,21 @@ function validateHoleAdvancedFeature(
     if (rawDepth === undefined) {
       diagnostics.push(createInvalidOptionDiagnostic("Blind holes require depth."));
     }
+  }
+  const upToTargetKind = { upToFace: "face", upToPart: "body", upToVertex: "vertex" }[
+    termination as HoleUpToTermination
+  ] as string | undefined;
+  const upToTarget = options.upToTarget as { kind?: unknown } | undefined;
+  if (
+    upToTargetKind !== undefined &&
+    upToTarget?.kind !== upToTargetKind &&
+    !(termination === "upToVertex" && upToTarget?.kind === "sketchPoint")
+  ) {
+    diagnostics.push(
+      createInvalidOptionDiagnostic(
+        `Up-to holes ending at a ${upToTargetKind} require one ${upToTargetKind} target.`,
+      ),
+    );
   }
 
   const mainDiameter = authoredNumericLiteral(options.mainDiameter);

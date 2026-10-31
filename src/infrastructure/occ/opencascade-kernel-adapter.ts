@@ -97,7 +97,10 @@ import type {
   BakedGeometryAssetReference,
   GeometryAssetBlobInput,
 } from "@/contracts/modeling/geometry-assets";
-import { ADVANCED_SOLID_FEATURE_SCHEMA_VERSION } from "@/contracts/modeling/advanced-solid";
+import {
+  ADVANCED_SOLID_FEATURE_SCHEMA_VERSION,
+  type HoleUpToTarget,
+} from "@/contracts/modeling/advanced-solid";
 import type {
   BodyId,
   DocumentId,
@@ -2136,6 +2139,18 @@ function getFeatureConsumedTargets(definition: FeatureDefinition) {
       }
 
       return targets;
+    }
+    case "hole": {
+      // An up-to terminator is a durable topology dependency, as it is for Extrude.
+      const upToTarget = definition.parameters.options?.upToTarget as
+        | HoleUpToTarget
+        | undefined;
+      return [
+        ...definition.parameters.participants.flatMap((participant) => [
+          ...participant.targets,
+        ]),
+        ...(upToTarget ? [upToTarget] : []),
+      ];
     }
     case "split":
     case "deleteSolid":

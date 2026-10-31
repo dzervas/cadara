@@ -4,9 +4,7 @@ import type {
   ExtrudeFeatureParameters,
   ExtrudeProfileRef,
   ExtrudeSurfaceProfileRef,
-  LinearExtentDirection,
   ModelingDiagnostic,
-  UpToOffsetDirection,
 } from "@/contracts/modeling/schema";
 import type {
   ExtrudeFeatureEndConditionDraft,
@@ -26,6 +24,13 @@ import {
 } from "@/core/editor/schema";
 import { EXTRUDE_FEATURE_SCHEMA_VERSION } from "@/contracts/shared/versioning";
 import * as shared from "@/core/feature-authoring/features/shared";
+import {
+  extrudeEndConditionFields,
+  extrudeEndHasRequiredTarget,
+  extrudeEndHasValidScalars,
+  patchExtrudeEndCondition,
+  type ExtrudeEndConditionFieldKeys,
+} from "@/core/feature-authoring/features/extrude-end-condition-fields";
 import type { FeatureEditorFormField } from "@/core/feature-authoring/form-schema";
 
 const DEFAULT_FIRST_END: ExtrudeFeatureEndConditionDraft = {
@@ -42,31 +47,10 @@ const DEFAULT_SECOND_END: ExtrudeFeatureEndConditionDraft = {
   draftAngle: 0,
 };
 
-function isExtrudeDirection(value: unknown): value is LinearExtentDirection {
-  return value === "positive" || value === "negative";
-}
-
 function isExtentMode(
   value: unknown,
 ): value is "oneSide" | "symmetric" | "twoSide" {
   return value === "oneSide" || value === "symmetric" || value === "twoSide";
-}
-
-function isEndConditionKind(
-  value: unknown,
-): value is ExtrudeEndCondition["kind"] {
-  return (
-    value === "blind" ||
-    value === "upToNext" ||
-    value === "upToFace" ||
-    value === "upToPart" ||
-    value === "upToVertex" ||
-    value === "throughAll"
-  );
-}
-
-function isOffsetDirection(value: unknown): value is UpToOffsetDirection {
-  return value === "shorten" || value === "extend";
 }
 
 function ensureEndSupportsMode(
@@ -82,153 +66,6 @@ function ensureEndSupportsMode(
         draftAngle: end.draftAngle,
       }
     : end;
-}
-
-function coerceTargetForEnd(kind: ExtrudeEndCondition["kind"], value: unknown) {
-  const target = shared.asUpToTargetRef(
-    value as Parameters<typeof shared.asUpToTargetRef>[0],
-  );
-  if (kind === "upToFace") {
-    return target?.kind === "face" ? target : null;
-  }
-  if (kind === "upToPart") {
-    return target?.kind === "body" ? target : null;
-  }
-  if (kind === "upToVertex") {
-    return target?.kind === "vertex" ? target : null;
-  }
-  return null;
-}
-
-function patchEnd(
-  end: ExtrudeFeatureEndConditionDraft,
-  patch: Record<string, unknown>,
-  prefix: "first" | "second",
-): ExtrudeFeatureEndConditionDraft {
-  const conditionKey =
-    prefix === "first" ? "endCondition" : "secondEndCondition";
-  const directionKey = prefix === "first" ? "direction" : "secondDirection";
-  const depthKey = prefix === "first" ? "depth" : "secondDepth";
-  const draftKey = prefix === "first" ? "draftAngle" : "secondDraftAngle";
-  const targetKey = prefix === "first" ? "upToTarget" : "secondUpToTarget";
-  const offsetDistanceKey =
-    prefix === "first" ? "upToOffsetDistance" : "secondUpToOffsetDistance";
-  const offsetDirectionKey =
-    prefix === "first" ? "upToOffsetDirection" : "secondUpToOffsetDirection";
-  const nextKind = isEndConditionKind(patch[conditionKey])
-    ? patch[conditionKey]
-    : end.kind;
-  const direction = isExtrudeDirection(patch[directionKey])
-    ? patch[directionKey]
-    : "direction" in end
-      ? end.direction
-      : "positive";
-  const draftAngle = shared.acceptAuthoredPatch(
-    patch[draftKey],
-    "draftAngle" in end ? (end.draftAngle ?? 0) : 0,
-    (value): value is number => typeof value === "number",
-  );
-  const offsetDistance = shared.acceptAuthoredPatch(
-    patch[offsetDistanceKey],
-    "offset" in end ? (end.offset?.distance ?? 0) : 0,
-    (value): value is number => typeof value === "number",
-  );
-  const offsetDirection = isOffsetDirection(patch[offsetDirectionKey])
-    ? patch[offsetDirectionKey]
-    : "offset" in end
-      ? (end.offset?.direction ?? "shorten")
-      : "shorten";
-  const offset = shared.isFiniteAuthoredNumber(offsetDistance)
-    ? { distance: offsetDistance, direction: offsetDirection }
-    : undefined;
-
-  if (nextKind === "blind") {
-    return {
-      kind: "blind",
-      direction,
-      distance: shared.acceptAuthoredPatch(
-        patch[depthKey],
-        end.kind === "blind" ? end.distance : 12,
-        (value): value is number => typeof value === "number",
-      ),
-      draftAngle,
-    };
-  }
-
-  if (nextKind === "throughAll") {
-    return { kind: "throughAll", direction, draftAngle };
-  }
-
-  if (nextKind === "upToNext") {
-    return offset
-      ? { kind: "upToNext", direction, offset, draftAngle }
-      : { kind: "upToNext", direction, draftAngle };
-  }
-
-  const target =
-    coerceTargetForEnd(nextKind, patch[targetKey]) ??
-    ("target" in end ? coerceTargetForEnd(nextKind, end.target) : null);
-  if (nextKind === "upToFace") {
-    return {
-      kind: "upToFace",
-      direction,
-      draftAngle,
-      ...(offset ? { offset } : {}),
-      target:
-        target?.kind === "face"
-          ? target
-          : { kind: "face", bodyId: "" as never, faceId: "" as never },
-    };
-  }
-  if (nextKind === "upToPart") {
-    return {
-      kind: "upToPart",
-      direction,
-      draftAngle,
-      ...(offset ? { offset } : {}),
-      target:
-        target?.kind === "body"
-          ? target
-          : { kind: "body", bodyId: "" as never },
-    };
-  }
-  return {
-    kind: "upToVertex",
-    direction,
-    draftAngle,
-    ...(offset ? { offset } : {}),
-    target:
-      target?.kind === "vertex"
-        ? target
-        : { kind: "vertex", bodyId: "" as never, vertexId: "" as never },
-  };
-}
-
-function endHasRequiredTarget(end: ExtrudeFeatureEndConditionDraft) {
-  if (end.kind === "upToFace") {
-    return end.target.bodyId.length > 0 && end.target.faceId.length > 0;
-  }
-  if (end.kind === "upToPart") {
-    return end.target.bodyId.length > 0;
-  }
-  if (end.kind === "upToVertex") {
-    return end.target.kind === "sketchPoint"
-      ? end.target.sketchId.length > 0 && end.target.pointId.length > 0
-      : end.target.bodyId.length > 0 && end.target.vertexId.length > 0;
-  }
-  return true;
-}
-
-function endHasValidScalars(end: ExtrudeFeatureEndConditionDraft) {
-  return (
-    (end.kind !== "blind" || shared.isPositiveAuthoredNumber(end.distance)) &&
-    (!("draftAngle" in end) ||
-      end.draftAngle === undefined ||
-      shared.isFiniteAuthoredNumber(end.draftAngle)) &&
-    (!("offset" in end) ||
-      end.offset === undefined ||
-      shared.isFiniteAuthoredNumber(end.offset.distance))
-  );
 }
 
 function definitionEnd(
@@ -275,21 +112,38 @@ function definitionEnd(
   }
 }
 
-function endConditionLabel(kind: ExtrudeEndCondition["kind"]) {
-  switch (kind) {
-    case "blind":
-      return "Blind";
-    case "upToNext":
-      return "Up to next";
-    case "upToFace":
-      return "Up to face";
-    case "upToPart":
-      return "Up to part";
-    case "upToVertex":
-      return "Up to vertex";
-    case "throughAll":
-      return "Through all";
-  }
+function extrudeEndKeys(prefix: "first" | "second"): ExtrudeEndConditionFieldKeys {
+  return prefix === "first"
+    ? {
+        idPrefix: "extrude",
+        labelPrefix: "",
+        condition: "endCondition",
+        direction: "direction",
+        depth: "depth",
+        draftAngle: "draftAngle",
+        target: "upToTarget",
+        offsetDistance: "upToOffsetDistance",
+        offsetDirection: "upToOffsetDirection",
+      }
+    : {
+        idPrefix: "extrude-second",
+        labelPrefix: "Second ",
+        condition: "secondEndCondition",
+        direction: "secondDirection",
+        depth: "secondDepth",
+        draftAngle: "secondDraftAngle",
+        target: "secondUpToTarget",
+        offsetDistance: "secondUpToOffsetDistance",
+        offsetDirection: "secondUpToOffsetDirection",
+      };
+}
+
+function patchEnd(
+  end: ExtrudeFeatureEndConditionDraft,
+  patch: Record<string, unknown>,
+  prefix: "first" | "second",
+) {
+  return patchExtrudeEndCondition(end, patch, extrudeEndKeys(prefix));
 }
 
 function endFields(
@@ -297,181 +151,12 @@ function endFields(
   end: ExtrudeFeatureEndConditionDraft,
   resultBodyType: FeatureResultBodyType,
 ): FeatureEditorFormField[] {
-  const idPrefix = prefix === "first" ? "extrude" : "extrude-second";
-  const labelPrefix = prefix === "first" ? "" : "Second ";
-  const conditionKey =
-    prefix === "first" ? "endCondition" : "secondEndCondition";
-  const directionKey = prefix === "first" ? "direction" : "secondDirection";
-  const depthKey = prefix === "first" ? "depth" : "secondDepth";
-  const draftKey = prefix === "first" ? "draftAngle" : "secondDraftAngle";
-  const targetKey = prefix === "first" ? "upToTarget" : "secondUpToTarget";
-  const offsetDistanceKey =
-    prefix === "first" ? "upToOffsetDistance" : "secondUpToOffsetDistance";
-  const offsetDirectionKey =
-    prefix === "first" ? "upToOffsetDirection" : "secondUpToOffsetDirection";
-  const fields: FeatureEditorFormField[] = [
-    {
-      kind: "enum",
-      id: `${idPrefix}-end-condition`,
-      label: `${labelPrefix}End condition`,
-      value: end.kind,
-      options: [
-        "blind",
-        "upToNext",
-        "upToFace",
-        "upToPart",
-        "upToVertex",
-        "throughAll",
-      ].map((value) => ({
-        value,
-        label: endConditionLabel(value as ExtrudeEndCondition["kind"]),
-      })),
-      patch: { patchKey: conditionKey },
-    },
-  ];
-
-  if (end.kind === "blind") {
-    fields.push({
-      kind: "numeric",
-      id: `${idPrefix}-depth`,
-      label: `${labelPrefix}Depth`,
-      value: shared.authoredNumberFormValue(end.distance),
-      input: "number",
-      step: 0.1,
-      directionToggle: {
-        patch: { patchKey: directionKey },
-        value: end.direction,
-        forwardValue: "positive",
-        reverseValue: "negative",
-        forwardLabel: "Positive normal",
-        reverseLabel: "Negative normal",
-      },
-      authoredValue: shared.expressionCapableAuthoredValue(end.distance, {
-        kind: "positiveNumber",
-      }),
-      error: shared.isPositiveAuthoredNumber(end.distance)
-        ? null
-        : { message: "Depth must be greater than zero." },
-      patch: { patchKey: depthKey },
-    });
-  } else {
-    fields.push({
-      kind: "enum",
-      id: `${idPrefix}-direction`,
-      label: `${labelPrefix}Direction`,
-      value: end.direction,
-      options: [
-        { value: "positive", label: "Positive normal" },
-        { value: "negative", label: "Negative normal" },
-      ],
-      patch: { patchKey: directionKey },
-    });
-  }
-
-  if (
-    end.kind === "upToFace" ||
-    end.kind === "upToPart" ||
-    end.kind === "upToVertex"
-  ) {
-    const targetKind =
-      end.kind === "upToFace"
-        ? "face"
-        : end.kind === "upToPart"
-          ? "body"
-          : "vertex";
-    fields.push({
-      kind: "referencePicker",
-      id: `${idPrefix}-up-to-target`,
-      label: `${labelPrefix}${endConditionLabel(end.kind)} target`,
-      value: endHasRequiredTarget(end) ? end.target : null,
-      emptyLabel: "None selected",
-      helper: `Accepted target: one ${targetKind}.`,
-      error: endHasRequiredTarget(end)
-        ? null
-        : { message: `Select one ${targetKind} target.` },
-      picker: {
-        mode: "replace",
-        allowsMultiple: false,
-        selectionFilter: shared.createSingleTargetSelectionFilter(
-          extrudeSelectionFilter,
-          {
-            id: `${idPrefix}-up-to-target`,
-            label: `${labelPrefix}${endConditionLabel(end.kind)} target`,
-            targetKind,
-          },
-        ),
-      },
-      patch: { patchKey: targetKey },
-    });
-  }
-
-  if (
-    end.kind === "upToNext" ||
-    end.kind === "upToFace" ||
-    end.kind === "upToPart" ||
-    end.kind === "upToVertex"
-  ) {
-    fields.push(
-      {
-        kind: "numeric",
-        id: `${idPrefix}-up-to-offset`,
-        label: `${labelPrefix}Offset`,
-        value: shared.authoredNumberFormValue(end.offset?.distance ?? 0),
-        input: "number",
-        step: 0.1,
-        authoredValue: shared.expressionCapableAuthoredValue(
-          end.offset?.distance ?? 0,
-          {
-            kind: "finiteNumber",
-          },
-        ),
-        error:
-          end.offset?.distance === undefined ||
-          shared.isFiniteAuthoredNumber(end.offset.distance)
-            ? null
-            : { message: "Offset must be finite." },
-        patch: { patchKey: offsetDistanceKey },
-      },
-      {
-        kind: "enum",
-        id: `${idPrefix}-up-to-offset-direction`,
-        label: `${labelPrefix}Offset direction`,
-        value: end.offset?.direction ?? "shorten",
-        options: [
-          { value: "shorten", label: "Shorten" },
-          { value: "extend", label: "Extend" },
-        ],
-        patch: { patchKey: offsetDirectionKey },
-      },
-    );
-  }
-
-  if (resultBodyType === "surface") {
-    return fields;
-  }
-
-  fields.push({
-    kind: "numeric",
-    id: `${idPrefix}-draft-angle`,
-    label: `${labelPrefix}Draft angle (degrees)`,
-    value: shared.authoredNumberFormValue(
-      end.draftAngle ?? 0,
-      (value) => value * (180 / Math.PI),
-    ),
-    input: "angleDegrees",
-    step: 1,
-    authoredValue: shared.expressionCapableAuthoredValue(end.draftAngle ?? 0, {
-      kind: "angle",
-    }),
-    error:
-      end.draftAngle === undefined ||
-      shared.isFiniteAuthoredNumber(end.draftAngle)
-        ? null
-        : { message: "Draft angle must be finite." },
-    patch: { patchKey: draftKey },
+  return extrudeEndConditionFields({
+    end,
+    keys: extrudeEndKeys(prefix),
+    includeDraftAngle: resultBodyType !== "surface",
+    selectionFilter: extrudeSelectionFilter,
   });
-
-  return fields;
 }
 
 export const extrudeAuthoringDefinition = {
@@ -628,8 +313,8 @@ export const extrudeAuthoringDefinition = {
     }
 
     if (
-      !endHasValidScalars(input.draft.firstEnd) ||
-      !endHasRequiredTarget(input.draft.firstEnd)
+      !extrudeEndHasValidScalars(input.draft.firstEnd) ||
+      !extrudeEndHasRequiredTarget(input.draft.firstEnd)
     ) {
       diagnostics.push(
         shared.createMissingInputDiagnostic({
@@ -644,8 +329,8 @@ export const extrudeAuthoringDefinition = {
 
     if (
       input.draft.extentMode === "twoSide" &&
-      (!endHasValidScalars(input.draft.secondEnd) ||
-        !endHasRequiredTarget(input.draft.secondEnd))
+      (!extrudeEndHasValidScalars(input.draft.secondEnd) ||
+        !extrudeEndHasRequiredTarget(input.draft.secondEnd))
     ) {
       diagnostics.push(
         shared.createMissingInputDiagnostic({
@@ -703,11 +388,11 @@ export const extrudeAuthoringDefinition = {
 
     if (
       draft.profileTargets.length === 0 ||
-      !endHasValidScalars(firstEnd) ||
-      !endHasRequiredTarget(firstEnd) ||
+      !extrudeEndHasValidScalars(firstEnd) ||
+      !extrudeEndHasRequiredTarget(firstEnd) ||
       (draft.extentMode === "twoSide" &&
-        (!endHasValidScalars(draft.secondEnd) ||
-          !endHasRequiredTarget(draft.secondEnd)))
+        (!extrudeEndHasValidScalars(draft.secondEnd) ||
+          !extrudeEndHasRequiredTarget(draft.secondEnd)))
     ) {
       return null;
     }

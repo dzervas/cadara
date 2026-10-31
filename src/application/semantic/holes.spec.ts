@@ -219,6 +219,42 @@ test("shared hole preparation preserves style/termination values and refuses los
   ).toBeNull();
 });
 
+test("shared hole preparation keeps Extrude up-to terminations and refuses inactive end fields", () => {
+  const participants = [
+    {
+      role: "location",
+      targets: [{ kind: "sketchPoint", sketchId: "sketch_locations", pointId: "sketch_point_center" }],
+    },
+    { role: "body", targets: [{ kind: "body", bodyId: "body_part" }] },
+  ] as const;
+  const face = { kind: "face", bodyId: "body_stop", faceId: "face_top" } as const;
+  const upToOffset = { distance: { source: "literal", value: 1 }, direction: "shorten" } as const;
+  const definition = prepareHoleFeatureDefinition({
+    participants,
+    options: { mainDiameter: 2, termination: "upToFace", upToTarget: face, upToOffset },
+  })!;
+  expect(definition.parameters.options).toMatchObject({
+    termination: { source: "literal", value: "upToFace" },
+    upToTarget: face,
+    upToOffset,
+  });
+  expect(
+    prepareHoleFeatureDefinition({ participants, options: { mainDiameter: 2, termination: "upToNext" } })!
+      .parameters.options,
+    "An up-to-next hole without an offset must not gain one.",
+  ).not.toHaveProperty("upToOffset");
+  for (const options of [
+    { mainDiameter: 2, termination: "upToNext", upToTarget: face },
+    { mainDiameter: 2, termination: "upToFace", upToTarget: face, depth: 3 },
+    { mainDiameter: 2, termination: "throughAll", upToOffset },
+    { mainDiameter: 2, termination: "upToPart", upToTarget: face },
+  ])
+    expect(
+      prepareHoleFeatureDefinition({ participants, options } as never),
+      `Hole options ${JSON.stringify(options)} must be refused.`,
+    ).toBeNull();
+});
+
 test("production holes preserve exact cylindrical/conical geometry through style, direction and termination updates", async () => {
   for (const reverse of [false, true]) {
     const w = await holeWorkflow(reverse);

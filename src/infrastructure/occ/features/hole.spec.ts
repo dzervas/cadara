@@ -495,3 +495,192 @@ test("OCC hole rejects unresolved and excessive inputs with structured failures"
     }),
   ).toThrow(/advanced-feature-unsupported-kernel-case/);
 });
+
+function makeBoxShape(
+  origin: readonly [number, number, number],
+  size: readonly [number, number, number],
+) {
+  const box = new oc.BRepPrimAPI_MakeBox_3(toGpPnt(oc, origin), size[0], size[1], size[2]);
+  box.Build(new oc.Message_ProgressRange_1());
+  expect(box.IsDone(), "Expected fixture box to build.").toBeTruthy();
+  return box.Shape();
+}
+
+function trackBody(
+  bodyId: string,
+  shape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
+) {
+  return trackNewSolidBody(oc, {
+    bodyId: bodyId as BodyId,
+    label: bodyId,
+    ownerFeatureId: `feature_${bodyId}_seed` as FeatureId,
+    shape,
+  });
+}
+
+/** A 4x4x4 block, z 0..4, with a closed internal cavity spanning z 2..3 around the hole axis. */
+function makeCavityBody(bodyId: string) {
+  const progress = new oc.Message_ProgressRange_1();
+  const cut = new oc.BRepAlgoAPI_Cut_3(
+    makeBoxShape([0, 0, 0], [4, 4, 4]),
+    makeBoxShape([1, 1, 2], [2, 2, 1]),
+    progress,
+  );
+  cut.Build(progress);
+  expect(cut.IsDone(), "Expected cavity fixture to build.").toBeTruthy();
+  return trackBody(bodyId, cut.Shape());
+}
+
+/** A side block beside the 4x4x4 target whose top face sits at z = 2.5. */
+function makeStopBody(bodyId: string) {
+  return trackBody(bodyId, makeBoxShape([6, 0, -1.5], [2, 2, 4]));
+}
+
+function topFaceId(body: OccTrackedBody, z: number) {
+  const entry = [...body.facesById].find(([, face]) => {
+    const props = new oc.GProp_GProps_1();
+    oc.BRepGProp.SurfaceProperties_1(face, props, false, false);
+    const centre = props.CentreOfMass();
+    const onLevel = Math.abs(centre.Z() - z) < 1e-6;
+    props.delete();
+    return onLevel;
+  });
+  expect(entry, `Expected a face of ${body.bodyId} at z = ${z}.`).toBeTruthy();
+  return entry![0];
+}
+
+function topVertexId(body: OccTrackedBody, z: number) {
+  const entry = [...body.verticesById].find(
+    ([, vertex]) => Math.abs(oc.BRep_Tool.Pnt(vertex).Z() - z) < 1e-6,
+  );
+  expect(entry, `Expected a vertex of ${body.bodyId} at z = ${z}.`).toBeTruthy();
+  return entry![0];
+}
+
+function executeUpToHole(input: {
+  name: string;
+  bodies: readonly OccTrackedBody[];
+  target: OccTrackedBody;
+  options: NonNullable<AdvancedSolidFeatureDefinition["parameters"]["options"]>;
+}) {
+  const center = pointId(`${input.name}_center`);
+  const sketch = makeSketch(`sketch_${input.name}` as SketchId, [
+    { pointId: center, position: [2, 2] },
+  ]);
+  const result = executeHole({
+    featureId: `feature_${input.name}` as FeatureId,
+    bodies: input.bodies,
+    sketch,
+    definition: holeDefinition({
+      sketchId: sketch.sketchId,
+      pointIds: [center],
+      bodyIds: [input.target.bodyId],
+      options: { style: "simple", mainDiameter: 1, ...input.options },
+    }),
+  });
+  return requireBody(result, input.target.bodyId);
+}
+
+test("OCC up-to-next hole stops at the first face the bore breaks through, unlike through-all", () => {
+  const body = makeCavityBody("body_hole_up_to_next");
+  const upToNext = executeUpToHole({
+    name: "hole_up_to_next",
+    bodies: [body],
+    target: body,
+    options: { termination: "upToNext" },
+  });
+  expectProbeEmpty(upToNext, [2, 2, 1], "Up-to-next bore should remove material below the cavity.");
+  expectProbeSolid(upToNext, [2, 2, 3.5], "Up-to-next bore should stop at the cavity and keep the roof.");
+
+  const throughAll = executeUpToHole({
+    name: "hole_up_to_next_control",
+    bodies: [body],
+    target: body,
+    options: { termination: "throughAll" },
+  });
+  expectProbeEmpty(throughAll, [2, 2, 3.5], "Through-all control should cut the cavity roof.");
+});
+
+test("OCC up-to-face, up-to-part and up-to-vertex holes end at the terminator's level", () => {
+  const stop = makeStopBody("body_hole_stop");
+  const stopFace = { kind: "face" as const, bodyId: stop.bodyId, faceId: topFaceId(stop, 2.5) };
+  const stopVertex = { kind: "vertex" as const, bodyId: stop.bodyId, vertexId: topVertexId(stop, 2.5) };
+  for (const [termination, upToTarget] of [
+    ["upToFace", stopFace],
+    ["upToPart", { kind: "body", bodyId: stop.bodyId }],
+    ["upToVertex", stopVertex],
+  ] as const) {
+    const body = makeBoxBody(`body_hole_${termination}` as BodyId, `feature_hole_${termination}_seed` as FeatureId);
+    const cut = executeUpToHole({
+      name: `hole_${termination}`,
+      bodies: [body, stop],
+      target: body,
+      options: { termination, upToTarget },
+    });
+    expectProbeEmpty(cut, [2, 2, 2.2], `${termination} hole should cut up to z = 2.5.`);
+    expectProbeSolid(cut, [2, 2, 2.7], `${termination} hole should leave material above z = 2.5.`);
+  }
+});
+
+test("OCC up-to hole applies Extrude's shorten and extend offsets", () => {
+  const stop = makeStopBody("body_hole_offset_stop");
+  const upToTarget = { kind: "face" as const, bodyId: stop.bodyId, faceId: topFaceId(stop, 2.5) };
+  const body = makeBoxBody("body_hole_offset" as BodyId, "feature_hole_offset_seed" as FeatureId);
+  const shortened = executeUpToHole({
+    name: "hole_offset_shorten",
+    bodies: [body, stop],
+    target: body,
+    options: { termination: "upToFace", upToTarget, upToOffset: { distance: { source: "literal", value: 1 }, direction: "shorten" } },
+  });
+  expectProbeEmpty(shortened, [2, 2, 1.2], "Shortened bore should reach z = 1.5.");
+  expectProbeSolid(shortened, [2, 2, 1.7], "Shortened bore should stop 1 below the face.");
+  const extended = executeUpToHole({
+    name: "hole_offset_extend",
+    bodies: [body, stop],
+    target: body,
+    options: { termination: "upToFace", upToTarget, upToOffset: { distance: 1, direction: "extend" } },
+  });
+  expectProbeEmpty(extended, [2, 2, 3.2], "Extended bore should reach z = 3.5.");
+  expectProbeSolid(extended, [2, 2, 3.7], "Extended bore should stop 1 beyond the face.");
+});
+
+test("OCC up-to hole refuses a too-deep counterbore, a missing terminator and a passed terminator, naming the hole", () => {
+  const stop = makeStopBody("body_hole_refuse_stop");
+  const body = makeBoxBody("body_hole_refuse" as BodyId, "feature_hole_refuse_seed" as FeatureId);
+  expect(() =>
+    executeUpToHole({
+      name: "hole_refuse_counterbore",
+      bodies: [body, stop],
+      target: body,
+      options: {
+        style: "counterbore",
+        counterboreDiameter: 2,
+        counterboreDepth: 3,
+        termination: "upToPart",
+        upToTarget: { kind: "body", bodyId: stop.bodyId },
+      },
+    }),
+  ).toThrow(/advanced-feature-unsupported-kernel-case: OCC hole counterboreDepth must be less than the up-to depth/);
+  expect(() =>
+    executeUpToHole({
+      name: "hole_refuse_target",
+      bodies: [body, stop],
+      target: body,
+      options: { termination: "upToFace" },
+    }),
+  ).toThrow(/advanced-feature-unsupported-kernel-case: .*require one face target/);
+  expect(
+    () =>
+      executeUpToHole({
+        name: "hole_refuse_behind",
+        bodies: [body, stop],
+        target: body,
+        options: {
+          termination: "upToFace",
+          upToTarget: { kind: "face", bodyId: stop.bodyId, faceId: topFaceId(stop, 2.5) },
+          upToOffset: { distance: 3, direction: "shorten" },
+        },
+      }),
+    "Refusals from Extrude's shared resolver should name the hole.",
+  ).toThrow(/advanced-feature-unsupported-kernel-case: OCC hole termination is behind/);
+});

@@ -938,6 +938,21 @@ for (const operation of ["extrude.create", "revolve.create"] as const) {
     }
   }
 }
+for (const [termination, target] of [["upToFace", face], ["upToPart", body], ["upToVertex", vertex], ["upToVertex", point]] as const) {
+  cases.push({
+    name: `hole ${termination} ${target.kind}`,
+    command: {
+      ...common,
+      operation: "hole.create",
+      parameters: {
+        participants: [{ role: "location", targets: [point] }, { role: "body", targets: [body] }],
+        options: { mainDiameter: 2, termination, upToTarget: target },
+      },
+    } as SemanticCommand,
+    path: "parameters.options.upToTarget",
+    target,
+  });
+}
 for (const [kind, target] of [["sketchPointOffset", point], ["entityOffset", edge], ["entityOffset", face]] as const) {
   cases.push({ name: `extrude start ${kind} ${target.kind}`, command: { ...common, operation: "extrude.create", parameters: { ...extrude, startExtent: { kind, target } } } as SemanticCommand, path: "parameters.startExtent.target", target });
 }

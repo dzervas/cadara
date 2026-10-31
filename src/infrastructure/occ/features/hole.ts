@@ -4,6 +4,7 @@ import type {
   HoleDirection,
   HoleStyle,
   HoleTermination,
+  HoleUpToTarget,
 } from "@/contracts/modeling/advanced-solid";
 import {
   getAdvancedParticipant,
@@ -15,7 +16,11 @@ import {
   isExpressionAuthoredValue,
   type MaybeAuthoredValue,
 } from "@/contracts/modeling/authored-values";
-import type { FeatureBooleanScope } from "@/contracts/modeling/schema";
+import type {
+  ExtrudeEndCondition,
+  FeatureBooleanScope,
+  LinearUpToOffset,
+} from "@/contracts/modeling/schema";
 import type { BodyId, FeatureId } from "@/contracts/shared/ids";
 import type { DurableRef } from "@/contracts/shared/references";
 import {
@@ -38,7 +43,10 @@ import {
   type OccFeatureExecutionContext,
   type OccFeatureExecutionResult,
 } from "@/infrastructure/occ/features/shared";
-import { getShapeVertexPoints } from "@/infrastructure/occ/features/extrude";
+import {
+  getShapeVertexPoints,
+  resolveExtrudeDistance,
+} from "@/infrastructure/occ/features/extrude";
 import {
   applyBooleanPolicy,
   runBoolean,
@@ -72,6 +80,8 @@ interface ResolvedHoleOptions {
   mainDiameter: number;
   termination: HoleTermination;
   depth: number | null;
+  /** Extrude end condition for the up-to terminations; null for blind and throughAll. */
+  upToEnd: ExtrudeEndCondition | null;
   counterboreDiameter: number | null;
   counterboreDepth: number | null;
   countersinkDiameter: number | null;
@@ -145,9 +155,7 @@ function resolveHoleOptions(
     options.termination as MaybeAuthoredValue<HoleTermination> | undefined,
     "termination",
   );
-  if (termination !== "blind" && termination !== "throughAll") {
-    unsupported("OCC hole termination must be blind or throughAll.");
-  }
+  const upToEnd = resolveHoleUpToEnd(termination, options);
 
   const mainDiameter = requirePositiveNumber(
     requireLiteralOption(
@@ -240,11 +248,63 @@ function resolveHoleOptions(
     mainDiameter,
     termination,
     depth,
+    upToEnd,
     counterboreDiameter,
     counterboreDepth,
     countersinkDiameter,
     countersinkAngleDegrees,
   };
+}
+
+/**
+ * The Extrude end condition an up-to hole ends at. Its direction is a
+ * placeholder: the hole axis is passed to the shared distance resolver directly.
+ */
+function resolveHoleUpToEnd(
+  termination: HoleTermination,
+  options: Record<string, unknown>,
+): ExtrudeEndCondition | null {
+  if (termination === "blind" || termination === "throughAll") {
+    return null;
+  }
+  if (
+    termination !== "upToNext" &&
+    termination !== "upToFace" &&
+    termination !== "upToPart" &&
+    termination !== "upToVertex"
+  ) {
+    unsupported("OCC hole termination must be one of the extrude end conditions.");
+  }
+
+  const authoredOffset = options.upToOffset as LinearUpToOffset | undefined;
+  const offset = authoredOffset
+    ? {
+        direction: authoredOffset.direction,
+        distance: {
+          source: "literal" as const,
+          value: requireLiteralOption(authoredOffset.distance, "upToOffset distance"),
+        },
+      }
+    : undefined;
+  if (termination === "upToNext") {
+    return { kind: "upToNext", direction: "positive", ...(offset ? { offset } : {}) };
+  }
+
+  const target = options.upToTarget as HoleUpToTarget | undefined;
+  const end = { direction: "positive" as const, ...(offset ? { offset } : {}) };
+  if (termination === "upToFace" && target?.kind === "face") {
+    return { ...end, kind: termination, target };
+  }
+  if (termination === "upToPart" && target?.kind === "body") {
+    return { ...end, kind: termination, target };
+  }
+  if (
+    termination === "upToVertex" &&
+    (target?.kind === "vertex" || target?.kind === "sketchPoint")
+  ) {
+    return { ...end, kind: termination, target };
+  }
+  unsupported(`OCC hole ${termination} termination requires a matching upToTarget.`);
 }
 
 function requireParticipants(
@@ -506,6 +566,9 @@ function buildHoleTool(
   const tools: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [];
 
   for (const location of locations) {
+    const depth = options.upToEnd
+      ? resolveHoleUpToDepth(context, options, location)
+      : options.depth;
     const mainStart =
       options.termination === "throughAll"
         ? add(
@@ -524,7 +587,7 @@ function buildHoleTool(
             const range = getProjectionRange(context, bodyIds, location.axisDirection);
             return range.max - range.min + margin * 2;
           })()
-        : options.depth! + margin;
+        : depth! + margin;
 
     const locationTools: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>[] = [
       makeCylinder(
@@ -569,6 +632,88 @@ function buildHoleTool(
   }
 
   return makeCompound(context.oc, tools);
+}
+
+function makeDiskFace(
+  oc: OpenCascadeInstance,
+  location: HoleLocation,
+  radius: number,
+) {
+  const axisParts = makeAxis(
+    oc,
+    location.origin,
+    location.axisDirection,
+    location.radialDirection,
+  );
+  const circle = new oc.gp_Circ_2(axisParts.axis, radius);
+  const edgeBuilder = new oc.BRepBuilderAPI_MakeEdge_8(circle);
+  const wireBuilder = new oc.BRepBuilderAPI_MakeWire_1();
+  let faceBuilder: InstanceType<OpenCascadeInstance["BRepBuilderAPI_MakeFace"]> | null =
+    null;
+  try {
+    wireBuilder.Add_1(edgeBuilder.Edge());
+    faceBuilder = new oc.BRepBuilderAPI_MakeFace_15(wireBuilder.Wire(), true);
+    if (!faceBuilder.IsDone()) {
+      unsupported("OCC hole up-to profile face build failed.");
+    }
+    return faceBuilder.Face();
+  } finally {
+    deleteOccObject(faceBuilder);
+    deleteOccObject(wireBuilder);
+    deleteOccObject(edgeBuilder);
+    deleteOccObject(circle);
+    deleteOccObject(axisParts.axis);
+    deleteOccObject(axisParts.radial);
+    deleteOccObject(axisParts.normal);
+    deleteOccObject(axisParts.point);
+  }
+}
+
+/**
+ * Depth of an up-to hole at one location, resolved exactly as Extrude resolves
+ * the same end condition for a main-diameter disk profile on the sketch plane.
+ */
+function resolveHoleUpToDepth(
+  context: OccFeatureExecutionContext,
+  options: ResolvedHoleOptions,
+  location: HoleLocation,
+) {
+  const profile = makeDiskFace(context.oc, location, options.mainDiameter / 2);
+  let depth: number;
+  try {
+    depth = resolveExtrudeDistance(
+      context,
+      profile,
+      location.axisDirection,
+      options.upToEnd!,
+    ).distance;
+  } catch (error) {
+    // The shared resolver names Extrude in its refusals; a hole user is told
+    // about the hole instead, with the original kept as the cause.
+    if (error instanceof Error && error.message.includes(": OCC extrude ")) {
+      throw new Error(error.message.replace(": OCC extrude ", ": OCC hole "), {
+        cause: error,
+      });
+    }
+    throw error;
+  } finally {
+    deleteOccObject(profile);
+  }
+
+  if (options.counterboreDepth !== null && options.counterboreDepth >= depth) {
+    unsupported("OCC hole counterboreDepth must be less than the up-to depth.");
+  }
+  if (options.countersinkDiameter !== null && options.countersinkAngleDegrees !== null) {
+    const sinkDepth = computeCountersinkDepth(
+      options.mainDiameter / 2,
+      options.countersinkDiameter / 2,
+      options.countersinkAngleDegrees,
+    );
+    if (sinkDepth >= depth) {
+      unsupported("OCC hole countersink entry depth must be less than the up-to depth.");
+    }
+  }
+  return depth;
 }
 
 function booleanScopeForBodies(bodyIds: readonly BodyId[]): FeatureBooleanScope {

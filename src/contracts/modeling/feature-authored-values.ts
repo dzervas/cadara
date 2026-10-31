@@ -240,6 +240,11 @@ export function getFeatureValueExpressionFields(
           valueKind: { kind: "positiveNumber" },
         },
         {
+          path: ["parameters", "options", "upToOffset", "distance"],
+          label: "Hole up-to offset",
+          valueKind: { kind: "finiteNumber" },
+        },
+        {
           path: ["parameters", "options", "counterboreDiameter"],
           label: "Hole counterbore diameter",
           valueKind: { kind: "positiveNumber" },

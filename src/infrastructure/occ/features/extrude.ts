@@ -754,7 +754,8 @@ function getThroughAllDistance(
   return Math.max(targetMax - profileRange.min + 10, 100);
 }
 
-function resolveExtrudeDistance(
+/** Distance from the profile to an end condition; Hole reuses it for its up-to ends. */
+export function resolveExtrudeDistance(
   context: OccFeatureExecutionContext,
   profileShape: InstanceType<OpenCascadeInstance["TopoDS_Shape"]>,
   direction: Vec3,
@@ -813,7 +814,12 @@ function resolveExtrudeDistance(
     );
   }
 
-  const offset = (end.offset?.distance ?? 0) as number;
+  const offset = end.offset ? getAuthoredLiteralValue(end.offset.distance) : 0;
+  if (offset === null) {
+    throw new Error(
+      "advanced-feature-unsupported-kernel-case: OCC extrude up-to offset must be a resolved literal.",
+    );
+  }
   const signedOffset = end.offset?.direction === "extend" ? offset : -offset;
   const distance = targetProjection - profileRange.max + signedOffset;
 

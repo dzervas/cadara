@@ -84,6 +84,35 @@ test("hole create/update use exact canonical style and termination options witho
           parameters: { participants, options },
         }).success,
       ).toBe(false);
+    const face = { kind: "face", bodyId: "body_stop", faceId: "face_top" };
+    const vertex = { kind: "vertex", bodyId: "body_stop", vertexId: "vertex_top" };
+    const offset = { distance: { source: "literal", value: 1 }, direction: "extend" };
+    for (const options of [
+      { mainDiameter: 2, termination: "upToNext" },
+      { mainDiameter: 2, termination: "upToNext", upToOffset: offset },
+      { mainDiameter: 2, termination: "upToFace", upToTarget: face, upToOffset: offset },
+      { mainDiameter: 2, termination: "upToPart", upToTarget: { kind: "body", bodyId: "body_stop" } },
+      { mainDiameter: 2, termination: "upToVertex", upToTarget: vertex },
+      { mainDiameter: 2, termination: "upToVertex", upToTarget: location },
+      { style: "counterbore", mainDiameter: 2, counterboreDiameter: 4, counterboreDepth: 2, termination: "upToFace", upToTarget: face },
+    ])
+      expect(
+        validateSemanticCommand({ ...command, parameters: { participants, options } }).success,
+        `Extrude end condition ${options.termination} should be a valid hole termination.`,
+      ).toBe(true);
+    for (const options of [
+      { mainDiameter: 2, termination: "upToFace" },
+      { mainDiameter: 2, termination: "upToFace", upToTarget: vertex },
+      { mainDiameter: 2, termination: "upToPart", upToTarget: face },
+      { mainDiameter: 2, termination: "upToNext", upToTarget: face },
+      { mainDiameter: 2, termination: "upToNext", depth: 3 },
+      { mainDiameter: 2, termination: "blind", depth: 3, upToOffset: offset },
+      { mainDiameter: 2, termination: "throughAll", upToTarget: face },
+    ])
+      expect(
+        validateSemanticCommand({ ...command, parameters: { participants, options } }).success,
+        `Hole options ${JSON.stringify(options)} must be refused.`,
+      ).toBe(false);
     for (const bad of [
       [{ role: "location", targets: [body] }, participants[1]],
       [participants[0], { role: "targetBody", targets: [body] }],

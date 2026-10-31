@@ -308,6 +308,17 @@ Options reuse the browser's canonical hole styles and authored scalar values:
   default).
 - `termination: "throughAll"` omits `depth`; inactive depth input is refused,
   not silently discarded. The existing native owner spans the selected bodies.
+- `termination` also takes Extrude's up-to end conditions: `"upToNext"`,
+  `"upToFace"`, `"upToPart"` and `"upToVertex"`. The last three need
+  `upToTarget` (a face, a body, or a body vertex/sketch point, exactly as the
+  matching Extrude end `target`, and accepting the same `{ alias, label }`
+  selectors). All four accept an optional Extrude `upToOffset`
+  (`{ distance, direction: "shorten" | "extend" }`). The depth is resolved the
+  way Extrude resolves that end for a main-diameter disk on the sketch plane,
+  per location, along the hole direction. `depth`, `upToTarget` and
+  `upToOffset` are refused when the termination does not use them.
+  Counterbore and countersink entries must stay shallower than the resolved
+  depth.
 - `style: "counterbore"` adds `counterboreDiameter` and `counterboreDepth`.
   The entry diameter must exceed `mainDiameter`; recess depth must be positive
   and smaller than a blind bore's depth.

@@ -9,6 +9,7 @@ import {
   type TargetSelector,
 } from "./target-inputs";
 import { selectionError } from "./selection-error";
+import { getAuthoredLiteralValue } from "@/contracts/modeling/authored-values";
 import type { RecipeCommand } from "@/contracts/semantic/recipe";
 import { mapCreationReferences, type CreationBindings } from "./target-creation-references";
 
@@ -62,6 +63,15 @@ function copyInput<T>(value: T): T {
 
 type ExtentTargetKind = "sketchPoint" | "edge" | "face" | "body" | "vertex";
 
+/** Target kinds an extent bound of `kind` accepts; Hole up-to terminators share Extrude's. */
+export function extentTargetKinds(kind: unknown, revolve: boolean): readonly ExtentTargetKind[] {
+  return kind === "sketchPointOffset" ? ["sketchPoint"]
+    : kind === "entityOffset" ? ["edge", "face"]
+    : kind === "upToFace" ? ["face"]
+    : kind === "upToPart" ? ["body"]
+    : kind === "upToVertex" ? revolve ? ["vertex"] : ["vertex", "sketchPoint"] : [];
+}
+
 /** Shared traversal for raw recipe preflight and canonical extent target resolution. */
 export function mapProfileExtentTargets<T extends { startExtent?: unknown; extent?: unknown }>(
   parameters: T,
@@ -71,12 +81,7 @@ export function mapProfileExtentTargets<T extends { startExtent?: unknown; exten
   const mapBound = (bound: unknown) => {
     if (!bound || typeof bound !== "object" || !("target" in bound)) return bound;
     const kind = "kind" in bound ? bound.kind : undefined;
-    const kinds: readonly ExtentTargetKind[] = kind === "sketchPointOffset" ? ["sketchPoint"]
-      : kind === "entityOffset" ? ["edge", "face"]
-      : kind === "upToFace" ? ["face"]
-      : kind === "upToPart" ? ["body"]
-      : kind === "upToVertex" ? revolve ? ["vertex"] : ["vertex", "sketchPoint"] : [];
-    return { ...bound, target: mapTarget(bound.target, kinds) };
+    return { ...bound, target: mapTarget(bound.target, extentTargetKinds(kind, revolve)) };
   };
   const extent = parameters.extent;
   return {
@@ -1013,12 +1018,23 @@ export function resolveSemanticCommand(
       if (target.kind !== "body") throw new Error("Invalid hole body.");
       return target;
     });
+    const options = command.parameters.options;
+    const upToTarget =
+      options.upToTarget && isTargetSelector(options.upToTarget)
+        ? resolveSketchTarget(
+            options.upToTarget,
+            extentTargetKinds(getAuthoredLiteralValue(options.termination), false),
+          )
+        : options.upToTarget;
     command.parameters = {
       ...command.parameters,
       participants: [
         { role: "location", targets: locations },
         { role: "body", targets: bodies },
       ],
+      options: (upToTarget
+        ? { ...options, upToTarget }
+        : options) as typeof options,
     };
   }
   if (

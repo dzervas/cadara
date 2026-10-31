@@ -150,6 +150,27 @@ test("real production Bun holes use discovered location/body aliases and preserv
           },
         },
         intent: "fulfill",
+        as: "sunk",
+      },
+      {
+        // An Extrude up-to end condition whose terminator is an aliased
+        // selector, resolved like an Extrude end target.
+        operation: "hole.update",
+        basis: a("sunk"),
+        featureId: { alias: "sunk", label: "Hole 1" },
+        parameters: {
+          participants,
+          options: {
+            mainDiameter: 2,
+            termination: "upToPart",
+            upToTarget: body,
+            upToOffset: {
+              distance: { source: "literal", value: 4 },
+              direction: "shorten",
+            },
+          },
+        },
+        intent: "fulfill",
       },
     ];
     const success = await invoke(commands);
@@ -191,6 +212,13 @@ test("real production Bun holes use discovered location/body aliases and preserv
       6,
       3,
     );
+    const upToPart = faces(9).find((t) => t.geometryType === "cylinder")!;
+    expect(upToPart.definingData!.radius).toBeCloseTo(1, 5);
+    expect(upToPart.boundingBox!.low[2]).toBeCloseTo(0, 5);
+    expect(
+      upToPart.boundingBox!.high[2],
+      "Up to the part's far face (z = 10), shortened by 4.",
+    ).toBeCloseTo(6, 5);
     const missing = await invoke([
       ...prefix,
       {

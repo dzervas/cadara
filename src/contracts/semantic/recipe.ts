@@ -30,6 +30,10 @@ type SelectableBound<T> = T extends { target: infer R } ? Omit<T, "target"> & { 
 type SelectableExtent<T> = T extends { firstEnd: infer A; secondEnd: infer B }
   ? Omit<T, "firstEnd" | "secondEnd"> & { firstEnd: SelectableBound<A>; secondEnd: SelectableBound<B> }
   : T extends { end: infer E } ? Omit<T, "end"> & { end: SelectableBound<E> } : T;
+/** Hole options select their up-to terminator like an Extrude end target. */
+type SelectableUpToOptions<O> = O extends { upToTarget: infer R }
+  ? Omit<O, "upToTarget"> & { upToTarget: R | TargetSelector }
+  : O;
 type SelectableReplayTransform<T> = T extends { direction: infer R }
   ? Omit<T, "direction"> & { direction: R | TargetSelector }
   : T extends { plane: infer R }
@@ -66,7 +70,11 @@ type SelectableFeatureParameters<T> = T extends {
               targets: readonly unknown[];
             }[];
           }
-        ? Omit<T, "participants"> & {
+        ? (T extends { options: infer O }
+            ? Omit<T, "participants" | "options"> & {
+                options: SelectableUpToOptions<O>;
+              }
+            : Omit<T, "participants">) & {
             participants: {
               [K in keyof P]: Omit<P[K], "targets"> & {
                 targets: readonly (P[K]["targets"][number] | TargetSelector)[];

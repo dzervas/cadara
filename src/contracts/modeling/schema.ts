@@ -103,6 +103,8 @@ export type {
   HoleAdvancedOptions,
   HoleStyle,
   HoleTermination,
+  HoleUpToTarget,
+  HoleUpToTermination,
   HoleDirection,
   SweepAdvancedOptions,
   LinearPatternAdvancedOptions,
