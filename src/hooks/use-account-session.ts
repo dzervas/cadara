@@ -31,7 +31,7 @@ export function useAccountSession(
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [passkeyRegistered, setPasskeyRegistered] = useState(false);
   const report = useCallback(
-    (error: unknown, visibility: "user" | "developer" = "user") => {
+    (error: unknown, visibility: "user" | "developer" | "silent" = "user") => {
       const appError = normalizeUnknownError(error, {
         code: "app/operation-failed",
         fallbackMessage: "Account request failed. Try again.",
@@ -62,7 +62,9 @@ export function useAccountSession(
       .catch((error: unknown) => {
         if (active && generation.current === requestGeneration) {
           setSession((current) => ({ ...current, offline: true }));
-          report(error, "developer");
+          // An unreachable account service is a normal local-only state, not an
+          // application error: the menu shows "offline" and retries on demand.
+          report(error, "silent");
         }
       });
     return () => {
