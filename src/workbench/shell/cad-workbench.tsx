@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
 import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
 import { appVersion, gitCommit } from "@/build-info";
+import {
+  PROJECT_READ_ONLY_MESSAGE,
+  type ProjectWriteGate,
+} from "@/application/project-sync/project-write-gate";
+import { toolAuthorsDocument } from "@/core/tools/activation-policy";
 
 import { ThreeCadViewport } from "@/components/cad/three-cad-viewport";
 import { useLatestCallbacks } from "@/hooks/use-latest-callbacks";
@@ -223,9 +228,12 @@ interface CadWorkbenchProps {
   projectLoading?: boolean;
   /** The synced project's role cannot edit: authoring tools are disabled. */
   readOnly?: boolean;
+  /** Refuses writes the project role does not allow; each refusal shows a notice. */
+  projectWriteGate?: ProjectWriteGate;
   onActivateDocumentTab: (documentId: DocumentId) => void;
   onCloseDocumentTab: (documentId: DocumentId) => void;
-  onCreateNewDocument: () => Promise<DocumentId>;
+  /** Null when the project refused the new part. */
+  onCreateNewDocument: () => Promise<DocumentId | null>;
   onOpenDocumentCopy: (file: File) => Promise<WorkbenchDocumentActionResult>;
   onOpenLinkedDocument: () => Promise<WorkbenchDocumentActionResult>;
   performanceTelemetry?: PerformanceTelemetry;
@@ -242,6 +250,7 @@ export function CadWorkbench({
   projectControls,
   projectLoading = false,
   readOnly = false,
+  projectWriteGate,
   onActivateDocumentTab,
   onCloseDocumentTab,
   onCreateNewDocument,
@@ -345,6 +354,17 @@ export function CadWorkbench({
     modelingService,
   });
   const draftRecoveryNotification = useWorkbenchSketchDraftRecovery(draftRecovery, reportDocumentFileActionFailure);
+  useEffect(
+    () =>
+      projectWriteGate?.subscribeToDenials(() =>
+        setWorkbenchStatusNotification({
+          type: "info",
+          title: "Read only",
+          message: PROJECT_READ_ONLY_MESSAGE,
+        }),
+      ),
+    [projectWriteGate, setWorkbenchStatusNotification],
+  );
 
   useEffect(() => {
     snapshotRef.current = snapshot;
@@ -413,6 +433,9 @@ export function CadWorkbench({
   }, [localFileBindingMetadata, onSyncActiveDocumentTab, snapshot]);
   const handleTabClose = useCallback(
     (documentId: DocumentId) => {
+      // Closing removes the part from the project: refuse it before asking
+      // whether to save a copy.
+      if (projectWriteGate?.authorize("manifest") === false) return;
       const browserOnlyTab = getBrowserOnlyTabCloseWarning(
         tabsState,
         documentId,
@@ -426,7 +449,7 @@ export function CadWorkbench({
 
       onCloseDocumentTab(documentId);
     },
-    [onCloseDocumentTab, tabsState],
+    [onCloseDocumentTab, projectWriteGate, tabsState],
   );
   const cancelBrowserTabCloseWarning = useCallback(() => {
     if (isBrowserTabCloseSavePending) {
@@ -720,13 +743,23 @@ export function CadWorkbench({
     sketchSession,
     snapshot,
   });
-  const { triggerTool } = useToolActions({
+  const { triggerTool: triggerAnyTool } = useToolActions({
     commandHandlers: {
       requestPartImport,
       requestRedo,
       requestUndo,
     },
   });
+  // Toolbar buttons and shortcuts both activate tools here: an authoring
+  // tool is refused while the project is read-only for this role.
+  const triggerTool: typeof triggerAnyTool = async (toolId) => {
+    if (
+      toolAuthorsDocument(toolId) &&
+      projectWriteGate?.authorize("part") === false
+    )
+      return;
+    await triggerAnyTool(toolId);
+  };
 
   const {
     handleNavigationReopen,
@@ -1418,8 +1451,8 @@ export function CadWorkbench({
   };
 
   const handleNewDocument = async () => {
-    await onCreateNewDocument();
-    showWorkbenchInfo("Created a new document.");
+    if (await onCreateNewDocument())
+      showWorkbenchInfo("Created a new document.");
   };
 
   const handleOpenDocument = () => {

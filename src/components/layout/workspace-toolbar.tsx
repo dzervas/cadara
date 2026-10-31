@@ -39,7 +39,10 @@ import {
 import { ToolbarToolIcon } from "@/components/layout/toolbar-tool-icon";
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
 import { getNextToolSearchHighlightIndex } from "@/components/layout/workspace-toolbar.a11y";
-import { toolLeavesSketch } from "@/core/tools/activation-policy";
+import {
+  toolAuthorsDocument,
+  toolLeavesSketch,
+} from "@/core/tools/activation-policy";
 import {
   getToolById,
   getToolbarSectionsForMode,
@@ -79,11 +82,6 @@ const TOOLBAR_PILL_GAP_PX = 2;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;
 // Leave 56px between the final tool pill and search, including the 8px grid gap.
 const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 48;
-/** Tools that only inspect the model stay usable in a read-only project. */
-const READ_ONLY_TOOL_IDS: ReadonlySet<string> = new Set([
-  "measure",
-  "sectionView",
-]);
 const PART_TOOL_DURING_SKETCH_REASON =
   "Part tools are unavailable while sketching. Finish Sketch first.";
 type VisibleToolbarSection = ReturnType<
@@ -182,7 +180,7 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
     hasActiveSketchSession || activeToolId === "sketch";
 
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
-    (readOnly && !READ_ONLY_TOOL_IDS.has(tool.id)) ||
+    (readOnly && toolAuthorsDocument(tool.id)) ||
     (tool.id === "undo" && !visibleHistory.canUndo) ||
     (tool.id === "redo" && !visibleHistory.canRedo) ||
     (tool.id === "import" &&

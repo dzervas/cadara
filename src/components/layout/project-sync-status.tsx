@@ -31,6 +31,19 @@ const CONNECTION_PRESENTATION: Record<
   },
 };
 
+const READ_ONLY_PRESENTATION: Partial<
+  Record<ProjectRole, { label: string; description: string }>
+> = {
+  viewer: {
+    label: "Read only · Viewer",
+    description: "You can view this project but not edit it.",
+  },
+  commenter: {
+    label: "Read only · Commenter",
+    description: "You can comment on this project but not edit its parts.",
+  },
+};
+
 export interface ProjectSyncIndicatorProps {
   connection: ProjectSyncConnection;
   /** The role the service grants; viewers and commenters cannot edit parts. */
@@ -49,6 +62,9 @@ export function ProjectSyncIndicator({
   failed = false,
 }: ProjectSyncIndicatorProps) {
   const presentation = CONNECTION_PRESENTATION[connection];
+  // Follows the role, not the connection: it stays while offline or
+  // reconnecting, since the role of the last sync token still applies.
+  const readOnly = role ? READ_ONLY_PRESENTATION[role] : undefined;
   return (
     <Group gap={4} wrap="nowrap">
       <Tooltip label={detail ?? presentation.description} multiline maw={260}>
@@ -63,18 +79,17 @@ export function ProjectSyncIndicator({
           {presentation.label}
         </Badge>
       </Tooltip>
-      {(role === "viewer" || role === "commenter") && (
-        <Tooltip
-          label={
-            role === "commenter"
-              ? "You can comment on this project but not edit its parts."
-              : "You can view this project but not edit it."
-          }
-          multiline
-          maw={260}
-        >
-          <Badge variant="outline" color="gray" size="sm">
-            Read only
+      {readOnly && (
+        <Tooltip label={readOnly.description} multiline maw={260}>
+          <Badge
+            variant="outline"
+            color="gray"
+            size="sm"
+            role="status"
+            aria-label={readOnly.label}
+            data-project-read-only-role={role}
+          >
+            {readOnly.label}
           </Badge>
         </Tooltip>
       )}

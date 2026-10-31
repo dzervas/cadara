@@ -1,4 +1,5 @@
 import type { LoadingStatusSource } from "@/contracts/modeling/loading-status";
+import type { ProjectWriteGate } from "@/application/project-sync/project-write-gate";
 import type { NeutralCurveQueryCapability } from "@/contracts/modeling/neutral-curve-query";
 import type {
   DocumentExportRequest,
@@ -190,6 +191,8 @@ export interface ModelingServiceOptions {
   documentRepository?: DocumentRepository | null;
   documentRepositoryPersistence?: "blocking" | "background";
   exportProviders?: ExportProviderRegistry;
+  /** A synced project's write permission: a refused change never reaches the kernel. */
+  projectWriteGate?: Pick<ProjectWriteGate, "authorize"> | null;
 }
 
 /**

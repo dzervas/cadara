@@ -1,4 +1,3 @@
-import type { ProjectRole } from "@/contracts/account/account";
 import type {
   ProjectManifest,
   ProjectServiceLink,
@@ -18,14 +17,6 @@ export interface ProjectServiceDependencies {
   service: ProjectServicePort;
   projects: SyncedProjectStore;
   transport: ProjectSyncTransport;
-}
-
-/**
- * Whether the user's role on a synced project lets them edit its parts;
- * the room rejects their part changes otherwise. Null: no role yet.
- */
-export function canEditProjectParts(role: ProjectRole | null) {
-  return role !== "viewer" && role !== "commenter";
 }
 
 /**

@@ -39,3 +39,14 @@ export function resolveToolActivationMode(
 export function toolLeavesSketch(toolId: ToolId) {
   return resolveToolActivationMode(toolId, "sketch") === "part";
 }
+
+/** Tools that only inspect the model stay usable in a read-only project. */
+const INSPECTION_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
+  "measure",
+  "sectionView",
+]);
+
+/** Whether a tool can change the document (and so needs write permission). */
+export function toolAuthorsDocument(toolId: ToolId) {
+  return !INSPECTION_TOOL_IDS.has(toolId);
+}

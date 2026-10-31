@@ -11,7 +11,6 @@ import type {
 } from "./project-service-port";
 import { ProjectSlugConflictError } from "./project-service-port";
 import {
-  canEditProjectParts,
   openServiceProject,
   presenceDisplayName,
   startProjectSync,
@@ -256,14 +255,6 @@ test("slugs follow the service rule", () => {
   expect(projectSlugFromName("  My Bracket v2!  ")).toBe("my-bracket-v2");
   expect(projectSlugFromName("Ωμέγα")).toBe("project");
   expect(projectSlugFromName("a".repeat(80))).toHaveLength(63);
-});
-
-test("viewers and commenters cannot edit parts; editors, admins and unsynced projects can", () => {
-  expect(canEditProjectParts("viewer")).toBe(false);
-  expect(canEditProjectParts("commenter")).toBe(false);
-  expect(canEditProjectParts("editor")).toBe(true);
-  expect(canEditProjectParts("admin")).toBe(true);
-  expect(canEditProjectParts(null)).toBe(true);
 });
 
 test("presence shows the account name, or initials, but never the email address", () => {

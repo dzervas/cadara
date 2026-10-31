@@ -3,6 +3,8 @@ import { createLoadingStatus } from "@/contracts/modeling/loading-status";
 import { requireMeasureTopologyResponse } from "@/contracts/modeling/topology-measure.runtime-schema";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
 import { appErrorFromModelingDiagnostic } from "@/contracts/errors/app-error";
+import { PROJECT_READ_ONLY_MESSAGE } from "@/application/project-sync/project-write-gate";
+import { PROJECT_READ_ONLY_REASON_CODE } from "@/application/project-sync/project-write-gated-document-repository";
 import type {
   AuthoredDocumentRestoreOptions,
   GeometryAssetResolver,
@@ -149,6 +151,14 @@ interface SaveFailureReason {
 const STORAGE_UNAVAILABLE: SaveFailureReason = {
   reasonCode: "document-storage-unavailable",
   message: "Document storage is unavailable.",
+};
+
+const PROJECT_READ_ONLY_DIAGNOSTIC: ModelingDiagnostic = {
+  code: PROJECT_READ_ONLY_REASON_CODE,
+  severity: "error",
+  message: PROJECT_READ_ONLY_MESSAGE,
+  target: null,
+  detail: null,
 };
 
 function isSameLocalSaveFailure(
@@ -551,6 +561,14 @@ export function createModelingService(
     replaceContext = false,
     countsAsSaving = true,
   ) {
+    // Every change that writes the document stops here while the project is
+    // read-only for this role, before the kernel applies anything.
+    if (countsAsSaving && options.projectWriteGate?.authorize("part") === false)
+      return Promise.reject(
+        appErrorFromModelingDiagnostic(PROJECT_READ_ONLY_DIAGNOSTIC, {
+          operation: "Edit document",
+        }),
+      );
     const changesBefore = repositoryChangePromise;
     const mutationsBefore = localMutations;
     const run = (async () => {

@@ -10,7 +10,11 @@ import {
 
 import { Alert, Group } from "@mantine/core";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
-import { canEditProjectParts } from "@/application/project-sync/project-service-use-cases";
+import {
+  canWriteProjectDocument,
+  ProjectWriteGate,
+} from "@/application/project-sync/project-write-gate";
+import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
 import { useWorkbenchProject } from "./use-workbench-project";
 import { useProjectSync, type ProjectSync } from "./use-project-sync";
 import { ProjectSyncControls } from "./project-sync-controls";
@@ -129,6 +133,13 @@ function ProjectWorkbenchApp({
   const errorReporter = useErrorReporter();
   const project = projects.project;
   const { saveParts, saveSession, registerPartReadiness } = projects;
+  // Every write to this project's documents asks this gate first; it
+  // follows the role of the latest sync token (see canWriteProjectDocument).
+  const [projectWriteGate] = useState(() => new ProjectWriteGate());
+  const projectRole = sync.status?.role ?? null;
+  useEffect(() => {
+    projectWriteGate.setRole(projectRole);
+  }, [projectRole, projectWriteGate]);
   const [projectApplied, setProjectApplied] = useState(
     project !== null || !projects.persistenceEnabled,
   );
@@ -147,19 +158,22 @@ function ProjectWorkbenchApp({
       return null;
     }
 
-    return createInstrumentedDocumentRepository(
-      createWorkerBackedDocumentRepository({
-        client: documentSyncWorkerClient,
-        urlStore: createLocalStorageDocumentRepositoryUrlStore(
-          window.localStorage,
-          createDocumentRepositoryUrlStorageKey(
-            getDocumentRepositoryStorageNamespace(window.location.search),
+    return createProjectWriteGatedDocumentRepository(
+      createInstrumentedDocumentRepository(
+        createWorkerBackedDocumentRepository({
+          client: documentSyncWorkerClient,
+          urlStore: createLocalStorageDocumentRepositoryUrlStore(
+            window.localStorage,
+            createDocumentRepositoryUrlStorageKey(
+              getDocumentRepositoryStorageNamespace(window.location.search),
+            ),
           ),
-        ),
-      }),
-      performanceTelemetry,
+        }),
+        performanceTelemetry,
+      ),
+      projectWriteGate,
     );
-  }, [documentSyncWorkerClient, performanceTelemetry]);
+  }, [documentSyncWorkerClient, performanceTelemetry, projectWriteGate]);
   const projectTabs = useCallback((): WorkbenchTabsState => {
     if (!project) return projects.initialTabs;
     const cached = tabsStorage?.load();
@@ -243,6 +257,7 @@ function ProjectWorkbenchApp({
                   ),
             documentRepositoryPersistence: "background",
             documentRepository,
+            projectWriteGate,
           }),
           performanceTelemetry,
         );
@@ -251,6 +266,7 @@ function ProjectWorkbenchApp({
       createKernelAdapter,
       documentRepository,
       performanceTelemetry,
+      projectWriteGate,
       runtimeExtensionRegistries.exportProviders,
       releaseDocumentResources,
     ],
@@ -332,13 +348,24 @@ function ProjectWorkbenchApp({
     if (!tabsStorage || !project || !projectApplied) return;
     tabsStorage.save(tabsState);
     saveSession(project.projectId, tabsState.activeDocumentId);
-    void saveParts(
-      project.projectId,
-      tabsState.tabs,
-      savedTabsRef.current ?? undefined,
-    );
+    // A read-only role keeps its tab order locally; parts are never added,
+    // closed or renamed for it (see the tab actions below).
+    if (projectWriteGate.allows("manifest"))
+      void saveParts(
+        project.projectId,
+        tabsState.tabs,
+        savedTabsRef.current ?? undefined,
+      );
     savedTabsRef.current = tabsState.tabs;
-  }, [tabsState, tabsStorage, project, projectApplied, saveParts, saveSession]);
+  }, [
+    tabsState,
+    tabsStorage,
+    project,
+    projectApplied,
+    projectWriteGate,
+    saveParts,
+    saveSession,
+  ]);
 
   useEffect(() => {
     if (!isLocalFileSyncDocumentRepository(documentRepository)) {
@@ -405,7 +432,9 @@ function ProjectWorkbenchApp({
     setActiveDocument(tabsState.activeDocumentId);
   }, [setActiveDocument, tabsState.activeDocumentId]);
 
+  // Adding, opening into and closing tabs adds or removes project parts.
   const createNewDocumentTab = useCallback(async () => {
+    if (!projectWriteGate.authorize("manifest")) return null;
     const documentId = generateDocumentId();
     tabsDispatch({
       type: "open",
@@ -413,15 +442,19 @@ function ProjectWorkbenchApp({
       activate: true,
     });
     return documentId;
-  }, []);
+  }, [projectWriteGate]);
 
   const activateDocumentTab = useCallback((documentId: DocumentId) => {
     tabsDispatch({ type: "activate", documentId });
   }, []);
 
-  const closeDocumentTab = useCallback((documentId: DocumentId) => {
-    tabsDispatch({ type: "close", documentId });
-  }, []);
+  const closeDocumentTab = useCallback(
+    (documentId: DocumentId) => {
+      if (!projectWriteGate.authorize("manifest")) return;
+      tabsDispatch({ type: "close", documentId });
+    },
+    [projectWriteGate],
+  );
 
   const reorderDocumentTab = useCallback(
     (documentId: DocumentId, toIndex: number) => {
@@ -436,6 +469,8 @@ function ProjectWorkbenchApp({
 
   const openDocumentCopy = useCallback(
     async (file: File): Promise<WorkbenchDocumentActionResult> => {
+      if (!projectWriteGate.authorize("manifest"))
+        return { status: "cancelled" };
       return openDocumentCopyAsTab({
         file,
         repository: documentRepository,
@@ -445,11 +480,13 @@ function ProjectWorkbenchApp({
         },
       });
     },
-    [documentRepository],
+    [documentRepository, projectWriteGate],
   );
 
   const openLinkedDocument =
     useCallback(async (): Promise<WorkbenchDocumentActionResult> => {
+      if (!projectWriteGate.authorize("manifest"))
+        return { status: "cancelled" };
       return openLinkedDocumentAsTab({
         repository: documentRepository,
         createDocumentId: generateDocumentId,
@@ -457,7 +494,7 @@ function ProjectWorkbenchApp({
           tabsDispatch({ type: "open", tab, activate: true });
         },
       });
-    }, [documentRepository]);
+    }, [documentRepository, projectWriteGate]);
 
   return (
     <RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
@@ -483,7 +520,8 @@ function ProjectWorkbenchApp({
             )}
             <CadWorkbench
               projectLoading={!projectApplied}
-              readOnly={!canEditProjectParts(sync.status?.role ?? null)}
+              readOnly={!canWriteProjectDocument(projectRole, "part")}
+              projectWriteGate={projectWriteGate}
               projectControls={
                 project && (
                   <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>

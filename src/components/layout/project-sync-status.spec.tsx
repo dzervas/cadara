@@ -30,12 +30,22 @@ test.each([
   expect(html).not.toContain("Read only");
 });
 
-test.each(["viewer", "commenter"] as const)(
-  "a %s sees the read-only badge",
-  (role) => {
-    expect(
-      render(<ProjectSyncIndicator connection="synced" role={role} />),
-    ).toContain("Read only");
+test.each([
+  ["viewer", "Read only · Viewer"],
+  ["commenter", "Read only · Commenter"],
+] as const)(
+  "a %s sees a read-only status naming the role in every connection state",
+  (role, label) => {
+    for (const connection of [
+      "synced",
+      "syncing",
+      "connecting",
+      "offline",
+    ] as const)
+      expect(
+        render(<ProjectSyncIndicator connection={connection} role={role} />),
+        `${role} while ${connection}`,
+      ).toMatch(new RegExp(`<[^>]*role="status"[^>]*aria-label="${label}"`));
   },
 );
 
