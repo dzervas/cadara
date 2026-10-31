@@ -43,9 +43,9 @@ import {
   createPlacedLineLength,
   getSketchLineIntersection,
   getSketchLineDirectionFromCenter,
-  getSketchAngleLabelPoint,
 } from "./annotation-geometry";
 import {
+  getAngleArcLabelPoint,
   getDimensionLabelPoint,
   createPlacedParallelLineDistance,
   createPlacedLinePointDistance,
@@ -664,13 +664,14 @@ export function createDimensionAnnotationAnchor(
       const side = dimension.annotationPlacement?.side ?? "minor";
       return {
         kind: "sketchPoint",
-        point: getSketchAngleLabelPoint(
+        point: getAngleArcLabelPoint({
           center,
           firstVector,
           secondVector,
           radius,
           side,
-        ),
+          labelPosition: dimension.annotationPlacement?.labelPosition,
+        }),
         offset: { x: 12, y: -12 },
       };
     }

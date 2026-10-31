@@ -13,10 +13,12 @@
 //      placement moves its label faster than the pointer (a projection onto
 //      the placed carrier, a midpoint of a line that slides with the pointer,
 //      a point at the pointer's radius, or a rim point seen from outside the
-//      circle). Distance-tool paths stay inside one reference zone (aligned /
-//      horizontal / vertical, minor angle side) and outside circles: crossing
-//      a zone boundary switches its carrier by design. Fixed-axis tools keep
-//      their carrier across zones.
+//      circle). Distance-tool paths stay outside circles, and inside one
+//      reference zone (aligned / horizontal / vertical, minor angle side)
+//      unless the row `crosses` zones: crossing a zone boundary switches the
+//      carrier by design, and the label, which sits at the pointer on every
+//      carrier, must not jump at the switch. Fixed-axis tools
+//      keep their carrier across zones.
 //  (b) tracking: in the creation preview the carrier (the infinite dimension
 //      line, or the angle arc's circle) passes through the pointer, and the
 //      label sits at the pointer (point-to-line kinds) or on its placed
@@ -162,8 +164,16 @@ interface ContinuityRow {
   name: string;
   tool: SketchConstraintToolId;
   targets: (fixture: Fixture) => readonly PrimitiveRef[];
-  /** The preview's reference kind, constant along the path (premise). */
+  /**
+   * The preview's reference kind, constant along the path (premise), unless
+   * the row `crosses` zones.
+   */
   referenceKind: string | null;
+  /**
+   * The zones the path crosses (premise, a dimension line's reference kind or
+   * an angle arc's side): the label must follow across every switch.
+   */
+  crosses?: readonly string[];
   committedKind: DimensionDefinition["kind"];
   /**
    * (b) where the creation label sits: at the pointer, or on its placed
@@ -475,6 +485,56 @@ const ROWS: readonly ContinuityRow[] = [
     ],
     drag: DRAG,
   },
+  // The Distance tool switches its carrier at a zone boundary
+  // (aligned / horizontal / vertical, the angle's minor / major side) by
+  // design; the label sits at the pointer on every carrier, so it does not
+  // jump at the switch.
+  {
+    name: "point pair, across the aligned, horizontal and vertical zones",
+    tool: "dimensionDistance",
+    targets: (f) => [f.dStart, f.dEnd],
+    referenceKind: null,
+    crosses: ["aligned", "horizontal", "vertical"],
+    committedKind: "distance",
+    label: "atPointer",
+    creation: [
+      [15.1, 4.1],
+      [15.5, 9],
+      [21, 4],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "point to origin, across the zones",
+    tool: "dimensionDistance",
+    targets: (f) => [f.bEnd, f.origin],
+    referenceKind: null,
+    crosses: ["aligned", "horizontal", "vertical"],
+    committedKind: "pointDatumDistance",
+    label: "atPointer",
+    creation: [
+      [0.94, 2.93],
+      [3, 8],
+      [-4, 3],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "angle, across the minor and major sides",
+    tool: "dimensionDistance",
+    targets: (f) => [f.a, f.b],
+    referenceKind: null,
+    crosses: ["minor", "major"],
+    committedKind: "lineAngle",
+    label: "atPointer",
+    creation: [
+      [3, 4],
+      [3, 0.5],
+      [-0.5, 0.5],
+      [-0.5, 4],
+    ],
+    drag: DRAG,
+  },
 ];
 
 /** The waypoints joined by straight steps of at most PATH_STEP. */
@@ -690,16 +750,26 @@ const summarize = (findings: readonly StepFinding[]) =>
 function expectCreationPreviewFollows(row: ContinuityRow) {
   const samples = glidePreview(row);
   expect(samples.length, "premise: a dense path").toBeGreaterThan(40);
-  expect(
-    [
-      ...new Set(
-        samples.map(({ overlay }) =>
-          overlay.kind === "dimensionLine" ? overlay.referenceKind : null,
-        ),
+  const zones = [
+    ...new Set(
+      samples.map(({ overlay }) =>
+        overlay.kind === "dimensionLine"
+          ? overlay.referenceKind
+          : row.crosses
+            ? overlay.side
+            : null,
       ),
-    ],
-    "premise: one reference zone along the path",
-  ).toEqual([row.referenceKind]);
+    ),
+  ];
+  if (row.crosses) {
+    expect(zones.sort(), "premise: the zones the path crosses").toEqual(
+      [...row.crosses].sort(),
+    );
+  } else {
+    expect(zones, "premise: one reference zone along the path").toEqual([
+      row.referenceKind,
+    ]);
+  }
   const findings = speedFindings(
     samples.map(({ pointer, overlay }) => ({
       pointer,
@@ -841,6 +911,55 @@ describe("cadara-3wp6: dimension labels follow a gliding pointer continuously (c
   }
 });
 
+// An angle label's placement is a fraction of its arc, so when the lines
+// move (a typed value or a line drag re-solves them) the label keeps its place
+// along the arc instead of a fixed direction that can fall off the arc.
+test("a committed angle label keeps its fraction of the arc, strictly inside it, when a line moves", () => {
+  const row = ROWS.find((candidate) => candidate.name === "angle")!;
+  // A fifth of the way from line A to line B, about the corner (1, 2).
+  const pointer: SketchPoint = [4, 3];
+  const { session, dimension } = commit(
+    pointerAt(armed(row), pointer),
+    pointer,
+  );
+  const fraction = (state: SketchSessionState) => {
+    const overlay = committedOverlay(state, dimension.dimensionId);
+    if (overlay.kind !== "angleArc") throw new Error("premise: an angle arc");
+    const angle = (point: readonly number[]) =>
+      Math.atan2(point[1]! - overlay.center[1], point[0]! - overlay.center[0]);
+    const signed = (delta: number) =>
+      Math.atan2(Math.sin(delta), Math.cos(delta));
+    const start = angle(overlay.start);
+    const label = labelOf(overlay);
+    expect(
+      Math.abs(distance(label, overlay.center) - overlay.radius),
+      "the label is on its arc",
+    ).toBeLessThan(EPSILON);
+    return signed(angle(label) - start) / signed(angle(overlay.end) - start);
+  };
+  const before = fraction(session);
+  expect(before, "premise: off the bisector").not.toBeCloseTo(0.5, 2);
+
+  // Line B [1,3]-[1,6] turns to [1,3]-[4,6]: the angle goes from 90° to 45°.
+  const b = session.definition.entities[2];
+  if (b?.kind !== "lineSegment") throw new Error("premise: line B");
+  const moved: SketchSessionState = {
+    ...session,
+    definition: {
+      ...session.definition,
+      points: session.definition.points.map((point) =>
+        point.pointId === b.endPointId
+          ? { ...point, position: [4, 6] as SketchPoint }
+          : point,
+      ),
+    },
+  };
+  const after = fraction(moved);
+  expect(after, "strictly inside the arc").toBeGreaterThan(0);
+  expect(after, "strictly inside the arc").toBeLessThan(1);
+  expect(after, "the same fraction of the arc").toBeCloseTo(before, 9);
+});
+
 // Fixed-axis tools must retain their placement axis even when the pointer
 // enters a zone that would switch the adaptive Distance tool's reference.
 const ZONE_CROSSING_ROWS: readonly ContinuityRow[] = [
@@ -850,8 +969,7 @@ const ZONE_CROSSING_ROWS: readonly ContinuityRow[] = [
     targets: (f) => [f.dStart, f.dEnd],
     referenceKind: "horizontal",
     committedKind: "horizontalDistance",
-    // Midpoint x 15.5, pointer up to x 20.
-    label: { reach: 4.5 },
+    label: "atPointer",
     creation: [
       [15, 8],
       [19, 8],
@@ -865,8 +983,7 @@ const ZONE_CROSSING_ROWS: readonly ContinuityRow[] = [
     targets: (f) => [f.dStart, f.dEnd],
     referenceKind: "vertical",
     committedKind: "verticalDistance",
-    // Midpoint y 4, pointer up to y 8.
-    label: { reach: 4 },
+    label: "atPointer",
     creation: [
       [20, 4],
       [20, 8],

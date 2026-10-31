@@ -112,6 +112,23 @@ const unit = (line: Line) => {
  * vertical: the fixed-axis tools only), as the
  * placement it gives `pointer` (null when it does not apply to the pick).
  */
+/** The pointer's fraction along a point pair's measured span on `axis`. */
+function alongPair(
+  first: Target,
+  second: Target,
+  pointer: SketchPoint,
+  axis: "aligned" | "horizontal" | "vertical",
+) {
+  const [a, b] = [first.anchor, second.anchor];
+  if (axis === "horizontal") return (pointer[0] - a[0]) / (b[0] - a[0]);
+  if (axis === "vertical") return (pointer[1] - a[1]) / (b[1] - a[1]);
+  return (
+    ((pointer[0] - a[0]) * (b[0] - a[0]) +
+      (pointer[1] - a[1]) * (b[1] - a[1])) /
+    ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2)
+  );
+}
+
 const ROUTES = {
   /** A circle or arc: the rim direction towards the pointer. */
   circleAngle: ([first]: readonly Target[], pointer: SketchPoint) =>
@@ -152,17 +169,31 @@ const ROUTES = {
       ? inferLinePointDimensionPlacement(line.line, point.anchor, pointer)
       : null;
   },
-  /** Fixed Horizontal: the pointer's Y offset, even in the vertical zone. */
+  /**
+   * Fixed Horizontal: the pointer's Y offset, even in the vertical zone, and
+   * the label at the pointer along the line.
+   */
   horizontal: ([first, second]: readonly Target[], pointer: SketchPoint) =>
     first && second && !first.line && !second.line
-      ? { kind: "dimensionLine", offset: pointer[1] - first.anchor[1] }
+      ? {
+          kind: "dimensionLine",
+          offset: pointer[1] - first.anchor[1],
+          labelPosition: alongPair(first, second, pointer, "horizontal"),
+        }
       : null,
   /** Fixed Vertical: the pointer's X offset, even in the horizontal zone. */
   vertical: ([first, second]: readonly Target[], pointer: SketchPoint) =>
     first && second && !first.line && !second.line
-      ? { kind: "dimensionLine", offset: pointer[0] - first.anchor[0] }
+      ? {
+          kind: "dimensionLine",
+          offset: pointer[0] - first.anchor[0],
+          labelPosition: alongPair(first, second, pointer, "vertical"),
+        }
       : null,
-  /** Two points: the offset across the reference axis the pointer picks. */
+  /**
+   * Two points: the offset across the reference axis the pointer picks, and
+   * the label at the pointer along the line.
+   */
   pointPair: ([first, second]: readonly Target[], pointer: SketchPoint) => {
     if (!first || !second || first.line || second.line) return null;
     const axis = selectPointToPointDimensionReference({
@@ -170,11 +201,20 @@ const ROUTES = {
       second: second.anchor,
       pointer,
     });
+    const labelPosition = alongPair(first, second, pointer, axis);
     if (axis === "horizontal") {
-      return { kind: "dimensionLine", offset: pointer[1] - first.anchor[1] };
+      return {
+        kind: "dimensionLine",
+        offset: pointer[1] - first.anchor[1],
+        labelPosition,
+      };
     }
     if (axis === "vertical") {
-      return { kind: "dimensionLine", offset: pointer[0] - first.anchor[0] };
+      return {
+        kind: "dimensionLine",
+        offset: pointer[0] - first.anchor[0],
+        labelPosition,
+      };
     }
     const [ux, uy] = unit({ start: first.anchor, end: second.anchor });
     return {
@@ -182,6 +222,7 @@ const ROUTES = {
       offset:
         (pointer[0] - first.anchor[0]) * -uy +
         (pointer[1] - first.anchor[1]) * ux,
+      labelPosition,
     };
   },
 } as const;

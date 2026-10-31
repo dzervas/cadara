@@ -217,9 +217,9 @@ export function SketchConstraintAnnotations({
   // displaced is dragged from where it is drawn: the drag's press is moved by
   // that displacement (`labelDragPressShiftRef`) and the chip sits on its
   // anchor, so the first placement brings the anchor under the chip and the
-  // release leaves the label where it was dropped. An angle label's
-  // placement cannot follow the pointer off its bisector, so it keeps the
-  // displacement as its offset instead. cadara-2wpl: the shifted anchor
+  // release leaves the label where it was dropped. An angle label keeps the
+  // displacement as its offset instead: moving its anchor under the chip
+  // could flip its arc to the other side. cadara-2wpl: the shifted anchor
   // arrives through the editor a render after the drag starts, so until the
   // anchor has moved the chip keeps its displacement (`untilAnchorMoves`);
   // dropping it at once drew the chip back on its old anchor for a frame.
@@ -240,11 +240,12 @@ export function SketchConstraintAnnotations({
         : [],
     ),
   );
-  // An angle label's placement cannot follow the pointer off its bisector,
-  // so a layout-displaced angle chip is dropped at its displacement. Its
-  // drag commits a placement that would let it outrank the label displacing
-  // it and jump onto its anchor at the release, so for the open sketch
-  // session it keeps the rank it had before the drag.
+  // A layout-displaced angle chip is dragged at its displacement: moving its
+  // anchor under the pointer could put the pointer in the other sector and
+  // flip the arc to its other side. Its drag commits a placement that would
+  // let it outrank the label displacing it and jump onto its anchor at the
+  // release, so for the open sketch session it keeps the rank it had before
+  // the drag.
   const [heldLabelRanks, setHeldLabelRanks] = useState<
     ReadonlyMap<string, SketchDimensionLabelRank>
   >(new Map());

@@ -34,6 +34,7 @@ import {
   getSketchAngleArcSide,
 } from "./annotation-geometry";
 import {
+  getAngleArcLabelPosition,
   withDimensionLabelPosition,
   inferParallelLineDimensionPlacement,
   createPlacedParallelLineDistance,
@@ -253,16 +254,25 @@ export function inferCommittedDimensionAnnotationPlacement(
       const center = getSketchLineIntersection(first, second) ?? first.start;
       const firstVector = getSketchLineDirectionFromCenter(first, center);
       const secondVector = getSketchLineDirectionFromCenter(second, center);
+      const side = getSketchAngleArcSide({
+        center,
+        startVector: firstVector,
+        endVector: secondVector,
+        point,
+      });
+      // The dragged label sits at the pointer on its arc.
       return {
         kind: "angleArc",
         radius: Math.max(
           0.1,
           Math.hypot(point[0] - center[0], point[1] - center[1]),
         ),
-        side: getSketchAngleArcSide({
+        side,
+        labelPosition: getAngleArcLabelPosition({
           center,
-          startVector: firstVector,
-          endVector: secondVector,
+          firstVector,
+          secondVector,
+          side,
           point,
         }),
       };

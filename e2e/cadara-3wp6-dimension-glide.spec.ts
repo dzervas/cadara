@@ -123,10 +123,12 @@ const ROWS: readonly GlideRow[] = [
     geometry: [D],
     tool: VERTICAL,
     picks: [D[1], D[2]],
+    // Left of the Constraints panel, which would take the pointer's moves
+    // from the canvas (the label follows the pointer along its line).
     creation: [
-      { x: 1150, y: 300 },
-      { x: 1160, y: 330 },
-      { x: 1140, y: 345 },
+      { x: 1110, y: 300 },
+      { x: 1120, y: 330 },
+      { x: 1100, y: 345 },
     ],
   },
   // Fixed-axis placement must stay continuous across adaptive reference zones.
@@ -148,8 +150,8 @@ const ROWS: readonly GlideRow[] = [
     tool: VERTICAL,
     picks: [D[1], D[2]],
     creation: [
-      { x: 1150, y: 300 },
-      { x: 1160, y: 330 },
+      { x: 1110, y: 300 },
+      { x: 1120, y: 330 },
       { x: 980, y: 170 },
     ],
   },

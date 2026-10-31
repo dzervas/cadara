@@ -604,6 +604,69 @@ function getAngleArcSide(input: {
   return pointSweep <= minorSweep ? "minor" : "major";
 }
 
+/** An angle arc's sweep: its first line's direction, then signed span. */
+function getAngleArcSweep(input: {
+  firstVector: readonly [number, number];
+  secondVector: readonly [number, number];
+  side: "minor" | "major";
+}) {
+  const { firstVector, secondVector } = input;
+  const startAngle = Math.atan2(firstVector[1], firstVector[0]);
+  const minorDelta = normalizeSignedAngleDelta(
+    Math.atan2(secondVector[1], secondVector[0]) - startAngle,
+  );
+  // The minor angle, or the rest of the turn the other way round.
+  const sweep =
+    input.side === "minor"
+      ? minorDelta
+      : minorDelta - Math.sign(minorDelta || 1) * Math.PI * 2;
+  return { startAngle, sweep };
+}
+
+/**
+ * An angle label's point on its arc: at `labelPosition`, a fraction of the
+ * arc's sweep from the first line (0) to the second (1), so it follows the
+ * lines when they move; absent, at the bisector (0.5).
+ */
+export function getAngleArcLabelPoint(input: {
+  center: readonly [number, number];
+  firstVector: readonly [number, number];
+  secondVector: readonly [number, number];
+  radius: number;
+  side: "minor" | "major";
+  labelPosition: number | undefined;
+}): [number, number] {
+  const { startAngle, sweep } = getAngleArcSweep(input);
+  const angle = startAngle + (input.labelPosition ?? 0.5) * sweep;
+  return [
+    input.center[0] + Math.cos(angle) * input.radius,
+    input.center[1] + Math.sin(angle) * input.radius,
+  ];
+}
+
+/**
+ * The `labelPosition` of `point` on the angle arc of `side` (the side the
+ * point is on, so the fraction is within [0, 1]).
+ */
+export function getAngleArcLabelPosition(input: {
+  center: readonly [number, number];
+  firstVector: readonly [number, number];
+  secondVector: readonly [number, number];
+  side: "minor" | "major";
+  point: readonly [number, number];
+}): number {
+  const { startAngle, sweep } = getAngleArcSweep(input);
+  if (Math.abs(sweep) <= 1e-9) return 0.5;
+  const pointAngle = Math.atan2(
+    input.point[1] - input.center[1],
+    input.point[0] - input.center[0],
+  );
+  return (
+    normalizePositiveAngleDelta((pointAngle - startAngle) * Math.sign(sweep)) /
+    Math.abs(sweep)
+  );
+}
+
 function lineDimensionOperand(
   target: SketchConstraintTargetRecord,
 ): SketchCurveConstraintOperand | null {
@@ -1151,29 +1214,44 @@ function getPointPairDimensionPlacement(input: {
     "aligned" | "horizontal" | "vertical"
   >;
 }): DimensionLineAnnotationPlacement | undefined {
-  if (!input.pointer) {
+  const { first, second, pointer } = input;
+  if (!pointer) {
     return undefined;
   }
 
+  // The label sits at the pointer's foot on the placed line,
+  // which passes through the pointer, so the label is at the pointer in
+  // every reference zone and a zone switch does not move it.
   if (input.referenceKind === "horizontal") {
-    return { kind: "dimensionLine", offset: input.pointer[1] - input.first[1] };
+    const offset = pointer[1] - first[1];
+    return withDimensionLabelPosition(
+      { kind: "dimensionLine", offset },
+      { start: [first[0], pointer[1]], end: [second[0], pointer[1]] },
+      pointer,
+    );
   }
 
   if (input.referenceKind === "vertical") {
-    return { kind: "dimensionLine", offset: input.pointer[0] - input.first[0] };
+    const offset = pointer[0] - first[0];
+    return withDimensionLabelPosition(
+      { kind: "dimensionLine", offset },
+      { start: [pointer[0], first[1]], end: [pointer[0], second[1]] },
+      pointer,
+    );
   }
 
-  const axis = normalize([
-    input.second[0] - input.first[0],
-    input.second[1] - input.first[1],
-  ]);
+  const axis = normalize([second[0] - first[0], second[1] - first[1]]);
   const normal: readonly [number, number] = [-axis[1], axis[0]];
-  return {
-    kind: "dimensionLine",
-    offset:
-      (input.pointer[0] - input.first[0]) * normal[0] +
-      (input.pointer[1] - input.first[1]) * normal[1],
-  };
+  const offset =
+    (pointer[0] - first[0]) * normal[0] + (pointer[1] - first[1]) * normal[1];
+  return withDimensionLabelPosition(
+    { kind: "dimensionLine", offset },
+    {
+      start: [first[0] + normal[0] * offset, first[1] + normal[1] * offset],
+      end: [second[0] + normal[0] * offset, second[1] + normal[1] * offset],
+    },
+    pointer,
+  );
 }
 
 export function inferDimensionAnnotationPlacement(
@@ -1217,15 +1295,29 @@ export function inferDimensionAnnotationPlacement(
       center,
       second.anchor,
     );
+    // The label sits at the pointer on its arc, so a switch between the
+    // minor and major side does not move it.
+    const side = getAngleArcSide({
+      center,
+      startVector: firstVector,
+      endVector: secondVector,
+      point,
+    });
     return {
       kind: "angleArc",
       radius: Math.max(0.1, point ? distanceBetween(center, point) : 1),
-      side: getAngleArcSide({
-        center,
-        startVector: firstVector,
-        endVector: secondVector,
-        point,
-      }),
+      side,
+      ...(point
+        ? {
+            labelPosition: getAngleArcLabelPosition({
+              center,
+              firstVector,
+              secondVector,
+              side,
+              point,
+            }),
+          }
+        : {}),
     };
   }
 
@@ -1302,14 +1394,13 @@ function buildPointDimensionDescriptor(input: {
       kind: "dimensionLine",
       label: input.label,
       referenceKind: "horizontal",
-      start,
-      end,
+      ...extendDimensionLineToLabel({ start, end }, input.placement),
       value: input.value,
       unit: input.unit,
       dragHandle: { id: `${input.id}-drag`, kind: "dimensionLine" },
       labelAnchor: {
         kind: "sketchPoint",
-        point: midpoint(start, end),
+        point: getDimensionLabelPoint({ start, end }, input.placement),
         offset: { x: 0, y: -18 },
       },
       extensionLines: [
@@ -1342,15 +1433,16 @@ function buildPointDimensionDescriptor(input: {
       kind: "dimensionLine",
       label: input.label,
       referenceKind: "vertical",
-      start,
-      end,
+      ...extendDimensionLineToLabel({ start, end }, input.placement),
       value: input.value,
       unit: input.unit,
       dragHandle: { id: `${input.id}-drag`, kind: "dimensionLine" },
       labelAnchor: {
         kind: "sketchPoint",
-        point: midpoint(start, end),
-        offset: { x: 16, y: 0 },
+        point: getDimensionLabelPoint({ start, end }, input.placement),
+        // The committed label's offset, and the other zones': a zone switch
+        // does not move the label.
+        offset: { x: 0, y: -18 },
       },
       extensionLines: [
         {
@@ -1399,14 +1491,13 @@ function buildPointDimensionDescriptor(input: {
     kind: "dimensionLine",
     label: input.label,
     referenceKind: "aligned",
-    start,
-    end,
+    ...extendDimensionLineToLabel({ start, end }, input.placement),
     value: input.value,
     unit: input.unit,
     dragHandle: { id: `${input.id}-drag`, kind: "dimensionLine" },
     labelAnchor: {
       kind: "sketchPoint",
-      point: midpoint(start, end),
+      point: getDimensionLabelPoint({ start, end }, input.placement),
       offset: { x: 0, y: -18 },
     },
     extensionLines:
@@ -1470,10 +1561,17 @@ function buildPointDimensionPreview(
       referenceKind,
       value: input.value,
       unit: options.unit,
+      // Before the second pick (`second` is the hovered point or the pointer)
+      // the label sits at the pointer too, so the pick does not move it.
       placement:
         input.annotationPlacement?.kind === "dimensionLine"
           ? input.annotationPlacement
-          : undefined,
+          : getPointPairDimensionPlacement({
+              first,
+              second,
+              pointer: input.pointer,
+              referenceKind,
+            }),
     }),
   ];
 }
@@ -1524,18 +1622,17 @@ function buildLineAnglePreview(
     center[0] + secondVector[0] * radius,
     center[1] + secondVector[1] * radius,
   ];
-  const labelDirection = normalize(
-    side === "major"
-      ? [
-          -(firstVector[0] + secondVector[0]),
-          -(firstVector[1] + secondVector[1]),
-        ]
-      : [firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]],
-  );
-  const labelPoint: readonly [number, number] = [
-    center[0] + labelDirection[0] * radius,
-    center[1] + labelDirection[1] * radius,
-  ];
+  const labelPoint = getAngleArcLabelPoint({
+    center,
+    firstVector,
+    secondVector,
+    radius,
+    side,
+    labelPosition:
+      input.annotationPlacement?.kind === "angleArc"
+        ? input.annotationPlacement.labelPosition
+        : undefined,
+  });
 
   return [
     {

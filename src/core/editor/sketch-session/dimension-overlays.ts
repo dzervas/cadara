@@ -16,10 +16,10 @@ import {
   getSketchLineIntersection,
   getSketchLineDirectionFromCenter,
   createAngleWitnessLines,
-  getSketchAngleLabelPoint,
 } from "./annotation-geometry";
 import {
   extendDimensionLineToLabel,
+  getAngleArcLabelPoint,
   getDimensionLabelPoint,
   createPlacedParallelLineDistance,
   createPlacedLinePointDistance,
@@ -397,13 +397,14 @@ export function buildCommittedDimensionOverlays(
               ),
               labelAnchor: {
                 kind: "sketchPoint",
-                point: getSketchAngleLabelPoint(
+                point: getAngleArcLabelPoint({
                   center,
                   firstVector,
                   secondVector,
                   radius,
                   side,
-                ),
+                  labelPosition: dimension.annotationPlacement?.labelPosition,
+                }),
                 offset: { x: 12, y: -12 },
               },
             },

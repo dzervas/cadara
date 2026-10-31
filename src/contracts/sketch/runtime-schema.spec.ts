@@ -811,3 +811,28 @@ test("cadara-bmy0: a dimension-line placement may store its label position along
     "a non-number label position",
   ).toBe(false);
 });
+
+// Logic lane (contract seam `validateSketchDefinition`): an angle placement
+// may carry its label's position along the arc; documents without it still
+// validate, and a non-number position is refused.
+test("an angle placement may store its label's position along the arc", () => {
+  const sketch = makeReferenceDimensionSketch();
+  const angle = makeReferenceDimensionCases().find(
+    (entry) => entry.driving.kind === "lineAngle",
+  )!.driving;
+  const placed = (annotationPlacement: unknown) =>
+    validateSketchDefinition(
+      withDimensions(sketch, [
+        { ...angle, annotationPlacement } as DimensionDefinition,
+      ]),
+    ).success;
+  const arc = { kind: "angleArc", radius: 2, side: "minor" };
+  expect(placed(arc), "bisector (no label position)").toBe(true);
+  expect(placed({ ...arc, labelPosition: 0.3 }), "with a label position").toBe(
+    true,
+  );
+  expect(
+    placed({ ...arc, labelPosition: "middle" }),
+    "a non-number label position",
+  ).toBe(false);
+});

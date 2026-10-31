@@ -180,28 +180,6 @@ export function getSketchAngleArcSide(input: {
   return pointSweep <= minorSweep ? "minor" : "major";
 }
 
-export function getSketchAngleLabelPoint(
-  center: SketchPoint,
-  firstVector: SketchPoint,
-  secondVector: SketchPoint,
-  radius: number,
-  side: "minor" | "major",
-): SketchPoint {
-  const labelDirection = normalizeSketchVector(
-    side === "major"
-      ? [
-          -(firstVector[0] + secondVector[0]),
-          -(firstVector[1] + secondVector[1]),
-        ]
-      : [firstVector[0] + secondVector[0], firstVector[1] + secondVector[1]],
-  );
-
-  return [
-    center[0] + labelDirection[0] * radius,
-    center[1] + labelDirection[1] * radius,
-  ];
-}
-
 function getPointPairAnnotationPlacementFromPoint(
   first: SketchPoint,
   second: SketchPoint,

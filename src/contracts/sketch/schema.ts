@@ -575,6 +575,12 @@ export type DimensionAngleAnnotationPlacement = {
   kind: "angleArc";
   radius: number;
   side: "minor" | "major";
+  /**
+   * Where the label sits on the arc, as a fraction of its sweep from the
+   * first line (0) to the second (1), so it follows the lines when they
+   * move. Absent: the bisector (0.5).
+   */
+  labelPosition?: number;
   /** As on a dimension-line placement. */
   dropOrder?: number;
 };
