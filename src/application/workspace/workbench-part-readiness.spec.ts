@@ -37,12 +37,16 @@ test("unmount before owner registration rejects pending and future discovery ins
   );
 });
 
-test("document owner failures propagate to discovery", async () => {
+test("document owner failures propagate to discovery and stay recognisable", async () => {
   const readiness = new WorkbenchPartReadiness();
+  const failure = new Error("Worker load failed");
   readiness.register(async () => {
-    throw new Error("Worker load failed");
+    throw failure;
   });
-  await expect(readiness.ensure("doc_failed")).rejects.toThrow(
-    "Worker load failed",
-  );
+  expect(readiness.failureOf("doc_failed")).toBeNull();
+  await expect(readiness.ensure("doc_failed")).rejects.toBe(failure);
+  // Project results carry only the message; discovery reads the cause, and
+  // which part it belongs to, here.
+  expect(readiness.failureOf("doc_failed")).toBe(failure);
+  expect(readiness.failureOf("doc_other")).toBeNull();
 });

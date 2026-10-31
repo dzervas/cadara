@@ -56,6 +56,11 @@ test.each([false, true])(
       expect(reporter.reports[0]?.metadata.source).toBe(
         "workbench.modeling.initialize",
       );
+      // Dismissing the notice does not open the document: surfaces that
+      // repeat its failure (the editor's refresh) stay quiet.
+      expect(controller.documentOpenFailed).toBe(true);
+      controller.setRestoreFailure(null);
+      expect(hookHarness.render(useNotifications).documentOpenFailed).toBe(true);
     }
     hookHarness.cleanup();
   },

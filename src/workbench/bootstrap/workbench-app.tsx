@@ -70,6 +70,7 @@ import { DurableHistoryProvider } from "@/hooks/durable-history-provider";
 import { useLocalSaveStatus } from "@/hooks/use-local-save-status";
 import { useOccKernelVersionRetired } from "@/hooks/use-occ-kernel-version-retired";
 import { AppUpdateNotification } from "@/components/layout/app-update-notification";
+import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import { useWorkbenchLocalSaveGuard } from "@/workbench/adapters/use-workbench-local-save-guard";
 import {
   openDocumentCopyAsTab,
@@ -293,6 +294,19 @@ function ProjectWorkbenchApp({
   });
   const localSaving = useLocalSaveStatus(modelingServices).saving;
   const kernelVersionRetired = useOccKernelVersionRetired();
+  // A retired kernel fails the part readiness the project waits for; the
+  // update notification's reload is the outcome.
+  const projectNotification = useMemo(
+    (): WorkbenchNotificationModel | null =>
+      projects.failure && !kernelVersionRetired
+        ? {
+            type: "error",
+            title: "Project could not be saved",
+            message: projects.failure,
+          }
+        : null,
+    [kernelVersionRetired, projects.failure],
+  );
 
   const durableHistory = useMemo(
     () =>
@@ -507,20 +521,6 @@ function ProjectWorkbenchApp({
             modelingService={modelingService}
             editorDependencies={editorDependencies}
           >
-            {/* A retired kernel fails the part readiness the project waits
-                for; the update notification's reload is the outcome. */}
-            {projects.failure && !kernelVersionRetired && (
-              <Alert
-                color="red"
-                title="Project could not be saved"
-                pos="absolute"
-                top={80}
-                right={16}
-                style={{ zIndex: 200 }}
-              >
-                {projects.failure}
-              </Alert>
-            )}
             <CadWorkbench
               projectLoading={!projectApplied}
               readOnly={
@@ -590,6 +590,7 @@ function ProjectWorkbenchApp({
               performanceTelemetry={performanceTelemetry}
               onReorderDocumentTab={reorderDocumentTab}
               onSyncActiveDocumentTab={syncActiveDocumentTab}
+              projectNotification={projectNotification}
               localSaveNotification={localSaveNotification}
               localSaving={localSaving}
             />

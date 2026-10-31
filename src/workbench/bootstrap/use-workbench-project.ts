@@ -20,6 +20,7 @@ import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
 import { createWorkbenchProjectBootstrap } from "@/infrastructure/persistence/workbench-project-bootstrap";
 import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
+import { isModelingServiceInitializationFailure } from "@/application/modeling/modeling-service/initialization-failure";
 
 export function useWorkbenchProject(persistenceEnabled: boolean) {
   const reporter = useErrorReporter();
@@ -103,7 +104,20 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
         setProjects(available);
       })
       .catch((error: unknown) => {
-        if (live) report(error);
+        if (!live) return;
+        // Creating the project needs its parts' documents open. When the
+        // active part's initialization threw, its own "could not be opened"
+        // notice is the outcome; this message-only copy is not news. Any
+        // other part's failure has no notice on screen, so it is reported.
+        if (
+          isModelingServiceInitializationFailure(
+            context.partReadiness.failureOf(
+              context.initialTabs.activeDocumentId,
+            ),
+          )
+        )
+          return;
+        report(error);
       })
       .finally(() => {
         if (live) setBusy(false);

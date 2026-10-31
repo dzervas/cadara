@@ -244,6 +244,8 @@ interface CadWorkbenchProps {
   performanceTelemetry?: PerformanceTelemetry;
   onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
   onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
+  /** Why the project could not be opened or saved; shown with the other notices. */
+  projectNotification?: WorkbenchNotificationModel | null;
   /** Every open tab's page-leave save notice (cadara-8p7o). */
   localSaveNotification?: WorkbenchNotificationModel | null;
   /** A local save is underway in any open tab (cadara-781c logo ring). */
@@ -264,6 +266,7 @@ export function CadWorkbench({
   performanceTelemetry = noopPerformanceTelemetry,
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
+  projectNotification = null,
   localSaveNotification = null,
   localSaving = false,
 }: CadWorkbenchProps) {
@@ -308,11 +311,6 @@ export function CadWorkbench({
     [],
   );
   const kernelVersionRetired = useOccKernelVersionRetired();
-  const documentRefreshFailureNotification = kernelVersionRetired
-    ? null
-    : getDocumentRefreshFailureNotification(machineState, () =>
-        dispatch({ type: "document.refreshRequested" }),
-      );
   const editorFailureNotification = getEditorFailureNotification(
     machineState,
     () => dispatch({ type: "failureNotice.dismissed" }),
@@ -348,6 +346,7 @@ export function CadWorkbench({
     viewportFitRequestId,
   } = useWorkbenchDocumentPresentation(snapshot?.document.documentId ?? null);
   const {
+    documentOpenFailed,
     reportDocumentFileActionFailure,
     restoreFailure,
     setRestoreFailure,
@@ -360,6 +359,14 @@ export function CadWorkbench({
     errorReporter,
     modelingService,
   });
+  // A document that never opened fails every refresh with its open failure;
+  // its "could not be opened" notice already says so.
+  const documentRefreshFailureNotification =
+    kernelVersionRetired || documentOpenFailed
+      ? null
+      : getDocumentRefreshFailureNotification(machineState, () =>
+          dispatch({ type: "document.refreshRequested" }),
+        );
   const draftRecoveryNotification = useWorkbenchSketchDraftRecovery(draftRecovery, reportDocumentFileActionFailure);
   // The gate announces each read-only refusal itself; the failed action's
   // own error echo would replace that notice with a red one.
@@ -1985,6 +1992,9 @@ export function CadWorkbench({
                       }
                       onDismiss={() => setRestoreFailure(null)}
                     />
+                  ) : null}
+                  {projectNotification ? (
+                    <WorkbenchNotification {...projectNotification} />
                   ) : null}
                   {localSaveNotification ? (
                     <WorkbenchNotification {...localSaveNotification} />

@@ -60,6 +60,12 @@ export function useWorkbenchNotifications({
         : { owner: modelingService, failure },
     );
   }, [modelingService]);
+  // A thrown initialization is final for its service: dismissing the notice
+  // does not open the document, so surfaces repeating that failure stay quiet.
+  const [openFailureOwner, setOpenFailureOwner] = useState<
+    WorkbenchNotificationsInput["modelingService"] | null
+  >(null);
+  const documentOpenFailed = openFailureOwner === modelingService;
   const [workbenchStatus, setWorkbenchStatus] = useState<{
     notification: WorkbenchNotificationModel;
     featureError: FeatureErrorNotificationTie | null;
@@ -231,6 +237,7 @@ export function useWorkbenchNotifications({
           ? error.message
           : "Modeling service initialization failed unexpectedly.";
         updateRestoreFailure({ kind: "initialization", message });
+        setOpenFailureOwner(modelingService);
         handleWorkbenchFailure({
           appError: createAppError({
             code: "workbench/action-failed",
@@ -258,6 +265,7 @@ export function useWorkbenchNotifications({
   }, [errorReporter, modelingService, setRestoreFailure]);
 
   return {
+    documentOpenFailed,
     reportDocumentFileActionFailure,
     restoreFailure,
     setRestoreFailure,

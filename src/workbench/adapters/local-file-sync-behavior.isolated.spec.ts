@@ -12,6 +12,9 @@ vi.mock("react", () => hookHarness.reactModule);
 
 const { useWorkbenchLocalFileSync } =
   await import("./use-workbench-local-file-sync");
+const { markModelingServiceInitializationFailure } = await import(
+  "@/application/modeling/modeling-service/initialization-failure"
+);
 
 beforeEach(() => {
   hookHarness.reset();
@@ -147,6 +150,36 @@ test("useWorkbenchLocalFileSync restores a binding on mount and reports restore 
       },
     ]),
   );
+});
+
+// Lane: logic (isolated, React is the hook harness). Seam: the restore
+// failure report. A document whose initialization threw rejects the restore
+// with that same error; its "could not be opened" notice is the outcome.
+test("useWorkbenchLocalFileSync leaves a failed document open to its own notice", async () => {
+  const failures: unknown[] = [];
+  const initializationFailure = new Error("Geometry engine failed to start");
+  markModelingServiceInitializationFailure(initializationFailure);
+  hookHarness.render(() =>
+    useWorkbenchLocalFileSync({
+      modelingService: {
+        currentDocumentId: "document_local_sync" as never,
+        async restoreLocalFileBinding() {
+          throw initializationFailure;
+        },
+        subscribeToLocalFileSyncStatus() {
+          return () => undefined;
+        },
+      },
+      reportDocumentFileActionFailure(source, message, error) {
+        failures.push({ error, message, source });
+      },
+      showWorkbenchError() {},
+      showWorkbenchInfo() {},
+    }),
+  );
+  await hookHarness.flushEffects();
+  await flushMicrotasks();
+  expect(failures).toEqual([]);
 });
 
 test("useWorkbenchLocalFileSync maps worker status updates to visible messages and enabled state", async () => {

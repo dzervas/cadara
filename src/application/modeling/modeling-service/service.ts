@@ -112,6 +112,7 @@ import {
   createExportFilename,
   stringifyCadaraDocument,
 } from "./helpers";
+import { markModelingServiceInitializationFailure } from "./initialization-failure";
 import {
   validateSnapshotResponse,
   buildDocumentRequest,
@@ -1857,6 +1858,7 @@ export function createModelingService(
     initializationPromise = initialize
       .catch((error: unknown) => {
         initializationThrew = true;
+        markModelingServiceInitializationFailure(error);
         canPersistOperationHistory = false;
         canPersistAuthoredDocument = false;
         historyRestoreState = createRestoreFailure(

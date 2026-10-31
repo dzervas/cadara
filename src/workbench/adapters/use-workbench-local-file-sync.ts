@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ModelingService } from "@/application/modeling/modeling-service";
+import { isModelingServiceInitializationFailure } from "@/application/modeling/modeling-service/initialization-failure";
 import type { LocalFileBindingMetadata } from "@/contracts/modeling/local-file-binding";
 import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 import { isOccKernelVersionRetiredFailure } from "@/infrastructure/occ/kernel-version-retired";
@@ -120,8 +121,13 @@ export function useWorkbenchLocalFileSync({
         }
       })
       .catch((error: unknown) => {
-        // The document never opened; the update notification asks for the reload.
-        if (!disposed && !isOccKernelVersionRetiredFailure(error)) {
+        // The document never opened: its "could not be opened" notice (or,
+        // for a retired kernel, the update notification) is the outcome.
+        if (
+          !disposed &&
+          !isOccKernelVersionRetiredFailure(error) &&
+          !isModelingServiceInitializationFailure(error)
+        ) {
           reportDocumentFileActionFailure(
             "workbench.file.restoreLocalBinding",
             "Local file sync restore failed.",

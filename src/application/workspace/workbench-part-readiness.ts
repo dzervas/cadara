@@ -6,6 +6,7 @@ type EnsurePartReady = (docId: DocumentId) => Promise<void>;
 export class WorkbenchPartReadiness {
   private owner: EnsurePartReady | null = null;
   private disposed = false;
+  private readonly failures = new Map<DocumentId, unknown>();
   private readonly waiters = new Set<{
     resolve: () => void;
     reject: (error: Error) => void;
@@ -28,7 +29,21 @@ export class WorkbenchPartReadiness {
     }
     if (this.disposed)
       throw new Error("Workbench closed before its part document was ready.");
-    await this.owner!(docId);
+    try {
+      await this.owner!(docId);
+    } catch (error) {
+      this.failures.set(docId, error);
+      throw error;
+    }
+  }
+
+  /**
+   * The document owner's error for `docId`'s last failure to become ready,
+   * or null. Project operations report such a failure by message only; this
+   * keeps what caused it and which part it was.
+   */
+  failureOf(docId: DocumentId): unknown {
+    return this.failures.has(docId) ? this.failures.get(docId) : null;
   }
 
   dispose() {
