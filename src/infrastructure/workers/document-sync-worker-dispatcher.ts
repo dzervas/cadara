@@ -1,4 +1,4 @@
-import type { DocumentSyncWorkerRequest } from "@/infrastructure/workers/document-sync-worker-protocol";
+import type { DocumentSyncWorkerInbound } from "@/infrastructure/workers/project-sync-worker-protocol";
 
 export type DocumentSyncWorkerBootstrapMessage = {
   kind: "bootstrap";
@@ -7,10 +7,10 @@ export type DocumentSyncWorkerBootstrapMessage = {
 
 type DocumentSyncWorkerIncomingMessage =
   | DocumentSyncWorkerBootstrapMessage
-  | DocumentSyncWorkerRequest;
+  | DocumentSyncWorkerInbound;
 
 type DocumentSyncWorkerMessageHandler = (
-  request: DocumentSyncWorkerRequest,
+  request: DocumentSyncWorkerInbound,
 ) => Promise<void> | void;
 
 export function createDocumentSyncWorkerDispatcher(
@@ -19,7 +19,7 @@ export function createDocumentSyncWorkerDispatcher(
   ) => DocumentSyncWorkerMessageHandler,
 ) {
   let handleMessage: DocumentSyncWorkerMessageHandler | null = null;
-  const pendingRequests: DocumentSyncWorkerRequest[] = [];
+  const pendingRequests: DocumentSyncWorkerInbound[] = [];
 
   return function dispatchDocumentSyncWorkerMessage(
     message: DocumentSyncWorkerIncomingMessage,

@@ -76,9 +76,11 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
 
   function renderToolbar({
     onReportBug,
+    readOnly,
     state,
   }: {
     onReportBug?: () => void;
+    readOnly?: boolean;
     state?: Partial<EditorViewState>;
   } = {}) {
     const viewState = {
@@ -102,7 +104,7 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
           }}
         >
           <WorkbenchCommandProvider handlers={workbenchHandlers}>
-            <WorkspaceToolbar onReportBug={onReportBug} />
+            <WorkspaceToolbar onReportBug={onReportBug} readOnly={readOnly} />
           </WorkbenchCommandProvider>
         </EditorContextFixture>
       </MantineProvider>,
@@ -175,6 +177,21 @@ test("src/components/layout/workspace-toolbar.spec.tsx", async () => {
       toolbarMarkup.includes('aria-label="Open repository on GitHub"') &&
       toolbarMarkup.includes("data-icon=\"GitHub-logo.svg\""),
     "Toolbar should render a safe GitHub repository link at the end.",
+  ).toBeTruthy();
+
+  const readOnlyToolbarMarkup = renderToolbar({ readOnly: true });
+  expect(
+    getToolMarkup(toolbarMarkup, "extrude").includes('data-disabled="true"'),
+    "Authoring tools are enabled for editors.",
+  ).toBeFalsy();
+  expect(
+    getToolMarkup(readOnlyToolbarMarkup, "extrude").includes(
+      'data-disabled="true"',
+    ) &&
+      !getToolMarkup(readOnlyToolbarMarkup, "measure").includes(
+        'data-disabled="true"',
+      ),
+    "A read-only project role disables authoring tools but keeps Measure.",
   ).toBeTruthy();
 
   const reportBugToolbarMarkup = renderToolbar({

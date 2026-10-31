@@ -1,4 +1,4 @@
-import type { DocumentSyncWorkerRequest } from "@/infrastructure/workers/document-sync-worker-protocol";
+import type { DocumentSyncWorkerInbound } from "@/infrastructure/workers/project-sync-worker-protocol";
 import {
   DocumentSyncWorkerClient,
   type DocumentSyncWorkerLike,
@@ -17,7 +17,7 @@ type DocumentSyncWorkerBootstrapMessage = {
 
 type BrowserDocumentSyncWorkerLike = DocumentSyncWorkerLike & {
   postMessage(
-    message: DocumentSyncWorkerRequest | DocumentSyncWorkerBootstrapMessage,
+    message: DocumentSyncWorkerInbound | DocumentSyncWorkerBootstrapMessage,
   ): void;
 };
 

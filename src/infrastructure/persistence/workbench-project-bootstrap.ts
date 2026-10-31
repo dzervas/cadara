@@ -10,6 +10,7 @@ import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed"
 import { WorkbenchPartReadiness } from "@/application/workspace/workbench-part-readiness";
 import type { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "./local-project-repository";
+import type { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import { createWorkbenchProjectSessionStore } from "./workbench-project-session-store";
 import {
   createDocumentRepositoryUrlStorageKey,
@@ -92,9 +93,14 @@ export function createWorkbenchProjectBootstrap(
     initialTabs.activeDocumentId = session.activeDocumentId;
   }
   const partReadiness = new WorkbenchPartReadiness();
-  let repository: Promise<LocalProjectRepository> | undefined;
+  let repository:
+    | Promise<{
+        projects: LocalProjectRepository;
+        documents: IndexedDbAutomergeDocumentRepository;
+      }>
+    | undefined;
   let initialProject: Promise<ProjectManifest> | undefined;
-  const getRepository = () => {
+  const openRepository = () => {
     if (!persistenceEnabled)
       throw new Error("Project persistence is disabled.");
     // Automerge initialization is independent of mounting the current part's shell.
@@ -114,19 +120,24 @@ export function createWorkbenchProjectBootstrap(
           storage,
           createDocumentRepositoryUrlStorageKey(projectNamespace),
         );
-        return new LocalProjectRepository(
-          new IndexedDbAutomergeDocumentRepository({
-            databaseName,
-            urlStore: urls,
-          }),
-          urls,
-          catalogUrls,
-          (docId) => partReadiness.ensure(docId),
-        );
+        const documents = new IndexedDbAutomergeDocumentRepository({
+          databaseName,
+          urlStore: urls,
+        });
+        return {
+          documents,
+          projects: new LocalProjectRepository(
+            documents,
+            urls,
+            catalogUrls,
+            (docId) => partReadiness.ensure(docId),
+          ),
+        };
       },
     );
     return repository;
   };
+  const getRepository = () => openRepository().then(({ projects }) => projects);
   return {
     persistenceEnabled,
     sessionStore,
@@ -138,6 +149,9 @@ export function createWorkbenchProjectBootstrap(
       owner: Parameters<WorkbenchPartReadiness["register"]>[0],
     ) => partReadiness.register(owner),
     getRepository,
+    /** The Repo holding catalog and manifests; project sync bridges it. */
+    getProjectAutomergeRepo: async () =>
+      (await openRepository()).documents.getOwnedAutomergeRepo(),
     /**
      * Opens the stored project, or creates one from the initial tabs. Returns
      * null when persistence is disabled: there is no project to load.

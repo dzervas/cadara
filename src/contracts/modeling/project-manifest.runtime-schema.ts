@@ -81,5 +81,12 @@ export function parseProjectManifest(
       !manifest.forkedFrom.version.trim())
   )
     return invalid("Fork origins require a project identity and version.");
+  if (
+    manifest.service &&
+    (!manifest.service.orgId.trim() || !manifest.service.projectId.trim())
+  )
+    return invalid(
+      "Service links require an organization and a project identity.",
+    );
   return { ok: true, value: manifest };
 }

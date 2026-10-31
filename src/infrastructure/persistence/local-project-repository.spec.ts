@@ -10,6 +10,7 @@ import { DocumentSyncWorkerClient } from "@/infrastructure/workers/document-sync
 import type { DocumentSyncWorkerLike } from "@/infrastructure/workers/document-sync-worker-client";
 import { createDocumentSyncWorkerMessageHandler } from "@/infrastructure/workers/document-sync-worker-runtime";
 import type { DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import { isProjectSyncWorkerRequest } from "@/infrastructure/workers/project-sync-worker-protocol";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { Repo } from "@automerge/automerge-repo";
 import * as Automerge from "@automerge/automerge";
@@ -515,7 +516,7 @@ test("overlapping worker load and project creation share one initialized part", 
   );
   const worker: DocumentSyncWorkerLike = {
     postMessage: (message) => {
-      void handler(message);
+      if (!isProjectSyncWorkerRequest(message)) void handler(message);
     },
     addEventListener: (_type, callback) => {
       listener = callback;
@@ -749,5 +750,51 @@ test("migration refuses writes when entries change during identity resolution", 
     ).toBe(true);
   } finally {
     await repo.shutdown();
+  }
+});
+
+test("an uploaded project records its service link, and a synced manifest joins another catalog with its part identities", async () => {
+  const owner = setup();
+  try {
+    const seed = await createSeedAuthoredModelDocument();
+    let project = unwrap(await owner.projects.create("Bracket", []));
+    project = unwrap(
+      await owner.projects.addPart(
+        project.projectId,
+        { docId: seed.documentId, name: "Base" },
+        seed,
+      ),
+    );
+    const manifestDocumentId = unwrap(
+      await owner.projects.manifestDocumentId(project.projectId),
+    );
+    const link = { orgId: "org", projectId: "remote" };
+    expect(
+      unwrap(await owner.projects.linkService(project.projectId, link)).service,
+    ).toEqual(link);
+
+    // A collaborator's browser: its own catalog and URL store, with the
+    // manifest delivered into the shared Repo by sync.
+    const guestUrls = new MemoryDocumentRepositoryUrlStore();
+    const guest = new LocalProjectRepository(
+      owner.documents,
+      guestUrls,
+      new MemoryDocumentRepositoryUrlStore(),
+    );
+    const adopted = unwrap(await guest.adoptManifest(manifestDocumentId));
+    expect(adopted.projectId).toBe(project.projectId);
+    expect(adopted.service).toEqual(link);
+    expect(guestUrls.get(seed.documentId)).toBe(
+      owner.urls.get(seed.documentId),
+    );
+    expect(
+      unwrap(await guest.list()).map((listed) => listed.projectId),
+    ).toEqual([project.projectId]);
+    expect(unwrap(await guest.adoptManifest(manifestDocumentId))).toEqual(
+      adopted,
+    );
+    expect(unwrap(await guest.list())).toHaveLength(1);
+  } finally {
+    await owner.repo.shutdown();
   }
 });

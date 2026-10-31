@@ -9,6 +9,7 @@ import type {
   ProjectManifest,
   ProjectEntry,
   ProjectResult,
+  ProjectServiceLink,
   ProjectReadmeDocument,
   ProjectDiscussionDocument,
 } from "@/contracts/modeling/project-manifest";
@@ -370,6 +371,59 @@ export class LocalProjectRepository {
         ...next.entries.filter((entry) => entry.kind !== "part"),
       ];
       return this.write(handle, next);
+    });
+  }
+
+  /** The Automerge document id of the project's manifest. */
+  manifestDocumentId(projectId: string) {
+    return this.run(async () => (await this.handle(projectId)).documentId);
+  }
+
+  linkService(projectId: string, service: ProjectServiceLink) {
+    return this.run(() =>
+      this.edit(projectId, (draft) => {
+        draft.service = service;
+      }),
+    );
+  }
+
+  /**
+   * Adds a manifest that arrived through project sync to this browser's
+   * catalog and records its entries' Automerge URLs, so its parts open
+   * from the synced documents rather than as new ones.
+   */
+  adoptManifest(automergeDocumentId: string) {
+    return this.run(async () => {
+      const url = `automerge:${automergeDocumentId}` as AutomergeUrl;
+      if (!isValidAutomergeUrl(url))
+        throw new Error("Invalid manifest document identity.");
+      const repo = await this.documents.getAutomergeRepository();
+      const handle = await repo.find<ProjectManifest>(url);
+      await handle.whenReady();
+      const manifest = this.checked(handle);
+      for (const entry of manifest.entries) {
+        const entryUrl = `automerge:${entry.automergeDocumentId}`;
+        if (!isValidAutomergeUrl(entryUrl))
+          throw new Error(`Invalid document identity for ${entry.name}.`);
+        const known = this.urls.get(entry.docId);
+        if (known && known !== entryUrl)
+          throw new Error(
+            `${entry.name} is already stored in this browser as another document.`,
+          );
+        if (!known) this.urls.set(entry.docId, entryUrl);
+      }
+      const catalog = await this.catalog();
+      if (
+        !catalog
+          .doc()
+          .projects.some((project) => project.projectId === manifest.projectId)
+      ) {
+        catalog.change((draft) => {
+          draft.projects.push({ projectId: manifest.projectId, url });
+        });
+        await repo.flush?.([catalog.documentId]);
+      }
+      return manifest;
     });
   }
 

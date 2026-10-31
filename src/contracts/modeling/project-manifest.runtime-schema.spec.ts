@@ -32,6 +32,11 @@ test("project manifests accept reserved assemblies and a fork origin", () => {
   expect(parseProjectManifest(value)).toEqual({ ok: true, value });
 });
 
+test("uploaded manifests carry their service project link", () => {
+  const value = { ...manifest(), service: { orgId: "org", projectId: "p1" } };
+  expect(parseProjectManifest(value)).toEqual({ ok: true, value });
+});
+
 test.each([
   { ...manifest(), schemaVersion: 2 },
   { ...manifest(), extra: true },
@@ -51,6 +56,8 @@ test.each([
     ...manifest(),
     versions: [{ label: "v1", createdAt: "bad date", heads: {} }],
   },
+  { ...manifest(), service: { orgId: " ", projectId: "p1" } },
+  { ...manifest(), service: { orgId: "org", projectId: "p1", extra: 1 } },
   {
     ...manifest(),
     versions: [

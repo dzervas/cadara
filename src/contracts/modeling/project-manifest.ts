@@ -13,6 +13,12 @@ export interface ProjectVersion {
   heads: Record<string, string[]>;
 }
 
+/** The CADara service project a local project syncs with. */
+export interface ProjectServiceLink {
+  orgId: string;
+  projectId: string;
+}
+
 export interface ProjectManifest {
   format: "cadara-project";
   schemaVersion: 1;
@@ -21,6 +27,11 @@ export interface ProjectManifest {
   entries: ProjectEntry[];
   versions: ProjectVersion[];
   forkedFrom?: { projectId: string; version: string };
+  /**
+   * Set once the project is uploaded. It lives in the synced manifest, not
+   * in browser storage, so every collaborator's copy knows where it syncs.
+   */
+  service?: ProjectServiceLink;
 }
 
 export interface ProjectReadmeDocument {

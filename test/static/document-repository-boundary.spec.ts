@@ -30,7 +30,9 @@ test("test/static/document-repository-boundary.spec.ts", () => {
       ) &&
       !relativePath.includes(
         "src/infrastructure/persistence/shared-memory-automerge-storage.fixtures.ts",
-      )
+      ) &&
+      // Project sync's network adapters join the repository's own Repo.
+      !relativePath.startsWith("src/infrastructure/project-sync/")
     ) {
       offenders.push(relativePath);
     }

@@ -7,10 +7,12 @@ import {
   createDocumentSyncWorkerDispatcher,
   type DocumentSyncWorkerBootstrapMessage,
 } from "@/infrastructure/workers/document-sync-worker-dispatcher";
-import type {
-  DocumentSyncWorkerRequest,
-  DocumentSyncWorkerResponse,
-} from "@/infrastructure/workers/document-sync-worker-protocol";
+import {
+  isProjectSyncWorkerRequest,
+  type DocumentSyncWorkerInbound,
+  type DocumentSyncWorkerOutbound,
+} from "@/infrastructure/workers/project-sync-worker-protocol";
+import { createProjectSyncWorkerHost } from "@/infrastructure/project-sync/project-sync-worker-host";
 import { createIndexedDbLocalFileBindingStore } from "@/infrastructure/persistence/local-file-binding-store";
 import {
   createIndexedDbMaterializedDocumentStore,
@@ -25,12 +27,12 @@ function reportMaterializedDocumentEvent(event: MaterializedDocumentEvent) {
 }
 
 interface DocumentSyncWorkerGlobalScope {
-  postMessage(message: DocumentSyncWorkerResponse): void;
+  postMessage(message: DocumentSyncWorkerOutbound): void;
   addEventListener(
     type: "message",
     listener: (
       event: MessageEvent<
-        DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest
+        DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerInbound
       >,
     ) => void,
   ): void;
@@ -45,35 +47,46 @@ function createWorkerMessageHandler(search: string) {
     workerSearchParams.get("cadLocalPeerSync") === "1";
   const databaseName =
     workerSearchParams.get("cadRepositoryDbName") ?? "cad-authored-documents";
-  return createDocumentSyncWorkerMessageHandler(
+  const repository = createIndexedDbAutomergeDocumentRepository({
+    urlStore: repositoryUrlStore,
+    databaseName,
+    // A dev server's worker is no content-named bundle (its modules
+    // change under the same URL), so it never answers from the cache:
+    // a record is only trusted by the build that materialized it.
+    materializedDocuments: import.meta.env.DEV
+      ? undefined
+      : {
+          store: createIndexedDbMaterializedDocumentStore({
+            databaseName: `${databaseName}-materialized-documents`,
+          }),
+          compatibility: self.location.pathname,
+          report: reportMaterializedDocumentEvent,
+        },
+    localPeerSync: localPeerSyncEnabled
+      ? {
+          channelName:
+            workerSearchParams.get("cadLocalPeerSyncChannel") ?? undefined,
+        }
+      : false,
+  });
+  const handleDocumentMessage = createDocumentSyncWorkerMessageHandler(
     {
-      repository: createIndexedDbAutomergeDocumentRepository({
-        urlStore: repositoryUrlStore,
-        databaseName,
-        // A dev server's worker is no content-named bundle (its modules
-        // change under the same URL), so it never answers from the cache:
-        // a record is only trusted by the build that materialized it.
-        materializedDocuments: import.meta.env.DEV
-          ? undefined
-          : {
-              store: createIndexedDbMaterializedDocumentStore({
-                databaseName: `${databaseName}-materialized-documents`,
-              }),
-              compatibility: self.location.pathname,
-              report: reportMaterializedDocumentEvent,
-            },
-        localPeerSync: localPeerSyncEnabled
-          ? {
-              channelName:
-                workerSearchParams.get("cadLocalPeerSyncChannel") ?? undefined,
-            }
-          : false,
-      }),
+      repository,
       repositoryUrlStore,
       bindingStore: createIndexedDbLocalFileBindingStore(),
     },
     (message) => workerScope.postMessage(message),
   );
+  // Project sync joins the same Repo, so remote part changes reach open
+  // documents through the repository's peer-change path.
+  const projectSync = createProjectSyncWorkerHost({
+    getRepo: () => repository.getOwnedAutomergeRepo(),
+    postMessage: (message) => workerScope.postMessage(message),
+  });
+  return (request: DocumentSyncWorkerInbound) =>
+    isProjectSyncWorkerRequest(request)
+      ? projectSync.handle(request)
+      : handleDocumentMessage(request);
 }
 
 const dispatchWorkerMessage = createDocumentSyncWorkerDispatcher(
@@ -84,7 +97,7 @@ workerScope.addEventListener(
   "message",
   (
     event: MessageEvent<
-      DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerRequest
+      DocumentSyncWorkerBootstrapMessage | DocumentSyncWorkerInbound
     >,
   ) => {
     dispatchWorkerMessage(event.data);

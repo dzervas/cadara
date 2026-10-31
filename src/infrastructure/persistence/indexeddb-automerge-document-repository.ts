@@ -215,6 +215,15 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   getAutomergeRepository() {
     return this.getRepo();
   }
+  /**
+   * The automerge-repo Repo this repository built, for adapters that extend
+   * its network (project sync). An injected `repo` has no such Repo.
+   */
+  async getOwnedAutomergeRepo(): Promise<Repo> {
+    if (this.options.repo)
+      throw new Error("An injected repository has no owned Automerge Repo.");
+    return (await this.getRepo()) as Repo;
+  }
   /** The recorder the repository's own Repo stores through; null for an injected Repo without one. */
   private getChunkKeyRecorder() {
     if (!this.chunkKeyRecorder && !this.options.repo)

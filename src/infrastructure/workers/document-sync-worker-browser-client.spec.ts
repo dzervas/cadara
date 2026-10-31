@@ -10,6 +10,7 @@ import {
   takeStartedBrowserDocumentSyncWorkerClient,
 } from "@/infrastructure/workers/document-sync-worker-browser-client";
 import type { DocumentSyncWorkerLike } from "@/infrastructure/workers/document-sync-worker-client";
+import type { DocumentSyncWorkerInbound } from "@/infrastructure/workers/project-sync-worker-protocol";
 
 test("createBrowserDocumentSyncWorkerClient bootstraps the worker search string and owns worker lifecycle through the exported seam", async () => {
   const worker = new FakeBrowserWorker();
@@ -144,7 +145,7 @@ class FakeBrowserWorker implements DocumentSyncWorkerLike {
     | null = null;
 
   postMessage(
-    message: DocumentSyncWorkerRequest | { kind: "bootstrap"; search: string },
+    message: DocumentSyncWorkerInbound | { kind: "bootstrap"; search: string },
   ) {
     if (message.kind === "bootstrap") {
       this.bootstrapMessages.push(message);

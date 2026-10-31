@@ -1,16 +1,23 @@
 import type { RequestId } from "@/contracts/shared/ids";
 import type { DocumentSyncNormalizeResult, DocumentSyncSubscriptionId, DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
+import {
+  isProjectSyncWorkerResponse,
+  type DocumentSyncWorkerInbound,
+  type DocumentSyncWorkerOutbound,
+  type ProjectSyncWorkerRequest,
+  type ProjectSyncWorkerResponse,
+} from "@/infrastructure/workers/project-sync-worker-protocol";
 
 export interface DocumentSyncWorkerLike {
-  postMessage(message: DocumentSyncWorkerRequest): void;
+  postMessage(message: DocumentSyncWorkerInbound): void;
   addEventListener(
     type: "message",
-    listener: (event: MessageEvent<DocumentSyncWorkerResponse>) => void,
+    listener: (event: MessageEvent<DocumentSyncWorkerOutbound>) => void,
   ): void;
   removeEventListener(
     type: "message",
-    listener: (event: MessageEvent<DocumentSyncWorkerResponse>) => void,
+    listener: (event: MessageEvent<DocumentSyncWorkerOutbound>) => void,
   ): void;
   terminate?(): void;
 }
@@ -45,9 +52,16 @@ export class DocumentSyncWorkerClient {
     (status: DocumentSyncWriteStatus) => void
   >();
   private readonly latestWriteStatusSequences = new Map<string, number>();
+  private readonly projectSyncListeners = new Set<
+    (message: ProjectSyncWorkerResponse) => void
+  >();
   private readonly handleMessage = (
-    event: MessageEvent<DocumentSyncWorkerResponse>,
+    event: MessageEvent<DocumentSyncWorkerOutbound>,
   ) => {
+    if (isProjectSyncWorkerResponse(event.data)) {
+      for (const listener of this.projectSyncListeners) listener(event.data);
+      return;
+    }
     this.receiveMessage(event.data);
   };
 
@@ -315,6 +329,20 @@ export class DocumentSyncWorkerClient {
     };
   }
 
+  /** Project sync messages (see project-sync-worker-protocol.ts). */
+  postProjectSyncMessage(message: ProjectSyncWorkerRequest) {
+    if (!this.disposed) this.worker.postMessage(message);
+  }
+
+  subscribeToProjectSync(
+    listener: (message: ProjectSyncWorkerResponse) => void,
+  ) {
+    this.projectSyncListeners.add(listener);
+    return () => {
+      this.projectSyncListeners.delete(listener);
+    };
+  }
+
   subscribeToWriteStatus(listener: (status: DocumentSyncWriteStatus) => void) {
     this.writeStatusListeners.add(listener);
     return () => {
@@ -335,6 +363,7 @@ export class DocumentSyncWorkerClient {
     }
     this.documentListeners.clear();
     this.writeStatusListeners.clear();
+    this.projectSyncListeners.clear();
     this.worker.terminate?.();
   }
 

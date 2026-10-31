@@ -220,6 +220,8 @@ interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
   projectControls?: ReactNode;
   projectLoading?: boolean;
+  /** The synced project's role cannot edit: authoring tools are disabled. */
+  readOnly?: boolean;
   onActivateDocumentTab: (documentId: DocumentId) => void;
   onCloseDocumentTab: (documentId: DocumentId) => void;
   onCreateNewDocument: () => Promise<DocumentId>;
@@ -238,6 +240,7 @@ export function CadWorkbench({
   tabsState,
   projectControls,
   projectLoading = false,
+  readOnly = false,
   onActivateDocumentTab,
   onCloseDocumentTab,
   onCreateNewDocument,
@@ -2000,6 +2003,7 @@ export function CadWorkbench({
             <WorkspaceToolbar
               accountMenu={accountMenu}
               historyAvailability={stableToolbarHistoryAvailability}
+              readOnly={readOnly}
               showBrowserStorageWarning={showBrowserStorageWarning}
               localSaving={localSaving}
               {...toolbarCallbacks}

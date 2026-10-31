@@ -157,9 +157,22 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     [context, pendingWrites, report],
   );
 
+  /** Shows a manifest the active project gained in place (e.g. its service link). */
+  const replaceProject = useCallback(
+    async (manifest: ProjectManifest) => {
+      const available = unwrap(await (await context.getRepository()).list());
+      setProjects(available);
+      setProject(manifest);
+    },
+    [context, unwrap],
+  );
+
   return {
     project,
     projects,
+    getRepository: context.getRepository,
+    getProjectAutomergeRepo: context.getProjectAutomergeRepo,
+    replaceProject,
     pendingWrites,
     sessionKey,
     persistenceEnabled: context.persistenceEnabled,

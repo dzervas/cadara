@@ -79,6 +79,11 @@ const TOOLBAR_PILL_GAP_PX = 2;
 const TOOLBAR_SHADOW_GUTTER_PX = 32;
 // Leave 56px between the final tool pill and search, including the 8px grid gap.
 const TOOLBAR_SEARCH_SHADOW_RESERVE_PX = 48;
+/** Tools that only inspect the model stay usable in a read-only project. */
+const READ_ONLY_TOOL_IDS: ReadonlySet<string> = new Set([
+  "measure",
+  "sectionView",
+]);
 const PART_TOOL_DURING_SKETCH_REASON =
   "Part tools are unavailable while sketching. Finish Sketch first.";
 type VisibleToolbarSection = ReturnType<
@@ -92,6 +97,8 @@ interface ToolbarMeasurement {
 interface WorkspaceToolbarProps {
   accountMenu?: ReactNode;
   historyAvailability?: EditorHistoryAvailability;
+  /** The user's project role cannot edit: only inspection tools stay enabled. */
+  readOnly?: boolean;
   showBrowserStorageWarning?: boolean;
   /** A local save is underway in any open tab: the logo shows its ring. */
   localSaving?: boolean;
@@ -117,6 +124,7 @@ interface WorkspaceToolbarProps {
 export const WorkspaceToolbar = memo(function WorkspaceToolbar({
   accountMenu,
   historyAvailability,
+  readOnly = false,
   showBrowserStorageWarning = false,
   localSaving = false,
   onNewDocument = () => undefined,
@@ -174,6 +182,7 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
     hasActiveSketchSession || activeToolId === "sketch";
 
   const isToolDisabled = (tool: RegisteredToolDefinition) =>
+    (readOnly && !READ_ONLY_TOOL_IDS.has(tool.id)) ||
     (tool.id === "undo" && !visibleHistory.canUndo) ||
     (tool.id === "redo" && !visibleHistory.canRedo) ||
     (tool.id === "import" &&

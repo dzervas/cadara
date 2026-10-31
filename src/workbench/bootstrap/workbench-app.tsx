@@ -8,9 +8,12 @@ import {
   useState,
 } from "react";
 
-import { Alert } from "@mantine/core";
+import { Alert, Group } from "@mantine/core";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
+import { canEditProjectParts } from "@/application/project-sync/project-service-use-cases";
 import { useWorkbenchProject } from "./use-workbench-project";
+import { useProjectSync, type ProjectSync } from "./use-project-sync";
+import { ProjectSyncControls } from "./project-sync-controls";
 
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
@@ -99,6 +102,7 @@ interface WorkbenchAppProps {
 export function WorkbenchApp(props: WorkbenchAppProps) {
   // Without a document repository there is no durable project (see createWorkbenchProjectBootstrap).
   const projects = useWorkbenchProject(props.documentSyncWorkerClient !== null);
+  const sync = useProjectSync(props.documentSyncWorkerClient, projects);
   if (projects.initialFailure)
     return (
       <Alert color="red" title="Project could not be opened">
@@ -110,6 +114,7 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
       key={projects.sessionKey}
       {...props}
       projects={projects}
+      sync={sync}
     />
   );
 }
@@ -121,7 +126,11 @@ function ProjectWorkbenchApp({
   performanceTelemetry = noopPerformanceTelemetry,
   runtimeExtensionRegistries,
   projects,
-}: WorkbenchAppProps & { projects: ReturnType<typeof useWorkbenchProject> }) {
+  sync,
+}: WorkbenchAppProps & {
+  projects: ReturnType<typeof useWorkbenchProject>;
+  sync: ProjectSync;
+}) {
   const errorReporter = useErrorReporter();
   const project = projects.project;
   const { saveParts, saveSession, registerPartReadiness } = projects;
@@ -362,6 +371,11 @@ function ProjectWorkbenchApp({
     }
   }, [documentRepository, tabsState.tabs]);
 
+  const { setActiveDocument } = sync;
+  useEffect(() => {
+    setActiveDocument(tabsState.activeDocumentId);
+  }, [setActiveDocument, tabsState.activeDocumentId]);
+
   const createNewDocumentTab = useCallback(async () => {
     const documentId = generateDocumentId();
     tabsDispatch({
@@ -438,37 +452,53 @@ function ProjectWorkbenchApp({
             )}
             <CadWorkbench
               projectLoading={!projectApplied}
+              readOnly={!canEditProjectParts(sync.status?.role ?? null)}
               projectControls={
                 project && (
-                  <ProjectSwitcher
-                    projects={projects.projects}
-                    activeProjectId={project.projectId}
-                    busy={projects.busy || localSaving}
-                    onSwitch={(projectId) => {
-                      void waitForLocalChanges()
-                        .then(() =>
-                          projects.select((repository) =>
-                            repository.open(projectId),
-                          ),
-                        )
-                        .catch(projects.report);
-                    }}
-                    onCreate={(name) => {
-                      void waitForLocalChanges()
-                        .then(() =>
-                          projects.select((repository) =>
-                            repository.create(name, [
-                              {
-                                docId: generateDocumentId(),
-                                name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
-                                kind: "part",
-                              },
-                            ]),
-                          ),
-                        )
-                        .catch(projects.report);
-                    }}
-                  />
+                  <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+                    <ProjectSwitcher
+                      projects={projects.projects}
+                      activeProjectId={project.projectId}
+                      busy={projects.busy || localSaving}
+                      onSwitch={(projectId) => {
+                        void waitForLocalChanges()
+                          .then(() =>
+                            projects.select((repository) =>
+                              repository.open(projectId),
+                            ),
+                          )
+                          .catch(projects.report);
+                      }}
+                      onCreate={(name) => {
+                        void waitForLocalChanges()
+                          .then(() =>
+                            projects.select((repository) =>
+                              repository.create(name, [
+                                {
+                                  docId: generateDocumentId(),
+                                  name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
+                                  kind: "part",
+                                },
+                              ]),
+                            ),
+                          )
+                          .catch(projects.report);
+                      }}
+                    />
+                    <ProjectSyncControls
+                      sync={sync}
+                      project={project}
+                      onOpened={(manifest) => {
+                        void waitForLocalChanges()
+                          .then(() =>
+                            projects.select((repository) =>
+                              repository.open(manifest.projectId),
+                            ),
+                          )
+                          .catch(projects.report);
+                      }}
+                    />
+                  </Group>
                 )
               }
               tabsState={tabsState}
