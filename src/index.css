@@ -120,12 +120,18 @@ input {
   will-change: transform, box-shadow;
 }
 
-.workbench-spark-logo:where(:hover, [data-hovered]) {
+/* The :not() pair outranks Mantine's ActionIcon hover rule, which would
+   repaint the tile with the graphite primary and white ink. */
+.workbench-spark-logo:where(:hover, [data-hovered]):not(:disabled):not(
+    [data-disabled]
+  ) {
+  background: var(--workbench-spark-accent-hover);
   box-shadow: var(--workbench-spark-logo-shadow-hover);
+  color: var(--workbench-spark-accent-ink);
   transform: translateY(-1px) scale(1.025);
 }
 
-.workbench-spark-logo:where(:active) {
+.workbench-spark-logo:where(:active):not(:disabled):not([data-disabled]) {
   transform: translateY(0) scale(1);
 }
 
@@ -213,7 +219,9 @@ input {
   .workbench-toolbar-action:where(:hover, [data-hovered]):not(:disabled):not(
       [data-disabled]
     ),
-  .workbench-spark-logo:where(:hover, [data-hovered]) {
+  .workbench-spark-logo:where(:hover, [data-hovered]):not(:disabled):not(
+      [data-disabled]
+    ) {
     transform: none;
   }
 
