@@ -75,6 +75,10 @@ async function selectionSample(
     "none",
   );
   const readoutAt = await waitForWatch(page, "measureReadout");
+  // The reflected wait matches by substring (`edge_1` is in `edge_12`).
+  const selected = await debugStateField(page, "selectionTargets");
+  if (selected !== id)
+    throw new Error(`the act selected "${selected}", not "${id}"`);
   timing.metrics = {
     ...metrics,
     measureReadoutMs: round(readoutAt - timing.startMs),
@@ -85,50 +89,9 @@ async function selectionSample(
 }
 
 /**
- * A viewport point where the hover target matches `pattern` and an untimed
- * trial press selects exactly that target. On the wheel a press can select
- * another primitive than the hovered one (a face hover pressed selects an
- * edge, an edge hover a vertex), so such points are passed over.
- */
-async function findPressSelectablePoint(
-  page: Page,
-  targets: readonly string[],
-  pattern: RegExp,
-) {
-  for (const target of targets) {
-    const found = await findHoverPoint(
-      page,
-      [target],
-      (hovered) => pattern.test(hovered),
-      40,
-    );
-    if (!found) continue;
-    await glideToHover(page, found.at, found.hovered);
-    await page.mouse.down();
-    await page.mouse.up();
-    await waitInPage(
-      page,
-      () =>
-        (
-          window as unknown as {
-            __cadaraDebug?: {
-              getState(): { selectionTargets: string } | null;
-            };
-          }
-        ).__cadaraDebug?.getState()?.selectionTargets !== "Nothing selected",
-      null,
-    );
-    const selected = await debugStateField(page, "selectionTargets");
-    await clearSelection(page);
-    if (selected === found.hovered) return found;
-  }
-  return null;
-}
-
-/**
  * Viewport selection of a face/edge: a real press where the hover target
- * is one and pressing selects it (findPressSelectablePoint), otherwise the
- * debug selection (metric `viaDebugSelect` = 1).
+ * is one (the press selects the hovered primitive), otherwise the debug
+ * selection (metric `viaDebugSelect` = 1).
  */
 async function prepareViewportSelection(
   session: Session,
@@ -138,10 +101,11 @@ async function prepareViewportSelection(
   const { page } = session;
   const targets = await selectableTargets(page, pattern);
   if (targets.length === 0) return `no selectable body ${what}`;
-  const found = await findPressSelectablePoint(
+  const found = await findHoverPoint(
     page,
     targets.slice(0, 8),
-    pattern,
+    (hovered) => pattern.test(hovered),
+    40,
   );
   if (!found) {
     return async () =>
