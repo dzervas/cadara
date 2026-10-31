@@ -121,14 +121,21 @@ function appendStrokeAttributes(
   attributes: string[],
   style: SketchVectorStyle | null,
 ) {
-  const stroke = style?.stroke;
-  if (!stroke) {
+  // No style at all is an unstyled entity and keeps the default line; an
+  // authored style without a stroke means the stroke was turned off.
+  if (!style) {
     attributes.push(
       'stroke="black"',
       'stroke-width="1"',
       'vector-effect="non-scaling-stroke"',
       'fill="none"',
     );
+    return;
+  }
+
+  const stroke = style.stroke;
+  if (!stroke) {
+    attributes.push('stroke="none"', 'fill="none"');
     return;
   }
 

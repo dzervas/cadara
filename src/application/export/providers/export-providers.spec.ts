@@ -7,7 +7,10 @@ import type {
   MeshTriangle,
   StepWriterOptions,
 } from "@/contracts/export/capabilities";
-import type { SketchVectorExportModel } from "@/contracts/export/sketch-vector";
+import type {
+  SketchVectorEntity,
+  SketchVectorExportModel,
+} from "@/contracts/export/sketch-vector";
 import type { BodyAppearance } from "@/contracts/modeling/body-appearance";
 import type { DocumentExportDiagnostic as ExportDiagnostic } from "@/contracts/modeling/export";
 import type { DurableRef } from "@/contracts/shared/references";
@@ -16,6 +19,7 @@ import { svgSketchExportProvider } from "@/application/export/providers/svg-sket
 import { stlExportProvider } from "@/application/export/providers/stl-export-provider";
 import { stepExportProvider } from "@/application/export/providers/step-export-provider";
 import { threeMfExportProvider } from "@/application/export/providers/threemf-export-provider";
+import { resolveAuthoredSketchVectorStyle } from "@/core/export/sketch-vector-export-model";
 
 const MOCK_BODY_TARGET: DurableRef = { kind: "body", bodyId: "body_test" };
 
@@ -640,6 +644,60 @@ async function exportThreeMfModelXml(targetAppearance: BodyAppearance | null) {
   if (!model) throw new Error("3MF package should contain 3D/3dmodel.model.");
   return strFromU8(model);
 }
+
+test("SVG sketch export hides an authored disabled stroke but keeps the default stroke for unstyled entities", async () => {
+  const line = (
+    entityId: SketchVectorEntity["entityId"],
+    style: Parameters<typeof resolveAuthoredSketchVectorStyle>[0],
+  ): SketchVectorEntity => ({
+    kind: "lineSegment",
+    entityId,
+    label: entityId,
+    start: [0, 0],
+    end: [10, 0],
+    isConstruction: false,
+    style: resolveAuthoredSketchVectorStyle(style),
+  });
+  const result = await svgSketchExportProvider.export({
+    target: { kind: "sketch", sketchId: "sketch_export" },
+    targetLabel: "Stroke Sketch",
+    targetAppearance: null,
+    options: svgSketchExportProvider.getDefaultOptions(),
+    capabilities: createMockCapabilities({
+      sketchModel: {
+        documentId: "doc_export",
+        revisionId: "rev_0001",
+        sketchId: "sketch_export",
+        label: "Stroke Sketch",
+        units: "millimeter",
+        entities: [
+          line("sketch_entity_disabled", {
+            fillMode: "solid",
+            strokeEnabled: false,
+          }),
+          line("sketch_entity_unstyled", undefined),
+        ],
+        regions: [],
+        diagnostics: [],
+      },
+    }),
+  });
+  if (!result.ok || typeof result.payload !== "string")
+    throw new Error("SVG sketch export should succeed with text payload.");
+  const entityElement = (entityId: string) =>
+    new RegExp(`<path [^>]*data-entity-id="${entityId}"[^>]*/>`).exec(
+      result.payload as string,
+    )?.[0] ?? "";
+
+  expect(
+    entityElement("sketch_entity_disabled"),
+    "an explicitly disabled stroke exports invisible",
+  ).toContain('stroke="none"');
+  expect(
+    entityElement("sketch_entity_unstyled"),
+    "an entity without any authored style keeps the default visible stroke",
+  ).toContain('stroke="black"');
+});
 
 test("3MF export writes the body's display colour as a colour group the object references", async () => {
   for (const [appearance, expected] of [
