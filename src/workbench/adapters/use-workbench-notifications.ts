@@ -10,6 +10,7 @@ import type { WorkspaceSnapshot } from "@/contracts/modeling/schema";
 import type { FeatureId } from "@/contracts/shared/ids";
 import type { WorkbenchNotificationModel } from "@/components/layout/workbench-notification-model";
 import { subscribeBrowserOccWorkerFailure } from "@/infrastructure/occ/browser-kernel-runtime";
+import { isOccKernelVersionRetiredFailure } from "@/infrastructure/occ/kernel-version-retired";
 import { handleWorkbenchFailure } from "@/workbench/commands/failure-policy";
 import {
   followFeatureErrorNotification,
@@ -29,6 +30,16 @@ interface WorkbenchNotificationsInput {
   >;
 }
 
+/**
+ * Why the document's stored state is not open. A thrown initialization says
+ * nothing about the stored history (an engine or worker failure), so only a
+ * reload is offered; a history failure can be resolved by resetting it.
+ */
+export interface WorkbenchRestoreFailure {
+  kind: "history" | "initialization";
+  message: string;
+}
+
 export function useWorkbenchNotifications({
   currentDocument,
   errorReporter,
@@ -36,17 +47,17 @@ export function useWorkbenchNotifications({
 }: WorkbenchNotificationsInput) {
   const [restoreNotice, setRestoreNotice] = useState<{
     owner: WorkbenchNotificationsInput["modelingService"];
-    message: string | null;
+    failure: WorkbenchRestoreFailure | null;
   } | null>(null);
   // A restore notice belongs to the service/document that produced it.
-  const restoreMessage = restoreNotice?.owner === modelingService
-    ? restoreNotice.message
+  const restoreFailure = restoreNotice?.owner === modelingService
+    ? restoreNotice.failure
     : null;
-  const setRestoreMessage = useCallback((message: string | null) => {
+  const setRestoreFailure = useCallback((failure: WorkbenchRestoreFailure | null) => {
     setRestoreNotice((current) =>
-      current?.owner === modelingService && current.message === message
+      current?.owner === modelingService && current.failure === failure
         ? current
-        : { owner: modelingService, message },
+        : { owner: modelingService, failure },
     );
   }, [modelingService]);
   const [workbenchStatus, setWorkbenchStatus] = useState<{
@@ -154,12 +165,13 @@ export function useWorkbenchNotifications({
   useEffect(() => {
     let disposed = false;
     let readVersion = 0;
-    let observedMessage: string | null | undefined;
-    const updateRestoreMessage = (message: string | null) => {
+    let observedFailure: string | null | undefined;
+    const updateRestoreFailure = (failure: WorkbenchRestoreFailure | null) => {
       // Reobserving the same failure must not reopen a dismissed notice.
-      if (observedMessage === message) return;
-      observedMessage = message;
-      setRestoreMessage(message);
+      const key = failure && `${failure.kind}:${failure.message}`;
+      if (observedFailure === key) return;
+      observedFailure = key;
+      setRestoreFailure(failure);
     };
 
     // Restore failures describe current document state, not a permanent startup event.
@@ -171,14 +183,15 @@ export function useWorkbenchNotifications({
         }
 
         if (state.kind !== "failed") {
-          updateRestoreMessage(null);
+          updateRestoreFailure(null);
           return;
         }
 
         const diagnostic = state.diagnostics[0];
         const message =
           diagnostic?.message ?? "Operation history restore failed.";
-        updateRestoreMessage(message);
+        // A thrown initialization rejects this read instead (below).
+        updateRestoreFailure({ kind: "history", message });
         handleWorkbenchFailure({
           appError: createAppError({
             code: "workbench/action-failed",
@@ -209,10 +222,15 @@ export function useWorkbenchNotifications({
         });
       }, (error: unknown) => {
         if (disposed || version !== readVersion) return;
+        // The update notification asks for the reload; nothing else applies.
+        if (isOccKernelVersionRetiredFailure(error)) {
+          updateRestoreFailure(null);
+          return;
+        }
         const message = error instanceof Error
           ? error.message
           : "Modeling service initialization failed unexpectedly.";
-        updateRestoreMessage(message);
+        updateRestoreFailure({ kind: "initialization", message });
         handleWorkbenchFailure({
           appError: createAppError({
             code: "workbench/action-failed",
@@ -237,12 +255,12 @@ export function useWorkbenchNotifications({
       disposed = true;
       unsubscribe();
     };
-  }, [errorReporter, modelingService, setRestoreMessage]);
+  }, [errorReporter, modelingService, setRestoreFailure]);
 
   return {
     reportDocumentFileActionFailure,
-    restoreMessage,
-    setRestoreMessage,
+    restoreFailure,
+    setRestoreFailure,
     setWorkbenchStatusNotification,
     showWorkbenchError,
     showWorkbenchInfo,

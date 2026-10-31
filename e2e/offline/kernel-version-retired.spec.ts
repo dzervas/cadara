@@ -16,7 +16,8 @@ import {
 // with that 404 itself. The tab is uncontrolled (a failed or blocked worker
 // install), so no waiting worker raises the usual update prompt: the kernel
 // worker, its client and the notification must turn the 404 into a reload
-// outcome, and the tab must never request another kernel version.
+// outcome, and the tab must never request another kernel version. The
+// document and project surfaces that see the same failure stay quiet.
 test.use({ serviceWorkers: "block" });
 
 test("a tab whose kernel version a deploy retired shows 'CADara was updated' and recovers on Reload", async ({
@@ -39,6 +40,35 @@ test("a tab whose kernel version a deploy retired shows 'CADara was updated' and
       .filter({ hasText: "CADara was updated" });
     await expect(notice).toBeVisible({ timeout: 60_000 });
     await expect(notice).toContainText("Reload to continue");
+    // Every modeling call now fails with the retired kernel, including the
+    // document's first snapshot. Once that failure reached the editor, the
+    // restore, refresh, local-file-sync and project surfaces have all seen
+    // it (without withholding, all five were already rendered at the first
+    // check after this signal); none may offer its own recovery (above all
+    // not the destructive "Reset stored history"): the reload is the only
+    // outcome.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (window.__cadaraDebug?.getTrace().entries ?? []).some(
+              (entry) =>
+                entry.kind === "effect-failed" &&
+                entry.failure.type === "effect.snapshotFailed",
+            ),
+          ),
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+    for (const surface of [
+      "History restore failed",
+      "Reset stored history",
+      "Document could not be opened",
+      "Document refresh failed",
+      "Local file sync restore failed",
+      "Project could not be saved",
+    ])
+      await expect(page.getByText(surface)).toHaveCount(0);
     expect(kernelRequests.length).toBeGreaterThan(0);
     for (const url of kernelRequests)
       expect(

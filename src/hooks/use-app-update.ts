@@ -3,14 +3,13 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
 import { messageSW } from "workbox-window";
 
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
-import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
+import { useOccKernelVersionRetired } from "@/hooks/use-occ-kernel-version-retired";
 import {
   isServiceWorkerInstallDiagnostic,
   type ServiceWorkerInstallDiagnostic,
@@ -293,11 +292,7 @@ export function useAppUpdate(waitForLocalChanges: () => Promise<void>) {
     onRegisterError: reportDeveloperFailure("serviceWorker.register"),
   });
 
-  const kernelVersionRetired = useSyncExternalStore(
-    browserOccKernelVersionRetired.subscribe,
-    browserOccKernelVersionRetired.getSnapshot,
-    browserOccKernelVersionRetired.getSnapshot,
-  );
+  const kernelVersionRetired = useOccKernelVersionRetired();
 
   async function reload() {
     setPhase("saving");

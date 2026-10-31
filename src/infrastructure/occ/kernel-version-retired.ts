@@ -1,3 +1,5 @@
+import type { ErrorReporter } from "@/contracts/errors";
+
 /**
  * The server no longer publishes this tab's kernel version: a newer deploy
  * replaced it, because every deploy ships exactly one
@@ -12,6 +14,35 @@ export class OccKernelVersionRetiredError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Whether `error`, or an error it wraps, is a retired kernel. Every later
+ * modeling call fails with it; the update notification is the only outcome.
+ */
+export function isOccKernelVersionRetiredFailure(error: unknown) {
+  for (
+    let current = error;
+    typeof current === "object" && current !== null;
+    current = (current as { cause?: unknown }).cause
+  )
+    if (current instanceof OccKernelVersionRetiredError) return true;
+  return false;
+}
+
+/**
+ * A retired kernel is a deploy, not a defect: failures it causes are not
+ * reported.
+ */
+export function withoutOccKernelVersionRetiredReports(
+  reporter: ErrorReporter,
+): ErrorReporter {
+  return {
+    report: (error, metadata) =>
+      isOccKernelVersionRetiredFailure(error)
+        ? null
+        : reporter.report(error, metadata),
+  };
 }
 
 /** Whether the server answers this tab's kernel URL with 404. */

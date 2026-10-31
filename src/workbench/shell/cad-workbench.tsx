@@ -152,6 +152,7 @@ import { createTopologyDebugSummary } from "@/core/modeling/topology-debug";
 import { useCadaraDebugPlatform } from "@/workbench/debug/use-cadara-debug-platform";
 import { useEditorState } from "@/hooks/use-editor-state";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
+import { useOccKernelVersionRetired } from "@/hooks/use-occ-kernel-version-retired";
 import { useFeatureEditing } from "@/hooks/use-feature-editing";
 
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
@@ -290,10 +291,12 @@ export function CadWorkbench({
     () => setGraphicsUnavailable(true),
     [],
   );
-  const documentRefreshFailureNotification =
-    getDocumentRefreshFailureNotification(machineState, () =>
-      dispatch({ type: "document.refreshRequested" }),
-    );
+  const kernelVersionRetired = useOccKernelVersionRetired();
+  const documentRefreshFailureNotification = kernelVersionRetired
+    ? null
+    : getDocumentRefreshFailureNotification(machineState, () =>
+        dispatch({ type: "document.refreshRequested" }),
+      );
   const editorFailureNotification = getEditorFailureNotification(
     machineState,
     () => dispatch({ type: "failureNotice.dismissed" }),
@@ -330,8 +333,8 @@ export function CadWorkbench({
   } = useWorkbenchDocumentPresentation(snapshot?.document.documentId ?? null);
   const {
     reportDocumentFileActionFailure,
-    restoreMessage,
-    setRestoreMessage,
+    restoreFailure,
+    setRestoreFailure,
     setWorkbenchStatusNotification,
     showWorkbenchError,
     showWorkbenchInfo,
@@ -1874,19 +1877,32 @@ export function CadWorkbench({
                       }
                     />
                   ) : null}
-                  {restoreMessage ? (
+                  {/* A retired kernel also fails later refreshes; its only
+                      outcome is the update notification's reload. */}
+                  {restoreFailure && !kernelVersionRetired ? (
                     <WorkbenchNotification
                       type="error"
-                      title="History restore failed"
-                      message={restoreMessage}
-                      action={{
-                        label: "Reset stored history",
-                        onClick: () => {
-                          modelingService.resetOperationHistory();
-                          setRestoreMessage(null);
-                        },
-                      }}
-                      onDismiss={() => setRestoreMessage(null)}
+                      title={
+                        restoreFailure.kind === "initialization"
+                          ? "Document could not be opened"
+                          : "History restore failed"
+                      }
+                      message={restoreFailure.message}
+                      action={
+                        restoreFailure.kind === "initialization"
+                          ? {
+                              label: "Reload",
+                              onClick: () => window.location.reload(),
+                            }
+                          : {
+                              label: "Reset stored history",
+                              onClick: () => {
+                                modelingService.resetOperationHistory();
+                                setRestoreFailure(null);
+                              },
+                            }
+                      }
+                      onDismiss={() => setRestoreFailure(null)}
                     />
                   ) : null}
                   {localSaveNotification ? (

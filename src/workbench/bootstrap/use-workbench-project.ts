@@ -19,6 +19,7 @@ import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
 import { createWorkbenchProjectBootstrap } from "@/infrastructure/persistence/workbench-project-bootstrap";
+import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
 
 export function useWorkbenchProject(persistenceEnabled: boolean) {
   const reporter = useErrorReporter();
@@ -62,6 +63,9 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
   const report = useCallback(
     (error: unknown) => {
       setFailure(error instanceof Error ? error.message : String(error));
+      // A retired kernel fails part readiness; the update notification's
+      // reload is the outcome, as for the hidden project alert.
+      if (browserOccKernelVersionRetired.getSnapshot()) return;
       reporter.report(
         normalizeUnknownError(error, {
           code: "app/operation-failed",
