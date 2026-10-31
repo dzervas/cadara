@@ -8,9 +8,13 @@ import {
   type SketchDisplayPolylineMaterialConfig,
 } from "@/components/cad/sketch-display-style";
 
-/** Flat, camera-facing marker whose geometry is measured in CSS pixels. */
+/**
+ * Flat marker whose geometry is measured in CSS pixels: camera-facing, or
+ * laid into the sketch plane of `planeNormal` (`updateScreenSpacePointMarker`).
+ */
 export function ScreenSpacePointMarker({
   position,
+  planeNormal,
   radiusPixels,
   ring = false,
   strokeConfig,
@@ -20,6 +24,7 @@ export function ScreenSpacePointMarker({
   renderOrder,
 }: {
   position: readonly [number, number, number];
+  planeNormal?: readonly [number, number, number];
   radiusPixels: number;
   ring?: boolean;
   strokeConfig?: SketchDisplayPolylineMaterialConfig;
@@ -43,6 +48,7 @@ export function ScreenSpacePointMarker({
         size.height,
         position,
         radiusScale,
+        planeNormal,
       );
     }
   });

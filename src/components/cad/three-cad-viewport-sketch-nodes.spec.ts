@@ -461,3 +461,92 @@ test("origin markers are flat and retain compact pixel radii through zoom and ob
     (mesh.material as THREE.Material).dispose();
   }
 });
+
+test("sketch markers lie in their sketch plane and cover a constant pixel disc, front-facing, from either side at oblique views; a nearly edge-on plane keeps them camera-facing", () => {
+  const renderables = getSketchSessionDisplayRenderables(markerSession());
+  const markers = renderables.filter(
+    (entry) => entry.geometry.kind === "marker",
+  );
+  expect(markers.length).toBeGreaterThan(0);
+  for (const marker of markers) {
+    expect(
+      marker.sketchPlaneFrame?.normal,
+      `${marker.id} carries its sketch plane for the in-plane marker`,
+    ).toEqual([0, 0, 1]);
+  }
+
+  const anchor = [1, 2, 0] as const;
+  const radiusPixels = 6;
+  const viewportHeight = 1000;
+  const views = [
+    { name: "above the plane", position: [14, -9, 8], inPlane: true },
+    { name: "below the plane", position: [14, -9, -8], inPlane: true },
+    { name: "nearly edge-on", position: [21, 2, 0.5], inPlane: false },
+  ] as const;
+  for (const camera of [
+    new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000),
+    new THREE.PerspectiveCamera(45, 1, 0.1, 1000),
+  ]) {
+    for (const view of views) {
+      const label = `${camera.type}, ${view.name}`;
+      camera.position.fromArray(view.position);
+      camera.lookAt(...anchor);
+      camera.updateMatrixWorld(true);
+      const geometry = createScreenSpacePointMarkerGeometry(
+        radiusPixels,
+        false,
+      );
+      const mesh = new THREE.Mesh(geometry);
+      updateScreenSpacePointMarker(
+        mesh,
+        camera,
+        viewportHeight,
+        anchor,
+        1,
+        [0, 0, 1],
+      );
+      mesh.updateMatrixWorld(true);
+      const toPixels = (point: THREE.Vector3) => {
+        const ndc = point.clone().project(camera);
+        return new THREE.Vector2(ndc.x, ndc.y).multiplyScalar(
+          viewportHeight / 2,
+        );
+      };
+      const center = toPixels(new THREE.Vector3(...anchor));
+      const positions = geometry.getAttribute("position");
+      const world = (index: number) =>
+        new THREE.Vector3()
+          .fromBufferAttribute(positions, index)
+          .applyMatrix4(mesh.matrixWorld);
+      for (let index = 1; index < positions.count; index += 1) {
+        if (view.inPlane) {
+          expect(world(index).z, `${label}: rim vertex on the plane`).toBeCloseTo(
+            0,
+            9,
+          );
+        }
+        // Perspective lays the disc in along the anchor's view ray only.
+        expect(
+          Math.abs(toPixels(world(index)).distanceTo(center) - radiusPixels),
+          `${label}: rim vertex within 0.1 px of the pixel radius`,
+        ).toBeLessThan(0.1);
+      }
+
+      // three culls a FrontSide triangle whose screen winding disagrees
+      // with the front face it picks from the object's determinant.
+      const index = geometry.getIndex()!;
+      const [a, b, c] = [0, 1, 2].map((corner) =>
+        toPixels(world(index.getX(corner))),
+      );
+      const screenCounterClockwise =
+        (b!.x - a!.x) * (c!.y - a!.y) - (b!.y - a!.y) * (c!.x - a!.x) > 0;
+      const frontFaceCounterClockwise = mesh.matrixWorld.determinant() > 0;
+      expect(
+        screenCounterClockwise === frontFaceCounterClockwise,
+        `${label}: the disc is front-facing, not culled`,
+      ).toBe(true);
+      geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+  }
+});

@@ -385,18 +385,86 @@ export function createScreenSpacePointMarkerGeometry(
   return new THREE.RingGeometry(innerRadius, innerRadius + 1, 32);
 }
 
+/**
+ * Below this |cos| between the view direction and the sketch normal the
+ * plane is nearly edge-on, laying the marker into it would stretch it
+ * without bound, and the marker stays camera-facing.
+ */
+const MIN_IN_PLANE_MARKER_VIEW_COSINE = 0.2;
+
+/**
+ * Sizes a screen-space marker in pixels. A marker on a sketch plane
+ * (`planeNormal`) is laid into that plane along the view direction: it
+ * covers the same screen disc as a camera-facing marker, but every
+ * fragment has the sketch plane's depth. A part face coplanar with the
+ * sketch is pushed behind that depth by its polygon offset, as for sketch
+ * curves, so it cannot clip half of a camera-facing disc at oblique views.
+ */
 export function updateScreenSpacePointMarker(
   mesh: THREE.Mesh,
   camera: THREE.Camera,
   viewportHeight: number,
   position: readonly [number, number, number],
   radiusScale: number,
+  planeNormal?: readonly [number, number, number],
 ) {
-  mesh.quaternion.copy(camera.quaternion);
-  mesh.scale.setScalar(
+  const scale =
     getSketchFeedbackWorldUnitsPerPixel(camera, viewportHeight, [position]) *
-      radiusScale,
-  );
+    radiusScale;
+  const basis = planeNormal
+    ? getInPlaneMarkerBasis(camera, position, planeNormal)
+    : null;
+  if (!basis) {
+    mesh.matrixAutoUpdate = true;
+    mesh.position.set(position[0], position[1], position[2]);
+    mesh.quaternion.copy(camera.quaternion);
+    mesh.scale.setScalar(scale);
+    return;
+  }
+
+  mesh.matrixAutoUpdate = false;
+  mesh.matrix
+    .makeBasis(
+      basis.x.multiplyScalar(scale),
+      basis.y.multiplyScalar(scale),
+      basis.z.multiplyScalar(scale),
+    )
+    .setPosition(position[0], position[1], position[2]);
+  mesh.matrixWorldNeedsUpdate = true;
+}
+
+/**
+ * The camera's screen axes moved along the view direction onto the plane
+ * through the marker, with the plane normal facing the camera, or null when
+ * the plane is nearly edge-on.
+ */
+function getInPlaneMarkerBasis(
+  camera: THREE.Camera,
+  position: readonly [number, number, number],
+  planeNormal: readonly [number, number, number],
+) {
+  const normal = new THREE.Vector3(...planeNormal).normalize();
+  const view =
+    camera instanceof THREE.PerspectiveCamera
+      ? new THREE.Vector3(...position)
+          .sub(camera.getWorldPosition(new THREE.Vector3()))
+          .normalize()
+      : new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const viewCosine = view.dot(normal);
+  if (Math.abs(viewCosine) < MIN_IN_PLANE_MARKER_VIEW_COSINE) {
+    return null;
+  }
+
+  const intoPlane = (axis: THREE.Vector3) =>
+    axis.addScaledVector(view, -axis.dot(normal) / viewCosine);
+  return {
+    x: intoPlane(new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)),
+    y: intoPlane(new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)),
+    // Toward the camera, keeping the basis right-handed: a negative
+    // determinant flips three's front face and culls the flat marker when
+    // the plane is seen from behind its normal.
+    z: viewCosine < 0 ? normal : normal.negate(),
+  };
 }
 
 export function getActiveSketchMarkerWorldRadii(

@@ -212,6 +212,7 @@ export function getStableSketchSessionDisplayRenderables(
             ? REFERENCE_IMAGE_ANCHOR_MARKER_RADIUS
             : DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
         },
+        sketchPlaneFrame: session.plane.frame,
         linePattern: "solid" as const,
         role: "local" as const,
         pointMarker: {
@@ -247,6 +248,7 @@ export function getStableSketchSessionDisplayRenderables(
               position: mapSketchPointToWorld(session.plane, point.position),
               displayRadius: REFERENCE_IMAGE_ANCHOR_OVERLAY_RADIUS,
             },
+            sketchPlaneFrame: session.plane.frame,
             linePattern: "solid" as const,
             role: "local" as const,
             markerLayer: "overlay" as const,
@@ -501,6 +503,7 @@ function createTangentHandleRenderables(
               position: mapSketchPointToWorld(session.plane, tipPosition),
               displayRadius: 0.12,
             },
+            sketchPlaneFrame: session.plane.frame,
             linePattern: "solid" as const,
             role: "local" as const,
             handleDisplay: {
@@ -1122,6 +1125,7 @@ export function createDisplayRenderableForEntity(
         position: mapSketchPointToWorld(session.plane, entity.center),
         displayRadius: DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
       },
+      sketchPlaneFrame: session.plane.frame,
       markerShape: "ring",
       linePattern: entity.isConstruction ? "dash-dot" : "solid",
       role: "local",
@@ -1736,6 +1740,7 @@ export function createDisplayRenderableForSketchDatum(
         position: mapSketchPointToWorld(session.plane, [0, 0]),
         displayRadius: DEFAULT_SKETCH_POINT_DISPLAY_RADIUS,
       },
+      sketchPlaneFrame: session.plane.frame,
       linePattern: "solid",
       role: "reference",
     };
@@ -1781,6 +1786,7 @@ export function createDisplayRenderableForReferenceRecord(
       ]),
       displayRadius: 0.12,
     },
+    sketchPlaneFrame: session.plane.frame,
     linePattern: "solid",
     role: "reference",
   };
@@ -1816,6 +1822,7 @@ export function createDisplayRenderableForProjectedGeometry(
         position: mapSketchPointToWorld(session.plane, geometry.position),
         displayRadius: 0.14,
       },
+      sketchPlaneFrame: session.plane.frame,
       linePattern: "dashed",
       role: "reference",
     };

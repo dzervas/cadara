@@ -667,6 +667,7 @@ export function SketchDisplayMarkerNode({
         visible={visible}
         material={material}
         position={geometryData.position}
+        planeNormal={renderable.sketchPlaneFrame?.normal}
         radiusPixels={radii.visiblePixelRadius}
         radiusScale={radiusScale}
         ring={renderable.markerShape === "ring"}
