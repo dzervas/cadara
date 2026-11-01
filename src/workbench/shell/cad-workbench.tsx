@@ -40,6 +40,7 @@ import { SketchPlaneInspector } from "@/components/layout/sketch-plane-inspector
 import {
   DocumentTabsBar,
   type DocumentTabsBarHandle,
+  type DocumentTabsBarProps,
 } from "@/components/layout/document-tabs-bar";
 import { BrowserTabCloseWarningModal } from "@/components/layout/browser-tab-close-warning-modal";
 import { HistoryTimelineShell } from "@/components/layout/history-timeline-shell";
@@ -246,6 +247,8 @@ interface CadWorkbenchProps {
   performanceTelemetry?: PerformanceTelemetry;
   onReorderDocumentTab: (documentId: DocumentId, toIndex: number) => void;
   onSyncActiveDocumentTab: (tab: WorkbenchTab) => void;
+  /** A document tab's context menu entries (Move to project…). */
+  documentTabMenuItems?: DocumentTabsBarProps["tabMenuItems"];
   /** Why the project could not be opened or saved; shown with the other notices. */
   projectNotification?: WorkbenchNotificationModel | null;
   /** Every open tab's page-leave save notice (cadara-8p7o). */
@@ -269,6 +272,7 @@ export function CadWorkbench({
   performanceTelemetry = noopPerformanceTelemetry,
   onReorderDocumentTab,
   onSyncActiveDocumentTab,
+  documentTabMenuItems,
   projectNotification = null,
   localSaveNotification = null,
   localSaving = false,
@@ -2228,6 +2232,7 @@ export function CadWorkbench({
                         onClose={handleTabClose}
                         onReorder={handleTabReorder}
                         onRename={handleTabRename}
+                        tabMenuItems={documentTabMenuItems}
                       />
                     )}
                   </div>

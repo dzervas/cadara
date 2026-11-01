@@ -71,6 +71,8 @@ export type ProjectSyncWorkerResponse =
       kind: "projectSyncStatus";
       link: ProjectServiceLink;
       connection: ProjectSyncConnection;
+      /** The manifest and allowed documents whose current heads the room's storage peer holds. */
+      syncedDocumentIds?: string[];
       peers: ProjectPresencePeer[];
       /** Why the worker could not start syncing the project. */
       error?: string;

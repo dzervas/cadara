@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { generateDocumentId } from "@/core/workspace/workbench-tabs";
+import { moveDocumentBetweenProjects } from "@/application/project-sync/move-project-document";
 import type {
   ProjectSyncStatus,
   SyncedProjectStore,
@@ -6,6 +8,7 @@ import type {
 import {
   openServiceProject,
   presenceDisplayName,
+  projectSlugFromName,
   startProjectSync,
   uploadProjectToService,
 } from "@/application/project-sync/project-service-use-cases";
@@ -271,8 +274,82 @@ export function useProjectSync(
     [getRepository, service, transport],
   );
 
+  /**
+   * Creates a local project with one part and uploads it as an account
+   * project. A failed upload leaves the local project, which the CADara
+   * menu can upload later.
+   */
+  const createAccountProject = useCallback(
+    async (input: {
+      name: string;
+      orgId: string;
+      visibility: ProjectVisibility;
+    }) => {
+      const repository = await getRepository();
+      const manifest = unwrap(
+        await repository.create(input.name, [
+          { docId: generateDocumentId(), name: "Workspace", kind: "part" },
+        ]),
+      );
+      try {
+        return await uploadProjectToService(
+          { service, projects: syncedProjectStore(repository) },
+          { manifest, ...input, slug: projectSlugFromName(input.name) },
+        );
+      } catch (error) {
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)} "${input.name}" was kept on this device; upload it from the CADara menu.`,
+          { cause: error },
+        );
+      }
+    },
+    [getRepository, service],
+  );
+
+  /** Move to project from the open project (see moveDocumentBetweenProjects). */
+  const moveDocument = useCallback(
+    async (input: {
+      target: ProjectManifest;
+      documentId: DocumentId;
+      waitForLocalChanges: () => Promise<void>;
+      cloneWithHistory: (
+        documentId: DocumentId,
+        targetDocumentId: DocumentId,
+      ) => Promise<void>;
+    }) => {
+      if (!project) throw new Error("No project is open.");
+      const repository = await getRepository();
+      return moveDocumentBetweenProjects({
+        ...input,
+        source: project,
+        projects: {
+          ...syncedProjectStore(repository),
+          addPart: async (projectId, entry) =>
+            unwrap(await repository.addPart(projectId, entry)),
+          removePart: async (projectId, docId) =>
+            unwrap(await repository.removePart(projectId, docId)),
+        },
+        service,
+        transport,
+        createDocumentId: generateDocumentId,
+      });
+    },
+    [getRepository, project, service, transport],
+  );
+
+  const roleStoreUserId = userId ?? null;
+  /** The role last granted for an account project in this browser; null when unknown. */
+  const knownRole = useCallback(
+    (projectLink: ProjectManifest["service"]) =>
+      projectLink ? roleStore.load(projectLink, roleStoreUserId) : null,
+    [roleStore, roleStoreUserId],
+  );
+
   return {
     available: transport !== null,
+    createAccountProject,
+    moveDocument,
+    knownRole,
     account,
     accountChecked,
     refreshAccount,

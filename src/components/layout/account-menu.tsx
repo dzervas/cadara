@@ -199,7 +199,13 @@ export function AccountPanel(props: AccountPanelProps) {
   );
 }
 
-export function AccountMenu(props: AccountPanelProps & { onOpen: () => void }) {
+export function AccountMenu(
+  props: AccountPanelProps & {
+    onOpen: () => void;
+    opened: boolean;
+    onOpenedChange: (opened: boolean) => void;
+  },
+) {
   const severities =
     props.account?.me.organizations.map(
       (org) => summarizeQuota(org).severity,
@@ -221,9 +227,8 @@ export function AccountMenu(props: AccountPanelProps & { onOpen: () => void }) {
       position="bottom-end"
       width={280}
       shadow="md"
-      onChange={(opened) => {
-        if (opened) props.onOpen();
-      }}
+      opened={props.opened}
+      onChange={props.onOpenedChange}
     >
       <Popover.Target>
         <Tooltip label={props.account ? "Account" : "Sign in to CADara"}>
@@ -233,6 +238,10 @@ export function AccountMenu(props: AccountPanelProps & { onOpen: () => void }) {
             color="workbench"
             aria-describedby={quotaDescription && quotaDescriptionId}
             aria-label="Account"
+            onClick={() => {
+              props.onOpenedChange(!props.opened);
+              if (!props.opened) props.onOpen();
+            }}
           >
             <Indicator
               disabled={severity === "normal"}

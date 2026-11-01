@@ -1,4 +1,5 @@
 import {
+  Fragment,
   forwardRef,
   useCallback,
   useId,
@@ -16,6 +17,10 @@ import {
 import { Tooltip } from "@mantine/core";
 
 import { ToolbarTooltipContent } from "@/components/layout/toolbar-tooltip-content";
+import {
+  WorkbenchContextMenu,
+  type WorkbenchContextMenuEntry,
+} from "@/components/layout/workbench-context-menu";
 import type { DocumentId } from "@/contracts/shared/ids";
 import {
   workbenchTabsStorageDescriptor,
@@ -46,6 +51,8 @@ export interface DocumentTabsBarProps {
   onClose: (documentId: DocumentId) => void;
   onReorder: (documentId: DocumentId, toIndex: number) => void;
   onRename: (documentId: DocumentId, title: string) => void;
+  /** A tab's context menu (e.g. Move to project…); none without it. */
+  tabMenuItems?: (tab: WorkbenchTab) => WorkbenchContextMenuEntry[];
 }
 
 /**
@@ -85,6 +92,7 @@ function DocumentTabsBarComponent(
     onClose,
     onReorder,
     onRename,
+    tabMenuItems,
   }: DocumentTabsBarProps,
   ref: ForwardedRef<DocumentTabsBarHandle>,
 ) {
@@ -187,9 +195,8 @@ function DocumentTabsBarComponent(
         const isDropTarget =
           dragOverIndex === index && draggingId !== null && !isDragging;
 
-        return (
+        const slot = (
           <div
-            key={tab.documentId}
             onDragOver={(event) => handleDragOver(event, index)}
             onDrop={(event) => handleDrop(event, index)}
             className="relative flex shrink-0"
@@ -219,6 +226,17 @@ function DocumentTabsBarComponent(
               onCancelRename={cancelRename}
             />
           </div>
+        );
+        return tabMenuItems ? (
+          <WorkbenchContextMenu
+            key={tab.documentId}
+            label={`${tab.title} actions`}
+            items={tabMenuItems(tab)}
+          >
+            {slot}
+          </WorkbenchContextMenu>
+        ) : (
+          <Fragment key={tab.documentId}>{slot}</Fragment>
         );
       })}
     </nav>

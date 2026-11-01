@@ -30,6 +30,13 @@ export interface ProjectSyncWorkerChannel {
 /** How long opening a service project waits for its documents. */
 const PROJECT_DOWNLOAD_TIMEOUT_MS = 60_000;
 
+/** The whole project, or one document, matches the room's copy. */
+function isSynced(status: ProjectSyncStatus, automergeDocumentId?: string) {
+  return automergeDocumentId !== undefined
+    ? status.syncedDocumentIds?.includes(automergeDocumentId) === true
+    : status.connection === "synced";
+}
+
 interface StartedProject {
   link: ProjectServiceLink;
   /** Starts not yet released by a stop; the worker stops at zero. */
@@ -38,7 +45,11 @@ interface StartedProject {
   issueGrant: () => Promise<ProjectSyncGrant>;
   status: ProjectSyncStatus;
   listeners: Set<(status: ProjectSyncStatus) => void>;
-  syncWaiters: Set<{ resolve(): void; reject(error: Error): void }>;
+  syncWaiters: Set<{
+    automergeDocumentId?: string;
+    resolve(): void;
+    reject(error: Error): void;
+  }>;
   /** Latest local presence; sent once the worker has the project. */
   presence: ProjectPresenceState | null;
   startPosted: boolean;
@@ -95,7 +106,8 @@ export function createProjectSyncWorkerTransport({
     for (const listener of project.listeners) listener(project.status);
     for (const waiter of project.syncWaiters) {
       if (project.status.error) waiter.reject(new Error(project.status.error));
-      else if (project.status.connection === "synced") waiter.resolve();
+      else if (isSynced(project.status, waiter.automergeDocumentId))
+        waiter.resolve();
       else continue;
       project.syncWaiters.delete(waiter);
     }
@@ -108,6 +120,7 @@ export function createProjectSyncWorkerTransport({
       project.status = {
         ...project.status,
         connection: message.connection,
+        syncedDocumentIds: message.syncedDocumentIds ?? [],
         peers: message.peers,
         error: message.error ?? null,
       };
@@ -238,11 +251,12 @@ export function createProjectSyncWorkerTransport({
       channel.postProjectSyncMessage({ kind: "projectSyncStop", link });
       shareChanged();
     },
-    whenSynced(link) {
+    whenSynced(link, automergeDocumentId) {
       const project = started.get(link.projectId);
       if (!project)
         return Promise.reject(new Error("Project sync is not running."));
-      if (project.status.connection === "synced") return Promise.resolve();
+      if (isSynced(project.status, automergeDocumentId))
+        return Promise.resolve();
       return new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           project.syncWaiters.delete(waiter);
@@ -253,6 +267,7 @@ export function createProjectSyncWorkerTransport({
           );
         }, PROJECT_DOWNLOAD_TIMEOUT_MS);
         const waiter = {
+          automergeDocumentId,
           resolve() {
             clearTimeout(timeout);
             resolve();

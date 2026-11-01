@@ -59,6 +59,11 @@ export interface ProjectSyncStatus {
   peers: ProjectPresencePeer[];
   /** Why syncing could not start; the project keeps working locally. */
   error: string | null;
+  /**
+   * Automerge ids of the documents whose current heads the room's storage
+   * peer reported holding (its sync state, not a custom acknowledgement).
+   */
+  syncedDocumentIds?: string[];
 }
 
 /**
@@ -74,8 +79,15 @@ export interface ProjectSyncTransport {
     issueGrant: () => Promise<ProjectSyncGrant>;
   }): void;
   stop(link: ProjectServiceLink): void;
-  /** Resolves once every project document matches the service's copy. */
-  whenSynced(link: ProjectServiceLink): Promise<void>;
+  /**
+   * Resolves once every project document matches the service's copy, or
+   * with `automergeDocumentId` once the room holds that document's current
+   * heads. Rejects after a bounded wait.
+   */
+  whenSynced(
+    link: ProjectServiceLink,
+    automergeDocumentId?: string,
+  ): Promise<void>;
   setPresence(link: ProjectServiceLink, state: ProjectPresenceState): void;
   subscribe(
     link: ProjectServiceLink,

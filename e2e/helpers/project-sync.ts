@@ -54,12 +54,15 @@ export async function openCadaraMenuItem(page: Page, item: string) {
   await menuItem.click();
 }
 
+/** Creates a project on this device (the New project modal's Local card). */
 export async function createProject(page: Page, name: string) {
   await page.bringToFront();
   await page.getByRole("button", { name: "New project", exact: true }).click();
   await page
     .getByRole("textbox", { name: "Project name", exact: true })
     .fill(name);
+  // A signed-in owner gets Private preselected; these rows upload explicitly.
+  await page.getByRole("radio", { name: /^Local/ }).check();
   await page
     .getByRole("button", { name: "Create project", exact: true })
     .click();

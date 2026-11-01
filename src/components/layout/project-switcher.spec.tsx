@@ -8,7 +8,9 @@ test("project switcher exposes the active project and a compact create action", 
   const html = renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
       <ProjectSwitcher
-        projects={[{ projectId: "one", name: "Enclosure" }]}
+        projects={[
+          { projectId: "one", name: "Enclosure", group: "On this device" },
+        ]}
         activeProjectId="one"
         busy={false}
         onSwitch={() => undefined}

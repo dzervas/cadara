@@ -282,6 +282,16 @@ class HostedProject {
     return synced ? "synced" : "syncing";
   }
 
+  /** The manifest and allowed documents whose current heads the room's storage peer reported holding. */
+  private syncedDocumentIds() {
+    if (this.connection !== "connected") return [];
+    return [this.manifestId, ...this.allowList].filter(
+      (id) =>
+        this.watched.has(id) &&
+        this.roomHas(this.host.repo.handles[id as DocumentId]),
+    );
+  }
+
   private peers(): ProjectPresencePeer[] {
     if (!this.presence) return [];
     return Object.values(this.presence.getPeerStates().value).flatMap(
@@ -298,6 +308,7 @@ class HostedProject {
       kind: "projectSyncStatus",
       link: this.link,
       connection: this.connectionStatus(),
+      syncedDocumentIds: this.syncedDocumentIds(),
       peers: this.peers(),
     };
     const serialized = JSON.stringify(message);

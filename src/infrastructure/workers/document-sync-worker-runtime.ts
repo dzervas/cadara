@@ -9,6 +9,7 @@ import {
 } from "@/contracts/modeling/authored-document-equality";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import { createDocumentSyncWorkerFailure, type DocumentSyncNormalizeResult, type DocumentSyncWorkerRequest, type DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
+import { validateDocumentHistoryCloneRequest } from "@/infrastructure/workers/document-history-clone.runtime-schema";
 import { type DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 import { isGeometryAssetDocumentRepository } from "@/core/modeling/document-repository";
 import {
@@ -32,6 +33,23 @@ export interface DocumentSyncWorkerRuntimeOptions {
   repository: DocumentRepository;
   repositoryUrlStore?: DocumentRepositoryUrlStore | null;
   bindingStore?: LocalFileBindingStore | null;
+}
+
+/** Storage that persists a full-history copy (IndexedDbAutomergeDocumentRepository). */
+interface DocumentHistoryCloneRepository {
+  cloneWithHistory(
+    sourceDocumentId: DocumentId,
+    documentId: DocumentId,
+  ): Promise<string>;
+}
+
+function isDocumentHistoryCloneRepository(
+  repository: DocumentRepository,
+): repository is DocumentRepository & DocumentHistoryCloneRepository {
+  return (
+    typeof (repository as Partial<DocumentHistoryCloneRepository>)
+      .cloneWithHistory === "function"
+  );
 }
 
 export function createDocumentSyncWorkerMessageHandler(
@@ -268,6 +286,22 @@ export function createDocumentSyncWorkerMessageHandler(
   ) {
     try {
       switch (request.kind) {
+        case "cloneWithHistory": {
+          if (!validateDocumentHistoryCloneRequest(request).success)
+            throw new Error("Invalid document history copy request.");
+          if (!isDocumentHistoryCloneRepository(options.repository))
+            throw new Error("This document storage cannot copy history.");
+          adoptStorageKey(request.documentId, request.storageKey);
+          postMessage({
+            kind: "clonedWithHistory",
+            requestId: request.requestId,
+            storageKey: await options.repository.cloneWithHistory(
+              request.documentId,
+              request.targetDocumentId,
+            ),
+          });
+          return;
+        }
         case "preload": {
           adoptStorageKey(request.documentId, request.storageKey);
           await options.repository.preload?.(request.documentId);

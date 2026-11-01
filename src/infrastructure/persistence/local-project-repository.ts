@@ -384,6 +384,31 @@ export class LocalProjectRepository {
     });
   }
 
+  /** Unlists a part; its document stays stored. Other entries' concurrent edits merge. */
+  removePart(projectId: string, docId: DocumentId) {
+    return this.run(async () => {
+      const handle = await this.handle(projectId);
+      if (
+        !this.checked(handle).entries.some(
+          (entry) => entry.kind === "part" && entry.docId === docId,
+        )
+      )
+        throw new Error("The part is not in this project.");
+      handle.change((draft) => {
+        applyProjectPartEdits(draft.entries, {
+          removed: new Set([docId]),
+          renamed: new Map(),
+          added: [],
+          order: null,
+        });
+      });
+      await (
+        await this.documents.getAutomergeRepository()
+      ).flush?.([handle.documentId]);
+      return this.checked(handle);
+    });
+  }
+
   addReadme(projectId: string, name = "Readme", markdown = "") {
     return this.run(async () => {
       const repo = await this.documents.getAutomergeRepository();

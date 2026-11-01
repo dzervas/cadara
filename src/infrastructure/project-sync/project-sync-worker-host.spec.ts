@@ -1,5 +1,9 @@
 import { beforeAll, expect, test, vi } from "vitest";
-import { initializeBase64Wasm, Repo } from "@automerge/automerge-repo/slim";
+import {
+  initializeBase64Wasm,
+  Repo,
+  type DocumentId,
+} from "@automerge/automerge-repo/slim";
 import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
 import { SharedMemoryStorage } from "@/infrastructure/persistence/shared-memory-automerge-storage.fixtures";
 import { createProjectSyncWorkerHost } from "./project-sync-worker-host";
@@ -212,4 +216,68 @@ test("a page that rejoins with a new bridge channel replaces the old bridge", as
   } finally {
     repo.networkSubsystem.disconnect();
   }
+});
+
+test("a document is reported synced only while the room holds its current heads", async () => {
+  const repo = new Repo({ storage: new SharedMemoryStorage(), network: [] });
+  const part = repo.create({ length: 1 });
+  const manifest = repo.create(
+    makeManifest([
+      {
+        name: "Part",
+        kind: "part",
+        docId: "doc_part",
+        automergeDocumentId: part.documentId,
+      },
+    ]),
+  );
+  const room = makeRoom(manifest.documentId);
+  const reported: string[][] = [];
+  const unconfirmed: string[] = [];
+  const client: ReturnType<typeof makeClient> = makeClient(room, repo, {
+    postMessage(message) {
+      if (message.kind !== "projectSyncStatus") {
+        void client.host.handle({
+          kind: "projectSyncToken",
+          tokenRequestId: message.tokenRequestId,
+          grant: { token: "token", expiresIn: 600 },
+        });
+        return;
+      }
+      const synced = message.syncedDocumentIds ?? [];
+      reported.push(synced);
+      for (const id of synced) {
+        const local = repo.handles[id as DocumentId]?.heads() ?? [];
+        const remote = room.repo.handles[id as DocumentId];
+        if (!remote?.isReady() || remote.heads().join() !== local.join())
+          unconfirmed.push(id);
+      }
+    },
+  });
+  await client.start(manifest.documentId);
+  await vi.waitFor(() => expect(reported.at(-1)).toContain(part.documentId), {
+    timeout: 5_000,
+  });
+
+  const moved = repo.create({ length: 2 });
+  manifest.change((draft) => {
+    draft.entries.push({
+      name: "Moved",
+      kind: "part",
+      docId: "doc_moved",
+      automergeDocumentId: moved.documentId,
+    });
+  });
+  moved.change((draft) => {
+    draft.length = 3;
+  });
+  await vi.waitFor(() => expect(reported.at(-1)).toContain(moved.documentId), {
+    timeout: 5_000,
+  });
+  expect(
+    unconfirmed,
+    "No status lists a document whose current heads the room lacks",
+  ).toEqual([]);
+  expect(room.repo.handles[moved.documentId]?.doc()).toEqual({ length: 3 });
+  await client.host.handle({ kind: "projectSyncStop", link });
 });

@@ -10,14 +10,18 @@ import type {
   ProjectManifest,
   ProjectResult,
 } from "@/contracts/modeling/project-manifest";
-import type {
-  WorkbenchTab,
-  WorkbenchTabsState,
+import type { DocumentId } from "@/contracts/shared/ids";
+import {
+  generateDocumentId,
+  type WorkbenchTab,
+  type WorkbenchTabsState,
 } from "@/core/workspace/workbench-tabs";
 import { normalizeUnknownError } from "@/contracts/errors";
 import { useErrorReporter } from "@/hooks/use-error-reporter";
 import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import type { LocalProjectRepository } from "@/infrastructure/persistence/local-project-repository";
+import { createLocalStorageProjectRoleStore } from "@/infrastructure/persistence/local-storage-project-role-store";
+import { canWriteProjectDocument } from "@/application/project-sync/project-write-gate";
 import { createWorkbenchProjectBootstrap } from "@/infrastructure/persistence/workbench-project-bootstrap";
 import { browserOccKernelVersionRetired } from "@/infrastructure/occ/kernel-version-retired";
 import { isModelingServiceInitializationFailure } from "@/application/modeling/modeling-service/initialization-failure";
@@ -27,6 +31,9 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
   const [project, setProject] = useState<ProjectManifest | null>(null);
   const [projects, setProjects] = useState<ProjectManifest[]>([]);
   const [sessionKey, setSessionKey] = useState("initial");
+  /** The part a switch asked to show, e.g. one that moved to this project. */
+  const [requestedDocumentId, setRequestedDocumentId] =
+    useState<DocumentId | null>(null);
   const pendingWrites = useMemo(() => new PendingLocalWrites(), []);
   const saving = useSyncExternalStore(
     useCallback(
@@ -65,6 +72,32 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     if (!result.ok) throw new Error(result.diagnostic.message);
     return result.value;
   }, []);
+  // A project without parts (e.g. every part moved away) gets an empty part
+  // when it opens, never before. An account project gets one only when the
+  // role last granted here may edit its manifest; the room refuses others.
+  const withPart = useCallback(
+    async (repository: LocalProjectRepository, opened: ProjectManifest) => {
+      if (opened.entries.some((entry) => entry.kind === "part")) return opened;
+      const role = opened.service
+        ? createLocalStorageProjectRoleStore(window.localStorage).load(
+            opened.service,
+            null,
+          )
+        : null;
+      if (
+        opened.service &&
+        !(role && canWriteProjectDocument(role, "manifest"))
+      )
+        throw new Error("This project has no part documents.");
+      return unwrap(
+        await repository.addPart(opened.projectId, {
+          docId: generateDocumentId(),
+          name: "Workspace",
+        }),
+      );
+    },
+    [unwrap],
+  );
   const report = useCallback(
     (error: unknown) => {
       setFailure(error instanceof Error ? error.message : String(error));
@@ -100,11 +133,11 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     let live = true;
     void opening
       .then(async (opened) => {
-        if (!opened.entries.some((entry) => entry.kind === "part"))
-          throw new Error("This project has no part documents.");
-        const available = unwrap(await (await context.getRepository()).list());
+        const repository = await context.getRepository();
+        const project = await withPart(repository, opened);
+        const available = unwrap(await repository.list());
         if (!live) return;
-        setProject(opened);
+        setProject(project);
         setProjects(available);
       })
       .catch((error: unknown) => {
@@ -130,26 +163,31 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     return () => {
       live = false;
     };
-  }, [context, pendingWrites, report, unwrap]);
+  }, [context, pendingWrites, report, unwrap, withPart]);
 
+  /** Switches to the project `operation` opens, showing `activeDocumentId` when given. */
   const select = useCallback(
     async (
       operation: (
         repository: LocalProjectRepository,
       ) => Promise<ProjectResult<ProjectManifest>>,
+      activeDocumentId?: DocumentId,
     ) => {
       setBusy(true);
       const finish = pendingWrites.begin();
       setFailure(null);
       try {
         const repository = await context.getRepository();
-        const opened = unwrap(await operation(repository));
-        const first = opened.entries.find((entry) => entry.kind === "part");
-        if (!first) throw new Error("This project has no part documents.");
+        const opened = await withPart(
+          repository,
+          unwrap(await operation(repository)),
+        );
+        const first = opened.entries.find((entry) => entry.kind === "part")!;
         const available = unwrap(await repository.list());
-        saveSession(opened.projectId, first.docId);
+        saveSession(opened.projectId, activeDocumentId ?? first.docId);
         setProjects(available);
         setProject(opened);
+        setRequestedDocumentId(activeDocumentId ?? null);
         setSessionKey(opened.projectId);
         return true;
       } catch (error) {
@@ -160,7 +198,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
         setBusy(false);
       }
     },
-    [context, pendingWrites, report, saveSession, unwrap],
+    [context, pendingWrites, report, saveSession, unwrap, withPart],
   );
 
   /** Writes the change from `previous` to `tabs` (see LocalProjectRepository.setParts). */
@@ -252,6 +290,11 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     }
   }, [context, report, unwrap]);
 
+  /** Re-reads the catalog, e.g. after a project was created without switching to it. */
+  const refreshProjects = useCallback(async () => {
+    setProjects(unwrap(await (await context.getRepository()).list()));
+  }, [context, unwrap]);
+
   /** Shows a manifest the active project gained in place (e.g. its service link). */
   const replaceProject = useCallback(
     async (manifest: ProjectManifest) => {
@@ -268,8 +311,10 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     getRepository: context.getRepository,
     getProjectAutomergeRepo: context.getProjectAutomergeRepo,
     replaceProject,
+    refreshProjects,
     pendingWrites,
     sessionKey,
+    requestedDocumentId,
     persistenceEnabled: context.persistenceEnabled,
     registerPartReadiness: context.registerPartReadiness,
     initialTabs: context.initialTabs,

@@ -4,6 +4,7 @@ import { MantineProvider } from "@mantine/core";
 import type { ReactNode } from "react";
 import { workbenchTheme } from "@/theme/workbench-theme";
 import {
+  MoveToProjectForm,
   OpenServiceProjectForm,
   UploadProjectForm,
 } from "./project-service-dialogs";
@@ -67,4 +68,39 @@ test("projects without uploaded documents cannot be opened", () => {
   );
   expect(html).toContain("Bracket");
   expect(html).toMatch(/disabled=""[^>]*>.*Hinge.*Not uploaded yet/s);
+});
+
+test("Move to project lists targets by location, explains disabled ones and says undo steps stay behind", () => {
+  const html = render(
+    <MoveToProjectForm
+      documentTitle="Lid"
+      targets={[
+        {
+          projectId: "bracket",
+          name: "Bracket",
+          group: "On this device",
+          disabledReason: null,
+          action: null,
+        },
+        {
+          projectId: "shared",
+          name: "Shared hinge",
+          group: "Team",
+          disabledReason: "Offline. Connect to move into an account project.",
+          action: null,
+        },
+      ]}
+      busy={false}
+      error={null}
+      onCancel={() => undefined}
+      onMove={() => undefined}
+    />,
+  );
+  expect(html).toMatch(/On this device.*Bracket.*Team.*Shared hinge/s);
+  expect(html).toMatch(
+    /disabled=""[^>]*value="shared".*Offline\. Connect to move into an account project\./s,
+  );
+  expect(html).toContain("Its undo steps stay behind.");
+  // Nothing is chosen yet, so the move needs a confirmed target.
+  expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
 });

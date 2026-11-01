@@ -1,9 +1,11 @@
 import {
+  Anchor,
   Button,
   Group,
   Loader,
   Menu,
   Modal,
+  Radio,
   SegmentedControl,
   Select,
   Stack,
@@ -13,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useState } from "react";
 import type { ProjectVisibility } from "@/contracts/project-sync/project-service";
+import type { ProjectMoveTarget } from "@/core/project-sync/project-move-targets";
 
 export interface ServiceOrganization {
   id: string;
@@ -267,6 +270,130 @@ export function OpenServiceProjectModal({
   return (
     <Modal opened={opened} onClose={onClose} title="Open from CADara" size="sm">
       <OpenServiceProjectForm {...form} />
+    </Modal>
+  );
+}
+
+export interface MoveToProjectFormProps {
+  documentTitle: string;
+  targets: readonly ProjectMoveTarget[];
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onMove: (projectId: string) => void;
+}
+
+/** Move to project: the user picks the target and confirms it. */
+export function MoveToProjectForm({
+  documentTitle,
+  targets,
+  busy,
+  error,
+  onCancel,
+  onMove,
+}: MoveToProjectFormProps) {
+  const [targetId, setTargetId] = useState<string | null>(null);
+  const groups = [...new Set(targets.map((target) => target.group))];
+  const target = targets.find(
+    (candidate) =>
+      candidate.projectId === targetId && candidate.disabledReason === null,
+  );
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (target && !busy) onMove(target.projectId);
+      }}
+    >
+      <Stack gap="sm">
+        <Text size="xs">
+          “{documentTitle}” moves with its full history, including content
+          deleted earlier, and leaves this project. Its undo steps stay behind.
+        </Text>
+        <Radio.Group
+          label="Target project"
+          size="xs"
+          value={targetId}
+          onChange={setTargetId}
+        >
+          <Stack gap="xs" mt={4}>
+            {groups.map((group) => (
+              <Stack gap={4} key={group}>
+                <Text size="xs" c="dimmed" fw={600}>
+                  {group}
+                </Text>
+                {targets
+                  .filter((candidate) => candidate.group === group)
+                  .map((candidate) => (
+                    <Stack gap={2} key={candidate.projectId}>
+                      <Radio
+                        value={candidate.projectId}
+                        label={candidate.name}
+                        description={candidate.disabledReason ?? undefined}
+                        disabled={busy || candidate.disabledReason !== null}
+                      />
+                      {candidate.action === "plan" && (
+                        <Anchor
+                          href="/dashboard/plan"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          size="xs"
+                          pl={28}
+                        >
+                          Change plan
+                        </Anchor>
+                      )}
+                    </Stack>
+                  ))}
+              </Stack>
+            ))}
+          </Stack>
+        </Radio.Group>
+        {busy && (
+          <Text size="xs" c="dimmed" role="status">
+            Moving the part…
+          </Text>
+        )}
+        {error && (
+          <Text size="xs" c="red" role="alert">
+            {error}
+          </Text>
+        )}
+        <Group justify="flex-end" gap="xs">
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            size="compact-sm"
+            loading={busy}
+            disabled={!target}
+          >
+            Move
+          </Button>
+        </Group>
+      </Stack>
+    </form>
+  );
+}
+
+export function MoveToProjectModal({
+  opened,
+  ...form
+}: MoveToProjectFormProps & { opened: boolean }) {
+  return (
+    <Modal
+      opened={opened}
+      onClose={form.onCancel}
+      title="Move to project"
+      size="sm"
+    >
+      <MoveToProjectForm {...form} />
     </Modal>
   );
 }

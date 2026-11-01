@@ -7,6 +7,7 @@ import type { DocumentId, RequestId } from "@/contracts/shared/ids";
 import type { DocumentRepositoryChangeEvent, DocumentRepositoryLoadResult, DocumentRepositoryMetadata, DocumentRepositoryMutationResult, DocumentRepositoryRestoreStatus } from "@/contracts/modeling/document-repository";
 import type { LocalFileBindingMetadata } from "@/contracts/modeling/local-file-binding";
 import type { LocalFileSystemFileHandle } from "@/contracts/modeling/local-file-system-access";
+import type { DocumentHistoryCloneRequest, DocumentHistoryCloneResponse } from "./document-history-clone.runtime-schema";
 
 export type DocumentSyncSubscriptionId = `subscription_document_sync_${string}`;
 
@@ -26,6 +27,7 @@ export interface DocumentSyncWorkerFailurePayload {
 }
 
 export type DocumentSyncWorkerRequest =
+  | DocumentHistoryCloneRequest
   | {
       kind: "preload";
       requestId: RequestId;
@@ -134,6 +136,7 @@ export type DocumentSyncWorkerRequest =
     };
 
 export type DocumentSyncWorkerResponse =
+  | DocumentHistoryCloneResponse
   | {
       kind: "preloadStarted";
       requestId: RequestId;

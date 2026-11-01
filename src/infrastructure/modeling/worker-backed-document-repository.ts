@@ -54,6 +54,22 @@ export class WorkerBackedDocumentRepository
     void this.client.settleLoad({ documentId });
   }
 
+  /**
+   * Persists a copy of `documentId` with its whole change history as
+   * `targetDocumentId`; it runs after the writes already sent for the source.
+   */
+  async cloneWithHistory(documentId: DocumentId, targetDocumentId: DocumentId) {
+    const storageKey = await this.client.cloneWithHistory({
+      documentId,
+      targetDocumentId,
+      storageKey: this.storageKey(documentId),
+    });
+    this.urlStore?.set(
+      targetDocumentId,
+      storageKey as Parameters<DocumentRepositoryUrlStore["set"]>[1],
+    );
+  }
+
   async load(
     input: Parameters<DocumentRepository["load"]>[0],
   ): Promise<DocumentRepositoryLoadResult> {

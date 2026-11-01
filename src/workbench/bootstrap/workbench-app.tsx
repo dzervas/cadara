@@ -9,12 +9,30 @@ import {
   useState,
 } from "react";
 
-import { Alert, Group } from "@mantine/core";
+import { Alert, Group, Text } from "@mantine/core";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
 import {
+  NewProjectModal,
+  type NewProjectInput,
+} from "@/components/layout/new-project-modal";
+import { MoveToProjectModal } from "@/components/layout/project-service-dialogs";
+import type { WorkbenchContextMenuEntry } from "@/components/layout/workbench-context-menu";
+import {
+  canWriteProjectDocument,
   projectAccessAllows,
   ProjectWriteGate,
 } from "@/application/project-sync/project-write-gate";
+import {
+  documentMoveUnavailableReason,
+  projectGroupLabel,
+  projectMoveTargets,
+} from "@/core/project-sync/project-move-targets";
+import { SignInRequestProvider } from "@/hooks/sign-in-request-provider";
+import { useSignInRequest } from "@/hooks/sign-in-request-context";
+import { createLocalStorageNewProjectChoiceStore } from "@/infrastructure/persistence/local-storage-new-project-choice-store";
+import type { NewProjectChoice } from "@/core/account/project-location-options";
+import { useBrowserOnline } from "@/hooks/use-browser-online";
+import { summarizeQuota } from "@/core/account/quota-summary";
 import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
 import { useWorkbenchProject } from "./use-workbench-project";
 import { useProjectSync, type ProjectSync } from "./use-project-sync";
@@ -111,12 +129,14 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
       </Alert>
     );
   return (
-    <ProjectWorkbenchApp
-      key={projects.sessionKey}
-      {...props}
-      projects={projects}
-      sync={sync}
-    />
+    <SignInRequestProvider>
+      <ProjectWorkbenchApp
+        key={projects.sessionKey}
+        {...props}
+        projects={projects}
+        sync={sync}
+      />
+    </SignInRequestProvider>
   );
 }
 
@@ -157,36 +177,47 @@ function ProjectWorkbenchApp({
           ),
     [project],
   );
-  const documentRepository = useMemo(() => {
+  // Move to project copies part documents through the worker directly.
+  const workerDocumentRepository = useMemo(() => {
     if (typeof window === "undefined" || !documentSyncWorkerClient) {
       return null;
     }
 
+    return createWorkerBackedDocumentRepository({
+      client: documentSyncWorkerClient,
+      urlStore: createLocalStorageDocumentRepositoryUrlStore(
+        window.localStorage,
+        createDocumentRepositoryUrlStorageKey(
+          getDocumentRepositoryStorageNamespace(window.location.search),
+        ),
+      ),
+    });
+  }, [documentSyncWorkerClient]);
+  const documentRepository = useMemo(() => {
+    if (!workerDocumentRepository) return null;
+
     return createProjectWriteGatedDocumentRepository(
       createInstrumentedDocumentRepository(
-        createWorkerBackedDocumentRepository({
-          client: documentSyncWorkerClient,
-          urlStore: createLocalStorageDocumentRepositoryUrlStore(
-            window.localStorage,
-            createDocumentRepositoryUrlStorageKey(
-              getDocumentRepositoryStorageNamespace(window.location.search),
-            ),
-          ),
-        }),
+        workerDocumentRepository,
         performanceTelemetry,
       ),
       projectWriteGate,
     );
-  }, [documentSyncWorkerClient, performanceTelemetry, projectWriteGate]);
+  }, [workerDocumentRepository, performanceTelemetry, projectWriteGate]);
+  const requestedDocumentId = projects.requestedDocumentId;
   const projectTabs = useCallback((): WorkbenchTabsState => {
     if (!project) return projects.initialTabs;
     const cached = tabsStorage?.load();
-    return createWorkbenchProjectTabs(
+    const tabs = createWorkbenchProjectTabs(
       project,
       cached?.ok ? cached.state : null,
       projects.initialTabs,
     );
-  }, [project, projects.initialTabs, tabsStorage]);
+    // A part that just moved here opens as the active tab.
+    return tabs.tabs.some((tab) => tab.documentId === requestedDocumentId)
+      ? { ...tabs, activeDocumentId: requestedDocumentId! }
+      : tabs;
+  }, [project, projects.initialTabs, requestedDocumentId, tabsStorage]);
   const [tabsState, tabsDispatch] = useReducer(
     (
       state: WorkbenchTabsState,
@@ -538,6 +569,179 @@ function ProjectWorkbenchApp({
       });
     }, [documentRepository, projectWriteGate]);
 
+  const { requestSignIn } = useSignInRequest();
+  const newProjectChoices = useMemo(
+    () => createLocalStorageNewProjectChoiceStore(window.localStorage),
+    [],
+  );
+  const online = useBrowserOnline();
+  const [newProjectDialog, setNewProjectDialog] = useState<{
+    lastChoice: NewProjectChoice | null;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
+  const { refreshAccount, createAccountProject } = sync;
+  const openNewProjectDialog = useCallback(() => {
+    void refreshAccount();
+    setNewProjectDialog({
+      lastChoice: newProjectChoices.load(),
+      busy: false,
+      error: null,
+    });
+  }, [newProjectChoices, refreshAccount]);
+  const createProject = async (input: NewProjectInput) => {
+    const lastChoice = { location: input.location, ownerId: input.ownerId };
+    setNewProjectDialog({ lastChoice, busy: true, error: null });
+    newProjectChoices.save(lastChoice);
+    try {
+      await waitForLocalChanges();
+      const created =
+        input.location === "local"
+          ? null
+          : await createAccountProject({
+              name: input.name,
+              orgId: input.ownerId,
+              visibility: input.location,
+            });
+      // A switch failure is reported with the other project notices.
+      await projects.select((repository) =>
+        created
+          ? repository.open(created.projectId)
+          : repository.create(input.name, [
+              {
+                docId: generateDocumentId(),
+                name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
+                kind: "part",
+              },
+            ]),
+      );
+      setNewProjectDialog(null);
+    } catch (error) {
+      // A failed upload keeps the new project on this device; list it.
+      if (input.location !== "local")
+        void projects.refreshProjects().catch(projects.report);
+      setNewProjectDialog({
+        lastChoice,
+        busy: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const [moveDialog, setMoveDialog] = useState<{
+    documentId: DocumentId;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
+  const organizations = sync.account?.organizations ?? [];
+  const sourceEditable = projectAccessAllows(
+    { linked: projectLinked, role: projectRole },
+    "manifest",
+  );
+  const moveUnavailableReason = documentMoveUnavailableReason({
+    sourceEditable,
+    projectCount: projects.projects.length,
+  });
+  const documentTabMenuItems = useCallback(
+    (tab: WorkbenchTab): WorkbenchContextMenuEntry[] => [
+      {
+        kind: "item",
+        id: "move-to-project",
+        label: "Move to project…",
+        disabled: moveUnavailableReason !== null,
+        onSelect: () => {
+          void refreshAccount();
+          setMoveDialog({
+            documentId: tab.documentId,
+            busy: false,
+            error: null,
+          });
+        },
+      },
+      ...(moveUnavailableReason === null
+        ? []
+        : [
+            {
+              kind: "content" as const,
+              id: "move-to-project-unavailable",
+              render: () => (
+                <Text size="xs" c="dimmed" px="sm" py={4}>
+                  {moveUnavailableReason}
+                </Text>
+              ),
+            },
+          ]),
+    ],
+    [moveUnavailableReason, refreshAccount],
+  );
+  const moveDocumentTitle = moveDialog
+    ? (tabsState.tabs.find((tab) => tab.documentId === moveDialog.documentId)
+        ?.title ?? "")
+    : "";
+  const moveTargets =
+    project && moveDialog
+      ? projectMoveTargets(projects.projects, project.projectId, {
+          online,
+          // Unknown until the account check answers; the move asks the service.
+          signedIn: !sync.accountChecked || sync.account !== null,
+          organizations,
+          storageAtLimit: (target) => {
+            const usage = sync.account?.me.organizations.find(
+              (org) => org.organizationId === target.service?.orgId,
+            );
+            return usage ? summarizeQuota(usage).storageAtLimit : false;
+          },
+          editable: (target) => {
+            const role = sync.knownRole(target.service);
+            return role === null || canWriteProjectDocument(role, "part");
+          },
+        })
+      : [];
+  const moveToProject = async (targetProjectId: string) => {
+    const target = projects.projects.find(
+      (candidate) => candidate.projectId === targetProjectId,
+    );
+    if (!moveDialog || !target || !workerDocumentRepository) return;
+    setMoveDialog({ ...moveDialog, busy: true, error: null });
+    try {
+      const moved = await sync.moveDocument({
+        target,
+        documentId: moveDialog.documentId,
+        waitForLocalChanges,
+        cloneWithHistory: (documentId, targetDocumentId) =>
+          workerDocumentRepository.cloneWithHistory(
+            documentId,
+            targetDocumentId,
+          ),
+      });
+      if (moved.sourceRemovalUnconfirmed)
+        errorReporter.report(
+          normalizeUnknownError(moved.sourceRemovalUnconfirmed, {
+            code: "app/operation-failed",
+            fallbackMessage: moved.sourceRemovalUnconfirmed.message,
+          }),
+          { source: "project-sync", visibility: "user" },
+        );
+      // The window follows the part to its new project; a switch failure
+      // is reported with the other project notices.
+      try {
+        await projects.select(
+          (repository) => repository.open(target.projectId),
+          moved.documentId,
+        );
+      } finally {
+        moved.release();
+      }
+      setMoveDialog(null);
+    } catch (error) {
+      setMoveDialog({
+        ...moveDialog,
+        busy: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   return (
     <RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
       <ModelingServiceProvider modelingService={modelingService}>
@@ -560,7 +764,11 @@ function ProjectWorkbenchApp({
                 project && (
                   <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
                     <ProjectSwitcher
-                      projects={projects.projects}
+                      projects={projects.projects.map((listed) => ({
+                        projectId: listed.projectId,
+                        name: listed.name,
+                        group: projectGroupLabel(listed, organizations),
+                      }))}
                       activeProjectId={project.projectId}
                       busy={projects.busy || localSaving}
                       onSwitch={(projectId) => {
@@ -572,21 +780,7 @@ function ProjectWorkbenchApp({
                           )
                           .catch(projects.report);
                       }}
-                      onCreate={(name) => {
-                        void waitForLocalChanges()
-                          .then(() =>
-                            projects.select((repository) =>
-                              repository.create(name, [
-                                {
-                                  docId: generateDocumentId(),
-                                  name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
-                                  kind: "part",
-                                },
-                              ]),
-                            ),
-                          )
-                          .catch(projects.report);
-                      }}
+                      onCreate={openNewProjectDialog}
                     />
                     <ProjectSyncControls
                       sync={sync}
@@ -616,6 +810,11 @@ function ProjectWorkbenchApp({
               performanceTelemetry={performanceTelemetry}
               onReorderDocumentTab={reorderDocumentTab}
               onSyncActiveDocumentTab={syncActiveDocumentTab}
+              documentTabMenuItems={
+                project && workerDocumentRepository
+                  ? documentTabMenuItems
+                  : undefined
+              }
               projectNotification={projectNotification}
               localSaveNotification={localSaveNotification}
               localSaving={localSaving}
@@ -623,6 +822,33 @@ function ProjectWorkbenchApp({
           </EditorProvider>
         </DurableHistoryProvider>
       </ModelingServiceProvider>
+      <NewProjectModal
+        opened={newProjectDialog !== null}
+        account={sync.account}
+        offline={!online}
+        lastChoice={newProjectDialog?.lastChoice ?? null}
+        busy={newProjectDialog?.busy ?? false}
+        error={newProjectDialog?.error ?? null}
+        onSignIn={() => {
+          setNewProjectDialog(null);
+          requestSignIn();
+        }}
+        onCancel={() => {
+          if (!newProjectDialog?.busy) setNewProjectDialog(null);
+        }}
+        onSubmit={(input) => void createProject(input)}
+      />
+      <MoveToProjectModal
+        opened={moveDialog !== null}
+        documentTitle={moveDocumentTitle}
+        targets={moveTargets}
+        busy={moveDialog?.busy ?? false}
+        error={moveDialog?.error ?? null}
+        onCancel={() => {
+          if (!moveDialog?.busy) setMoveDialog(null);
+        }}
+        onMove={(projectId) => void moveToProject(projectId)}
+      />
       {/* Production builds only: the service worker's update prompt. */}
       <AppUpdateNotification waitForLocalChanges={waitForLocalChanges} />
     </RuntimeExtensionRegistryProvider>

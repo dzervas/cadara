@@ -196,3 +196,49 @@ test("a page that starts offline tells the worker", async () => {
   });
   expect(posted[0]).toEqual({ kind: "projectSyncNetwork", online: false });
 });
+
+test("waiting for one document resolves once the room holds it, not when the rest of the project syncs", async () => {
+  vi.useFakeTimers();
+  try {
+    const { transport, fromWorker } = await makeTransport();
+    transport.start({
+      link,
+      manifestDocumentId: "manifest",
+      foreignDocumentIds: [],
+      issueGrant: async () => ({ token: "t", expiresIn: 600, role: "editor" }),
+    });
+    let settled: string | null = null;
+    void transport.whenSynced(link, "copy").then(
+      () => (settled = "resolved"),
+      (error: Error) => (settled = error.message),
+    );
+    fromWorker({
+      kind: "projectSyncStatus",
+      link,
+      connection: "synced",
+      syncedDocumentIds: ["part"],
+      peers: [],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled, "Another document's sync is no confirmation").toBeNull();
+    fromWorker({
+      kind: "projectSyncStatus",
+      link,
+      connection: "syncing",
+      syncedDocumentIds: ["part", "copy"],
+      peers: [],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe("resolved");
+
+    let unconfirmed: string | null = null;
+    void transport
+      .whenSynced(link, "never")
+      .catch((error: Error) => (unconfirmed = error.message));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(unconfirmed, "The wait is bounded").not.toBeNull();
+    transport.stop(link);
+  } finally {
+    vi.useRealTimers();
+  }
+});

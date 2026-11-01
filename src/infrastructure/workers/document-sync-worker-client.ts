@@ -2,6 +2,10 @@ import type { RequestId } from "@/contracts/shared/ids";
 import type { DocumentSyncNormalizeResult, DocumentSyncSubscriptionId, DocumentSyncWorkerRequest, DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import type { DocumentSyncWriteStatus } from "@/contracts/modeling/document-sync-write-status";
 import {
+  validateDocumentHistoryCloneResponse,
+  type DocumentHistoryCloneRequest,
+} from "@/infrastructure/workers/document-history-clone.runtime-schema";
+import {
   isProjectSyncWorkerResponse,
   type DocumentSyncWorkerInbound,
   type DocumentSyncWorkerOutbound,
@@ -68,6 +72,18 @@ export class DocumentSyncWorkerClient {
   constructor(options: { worker: DocumentSyncWorkerLike }) {
     this.worker = options.worker;
     this.worker.addEventListener("message", this.handleMessage);
+  }
+
+  /** Resolves to the persisted copy's Automerge URL. */
+  async cloneWithHistory(
+    input: Omit<DocumentHistoryCloneRequest, "kind" | "requestId">,
+  ) {
+    const response = validateDocumentHistoryCloneResponse(
+      await this.request("cloneWithHistory", "clonedWithHistory", input),
+    );
+    if (!response.success)
+      throw new Error("The document history copy returned an invalid answer.");
+    return response.data.storageKey;
   }
 
   async preload(

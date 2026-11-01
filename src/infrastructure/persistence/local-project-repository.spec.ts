@@ -1141,3 +1141,27 @@ test("repairing skips a stored document that cannot be read and counts it", asyn
 function parseUrl(url: AutomergeUrl) {
   return url.slice("automerge:".length);
 }
+
+test("removePart unlists only that part, keeps its stored document and refuses parts the project does not list", async () => {
+  const { repo, urls, projects } = setup();
+  try {
+    const project = unwrap(
+      await projects.create("Source", [
+        { name: "Moved", kind: "part", docId: "doc_moved" },
+        { name: "Kept", kind: "part", docId: "doc_kept" },
+      ]),
+    );
+    const movedUrl = urls.get("doc_moved")!;
+    const after = unwrap(
+      await projects.removePart(project.projectId, "doc_moved"),
+    );
+    expect(after.entries.map((entry) => entry.docId)).toEqual(["doc_kept"]);
+    expect(unwrap(await projects.open(project.projectId))).toEqual(after);
+    expect(urls.get("doc_moved")).toBe(movedUrl);
+    expect((await repo.find(movedUrl)).isReady()).toBe(true);
+    const refused = await projects.removePart(project.projectId, "doc_moved");
+    expect(refused.ok).toBe(false);
+  } finally {
+    await repo.shutdown();
+  }
+});

@@ -79,6 +79,9 @@ export interface AutomergeRepositoryLike {
   create<T>(initialValue?: T): AutomergeHandleLike<T>;
   find<T>(id: AutomergeUrl): Promise<AutomergeHandleLike<T>>;
   findWithProgress?<T>(id: AutomergeUrl): { handle: AutomergeHandleLike<T> };
+  /** Full-history transfers, supported by the production Automerge Repo. */
+  export?(id: AutomergeUrl): Promise<Uint8Array | undefined>;
+  import?<T>(binary: Uint8Array): AutomergeHandleLike<T>;
   delete(id: AutomergeUrl): void;
   flush?(documents?: string[]): Promise<void>;
 }
@@ -211,6 +214,34 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       createIndexedDbGeometryAssetStore({
         databaseName: `${options.databaseName ?? "cad-authored-documents"}-geometry-assets`,
       });
+  }
+  /**
+   * Persists a copy of `sourceDocumentId` with its whole change history as
+   * `documentId`, queued after the source's pending writes. The copy is read
+   * from the source's immutable document (Repo.export); only its identity
+   * field is then written. File bindings and the undo stack are keyed by the
+   * document identity, so the copy starts unlinked and with no undo history.
+   */
+  cloneWithHistory(sourceDocumentId: DocumentId, documentId: DocumentId) {
+    return this.enqueue(sourceDocumentId, async () => {
+      if (sourceDocumentId === documentId || this.urlStore.get(documentId))
+        throw new Error("The copy's document identity is already in use.");
+      const sourceUrl = this.urlStore.get(sourceDocumentId);
+      if (!sourceUrl) throw new Error("The document is not saved yet.");
+      const repo = await this.getRepo();
+      if (!repo.export || !repo.import)
+        throw new Error("This document storage cannot copy history.");
+      const binary = await repo.export(sourceUrl);
+      if (!binary) throw new Error("The document could not be read.");
+      const clone = repo.import<CollaborativeDocument>(binary);
+      await clone.whenReady();
+      clone.change((draft) => {
+        draft.authored.documentId = documentId;
+      });
+      await repo.flush?.([clone.documentId]);
+      this.urlStore.set(documentId, clone.url);
+      return clone.url;
+    });
   }
   getAutomergeRepository() {
     return this.getRepo();
