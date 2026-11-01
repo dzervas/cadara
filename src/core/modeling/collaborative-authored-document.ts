@@ -2,6 +2,7 @@ import type { AuthoredModelDocument } from "@/contracts/modeling/authored-docume
 import type { ModelingDiagnostic } from "@/contracts/modeling/schema";
 import type { DurableRef } from "@/contracts/shared/references";
 import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
+import { getPrimitiveRefKey } from "@/core/editor/schema";
 
 export const COLLABORATIVE_MERGE_DIAGNOSTIC_CODES = {
   invalidFeatureOrder: "merge-invalid-feature-order",
@@ -123,13 +124,18 @@ function normalizeFeatureOrder(
   >,
   diagnostics: ModelingDiagnostic[],
 ) {
+  const labels = new Map(
+    document.features.map((feature) => [feature.featureId, feature.label]),
+  );
   const seen = new Set<string>();
   const normalized = document.featureOrder.filter((featureId) => {
     if (!featureIds.has(featureId) || seen.has(featureId)) {
       diagnostics.push(
         createMergeDiagnostic(
           COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
-          `Merged feature order contained invalid or duplicate feature ${featureId}.`,
+          featureIds.has(featureId)
+            ? `${labels.get(featureId)} appeared twice in the feature order; the repeat was dropped.`
+            : "The feature order named a feature that no longer exists; it was dropped.",
           { kind: "feature", featureId },
         ),
       );
@@ -146,7 +152,9 @@ function normalizeFeatureOrder(
     diagnostics.push(
       createMergeDiagnostic(
         COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidFeatureOrder,
-        `Merged feature order omitted ${missingFeatureIds.join(", ")}; appended deterministically by durable ID.`,
+        `The feature order was missing ${missingFeatureIds
+          .map((featureId) => labels.get(featureId))
+          .join(", ")}; appended at its end.`,
         null,
       ),
     );
@@ -170,7 +178,7 @@ function normalizeCursor(
     diagnostics.push(
       createMergeDiagnostic(
         COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
-        `Merged feature cursor referenced missing feature ${document.cursor.featureId}.`,
+        "The history position named a feature that no longer exists; it was reset.",
         { kind: "feature", featureId: document.cursor.featureId },
       ),
     );
@@ -184,7 +192,7 @@ function normalizeCursor(
     diagnostics.push(
       createMergeDiagnostic(
         COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.missingCursorTarget,
-        `Merged feature cursor referenced missing sketch ${document.cursor.sketchId}.`,
+        "The history position named a sketch that no longer exists; it was reset.",
         { kind: "sketch", sketchId: document.cursor.sketchId },
       ),
     );
@@ -220,7 +228,7 @@ function collectScalarDiagnostics(document: AuthoredModelDocument) {
       diagnostics.push(
         createMergeDiagnostic(
           COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.concurrentLabelConflict,
-          `Merged feature label "${feature.label}" is shared by ${existing} and ${feature.featureId}.`,
+          `Several features are named "${feature.label}"; rename one so each name is unique.`,
           { kind: "feature", featureId: feature.featureId },
         ),
       );
@@ -243,18 +251,70 @@ function collectInvalidReferenceDiagnostics(
   for (const feature of document.features) {
     for (const target of collectPrimitiveRefs(feature.definition)) {
       if (!primitiveRefExists(target, featureIds, sketchIds, bodyIds)) {
-        diagnostics.push(
-          createMergeDiagnostic(
+        const missing = describeDurableRefKind(target.kind);
+        diagnostics.push({
+          ...createMergeDiagnostic(
             COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference,
-            `Merged feature ${feature.featureId} references missing ${target.kind}.`,
+            `${feature.label} references a missing ${missing}.`,
             target,
           ),
-        );
+          repairGuidance: `Edit ${feature.label} and select an existing ${missing}. This notice clears when the document is opened again.`,
+        });
       }
     }
   }
 
   return diagnostics;
+}
+
+/**
+ * Drops each load-time missing-reference diagnostic whose target a feature's
+ * own rebuild error already names: that error carries the feature's label
+ * and repair, so the document-level one only repeats it. A missing reference
+ * no feature error names (for example on a suppressed feature) is kept.
+ * The match is by target alone: when two features reference the same
+ * missing target and only one of them reports it, both are dropped.
+ */
+export function withoutMissingReferencesReportedByFeatures(
+  diagnostics: readonly ModelingDiagnostic[],
+): ModelingDiagnostic[] {
+  const reportedTargets = new Set(
+    diagnostics.flatMap((diagnostic) =>
+      diagnostic.severity === "error" &&
+      diagnostic.featureId != null &&
+      diagnostic.target
+        ? [getPrimitiveRefKey(diagnostic.target)]
+        : [],
+    ),
+  );
+  return diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.code !==
+        COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference ||
+      !diagnostic.target ||
+      !reportedTargets.has(getPrimitiveRefKey(diagnostic.target)),
+  );
+}
+
+function describeDurableRefKind(kind: DurableRef["kind"]) {
+  switch (kind) {
+    case "sketchEntity":
+      return "sketch curve";
+    case "sketchPoint":
+      return "sketch point";
+    case "sketchOperation":
+      return "sketch operation";
+    case "constraint":
+      return "sketch constraint";
+    case "dimension":
+      return "sketch dimension";
+    case "region":
+      return "sketch region";
+    case "construction":
+      return "construction geometry";
+    default:
+      return kind;
+  }
 }
 
 function collectPrimitiveRefs(value: unknown): DurableRef[] {

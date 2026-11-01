@@ -7,6 +7,7 @@ import {
   FeatureInspector,
 } from "@/components/layout/feature-inspector";
 import {
+  getEditorViewState,
   initialEditorState,
   type EditorViewState,
 } from "@/core/editor/state-machine";
@@ -405,4 +406,74 @@ test("src/components/layout/feature-inspector.spec.tsx", async () => {
     ),
   ].filter((text) => /region|^(Remove|Move) /i.test(text));
   expectNoInternalIds(chipTexts, ["region_gone", "region_live"]);
+});
+
+// UI lane; seam: the feature inspector's Diagnostics field render (static
+// markup). An edit preview blocked by an earlier failure names the affected
+// features by label, as the sidebar does, never by id (the preview's own
+// feature id is not a document feature and is left out).
+test("feature inspector diagnostics name affected features by label", () => {
+  const holeSession = {
+    ...createFeatureEditSession({ featureType: "hole", selectedTarget: null }),
+    mode: "edit" as const,
+    featureId: "feature_hole-2" as const,
+    diagnostics: [
+      {
+        code: "feature-dependency-blocked",
+        severity: "error" as const,
+        message: "Hole 2 is blocked by an earlier feature error.",
+        target: null,
+        detail: {
+          kind: "rebuildFailure" as const,
+          affectedFeatureIds: [
+            "feature_hole-1" as const,
+            "feature_preview_preview_feature_hole-2" as const,
+          ],
+          affectedTargets: [],
+        },
+      },
+    ],
+  };
+  const markup = renderToStaticMarkup(
+    <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">
+      <EditorContext.Provider
+        value={{
+          machineState: initialEditorState,
+          state: {
+            ...getEditorViewState(initialEditorState),
+            mode: "part",
+            activeEditSession: holeSession,
+            snapshot: {
+              document: {
+                variables: [],
+                diagnostics: [],
+                features: [{ featureId: "feature_hole-1", label: "Hole 1" }],
+                bodies: [],
+                sketches: [],
+              },
+              presentation: { entities: [] },
+            } as unknown as WorkspaceSnapshot,
+          },
+          dispatch: () => undefined,
+          getRuntimeTrace: () => ({
+            maxEntries: 0,
+            totalEntries: 0,
+            droppedEntries: 0,
+            entries: [],
+          }),
+        }}
+      >
+        <FeatureInspector
+          featureSnapshot={null}
+          onPatch={() => undefined}
+          onCommit={() => undefined}
+          onCancel={() => undefined}
+        />
+      </EditorContext.Provider>
+    </MantineProvider>,
+  );
+  const detail = /Affected features: [^<]*/.exec(markup)?.[0];
+
+  expect(detail).toBe("Affected features: ‘Hole 1’");
+  expectNoInternalIds([detail]);
 });

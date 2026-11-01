@@ -145,6 +145,8 @@ async function documentWithDeletedHoleSketch(cursorFeatureId: FeatureId) {
         })),
       ],
       cursor: { kind: "feature", featureId: cursorFeatureId },
+      // As a saved document has it: a body has its label record.
+      bodyLabels: [{ bodyId: BASE_BODY, label: "Extrude 1" }],
       topologyLineage: [],
     } as AuthoredModelDocument,
   };
@@ -177,7 +179,7 @@ async function restoredAdapter(
       ...(replacesFeatureId ? { replacesFeatureId } : {}),
       definition,
     });
-  return { ...fixture, adapter, snapshot, preview };
+  return { ...fixture, loaded, adapter, snapshot, preview };
 }
 
 function errors<Diagnostic extends { severity: string }>(
@@ -187,7 +189,11 @@ function errors<Diagnostic extends { severity: string }>(
 }
 
 test("OCC preview: editing a feature after an unrelated failed feature previews its geometry", async () => {
-  const { adapter, base, snapshot, preview } = await restoredAdapter();
+  const { adapter, base, loaded, snapshot, preview } = await restoredAdapter();
+  expect(
+    loaded.diagnostics.map((diagnostic) => diagnostic.message),
+    "Premise: the load reports Hole 1's missing sketch point.",
+  ).toEqual(["Hole 1 references a missing sketch point."]);
   const committedErrors = errors(snapshot.document.diagnostics);
   expect(
     committedErrors.flatMap((diagnostic) =>
@@ -199,8 +205,8 @@ test("OCC preview: editing a feature after an unrelated failed feature previews 
     committedErrors.some(
       (diagnostic) => diagnostic.code === "merge-invalid-durable-reference",
     ),
-    "The fixture's load reports the missing sketch point.",
-  ).toBe(true);
+    "The load's missing-sketch-point diagnostic is dropped: Hole 1's own error names that point.",
+  ).toBe(false);
 
   const edited = await preview(
     "preview_edit_extrude_2",

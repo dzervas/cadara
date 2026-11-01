@@ -22,7 +22,7 @@ import {
 } from "@/core/editor/schema";
 import { getObjectTreeNodeToolIcon } from "@/core/tools/tool-icon-resolvers";
 import { evaluateDocumentVariableExpressions } from "@/core/modeling/document-variable-expressions";
-import { formatSidebarDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
+import { formatUserDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
 import { canReassignCommittedSketchPlane } from "@/core/editor/sketch-plane-editing";
 import { useEditorState } from "@/hooks/use-editor-state";
 
@@ -759,12 +759,12 @@ export function FeatureSidebar({
                           </p>
                           {/* T17e (review R-3): no target id line; the
                               target is reached by "Select target". */}
-                          {formatSidebarDiagnosticDetail(
+                          {formatUserDiagnosticDetail(
                             diagnostic,
                             featureLabel,
                           ) ? (
                             <p className="mt-1 text-xs text-[var(--workbench-shell-text-muted)]">
-                              {formatSidebarDiagnosticDetail(
+                              {formatUserDiagnosticDetail(
                                 diagnostic,
                                 featureLabel,
                               )}

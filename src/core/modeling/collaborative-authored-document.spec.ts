@@ -12,7 +12,9 @@ import {
 import {
   COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
   normalizeCollaborativeAuthoredModelDocument,
+  withoutMissingReferencesReportedByFeatures,
 } from "@/core/modeling/collaborative-authored-document";
+import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
 import { MockKernelAdapter } from "@/application/modeling/mock-kernel-adapter";
 
 test("src/domain/modeling/collaborative-authored-document.spec.ts", async () => {
@@ -142,6 +144,16 @@ test("src/domain/modeling/collaborative-authored-document.spec.ts", async () => 
     "Variable cycles introduced by merge should have stable diagnostics.",
   ).toBeTruthy();
 
+  expectNoInternalIds(
+    [
+      ...concurrentInsert.diagnostics,
+      ...movedAndDeleted.diagnostics,
+      ...renameConflict.diagnostics,
+      ...missingCursor.diagnostics,
+    ].map((diagnostic) => diagnostic.message),
+    ["feature_extrude-a", "feature_extrude-b", "feature_deleted"],
+  );
+
   const invalidReferenceDefinition: FeatureDefinition = {
     kind: "extrude",
     featureTypeVersion: EXTRUDE_FEATURE_SCHEMA_VERSION,
@@ -186,4 +198,89 @@ test("src/domain/modeling/collaborative-authored-document.spec.ts", async () => 
     ),
     "Invalid durable references caused by merge should be explicit diagnostics.",
   ).toBeTruthy();
+});
+
+// Logic lane; seam: the load normalizer's missing-reference diagnostic and
+// the filter that drops it once a feature's rebuild error names the same
+// target (the kernel's labelled error says the same and how to repair it).
+test("a missing reference names its feature by label and is dropped only where a feature error names the same target", async () => {
+  const seed = createAuthoredModelDocumentFromSnapshot(
+    (
+      await new MockKernelAdapter().getDocumentSnapshot({
+        contractVersion: CONTRACT_VERSION,
+        documentId: "doc_workspace",
+      })
+    ).snapshot,
+  );
+  const extrude = seed.features.find(
+    (feature) => feature.featureId === "feature_extrude-1",
+  )!;
+  if (extrude.definition.kind !== "extrude")
+    throw new Error("Expected the seed Extrude 1.");
+  const missingRegion = {
+    kind: "region" as const,
+    sketchId: "sketch_deleted" as const,
+    regionId: "region_deleted" as const,
+  };
+  const loaded = normalizeCollaborativeAuthoredModelDocument({
+    ...seed,
+    features: [
+      {
+        ...extrude,
+        definition: {
+          ...extrude.definition,
+          parameters: {
+            ...extrude.definition.parameters,
+            profiles: [missingRegion],
+          },
+        },
+      },
+    ],
+    featureOrder: [extrude.featureId],
+  } as AuthoredModelDocument);
+  const missing = loaded.diagnostics.filter(
+    (diagnostic) =>
+      diagnostic.code ===
+      COLLABORATIVE_MERGE_DIAGNOSTIC_CODES.invalidDurableReference,
+  );
+
+  expect(missing).toMatchObject([
+    {
+      message: "Extrude 1 references a missing sketch region.",
+      repairGuidance:
+        "Edit Extrude 1 and select an existing sketch region. This notice clears when the document is opened again.",
+      target: missingRegion,
+    },
+  ]);
+  expectNoInternalIds(
+    missing.flatMap((diagnostic) => [
+      diagnostic.message,
+      diagnostic.repairGuidance,
+    ]),
+    [extrude.featureId],
+  );
+
+  const featureError = {
+    code: "occ-missing-reference",
+    severity: "error" as const,
+    message: "Extrude 1 profile selection is incorrect.",
+    featureId: extrude.featureId,
+    target: missingRegion,
+    detail: null,
+  };
+  expect(
+    withoutMissingReferencesReportedByFeatures([...missing, featureError]),
+    "The feature's own error replaces the document-level duplicate.",
+  ).toEqual([featureError]);
+  expect(
+    withoutMissingReferencesReportedByFeatures([
+      ...missing,
+      { ...featureError, target: { ...missingRegion, regionId: "region_other" } },
+    ]),
+    "A feature error about another target does not hide it.",
+  ).toHaveLength(2);
+  expect(
+    withoutMissingReferencesReportedByFeatures(missing),
+    "Kept when it is the only signal.",
+  ).toEqual(missing);
 });

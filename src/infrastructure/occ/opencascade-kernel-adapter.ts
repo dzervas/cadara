@@ -187,7 +187,10 @@ import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { OccWorkerSnapshotClient } from "@/infrastructure/occ/worker-client";
 import { projectSketchExternalReferencesFromSnapshot } from "@/core/modeling/sketch-reference-projection";
 import { NON_ACCEPTED_OFFSET_FEATURE_INPUT_CODE } from "@/core/modeling/sketch-feature-input";
-import { COLLABORATIVE_MERGE_DIAGNOSTIC_CODES } from "@/core/modeling/collaborative-authored-document";
+import {
+  COLLABORATIVE_MERGE_DIAGNOSTIC_CODES,
+  withoutMissingReferencesReportedByFeatures,
+} from "@/core/modeling/collaborative-authored-document";
 import {
   findDocumentHistoryOrderDependencyViolations,
   getDocumentHistoryOrderEntryKey,
@@ -3689,9 +3692,11 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
       this.recordColdEvaluatedCheckpoints(rebuiltAuthoringState);
       authoringState = {
         ...rebuiltAuthoringState,
-        diagnostics: mergeModelingDiagnostics(
-          rebuiltAuthoringState.diagnostics,
-          restoreDiagnostics,
+        diagnostics: withoutMissingReferencesReportedByFeatures(
+          mergeModelingDiagnostics(
+            rebuiltAuthoringState.diagnostics,
+            restoreDiagnostics,
+          ),
         ),
       };
       // A plain restore keeps the document's id but never lowers the counter.

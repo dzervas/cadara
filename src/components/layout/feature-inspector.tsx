@@ -34,7 +34,7 @@ import {
   primitiveRefEquals,
   type PrimitiveRef,
 } from "@/core/editor/schema";
-import { formatInspectorDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
+import { formatUserDiagnosticDetail } from "@/core/modeling/diagnostic-formatting";
 import {
   getMissingRegionSketchLabel,
   getReferenceTargetLabel,
@@ -83,6 +83,9 @@ function DiagnosticsList({
 }: {
   diagnostics: readonly ModelingDiagnostic[];
 }) {
+  const features = useContext(EditorContext)?.state.snapshot?.document.features;
+  const featureLabel = (featureId: string) =>
+    features?.find((feature) => feature.featureId === featureId)?.label;
   if (diagnostics.length === 0) {
     return (
       <p className="text-xs text-(--workbench-shell-text-muted)">
@@ -94,6 +97,7 @@ function DiagnosticsList({
   return (
     <div className="space-y-2">
       {diagnostics.map((diagnostic, index) => {
+        const detail = formatUserDiagnosticDetail(diagnostic, featureLabel);
         const surface =
           diagnostic.severity === "error"
             ? {
@@ -128,9 +132,9 @@ function DiagnosticsList({
             <p className="mt-1 text-sm text-(--workbench-shell-text)">
               {diagnostic.message}
             </p>
-            {diagnostic.detail ? (
+            {detail ? (
               <p className="mt-1 text-xs text-(--workbench-shell-text-muted)">
-                {formatInspectorDiagnosticDetail(diagnostic)}
+                {detail}
               </p>
             ) : null}
             <p className="mt-1 text-xs text-(--workbench-shell-text-muted)">
