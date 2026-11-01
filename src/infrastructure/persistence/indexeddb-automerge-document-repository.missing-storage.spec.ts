@@ -36,8 +36,24 @@ import { SharedMemoryStorage } from "./shared-memory-automerge-storage.fixtures"
 
 const repos: Repo[] = [];
 // Repo.shutdown() flushes every cached handle and throws on unavailable ones.
-afterEach(() => {
-  for (const repo of repos.splice(0)) repo.networkSubsystem.disconnect();
+// A test can end while a peer is still requesting a document (a tab that
+// announced a new document just before the assertions). Disconnecting then
+// strands automerge-repo's DocSynchronizer awaiting that handle's readiness;
+// 60 s later its timeout rejects unhandled and can kill the shared Vitest
+// worker. Let every in-flight request settle before disconnecting.
+afterEach(async () => {
+  const live = repos.splice(0);
+  await Promise.all(
+    live.flatMap((repo) =>
+      Object.values(repo.handles)
+        .filter(
+          (handle) =>
+            handle.state === "loading" || handle.state === "requesting",
+        )
+        .map((handle) => handle.whenReady(["ready", "unavailable"])),
+    ),
+  );
+  for (const repo of live) repo.networkSubsystem.disconnect();
 });
 
 async function tab(
@@ -391,8 +407,12 @@ test.each(["changed", "deleted"] as const)(
     await reading;
     // Worker requests adopt their incoming URL synchronously, even while a
     // prior repository operation is queued behind this asset-availability read.
+    // The replacement has content: a peer never finishes requesting an
+    // empty document, which would hold the teardown above.
     const replacementUrl =
-      change === "changed" ? peer.writer.repo.create({}).url : null;
+      change === "changed"
+        ? peer.writer.repo.create({ replacement: true }).url
+        : null;
     if (replacementUrl) peer.urls.set(peer.seed.documentId, replacementUrl);
     else peer.urls.delete(peer.seed.documentId);
     releaseRead();
