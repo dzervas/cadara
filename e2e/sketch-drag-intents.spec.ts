@@ -613,29 +613,27 @@ test("T12f: dragging a fixed circle centre shows a feedback cue that disappears 
     .filter({ hasText: "Fix geometry preview" });
   await expect(fixChip).toHaveCount(1);
   await expect(fixChip).toContainText("Select geometry to fix");
+  // The chip follows the pointer and can still be drawn for the glide's
+  // previous step (5 px short in x) when the last move returns, so wait for its
+  // place at the final pointer: below-right, a whole pick box (twice the 16 px
+  // exit radius) plus the 6 px label gap away from the hovered centre.
   await expect
     .poll(
       async () => {
         const chip = await fixChip.boundingBox();
-        if (!chip) return false;
-        // The picked centre's screen box includes its full 16 px exit radius.
-        return (
-          chip.x >= hotspot.x + 16 ||
-          chip.x + chip.width <= hotspot.x - 16 ||
-          chip.y >= hotspot.y + 16 ||
-          chip.y + chip.height <= hotspot.y - 16
-        );
+        return {
+          right: Boolean(chip && chip.x >= hotspot.x + 38),
+          below: Boolean(chip && chip.y >= hotspot.y + 38),
+        };
       },
       {
         message:
-          "The gliding Fix Geometry prompt must not cover the hovered point's pick box",
+          "The gliding Fix Geometry prompt settles below-right of the hovered point, clear of its pick box",
       },
     )
-    .toBe(true);
+    .toEqual({ right: true, below: true });
   const chip = await fixChip.boundingBox();
   if (!chip) throw new Error("Fix Geometry chip not visible.");
-  expect(chip.x).toBeGreaterThanOrEqual(hotspot.x + 38);
-  expect(chip.y).toBeGreaterThanOrEqual(hotspot.y + 38);
   const canvas = await page.locator("main canvas").first().boundingBox();
   if (!canvas) throw new Error("Canvas not visible.");
   expect(chip.x + chip.width).toBeLessThanOrEqual(canvas.x + canvas.width);
