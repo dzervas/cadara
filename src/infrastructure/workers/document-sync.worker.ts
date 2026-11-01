@@ -18,6 +18,7 @@ import {
   createIndexedDbMaterializedDocumentStore,
   type MaterializedDocumentEvent,
 } from "@/infrastructure/persistence/indexeddb-materialized-document-store";
+import { reportAbandonedAutomergeSyncWaits } from "@/infrastructure/workers/document-sync-worker-sync-wait-timeout";
 
 function reportMaterializedDocumentEvent(event: MaterializedDocumentEvent) {
   // The cache only ever falls back to the Automerge load; a failing cache is
@@ -36,9 +37,19 @@ interface DocumentSyncWorkerGlobalScope {
       >,
     ) => void,
   ): void;
+  addEventListener(
+    type: "unhandledrejection",
+    listener: (event: PromiseRejectionEvent) => void,
+  ): void;
 }
 
 const workerScope = globalThis as unknown as DocumentSyncWorkerGlobalScope;
+reportAbandonedAutomergeSyncWaits(workerScope, (error) =>
+  console.warn(
+    "[document-sync] A peer announced a document but the connection dropped before the document arrived; Automerge stopped waiting for it after 60 s.",
+    error,
+  ),
+);
 const repositoryUrlStore = new MemoryDocumentRepositoryUrlStore();
 
 function createWorkerMessageHandler(search: string) {
