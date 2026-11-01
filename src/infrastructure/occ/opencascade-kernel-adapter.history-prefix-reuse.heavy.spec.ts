@@ -90,6 +90,7 @@ import { SharedMemoryStorage } from "@/infrastructure/persistence/shared-memory-
 
 import {
   appliedFeatureIds,
+  bodiesFrom,
   enclosureSessionWithTailFaceSketch,
   evaluatedModel,
   expectColdEquivalent,
@@ -822,19 +823,6 @@ async function restoreAndSnapshot(
   return { runs, bodies: bodies.sort(), regionFaces: regionFaces.count };
 }
 
-/** Bodies that the applied features from `featureId` on output. */
-const bodiesFrom = (document: AuthoredModelDocument, featureId: FeatureId) => {
-  const applied = appliedFeatureIds(document);
-  const suffix = new Set(applied.slice(applied.indexOf(featureId)));
-  return [
-    ...new Set(
-      (document.topologyLineage ?? [])
-        .filter((record) => suffix.has(record.featureId))
-        .flatMap((record) => record.outputs.map((output) => output.outputSlot)),
-    ),
-  ].sort();
-};
-
 test.each(Object.keys(tailParameterEdits))(
   "restores on the landing %s resume from the runtime's unchanged prefix, rebuild only the changed tail and equal a cold open (cadara-jxe3)",
   async (model) => {
@@ -1247,6 +1235,7 @@ const spyOnSketchRebuilds = (session: Session) =>
 // document. The commit registers its record with the inputs that restore
 // reads, so the restore neither re-solves it nor evaluates the history the
 // re-solve projects against (on the enclosure, 11 s per Finish Sketch).
+// The premise snapshot meshes the committed sketch before the restore.
 test("a restore of the session's own export after a new face sketch at the tail evaluates, re-solves and meshes nothing (cadara-dx2k.5)", async () => {
   const { session, sketchId } = await enclosureSessionWithTailFaceSketch();
   try {
@@ -1288,11 +1277,13 @@ test("a restore of the session's own export after a new face sketch at the tail 
   }
 }, 900_000);
 
-// The browser publishes through the Automerge repository, which keeps the
-// authored record order, so the publication has the key the commit
-// registered and its restore reuses the committed record.
-test("a restore of a new face sketch's publication through the Automerge repository evaluates and re-solves nothing (cadara-dx2k.12)", async () => {
-  const { session, opened } = await enclosureSessionWithTailFaceSketch();
+// The browser publishes through the Automerge repository (authored record
+// order, sorted keys). The snapshot after the commit meshes the new sketch
+// once; the restore keeps the committed records, so its snapshot meshes
+// nothing.
+test("a restore of a new face sketch's publication through the Automerge repository evaluates, re-solves and meshes nothing (cadara-dx2k.12)", async () => {
+  const { session, sketchId, opened } =
+    await enclosureSessionWithTailFaceSketch();
   await initializeBase64Wasm(automergeWasmBase64);
   const repo = new Repo({ storage: new SharedMemoryStorage() });
   try {
@@ -1311,13 +1302,23 @@ test("a restore of a new face sketch's publication through the Automerge reposit
       document: exported,
     });
     if (!published.ok) throw new Error(JSON.stringify(published.status));
+    expect(
+      Object.keys(published.document),
+      "premise: sorted keys, unlike the export",
+    ).not.toEqual(Object.keys(exported));
+    expect(
+      (await session.snapshot()).document.sketches.find(
+        (entry) => entry.sketchId === sketchId,
+      )?.sketch.regions.length,
+      "premise: the committed sketch has regions to mesh",
+    ).toBeGreaterThan(0);
 
     const sketchRebuilds = spyOnSketchRebuilds(session);
-    const { runs } = await restoreAndSnapshot(session, published.document);
+    const restored = await restoreAndSnapshot(session, published.document);
     expect(
-      { runs, sketchRebuilds: sketchRebuilds.mock.calls.length },
-      "the publication's restore evaluates and re-solves nothing",
-    ).toEqual({ runs: 0, sketchRebuilds: 0 });
+      { ...restored, sketchRebuilds: sketchRebuilds.mock.calls.length },
+      "the publication's restore evaluates, re-solves and meshes nothing",
+    ).toEqual({ runs: 0, bodies: [], regionFaces: 0, sketchRebuilds: 0 });
     sketchRebuilds.mockRestore();
     await expectColdEquivalent(
       session,

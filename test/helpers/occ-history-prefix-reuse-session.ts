@@ -395,6 +395,22 @@ export const appliedFeatureIds = (document: AuthoredModelDocument) => {
     .flatMap((item) => (item.kind === "feature" ? [item.featureId] : []));
 };
 
+/** Bodies that the applied features from `featureId` on output. */
+export const bodiesFrom = (
+  document: AuthoredModelDocument,
+  featureId: FeatureId,
+) => {
+  const applied = appliedFeatureIds(document);
+  const suffix = new Set(applied.slice(applied.indexOf(featureId)));
+  return [
+    ...new Set(
+      (document.topologyLineage ?? [])
+        .filter((record) => suffix.has(record.featureId))
+        .flatMap((record) => record.outputs.map((output) => output.outputSlot)),
+    ),
+  ].sort();
+};
+
 export const loadLandingModel = async (model: string) =>
   JSON.parse(
     await readFile(
