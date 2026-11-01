@@ -128,14 +128,13 @@ function appendStrokeAttributes(
       'stroke="black"',
       'stroke-width="1"',
       'vector-effect="non-scaling-stroke"',
-      'fill="none"',
     );
     return;
   }
 
   const stroke = style.stroke;
   if (!stroke) {
-    attributes.push('stroke="none"', 'fill="none"');
+    attributes.push('stroke="none"');
     return;
   }
 
@@ -147,7 +146,6 @@ function appendStrokeAttributes(
     `stroke-linecap="${stroke.lineCap}"`,
     `stroke-linejoin="${stroke.lineJoin}"`,
     `stroke-miterlimit="${formatNumber(stroke.miterLimit)}"`,
-    'fill="none"',
   );
 
   if ((stroke.dashSize ?? 0) > 0 && (stroke.gapSize ?? 0) > 0) {
@@ -405,6 +403,8 @@ function serializeSvg(model: SketchVectorExportModel): ExportResult {
     }
     const attributes = [`data-entity-id="${escapeXml(entity.entityId)}"`];
     appendStrokeAttributes(attributes, entity.style);
+    // An entity is an open or closed outline; only regions carry a fill.
+    attributes.push('fill="none"');
     entityElements.push(
       `<path d="${escapeXml(path)}" ${attributes.join(" ")}/>`,
     );

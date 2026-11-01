@@ -699,6 +699,117 @@ test("SVG sketch export hides an authored disabled stroke but keeps the default 
   ).toContain('stroke="black"');
 });
 
+test("SVG sketch export writes each attribute once per element, so a filled and stroked region keeps its authored fill", async () => {
+  const stroke = {
+    color: "#112233",
+    opacity: 1,
+    width: 1.5,
+    lineCap: "round",
+    lineJoin: "round",
+    miterLimit: 4,
+  } as const;
+  const square = [
+    { kind: "line", start: [0, 0], end: [10, 0] },
+    { kind: "line", start: [10, 0], end: [10, 8] },
+    { kind: "line", start: [10, 8], end: [0, 8] },
+    { kind: "line", start: [0, 8], end: [0, 0] },
+  ] as const;
+  const result = await svgSketchExportProvider.export({
+    target: { kind: "sketch", sketchId: "sketch_export" },
+    targetLabel: "Filled Stroked Sketch",
+    targetAppearance: null,
+    options: svgSketchExportProvider.getDefaultOptions(),
+    capabilities: createMockCapabilities({
+      sketchModel: {
+        documentId: "doc_export",
+        revisionId: "rev_0001",
+        sketchId: "sketch_export",
+        label: "Filled Stroked Sketch",
+        units: "millimeter",
+        entities: [
+          {
+            kind: "lineSegment",
+            entityId: "entity_stroked",
+            label: "stroked",
+            start: [0, 0],
+            end: [10, 0],
+            isConstruction: false,
+            style: { fill: { kind: "none" }, stroke },
+          },
+        ],
+        regions: [
+          {
+            regionId: "region_solid",
+            label: "Solid",
+            loops: [{ role: "outer", isClosed: true, segments: [...square] }],
+            style: {
+              fill: { kind: "solid", color: "#44aa66", opacity: 0.5 },
+              stroke,
+            },
+          },
+          {
+            regionId: "region_gradient",
+            label: "Gradient",
+            loops: [{ role: "outer", isClosed: true, segments: [...square] }],
+            style: {
+              fill: {
+                kind: "gradient",
+                gradient: {
+                  kind: "linear",
+                  angleRadians: 0,
+                  startColor: "#2266ff",
+                  startOpacity: 1,
+                  endColor: "#ffcc33",
+                  endOpacity: 1,
+                },
+              },
+              stroke,
+            },
+          },
+        ],
+        diagnostics: [],
+      },
+    }),
+  });
+  if (!result.ok || typeof result.payload !== "string")
+    throw new Error("SVG sketch export should succeed with text payload.");
+
+  const elementAttributes = (idAttribute: string) => {
+    const element = new RegExp(`<path [^>]*${idAttribute}[^>]*/>`).exec(
+      result.payload as string,
+    )?.[0];
+    if (!element) throw new Error(`no <path> with ${idAttribute}`);
+    return [...element.matchAll(/\s([\w:-]+)="([^"]*)"/g)].map(
+      ([, name, value]) => [name!, value!] as const,
+    );
+  };
+  const expectSingleFill = (idAttribute: string, fill: unknown) => {
+    const attributes = elementAttributes(idAttribute);
+    const names = attributes.map(([name]) => name);
+    expect(
+      names,
+      `${idAttribute}: XML forbids repeating an attribute on one element`,
+    ).toEqual([...new Set(names)]);
+    expect(
+      attributes.filter(([name]) => name === "fill"),
+      `${idAttribute}: exactly one fill`,
+    ).toEqual([["fill", fill]]);
+    return attributes.find(([name]) => name === "fill")![1];
+  };
+
+  expectSingleFill('data-region-id="region_solid"', "#44aa66");
+  const gradientFill = expectSingleFill(
+    'data-region-id="region_gradient"',
+    expect.stringMatching(/^url\(#[\w-]+\)$/),
+  );
+  const gradientId = /^url\(#([\w-]+)\)$/.exec(gradientFill)![1];
+  expect(
+    result.payload,
+    "the gradient fill references a gradient definition",
+  ).toContain(`<linearGradient id="${gradientId}"`);
+  expectSingleFill('data-entity-id="entity_stroked"', "none");
+});
+
 test("3MF export writes the body's display colour as a colour group the object references", async () => {
   for (const [appearance, expected] of [
     [{ kind: "palette", slot: 3 }, "#A68DD0"],
