@@ -320,7 +320,15 @@ test("production startup requires callable native topology and neutral query met
 test("filesystem startup fails explicitly for absent and unusable custom assets", async () => {
   const directory = await mkdtemp(join(tmpdir(), "cadara-occ-runtime-"));
   try {
-    await expect(loadFilesystemOpenCascadeFactory(directory)).rejects.toThrow();
+    // The absent case gets its own directory: its rejected readFile settles the
+    // load while the module runner's import of the same URL can still be in
+    // flight, and a later import of that URL would join the pending "not
+    // found" fetch instead of reading the stub written below.
+    const absentDirectory = join(directory, "absent");
+    await mkdir(absentDirectory);
+    await expect(
+      loadFilesystemOpenCascadeFactory(absentDirectory),
+    ).rejects.toThrow();
     await writeFile(join(directory, "cadara-occ.js"), "export default 42;");
     await writeFile(join(directory, "cadara-occ.wasm"), "unusable wasm");
     await expect(loadFilesystemOpenCascadeFactory(directory)).rejects.toThrow(
