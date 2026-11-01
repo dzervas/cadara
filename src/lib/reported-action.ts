@@ -25,32 +25,60 @@ interface ReportedActionReportingPolicy {
   thrownFailure?: ReportedActionMappedFailurePolicy;
 }
 
+interface ModelingResultRequirement {
+  operation: string;
+  fallbackMessage: string;
+  context?: readonly AppErrorContextEntry[];
+}
+
+function modelingResultError(
+  result: WorkbenchModelingMutationResult,
+  input: ModelingResultRequirement,
+) {
+  return appErrorFromModelingResult({
+    operation: input.operation,
+    fallbackMessage: input.fallbackMessage,
+    diagnostics: result.diagnostics,
+    revisionState: result.revisionState,
+    context: input.context,
+  });
+}
+
+/**
+ * An accepted revision with an error diagnostic is a failure here: for
+ * callers that must stay atomic (the importer). Workbench edits use
+ * `requireAcceptedRevision`.
+ */
 export function requireAcceptedModelingResult<
   T extends WorkbenchModelingMutationResult,
 >(
   result: T,
-  input: {
-    operation: string;
-    fallbackMessage: string;
-    context?: readonly AppErrorContextEntry[];
-  },
+  input: ModelingResultRequirement,
 ): AppResult<T> {
   const hasErrorDiagnostic = result.diagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
-  if (result.revisionState.kind === "accepted" && !hasErrorDiagnostic) {
+  return hasErrorDiagnostic
+    ? err(modelingResultError(result, input))
+    : requireAcceptedRevision(result, input);
+}
+
+/**
+ * Whether the revision was accepted; its diagnostics do not decide it. An
+ * accepted edit that leaves features failing has still happened (the caller
+ * announces those features), while a rejected or conflicting one has not.
+ */
+export function requireAcceptedRevision<
+  T extends WorkbenchModelingMutationResult,
+>(
+  result: T,
+  input: ModelingResultRequirement,
+): AppResult<T> {
+  if (result.revisionState.kind === "accepted") {
     return ok(result);
   }
 
-  return err(
-    appErrorFromModelingResult({
-      operation: input.operation,
-      fallbackMessage: input.fallbackMessage,
-      diagnostics: result.diagnostics,
-      revisionState: result.revisionState,
-      context: input.context,
-    }),
-  );
+  return err(modelingResultError(result, input));
 }
 
 function isAppResult<T>(value: T | AppResult<T>): value is AppResult<T> {

@@ -356,6 +356,7 @@ export function CadWorkbench({
     setWorkbenchStatusNotification,
     showWorkbenchError: showAnyWorkbenchError,
     showWorkbenchInfo,
+    showWorkbenchWarning,
     workbenchStatusNotification,
   } = useWorkbenchNotifications({
     currentDocument: snapshot?.document ?? null,
@@ -773,6 +774,8 @@ export function CadWorkbench({
     history,
     setInvalidVariableValueMessages,
     showWorkbenchError,
+    showWorkbenchInfo,
+    showWorkbenchWarning,
     sketchSession,
     snapshot,
   });
@@ -1261,6 +1264,7 @@ export function CadWorkbench({
     snapshot,
     showWorkbenchError,
     showWorkbenchInfo,
+    showWorkbenchWarning,
   };
 
   const handleDeleteTarget = (target: PrimitiveRef, label: string) => {

@@ -100,7 +100,7 @@ export function useWorkbenchNotifications({
         featureError: featureId
           ? {
               documentId: modelingService.currentDocumentId,
-              featureId,
+              featureIds: [featureId],
               observed: false,
             }
           : null,
@@ -109,7 +109,25 @@ export function useWorkbenchNotifications({
     [modelingService],
   );
 
-  // A feature's error stops being news once the document no longer has it
+  /** `featureIds` ties the warning to those features' errors in the document. */
+  const showWorkbenchWarning = useCallback(
+    (message: string, featureIds: readonly FeatureId[]) => {
+      setWorkbenchStatus({
+        notification: { type: "warning", title: "Workbench action", message },
+        featureError:
+          featureIds.length > 0
+            ? {
+                documentId: modelingService.currentDocumentId,
+                featureIds,
+                observed: false,
+              }
+            : null,
+      });
+    },
+    [modelingService],
+  );
+
+  // Features' errors stop being news once the document no longer has them
   // (state adjusted during render; settles once the tie stops changing).
   if (workbenchStatus?.featureError && currentDocument) {
     const featureError = followFeatureErrorNotification(
@@ -272,6 +290,7 @@ export function useWorkbenchNotifications({
     setWorkbenchStatusNotification,
     showWorkbenchError,
     showWorkbenchInfo,
+    showWorkbenchWarning,
     workbenchStatusNotification,
   };
 }

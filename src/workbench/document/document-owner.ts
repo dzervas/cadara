@@ -20,7 +20,11 @@ import {
   } from "@/infrastructure/import/orchestrator";
 import { createBrowserOccImportHistoryProbe } from "@/infrastructure/occ/browser-import-history-probe";
 import { isDurablePrimitiveRef, type PrimitiveRef } from "@/core/editor/schema";
-import { requireAcceptedModelingResult } from "@/lib/reported-action";
+import { requireAcceptedRevision } from "@/lib/reported-action";
+import {
+  findNewlyFailingFeatures,
+  type NewlyFailingFeature,
+} from "@/workbench/adapters/feature-error-notification";
 import type { ModelingService } from "@/application/modeling/modeling-service";
 import type { GeometryAssetStore } from "@/core/modeling/geometry-asset-store";
 import { getNextDocumentVariableName } from "@/core/modeling/document-variable-expressions";
@@ -36,9 +40,19 @@ interface AcceptedMutationOptions {
   context?: readonly AppErrorContextEntry[];
 }
 
+interface DocumentMutationResult {
+  revisionState:
+    | { kind: "accepted" }
+    | { kind: "conflict"; actualRevisionId: string }
+    | { kind: "rejected"; reasonCode: string };
+  diagnostics: readonly ModelingDiagnostic[];
+}
+
 type AcceptedDocumentMutation<T> = AppResult<{
   mutation: T;
   snapshot: WorkspaceSnapshot;
+  /** Features this mutation left failing (not failing before it). */
+  newlyFailingFeatures: NewlyFailingFeature[];
 }>;
 
 interface WorkbenchDocumentOwnerDependencies {
@@ -99,33 +113,29 @@ export function createWorkbenchDocumentOwner({
     return snapshot;
   }
 
-  async function acceptMutation<
-    T extends {
-      revisionState:
-        | { kind: "accepted" }
-        | { kind: "conflict"; actualRevisionId: string }
-        | { kind: "rejected"; reasonCode: string };
-      diagnostics: readonly ModelingDiagnostic[];
-    },
-  >(
+  async function acceptMutation<T extends DocumentMutationResult>(
     result: AppResult<T>,
     options: AcceptedMutationOptions,
+    /** The snapshot the mutation was based on, for what it newly broke. */
+    baseSnapshot: WorkspaceSnapshot | null = snapshot,
   ): Promise<AcceptedDocumentMutation<T>> {
     if (result.isErr()) {
       return result as unknown as AcceptedDocumentMutation<T>;
     }
 
-    const accepted = requireAcceptedModelingResult(result.value, options);
+    const accepted = requireAcceptedRevision(result.value, options);
     if (accepted.isErr()) {
-      if (result.value.revisionState.kind === "accepted") {
-        await loadAcceptedMutationSnapshot();
-      }
       return accepted as unknown as AcceptedDocumentMutation<T>;
     }
 
+    const nextSnapshot = await loadAcceptedMutationSnapshot();
     return ok({
       mutation: accepted.value,
-      snapshot: await loadAcceptedMutationSnapshot(),
+      snapshot: nextSnapshot,
+      newlyFailingFeatures: findNewlyFailingFeatures(
+        baseSnapshot?.document ?? null,
+        nextSnapshot.document,
+      ),
     });
   }
 
@@ -145,7 +155,7 @@ export function createWorkbenchDocumentOwner({
         valueText: "0",
       });
 
-      return acceptMutation(result, options);
+      return acceptMutation(result, options, currentSnapshot);
     })();
     // Ordering only: the caller still receives `run`'s outcome.
     const settled = run.then(
@@ -176,7 +186,7 @@ export function createWorkbenchDocumentOwner({
       valueText: next.valueText,
     });
 
-    return acceptMutation(result, options);
+    return acceptMutation(result, options, currentSnapshot);
   }
 
   async function removeDocumentVariable(
@@ -261,7 +271,7 @@ export function createWorkbenchDocumentOwner({
     target: PrimitiveRef,
     nextLabel: string,
     options: AcceptedMutationOptions,
-  ) {
+  ): Promise<AcceptedDocumentMutation<DocumentMutationResult>> {
     const currentSnapshot = requireSnapshot();
 
     switch (target.kind) {

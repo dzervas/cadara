@@ -473,3 +473,57 @@ test("a feature's status error clears once the document stops reporting it; an u
     "An error not tied to a feature survives document changes.",
   ).toBe("Name cannot be empty.");
 });
+
+test("an accepted edit's warning clears once none of the features it names fails", () => {
+  const reporter = createTestErrorReporter();
+  const documentId = "doc_feature_warnings" as const;
+  const modelingService = {
+    currentDocumentId: documentId,
+    subscribeToDocumentChanges() { return () => undefined; },
+    async getHistoryRestoreState() { return restored; },
+  };
+  const featureError = (featureId: `feature_${string}`) => ({
+    code: "feature-reference-missing",
+    severity: "error" as const,
+    message: "Selection is incorrect.",
+    featureId,
+    target: null,
+    detail: null,
+  });
+  const fillet = featureError("feature_fillet-1");
+  const shell = featureError("feature_shell-3");
+  const warning =
+    "Deleted Extrude 1. Fillet 1 no longer rebuilds: repair it or undo.";
+  let diagnostics: (typeof fillet)[] = [];
+  const useNotifications = () =>
+    useWorkbenchNotifications({
+      currentDocument: { documentId, diagnostics },
+      errorReporter: reporter,
+      modelingService,
+    });
+  const renderSettled = () => {
+    hookHarness.render(useNotifications);
+    return hookHarness.render(useNotifications);
+  };
+
+  renderSettled().showWorkbenchWarning(warning, [
+    fillet.featureId,
+    shell.featureId,
+  ]);
+  expect(renderSettled().workbenchStatusNotification).toMatchObject({
+    type: "warning",
+    title: "Workbench action",
+    message: warning,
+  });
+
+  diagnostics = [fillet, shell];
+  expect(renderSettled().workbenchStatusNotification?.message).toBe(warning);
+  diagnostics = [shell];
+  expect(
+    renderSettled().workbenchStatusNotification?.message,
+    "kept while one of its features still fails",
+  ).toBe(warning);
+  // Undo or a repair: none of them fails any more.
+  diagnostics = [];
+  expect(renderSettled().workbenchStatusNotification ?? null).toBeNull();
+});

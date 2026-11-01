@@ -15,6 +15,7 @@ import type { FeatureId } from "@/contracts/shared/ids";
 import { ok, type ErrorReporter } from "@/contracts/errors";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import type { createWorkbenchDocumentOwner } from "@/workbench/document/document-owner";
+import { announceAcceptedDocumentMutation } from "@/workbench/adapters/feature-error-notification";
 
 type WorkbenchDocumentOwner = ReturnType<typeof createWorkbenchDocumentOwner>;
 type FeatureHistoryItem = Extract<
@@ -28,6 +29,10 @@ interface WorkbenchObjectActionContext {
   snapshot: WorkspaceSnapshot | null;
   showWorkbenchError: (message: string, featureId?: FeatureId | null) => void;
   showWorkbenchInfo: (message: string) => void;
+  showWorkbenchWarning: (
+    message: string,
+    featureIds: readonly FeatureId[],
+  ) => void;
 }
 
 export function deleteWorkbenchTarget({
@@ -36,6 +41,7 @@ export function deleteWorkbenchTarget({
   label,
   showWorkbenchError,
   showWorkbenchInfo,
+  showWorkbenchWarning,
   snapshot,
   target,
 }: WorkbenchObjectActionContext & {
@@ -75,7 +81,12 @@ export function deleteWorkbenchTarget({
       return;
     }
 
-    showWorkbenchInfo(`Deleted ${label}.`);
+    announceAcceptedDocumentMutation({
+      successMessage: `Deleted ${label}.`,
+      newlyFailingFeatures: result.value.newlyFailingFeatures,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
+    });
   });
 }
 
@@ -115,6 +126,8 @@ export function removeWorkbenchVariable({
   documentOwner,
   errorReporter,
   showWorkbenchError,
+  showWorkbenchInfo,
+  showWorkbenchWarning,
   snapshot,
   variable,
 }: WorkbenchObjectActionContext & {
@@ -142,6 +155,17 @@ export function removeWorkbenchVariable({
       }),
     mapSuccess: (result) => ok(result),
     onError: (error) => showWorkbenchError(error.message, error.featureId),
+  }).then((result) => {
+    if (result.isErr()) {
+      return;
+    }
+
+    announceAcceptedDocumentMutation({
+      successMessage: null,
+      newlyFailingFeatures: result.value.newlyFailingFeatures,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
+    });
   });
 }
 
@@ -151,6 +175,7 @@ export function setWorkbenchFeatureSuppression({
   item,
   showWorkbenchError,
   showWorkbenchInfo,
+  showWorkbenchWarning,
   snapshot,
 }: WorkbenchObjectActionContext & {
   item: FeatureHistoryItem;
@@ -188,11 +213,14 @@ export function setWorkbenchFeatureSuppression({
       return;
     }
 
-    showWorkbenchInfo(
-      nextSuppressed
+    announceAcceptedDocumentMutation({
+      successMessage: nextSuppressed
         ? `Suppressed ${item.label}.`
         : `Unsuppressed ${item.label}.`,
-    );
+      newlyFailingFeatures: result.value.newlyFailingFeatures,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
+    });
   });
 }
 
@@ -204,6 +232,7 @@ export function renameWorkbenchTarget({
   setObjectLabelOverrides,
   showWorkbenchError,
   showWorkbenchInfo,
+  showWorkbenchWarning,
   snapshot,
   target,
 }: WorkbenchObjectActionContext & {
@@ -266,7 +295,12 @@ export function renameWorkbenchTarget({
       delete next[getPrimitiveRefKey(target)];
       return next;
     });
-    showWorkbenchInfo(`Renamed ${label} to ${nextLabel}.`);
+    announceAcceptedDocumentMutation({
+      successMessage: `Renamed ${label} to ${nextLabel}.`,
+      newlyFailingFeatures: result.value.newlyFailingFeatures,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
+    });
   });
 }
 

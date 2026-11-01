@@ -101,6 +101,8 @@ test.each([
           showWorkbenchError(message) {
             notifications.push(message);
           },
+          showWorkbenchInfo() {},
+          showWorkbenchWarning() {},
           sketchSession: null,
           snapshot: makeSnapshot(),
         }),
@@ -207,6 +209,8 @@ test("useWorkbenchHistory routes sketch undo and redo to the editor action owner
       showWorkbenchError() {
         throw new Error("Sketch undo should not surface a document error.");
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: { sketchId: "sketch_active" } as never,
       snapshot: makeSnapshot(),
     }),
@@ -280,6 +284,8 @@ test("useWorkbenchHistory routes document undo and redo through the durable hist
       showWorkbenchError() {
         throw new Error("Document undo should not surface a document error.");
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: makeSnapshot(),
     }),
@@ -342,6 +348,8 @@ test("useWorkbenchHistory derives sketch toolbar availability from editor-owned 
           "Sketch availability should not surface workbench errors.",
         );
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: { sketchId: "sketch_active" } as never,
       snapshot: makeSnapshot(),
     }),
@@ -380,6 +388,8 @@ test("useWorkbenchHistory derives sketch toolbar availability from editor-owned 
           "Sketch availability should not surface workbench errors.",
         );
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: { sketchId: "sketch_active" } as never,
       snapshot: makeSnapshot(),
     }),
@@ -442,6 +452,7 @@ test("useWorkbenchHistory updates variables through the document owner and refle
                 diagnostics: [],
               },
               snapshot: currentSnapshot,
+              newlyFailingFeatures: [],
             });
           },
         },
@@ -455,6 +466,8 @@ test("useWorkbenchHistory updates variables through the document owner and refle
       showWorkbenchError(message) {
         shownErrors.push(message);
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: currentSnapshot,
     }),
@@ -490,6 +503,7 @@ test("useWorkbenchHistory updates variables through the document owner and refle
                 diagnostics: [],
               },
               snapshot: currentSnapshot,
+              newlyFailingFeatures: [],
             });
           },
         },
@@ -503,6 +517,8 @@ test("useWorkbenchHistory updates variables through the document owner and refle
       showWorkbenchError(message) {
         shownErrors.push(message);
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: currentSnapshot,
     }),
@@ -570,6 +586,8 @@ test("useWorkbenchHistory surfaces invalid variable updates without changing dur
       showWorkbenchError(message) {
         shownErrors.push(message);
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: makeSnapshot({
         variables: [{ name: "Width", valueText: "10 mm", variableId: "width" }],
@@ -633,6 +651,8 @@ test("variable expression failures in one document do not mark another document'
         setInvalidVariableValueMessages:
           presentation.setInvalidVariableValueMessages,
         showWorkbenchError() {},
+        showWorkbenchInfo() {},
+        showWorkbenchWarning() {},
         sketchSession: null,
         snapshot,
       });
@@ -714,6 +734,7 @@ test("useWorkbenchHistory reorders document history through the document owner a
       return ok({
         mutation: { revisionState: { kind: "accepted" }, diagnostics: [] },
         snapshot: currentSnapshot,
+        newlyFailingFeatures: [],
       });
     },
     async updateDocumentVariable() {
@@ -739,6 +760,8 @@ test("useWorkbenchHistory reorders document history through the document owner a
       showWorkbenchError(message) {
         shownErrors.push(message);
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: currentSnapshot,
     }),
@@ -769,6 +792,8 @@ test("useWorkbenchHistory reorders document history through the document owner a
       showWorkbenchError(message) {
         shownErrors.push(message);
       },
+      showWorkbenchInfo() {},
+      showWorkbenchWarning() {},
       sketchSession: null,
       snapshot: currentSnapshot,
     }),

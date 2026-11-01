@@ -33,6 +33,7 @@ import type {
 } from "@/contracts/modeling/schema";
 import { createDocumentHistoryOrder } from "@/core/modeling/document-history";
 import { documentHistoryOrdersEqual } from "@/workbench/history/workbench-history";
+import { announceAcceptedDocumentMutation } from "@/workbench/adapters/feature-error-notification";
 import { runReportedAction as runWorkbenchAction } from "@/lib/reported-action";
 import { useWorkbenchDocumentOwner } from "@/hooks/use-workbench-document-owner";
 import { useDurableHistory } from "@/hooks/use-durable-history";
@@ -54,6 +55,11 @@ interface WorkbenchHistoryControllerInput {
     SetStateAction<Record<string, string>>
   >;
   showWorkbenchError: (message: string, featureId?: FeatureId | null) => void;
+  showWorkbenchInfo: (message: string) => void;
+  showWorkbenchWarning: (
+    message: string,
+    featureIds: readonly FeatureId[],
+  ) => void;
   sketchSession: SketchSessionState | null;
   snapshot: WorkspaceSnapshot | null;
 }
@@ -79,6 +85,8 @@ export function useWorkbenchHistory({
   history,
   setInvalidVariableValueMessages,
   showWorkbenchError,
+  showWorkbenchInfo,
+  showWorkbenchWarning,
   sketchSession,
   snapshot,
 }: WorkbenchHistoryControllerInput) {
@@ -352,6 +360,12 @@ export function useWorkbenchHistory({
           delete nextMessages[variable.variableId];
           return nextMessages;
         });
+        announceAcceptedDocumentMutation({
+          successMessage: null,
+          newlyFailingFeatures: result.value.newlyFailingFeatures,
+          showWorkbenchInfo,
+          showWorkbenchWarning,
+        });
       });
     },
     [
@@ -360,6 +374,8 @@ export function useWorkbenchHistory({
       runAction,
       setInvalidVariableValueMessages,
       setVariableFailure,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
       snapshot,
     ],
   );
@@ -400,6 +416,12 @@ export function useWorkbenchHistory({
             return;
           }
 
+          announceAcceptedDocumentMutation({
+            successMessage: null,
+            newlyFailingFeatures: result.value.newlyFailingFeatures,
+            showWorkbenchInfo,
+            showWorkbenchWarning,
+          });
           const afterOrder = createDocumentHistoryOrder(
             result.value.snapshot.presentation.documentHistory,
           );
@@ -417,6 +439,8 @@ export function useWorkbenchHistory({
       isDocumentHistoryReorderRunning,
       runAction,
       showWorkbenchError,
+      showWorkbenchInfo,
+      showWorkbenchWarning,
       snapshot,
     ],
   );
