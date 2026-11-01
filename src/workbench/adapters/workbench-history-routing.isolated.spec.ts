@@ -57,6 +57,8 @@ test.each([
   ["action-not-found", "warning"],
   ["later-action-overlap", "warning"],
   ["automerge-durability-pending", "error"],
+  // The repository's stored-copy fault, not the authored-action conflict.
+  ["stored-identity-mismatch", "error"],
   ["repository-synchronization-timeout", "error"],
   ["unknown-reason", "error"],
   [undefined, "error"],

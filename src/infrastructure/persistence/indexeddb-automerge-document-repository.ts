@@ -413,11 +413,13 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
       materializeCollaborativeDocument(stored),
     );
     if (!parsed.ok) return { ok: false, diagnostic: parsed.diagnostic };
+    // A storage fault, distinct from the authored-action conflict
+    // "identity-mismatch" that history reports as an expected refusal.
     if (parsed.document.documentId !== documentId)
       return {
         ok: false,
         diagnostic: {
-          reasonCode: "identity-mismatch",
+          reasonCode: "stored-identity-mismatch",
           message: "Document identity does not match.",
         },
       };

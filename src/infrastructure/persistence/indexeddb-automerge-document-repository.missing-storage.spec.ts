@@ -297,7 +297,7 @@ test.each(["invalid", "identity-mismatch"] as const)(
           reasonCode:
             kind === "invalid"
               ? "invalid-authored-document"
-              : "identity-mismatch",
+              : "stored-identity-mismatch",
         },
       });
     expect(peer.publications).toEqual([]);
