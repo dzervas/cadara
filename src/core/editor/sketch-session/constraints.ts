@@ -804,6 +804,7 @@ export function patchSketchDimensionAnnotationPlacement(
     session.definition,
     target,
     point,
+    { keepDropOrder: patch.keepDropOrder === true },
   );
 
   if (nextFullDefinition === session.definition) {

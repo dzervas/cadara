@@ -63,20 +63,32 @@ export function updateDimensionAnnotationPlacementInDefinition(
   definition: SketchDefinition,
   target: SketchDimensionRef,
   point: SketchPoint,
+  options: { keepDropOrder?: boolean } = {},
 ): SketchDefinition {
   // The dragged label goes in front of every earlier drop. Every frame of one
-  // drag writes the same order, and undo restores the previous one.
-  const dropOrder =
-    Math.max(
-      0,
-      ...definition.dimensions.flatMap((dimension) =>
-        dimension.dimensionId !== target.dimensionId &&
-        "annotationPlacement" in dimension &&
-        dimension.annotationPlacement?.dropOrder !== undefined
-          ? [dimension.annotationPlacement.dropOrder]
-          : [],
-      ),
-    ) + 1;
+  // drag writes the same order, and undo restores the previous one. A drag
+  // that keeps its drop order (a layout-displaced angle label dragged where
+  // it is drawn) keeps the label's layout rank, so the label it was
+  // displaced by keeps its anchor in this session and after a reopen.
+  const kept = options.keepDropOrder
+    ? definition.dimensions.find(
+        (dimension) => dimension.dimensionId === target.dimensionId,
+      )
+    : undefined;
+  const dropOrder = kept
+    ? "annotationPlacement" in kept
+      ? kept.annotationPlacement?.dropOrder
+      : undefined
+    : Math.max(
+        0,
+        ...definition.dimensions.flatMap((dimension) =>
+          dimension.dimensionId !== target.dimensionId &&
+          "annotationPlacement" in dimension &&
+          dimension.annotationPlacement?.dropOrder !== undefined
+            ? [dimension.annotationPlacement.dropOrder]
+            : [],
+        ),
+      ) + 1;
   const dimensions = definition.dimensions.map((dimension) => {
     if (dimension.dimensionId !== target.dimensionId) {
       return dimension;
@@ -91,7 +103,8 @@ export function updateDimensionAnnotationPlacementInDefinition(
     if (!inferred) {
       return dimension;
     }
-    const placement = { ...inferred, dropOrder };
+    const placement =
+      dropOrder === undefined ? inferred : { ...inferred, dropOrder };
 
     switch (dimension.kind) {
       case "distance":

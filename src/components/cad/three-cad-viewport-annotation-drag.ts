@@ -10,12 +10,14 @@ import type {
 export function createDimensionAnnotationPlacementPatch(
   handle: SketchDimensionAnnotationDragHandle,
   point: readonly [number, number],
+  grab: Pick<DimensionAnnotationLabelGrab, "keepDropOrder">,
 ) {
   return {
     intent: "setDimensionAnnotationPlacement" as const,
     handleId: handle.id,
     dimensionId: handle.dimensionId,
     point,
+    ...(grab.keepDropOrder ? { keepDropOrder: true } : {}),
   };
 }
 
@@ -30,6 +32,11 @@ export interface DimensionAnnotationLabelGrab {
   clientX: number;
   clientY: number;
   labelPoint: readonly [number, number];
+  /**
+   * The drop keeps the label's committed drop order (its layout rank)
+   * instead of putting it in front of every earlier drop.
+   */
+  keepDropOrder?: boolean;
 }
 
 export type DimensionAnnotationDragListener = (

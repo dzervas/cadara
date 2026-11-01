@@ -4345,7 +4345,7 @@ function ThreeCadViewportScene({
           );
           if (point) {
             sketchToolPatchRef.current({
-              ...createDimensionAnnotationPlacementPatch(handle, point),
+              ...createDimensionAnnotationPlacementPatch(handle, point, grab),
               gesturePhase,
               clientPoint: [clientX, clientY],
             });

@@ -550,6 +550,80 @@ test("a label drag puts the label's drop order above every other dimension's, th
   ).toEqual([3, 2]);
 });
 
+// Logic lane (same seam): a layout-displaced angle label is dragged where it
+// is drawn and must not outrank the label displacing it, in the session or
+// after a reopen. Its drag keeps the drop order it had, so the persisted
+// placement, which alone ranks the label, is the same at the release and
+// after a reopen. A label that had no placement gains one without a drop
+// order: it becomes user-placed, at the release and after a reopen alike.
+test("a label drag that keeps its drop order moves the label and keeps its drop order; a never-placed label gains a placement without one", () => {
+  let session = enterSketchSession(
+    createNewSketchSession(
+      createStandardPlaneDefinition("xy"),
+      OCC_KERNEL_SETTINGS,
+    ),
+  );
+  for (const y of [0, 3]) {
+    session = acceptSketchDraw(
+      startSketchDraw(beginSketchTool(session, "line"), [0, y]),
+      [4, y],
+    );
+  }
+  const dimensions = session.definition.entities.map((entity, index) => ({
+    kind: "lineLength",
+    entityId: entity.entityId,
+    dimensionId: `dimension_keep_${index}`,
+    label: "Length",
+    reference: true as const,
+  }));
+  session = {
+    ...session,
+    definition: {
+      ...session.definition,
+      dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
+      dimensions,
+    } as unknown as SketchSessionState["definition"],
+  };
+  const drag = (
+    state: SketchSessionState,
+    id: string,
+    point: SketchPoint,
+    keepDropOrder?: true,
+  ) =>
+    patchSketchDimensionAnnotationPlacement(state, {
+      intent: "setDimensionAnnotationPlacement",
+      dimensionId: id,
+      point,
+      ...(keepDropOrder ? { keepDropOrder } : {}),
+    });
+  const placements = (state: SketchSessionState) =>
+    state.definition.dimensions.map((dimension) =>
+      "annotationPlacement" in dimension
+        ? dimension.annotationPlacement
+        : undefined,
+    );
+
+  const unplaced = drag(session, "dimension_keep_0", [2, 1], true);
+  expect(
+    placements(unplaced)[0],
+    "a never-dropped label is moved and stays without a drop order",
+  ).toMatchObject({ kind: "dimensionLine", offset: 1 });
+  expect(placements(unplaced)[0]).not.toHaveProperty("dropOrder");
+
+  session = drag(session, "dimension_keep_0", [2, 1]);
+  session = drag(session, "dimension_keep_1", [2, 2]);
+  const before = placements(session);
+  session = drag(session, "dimension_keep_0", [2, 1.5], true);
+  session = drag(session, "dimension_keep_0", [2.5, 2], true);
+  const after = placements(session);
+  expect(
+    after.map((placement) => placement?.dropOrder),
+    "the drag keeps the label's drop order below the later drop",
+  ).toEqual([1, 2]);
+  expect(after[0], "the label moved with the drag").not.toEqual(before[0]);
+  expect(after[1], "the other label is untouched").toBe(before[1]);
+});
+
 test("unsupported constraint diagnostics reach annotation and list explanations", () => {
   const session = drawWith(newSpecSession(), "rectangle", [
     [1, 1],

@@ -689,6 +689,7 @@ test("src/components/cad/three-cad-viewport.spec.ts", () => {
     const patch = createDimensionAnnotationPlacementPatch(
       { id: "dimension_1-annotation-drag", dimensionId: "dimension_1" },
       [8, 3],
+      {},
     );
 
     expect(

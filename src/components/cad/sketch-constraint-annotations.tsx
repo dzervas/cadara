@@ -41,7 +41,6 @@ import {
   getSketchDimensionLabelRank,
   type SketchAnnotationLayoutObstacle,
   type SketchAnnotationLayoutViewport,
-  type SketchDimensionLabelRank,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 import {
@@ -230,6 +229,12 @@ export function SketchConstraintAnnotations({
     untilAnchorMoves: { x: number; y: number; dx: number; dy: number } | null;
   } | null>(null);
   const labelDragPressShiftRef = useRef({ dx: 0, dy: 0 });
+  // A layout-displaced angle chip is dragged at its displacement: moving its
+  // anchor under the pointer could put the pointer in the other sector and
+  // flip the arc to its other side. Dropped as the latest drop it would
+  // outrank the label displacing it and jump onto its anchor at the release,
+  // so its drag keeps the drop order it had (`keepDropOrder`).
+  const labelDragKeepsDropOrderRef = useRef(false);
   // Released, a chip is no longer `fixed`. Its committed
   // placement ranks it (user-placed, then the latest drop first), so it
   // stays where it was dropped and the labels under it stay displaced.
@@ -240,28 +245,8 @@ export function SketchConstraintAnnotations({
         : [],
     ),
   );
-  // A layout-displaced angle chip is dragged at its displacement: moving its
-  // anchor under the pointer could put the pointer in the other sector and
-  // flip the arc to its other side. Its drag commits a placement that would
-  // let it outrank the label displacing it and jump onto its anchor at the
-  // release, so for the open sketch session it keeps the rank it had before
-  // the drag.
-  const [heldLabelRanks, setHeldLabelRanks] = useState<
-    ReadonlyMap<string, SketchDimensionLabelRank>
-  >(new Map());
-  // Session-only: cleared once the sketch session ends (no definition).
-  if (definition === null && heldLabelRanks.size > 0) {
-    setHeldLabelRanks(new Map());
-  }
-  const getLabelRank = (handle: { id: string; dimensionId: string }) =>
-    heldLabelRanks.get(handle.id) ??
-    getSketchDimensionLabelRank(
-      placementByDimensionId.get(handle.dimensionId),
-    );
-  const labelDropRef = useRef<{
-    handleId: string;
-    heldRank: SketchDimensionLabelRank | null;
-  } | null>(null);
+  const getLabelRank = (handle: { dimensionId: string }) =>
+    getSketchDimensionLabelRank(placementByDimensionId.get(handle.dimensionId));
   const onTrackedDimensionDrag: DimensionAnnotationDragListener = (
     handle,
     clientX,
@@ -284,13 +269,10 @@ export function SketchConstraintAnnotations({
       labelDragPressShiftRef.current = followsAlongLine
         ? displacement
         : { dx: 0, dy: 0 };
-      labelDropRef.current = {
-        handleId: handle.id,
-        heldRank:
-          followsAlongLine || (displacement.dx === 0 && displacement.dy === 0)
-            ? null
-            : getLabelRank(handle),
-      };
+      labelDragKeepsDropOrderRef.current = !(
+        followsAlongLine ||
+        (displacement.dx === 0 && displacement.dy === 0)
+      );
       setLabelDragOffset({
         handleId: handle.id,
         ...(followsAlongLine ? { dx: 0, dy: 0 } : displacement),
@@ -301,30 +283,13 @@ export function SketchConstraintAnnotations({
       });
     } else if (phase === "end" || phase === "cancel") {
       setLabelDragOffset(null);
-      const drop = labelDropRef.current;
-      if (phase === "end" && drop?.handleId === handle.id) {
-        const liveHandleIds = new Set(
-          annotations.flatMap((entry) =>
-            entry.dragHandle ? [entry.dragHandle.id] : [],
-          ),
-        );
-        setHeldLabelRanks((ranks) => {
-          const next = new Map(
-            [...ranks].filter(
-              ([handleId]) =>
-                handleId !== drop.handleId && liveHandleIds.has(handleId),
-            ),
-          );
-          if (drop.heldRank) next.set(drop.handleId, drop.heldRank);
-          return next;
-        });
-      }
     }
     const { dx, dy } = labelDragPressShiftRef.current;
     onDimensionDrag?.(handle, clientX, clientY, phase, {
       ...grab,
       clientX: grab.clientX - dx,
       clientY: grab.clientY - dy,
+      keepDropOrder: labelDragKeepsDropOrderRef.current,
     });
   };
 
@@ -395,9 +360,7 @@ export function SketchConstraintAnnotations({
             annotation.dragHandle?.id === labelDragOffset.handleId
               ? getDraggedLabelCentre(anchor, labelDragOffset)
               : null,
-          ...(annotation.dragHandle
-            ? getLabelRank(annotation.dragHandle)
-            : {}),
+          ...(annotation.dragHandle ? getLabelRank(annotation.dragHandle) : {}),
           // T14f (T-9): dimensions and problems are never clustered.
           cluster:
             isProblem || isDimension

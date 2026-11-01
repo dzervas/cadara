@@ -283,11 +283,12 @@ test("cadara-0atd: a chip dragged across a dense glyph cluster and dropped onto 
   );
 });
 
-// An angle label's placement keeps it on its bisector, so a layout-displaced
-// angle chip is dragged at its displacement (cadara-bmy0) and dropped there,
-// not on its anchor. It must not take its anchor back at the release: as the
-// last drop it would outrank the chip displacing it and jump onto it.
-test("cadara-0atd: a layout-displaced angle chip dragged along its bisector and released stays where it was dropped", async ({
+// A layout-displaced angle chip is dragged at its displacement (cadara-bmy0)
+// and dropped there, not on its anchor. It must not take its anchor back at
+// the release: as the last drop it would outrank the chip displacing it and
+// jump onto it. Its drag keeps its drop order, so after the sketch is
+// finished and reopened neither chip moves.
+test("cadara-0atd: a layout-displaced angle chip dragged along its bisector and released stays where it was dropped, also after a sketch reopen", async ({
   page,
 }) => {
   const workbench = new SketchWorkbenchHarness(page);
@@ -354,6 +355,53 @@ test("cadara-0atd: a layout-displaced angle chip dragged along its bisector and 
     () => workbench.waitForAnimationFrames(2),
     { followTolerancePx: 6 },
   );
+  const leader = (id: string) =>
+    page.locator(`[data-sketch-annotation-leader="${id}"]`);
+  await expect(
+    leader(angle!),
+    "premise: the dropped angle chip is still displaced",
+  ).toBeAttached();
+  await expect(leader(length!)).toHaveCount(0);
+  const dropped = {
+    angle: await centreOf(page, angle!),
+    length: await centreOf(page, length!),
+  };
+
+  await workbench.activateTool("Exit the active sketch.");
+  await workbench.expectMachine("idle");
+  await page
+    .getByRole("button", { name: /^Select .*Double-click to reopen\.$/ })
+    .filter({ hasText: /Sketch/ })
+    .first()
+    .dblclick({ timeout: 30_000 });
+  await workbench.expectSketchSessionActive();
+  await expect(angleChip).toBeVisible({ timeout: 30_000 });
+  await workbench.waitForAnimationFrames(3);
+  await expect(
+    leader(angle!),
+    "after a reopen the angle chip is still the displaced one",
+  ).toBeAttached();
+  await expect(
+    leader(length!),
+    "after a reopen the length chip still holds its anchor",
+  ).toHaveCount(0);
+  // The reopened sketch view can be panned, so the chips are compared by
+  // where the angle chip sits relative to the length chip.
+  const reopened = {
+    angle: await centreOf(page, angle!),
+    length: await centreOf(page, length!),
+  };
+  expect(
+    Math.hypot(
+      reopened.angle.x -
+        reopened.length.x -
+        (dropped.angle.x - dropped.length.x),
+      reopened.angle.y -
+        reopened.length.y -
+        (dropped.angle.y - dropped.length.y),
+    ),
+    "after a reopen neither chip has moved relative to the other",
+  ).toBeLessThanOrEqual(3);
 });
 
 // The enclosure example's 3.00 and vertical 10.00 chips (point-to-origin).
