@@ -3099,6 +3099,19 @@ function ThreeCadViewportScene({
           activeSketchSession.status,
         )
       ) {
+        // A constraint tool's pointer-following preview (a dimension line
+        // drawn through the pointer) can be redrawn under a press that
+        // reached the canvas. The canvas keeps the press, so its
+        // `pointerleave` does not forget it and the release still places or
+        // picks.
+        if (
+          activeSketchSession &&
+          !activeSketchSession.activeSpecialMode &&
+          activeSketchSession.constraintAuthoring &&
+          !activeSketchSession.constraintAuthoring.isPreviewPinned
+        ) {
+          canvasElement.setPointerCapture(event.pointerId);
+        }
         return;
       }
 
