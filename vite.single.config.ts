@@ -49,19 +49,50 @@ Object.defineProperty(window.__CADARA_SINGLE_ASSETS__, 'wasm', {
 });`;
 }
 
-function toDomReadyScript(source: string) {
-  return `(() => {
-  function startCadara() {
-    "use strict";
-${source}
-  }
+const moduleWorkerConstructorPattern =
+  /new Worker\(\s*new URL\(\s*(["'])([^"']+)\1\s*,\s*import\.meta\.url\s*\)\s*,\s*\{\s*type:\s*["']module["'],?\s*\}\s*\)/g;
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startCadara, { once: true });
-  } else {
-    startCadara();
-  }
-})();`;
+/**
+ * A page opened from file:// cannot start a worker from a separate file, and
+ * Chromium refuses module workers from such a page's blob: URLs. In this build
+ * every `new Worker(new URL("./x.ts", import.meta.url), { type: "module" })`
+ * in the app source becomes Vite's `./x.ts?worker&inline` import of the same
+ * module, bundled into the page as a classic worker (`worker.format: "iife"`).
+ * The normal build keeps its module worker files.
+ */
+function cadaraInlineWorkersPlugin(): Plugin {
+  const sourceDir = path.join(rootDir, "src") + path.sep;
+  return {
+    name: "cadara-inline-workers",
+    apply: "build",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.startsWith(sourceDir) || !code.includes("new Worker(")) {
+        return null;
+      }
+
+      const imports: string[] = [];
+      const inlined = code.replace(
+        moduleWorkerConstructorPattern,
+        (_match, _quote, specifier: string) => {
+          const workerClass = `CadaraInlineWorker${imports.length}`;
+          imports.push(
+            `import ${workerClass} from ${JSON.stringify(`${specifier}?worker&inline`)};`,
+          );
+          return `new ${workerClass}()`;
+        },
+      );
+      if (/new Worker\(\s*new URL\(/.test(inlined)) {
+        this.error(
+          `${id} constructs a worker the single-file build cannot inline; use new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }).`,
+        );
+      }
+
+      return imports.length === 0
+        ? null
+        : { code: `${imports.join("\n")}\n${inlined}`, map: null };
+    },
+  };
 }
 
 function cadaraSingleHtmlPlugin(): Plugin {
@@ -116,10 +147,13 @@ function cadaraSingleHtmlPlugin(): Plugin {
         /<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*>/g,
         () => "",
       );
+      // The entry chunk is an ES module (worker URLs use import.meta), so it
+      // stays a module script; an inline module runs once the document is
+      // parsed, which a file:// page allows without fetching anything.
       html = html.replace(
         /<script\b(?=[^>]*\btype=["']module["'])(?=[^>]*\bsrc=["'][^"']+["'])[^>]*><\/script>/,
         () =>
-          `<style>\n${escapeInlineStyle(styles)}\n</style>${wasmDataScript}\n    <script>\n${escapeInlineScript(assetScript)}\n</script>\n    <script>\n${escapeInlineScript(toDomReadyScript(appCode))}\n</script>`,
+          `<style>\n${escapeInlineStyle(styles)}\n</style>${wasmDataScript}\n    <script>\n${escapeInlineScript(assetScript)}\n</script>\n    <script type="module">\n${escapeInlineScript(appCode)}\n</script>`,
       );
 
       await writeFile(path.join(outDir, singleHtmlFileName), html);
@@ -140,9 +174,11 @@ export default defineConfig({
   define: createBuildMetadataDefines(buildMetadata),
   publicDir: false,
   worker: {
+    format: "iife",
     plugins: () => createTypiaVitePlugins(rootDir),
   },
   plugins: [
+    cadaraInlineWorkersPlugin(),
     ...createTypiaVitePlugins(rootDir),
     react(),
     tailwindcss(),

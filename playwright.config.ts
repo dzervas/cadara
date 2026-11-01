@@ -17,10 +17,17 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: runRealCaptures ? realCaptureTests : undefined,
   // `e2e/offline/` runs only in its own sub-lane on a production preview
-  // (`playwright.offline.config.ts`, `bun run test:e2e:offline`).
+  // (`playwright.offline.config.ts`, `bun run test:e2e:offline`), and
+  // `e2e/single-file/` only against the single-file build
+  // (`playwright.single-file.config.ts`, `bun run test:e2e:single-file`).
   testIgnore: runRealCaptures
     ? undefined
-    : [...realCaptureTests, "**/e2e/offline/**", "**/e2e/production/**"],
+    : [
+        ...realCaptureTests,
+        "**/e2e/offline/**",
+        "**/e2e/production/**",
+        "**/e2e/single-file/**",
+      ],
   timeout: 30_000,
   // Leave time for the runner to upload diagnostics before its job deadline.
   globalTimeout: isCI && !runRealCaptures ? 50 * 60_000 : undefined,
