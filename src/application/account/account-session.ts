@@ -1,6 +1,8 @@
 import type { Account } from "@/contracts/account/account";
 import type { SessionPort } from "./session-port";
 
+export const ACCOUNT_SESSION_CHANGED = "cadara-session-changed";
+
 export interface AccountSessionState {
   account: Account | null;
   offline: boolean;

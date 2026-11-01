@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { SIGN_IN_OFFER_KEY } from "./src/application/account/sign-in-offer";
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const shouldStartWebServer = (process.env.PLAYWRIGHT_WEB_SERVER ?? "1") !== "0";
@@ -39,6 +40,17 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL,
+    // Ordinary modelling rows have already chosen guest mode. Offer-specific
+    // rows clear this acknowledgement to exercise the real idle trigger.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: new URL(baseURL).origin,
+          localStorage: [{ name: SIGN_IN_OFFER_KEY, value: "1" }],
+        },
+      ],
+    },
     headless: true,
     ...(useGPU
       ? {

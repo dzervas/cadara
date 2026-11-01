@@ -1,12 +1,23 @@
 import { readFileSync, statSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
+import { SIGN_IN_OFFER_KEY } from "../../src/application/account/sign-in-offer";
 
 // Project sync rows need a local API with the memory mailer and its stdout
 // file (see account-sign-in.spec.ts). Run them with one worker: the log does
 // not name a link's recipient, so concurrent sign-ins can take each other's.
 export const mailerLog = process.env.CADARA_AUTH_MAILER_LOG;
 
-export async function openWorkbench(page: Page, url: string) {
+export async function openWorkbench(
+  page: Page,
+  url: string,
+  offerSignIn = false,
+) {
+  // Explicitly-created peer contexts do not inherit the configured storageState.
+  if (!offerSignIn)
+    await page.addInitScript(
+      (key) => localStorage.setItem(key, "1"),
+      SIGN_IN_OFFER_KEY,
+    );
   await page.goto(url);
   await expect
     .poll(
@@ -24,9 +35,7 @@ export async function signIn(page: Page, email: string) {
   const logOffset = statSync(mailerLog!).size;
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
-  await page
-    .getByRole("button", { name: "Email sign-in link", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   let link = "";
   await expect
     .poll(
@@ -40,7 +49,17 @@ export async function signIn(page: Page, email: string) {
       { message: "Memory mailer emitted a sign-in link", timeout: 30_000 },
     )
     .toBe(true);
-  await openWorkbench(page, link);
+  const landing = await page.context().newPage();
+  await landing.goto(link);
+  await expect(landing.getByRole("status")).toHaveText(
+    "Signed in, you can close this tab",
+  );
+  await expect(landing.getByText(`as ${email}`, { exact: true })).toBeVisible();
+  await landing.close();
+  await page.bringToFront();
+  await expect(
+    page.getByRole("dialog", { name: "Sign in to CADara" }),
+  ).toHaveCount(0);
   return new URL(link).origin;
 }
 

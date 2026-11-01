@@ -45,7 +45,8 @@ test("upload progress/failure and sync failure drive tab badges; account-project
   const uploadGate = new Promise<void>((resolve) => {
     completeUpload = resolve;
   });
-  await page.route("http://localhost:8787/**", async (route) => {
+  const accountApi = /^http:\/\/localhost:\d+\/(api\/auth\/|me$|orgs(?:\/|$))/;
+  await page.route(accountApi, async (route) => {
     const path = new URL(route.request().url()).pathname;
     let body: unknown;
     let status = 200;

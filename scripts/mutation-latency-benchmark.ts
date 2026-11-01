@@ -107,6 +107,7 @@ import { cpus, hostname } from "node:os";
 import { basename, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
+import { SIGN_IN_OFFER_KEY } from "../src/application/account/sign-in-offer";
 
 import {
   attributeFrames,
@@ -454,6 +455,10 @@ async function createInstrumentedContext(browser: Browser): Promise<{
     viewport: { width: 1600, height: 1000 },
     acceptDownloads: true,
   });
+  await context.addInitScript(
+    (key) => localStorage.setItem(key, "1"),
+    SIGN_IN_OFFER_KEY,
+  );
   const telemetry: TelemetrySink = { spans: [], release: null };
   // Local builds report to the placeholder DSN host (sentry.invalid).
   await context.route(/sentry\.(io|invalid)\//, async (route) => {

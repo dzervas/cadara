@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/client";
 import {
   magicLinkClient,
+  emailOTPClient,
   organizationClient,
 } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
@@ -19,7 +20,12 @@ export function createBrowserSession({
   const client = createAuthClient({
     baseURL: apiOrigin,
     fetchOptions: { credentials: "include", customFetchImpl: fetcher },
-    plugins: [magicLinkClient(), organizationClient(), passkeyClient()],
+    plugins: [
+      magicLinkClient(),
+      emailOTPClient(),
+      organizationClient(),
+      passkeyClient(),
+    ],
   });
   const requireSuccess = (result: { error: { message?: string } | null }) => {
     if (result.error)
@@ -70,10 +76,13 @@ export function createBrowserSession({
       requireSuccess(
         await client.signIn.magicLink({
           email,
-          callbackURL,
+          callbackURL: `${callbackURL}?accountSignedIn=1`,
           errorCallbackURL: `${callbackURL}?accountError=link`,
         }),
       );
+    },
+    async redeemEmailCode(email, code) {
+      requireSuccess(await client.signIn.emailOtp({ email, otp: code }));
     },
     async signInSocial(provider) {
       requireSuccess(
@@ -84,8 +93,8 @@ export function createBrowserSession({
         }),
       );
     },
-    async signInPasskey() {
-      requireSuccess(await client.signIn.passkey());
+    async signInPasskey(options) {
+      requireSuccess(await client.signIn.passkey(options));
     },
     async registerPasskey() {
       requireSuccess(await client.passkey.addPasskey({ name: "CADara" }));

@@ -91,3 +91,8 @@ export function selectSelectionState({ state }: EditorContextValue) {
     selectionCatalog: state.selectionCatalog,
   };
 }
+
+/** No tool, gesture session or mode is active: account offers may show. */
+export function selectEditorIdle({ machineState }: EditorContextValue) {
+  return machineState.kind === "idle";
+}

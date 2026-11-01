@@ -19,6 +19,16 @@ function fakeAccountApi() {
         { status: rejectLink ? 400 : 200 },
       );
     }
+    if (path === "/api/auth/sign-in/email-otp") {
+      const body = (await request.clone().json()) as { otp: string };
+      if (body.otp !== "123456")
+        return Response.json(
+          { message: "Invalid code", code: "INVALID_OTP" },
+          { status: 400 },
+        );
+      signedIn = true;
+      return Response.json({ status: true });
+    }
     if (path === "/api/auth/sign-out") {
       signedIn = false;
       return Response.json({ success: true });
@@ -80,7 +90,7 @@ test("magic link request is JSON with API credentials; completion hydrates ident
   expect(request.headers.get("content-type")).toContain("application/json");
   expect(await request.json()).toMatchObject({
     email: "maker@example.test",
-    callbackURL: "http://localhost:3000/app",
+    callbackURL: "http://localhost:3000/app?accountSignedIn=1",
   });
   expect(await port.getAccount()).toBeNull();
   api.completeLink();
@@ -106,4 +116,27 @@ test("invalid account payloads and rejected links propagate to the caller", asyn
   await expect(port.requestMagicLink("maker@example.test")).rejects.toThrow(
     "Link request rejected",
   );
+});
+
+test("email codes redeem with credentials in place and invalid codes propagate", async () => {
+  const api = fakeAccountApi();
+  const port = createBrowserSession({
+    apiOrigin: "http://localhost:8787",
+    callbackURL: "http://localhost/app",
+    fetcher: api.fetcher,
+  });
+  await expect(
+    port.redeemEmailCode("maker@example.test", "000000"),
+  ).rejects.toThrow("Invalid code");
+  expect(await port.getAccount()).toBeNull();
+  await port.redeemEmailCode("maker@example.test", "123456");
+  const request = api.requests.findLast((entry) =>
+    entry.url.endsWith("/sign-in/email-otp"),
+  )!;
+  expect(request.credentials).toBe("include");
+  expect(await request.json()).toEqual({
+    email: "maker@example.test",
+    otp: "123456",
+  });
+  expect(await port.getAccount()).toEqual(makeAccount());
 });

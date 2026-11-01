@@ -19,11 +19,9 @@ test("magic link creates a persistent API session; sign out clears it without af
   await page.getByRole("button", { name: "Account", exact: true }).click();
   const email = `cadara-${Date.now()}@example.test`;
   await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
-  await page
-    .getByRole("button", { name: "Email sign-in link", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "Check your inbox" }),
+    page.getByRole("status").filter({ hasText: "Email sent to" }),
   ).toContainText(email);
   let link = "";
   await expect
@@ -36,7 +34,16 @@ test("magic link creates a persistent API session; sign out clears it without af
       { message: "Memory mailer emitted a sign-in link" },
     )
     .toBe(true);
-  await page.goto(link);
+  const landing = await page.context().newPage();
+  await landing.goto(link);
+  await expect(landing.getByRole("status")).toHaveText(
+    "Signed in, you can close this tab",
+  );
+  await landing.close();
+  await page.bringToFront();
+  await expect(
+    page.getByRole("dialog", { name: "Sign in to CADara" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByText(email, { exact: true })).toBeVisible();
   await expect(page.getByText(/Personal · owner/)).toBeVisible();
@@ -57,12 +64,16 @@ test("magic link creates a persistent API session; sign out clears it without af
   await expect(page.getByText(email, { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Email sign-in link", exact: true }),
+    page.getByRole("button", { name: "Register passkey" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Continue", exact: true }),
   ).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Email sign-in link", exact: true }),
+    page.getByRole("button", { name: "Continue", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("combobox", { name: "Project", exact: true }),
@@ -87,15 +98,15 @@ test("rejected magic-link requests show inline feedback and a workbench notifica
   await page
     .getByRole("textbox", { name: "Email", exact: true })
     .fill("maker@example.test");
-  await page
-    .getByRole("button", { name: "Email sign-in link", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
     page
       .getByRole("alert")
       .filter({ hasText: "Unable to send the sign-in link." }),
   ).toHaveCount(2);
-  await page.getByRole("button", { name: "Account", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Close sign in", exact: true })
+    .click();
   await expect(
     page.getByRole("alert").filter({ hasText: "Workbench action failed" }),
   ).toContainText("Unable to send the sign-in link.");

@@ -33,6 +33,11 @@ const browser = await chromium.connectOverCDP(
 );
 const context = browser.contexts()[0] ?? (await browser.newContext());
 const page = context.pages()[0] ?? (await context.newPage());
+// A fresh profile would get the automatic sign-in offer after 25 s idle;
+// mark it as already offered (key: src/application/account/sign-in-offer.ts).
+await page.addInitScript(() =>
+  localStorage.setItem("cadara-sign-in-offered", "1"),
+);
 await page.goto(process.env.CADARA_DEV_FRONTEND_URL!);
 ```
 

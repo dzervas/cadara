@@ -10,6 +10,8 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "@mantine/core/styles.css";
 import "./index.css";
 import App from "./App.tsx";
+import { SignInComplete } from "@/components/layout/sign-in-complete";
+import { getWorkbenchSessionPort } from "@/workbench/shell/workbench-session";
 import {
   createSentryPerformanceTelemetry,
   shouldEnablePerformanceTelemetry,
@@ -20,14 +22,19 @@ import {
   workbenchTheme,
 } from "@/theme/workbench-theme";
 
-startBrowserOccWarmup(
-  createSentryPerformanceTelemetry({
-    enabled: shouldEnablePerformanceTelemetry({
-      isProduction: import.meta.env.PROD,
-      search: typeof window === "undefined" ? null : window.location.search,
-    }),
-  }),
+const signInComplete = new URLSearchParams(window.location.search).has(
+  "accountSignedIn",
 );
+
+if (!signInComplete)
+  startBrowserOccWarmup(
+    createSentryPerformanceTelemetry({
+      enabled: shouldEnablePerformanceTelemetry({
+        isProduction: import.meta.env.PROD,
+        search: typeof window === "undefined" ? null : window.location.search,
+      }),
+    }),
+  );
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -36,7 +43,11 @@ createRoot(document.getElementById("root")!).render(
       defaultColorScheme="dark"
       cssVariablesResolver={workbenchCssVariablesResolver}
     >
-      <App />
+      {signInComplete ? (
+        <SignInComplete session={getWorkbenchSessionPort()} />
+      ) : (
+        <App />
+      )}
     </MantineProvider>
   </StrictMode>,
 );

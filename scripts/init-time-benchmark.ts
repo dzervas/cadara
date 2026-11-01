@@ -1,5 +1,6 @@
 // TODO: Turn into a vitest benchmark
 import { chromium, type Page } from "@playwright/test";
+import { SIGN_IN_OFFER_KEY } from "../src/application/account/sign-in-offer";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -193,6 +194,10 @@ async function main() {
 
     try {
       const page = await browser.newPage();
+      await page.addInitScript(
+        (key) => localStorage.setItem(key, "1"),
+        SIGN_IN_OFFER_KEY,
+      );
       page.on("pageerror", (error) => {
         console.error(`[pageerror] ${error.message}`);
       });
