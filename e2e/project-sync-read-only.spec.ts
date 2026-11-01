@@ -141,24 +141,12 @@ test("an invited viewer opens a synced project read only: shortcuts, undo, tab c
     expect(projectId, "the uploaded project is listed").not.toBe("");
     const orgName = `Workshop ${stamp}`;
     await api(owner, "PATCH", `/orgs/${orgId}`, { name: orgName });
-    const invitation = await api<{ id: string }>(
-      owner,
-      "POST",
-      `/orgs/${orgId}/invitations`,
-      { email: viewerEmail, role: "member" },
-    );
-    const accepted = await api<{ member: { userId: string } }>(
-      viewer,
-      "POST",
-      `/invitations/${invitation.id}/accept`,
-      {},
-    );
-    await api(
-      owner,
-      "PUT",
-      `/orgs/${orgId}/projects/${projectId}/grants/${accepted.member.userId}`,
-      { role: "viewer" },
-    );
+    // A personal organization shares single projects; an invite to an
+    // existing verified account grants the role at once.
+    await api(owner, "POST", `/orgs/${orgId}/projects/${projectId}/invites`, {
+      email: viewerEmail,
+      role: "viewer",
+    });
 
     // The viewer opens it from the service.
     await openCadaraMenuItem(viewer, "Open from CADara…");

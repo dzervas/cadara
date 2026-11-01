@@ -80,25 +80,29 @@ test("two accounts see each other's role and matching selection colour, then cle
       return (await response.json()) as T;
     };
     let orgId = "";
+    let projectId = "";
     for (const org of await api<{ id: string }[]>(owner, "GET", "/orgs")) {
-      const projects = await api<{ name: string }[]>(
-        owner,
-        "GET",
-        `/orgs/${org.id}/projects`,
-      );
-      if (projects.some((project) => project.name === projectName))
+      const remote = (
+        await api<{ id: string; name: string }[]>(
+          owner,
+          "GET",
+          `/orgs/${org.id}/projects`,
+        )
+      ).find((project) => project.name === projectName);
+      if (remote) {
         orgId = org.id;
+        projectId = remote.id;
+      }
     }
-    expect(orgId).not.toBe("");
+    expect(projectId).not.toBe("");
     const orgName = `Presence workshop ${stamp}`;
     await api(owner, "PATCH", `/orgs/${orgId}`, { name: orgName });
-    const invitation = await api<{ id: string }>(
-      owner,
-      "POST",
-      `/orgs/${orgId}/invitations`,
-      { email: guestEmail, role: "member" },
-    );
-    await api(guest, "POST", `/invitations/${invitation.id}/accept`, {});
+    // A personal organization shares single projects; an invite to an
+    // existing verified account grants access at once.
+    await api(owner, "POST", `/orgs/${orgId}/projects/${projectId}/invites`, {
+      email: guestEmail,
+      role: "editor",
+    });
     await openCadaraMenuItem(guest, "Open from CADara…");
     await guest.getByRole("combobox", { name: "Organization" }).click();
     await guest.getByRole("option", { name: orgName }).click();
