@@ -485,6 +485,74 @@ const ROWS: readonly ContinuityRow[] = [
     ],
     drag: DRAG,
   },
+  // Picking the origin first: the preview measures from the origin, the
+  // committed dimension stores the point first, and both draw the same line.
+  {
+    name: "origin then point, vertical",
+    tool: "dimensionDistance",
+    targets: (f) => [f.origin, f.bEnd],
+    referenceKind: "vertical",
+    committedKind: "pointDatumDistance",
+    label: { reach: 1 },
+    creation: [
+      [-3, 2],
+      [-3.5, 4],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "origin then point, horizontal",
+    tool: "dimensionDistance",
+    targets: (f) => [f.origin, f.dStart],
+    referenceKind: "horizontal",
+    committedKind: "pointDatumDistance",
+    label: { reach: 1 },
+    creation: [
+      [6, 6],
+      [8, 7],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "origin then point, aligned",
+    tool: "dimensionDistance",
+    targets: (f) => [f.origin, f.bEnd],
+    referenceKind: "aligned",
+    committedKind: "pointDatumDistance",
+    label: { reach: 1.25 },
+    creation: [
+      [1.19, 4.12],
+      [0.94, 2.93],
+      [0.79, 1.72],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "Horizontal tool, origin then point",
+    tool: "dimensionHorizontal",
+    targets: (f) => [f.origin, f.dStart],
+    referenceKind: "horizontal",
+    committedKind: "pointDatumDistance",
+    label: { reach: 1 },
+    creation: [
+      [6, 6],
+      [8, 7],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "Vertical tool, origin then point",
+    tool: "dimensionVertical",
+    targets: (f) => [f.origin, f.bEnd],
+    referenceKind: "vertical",
+    committedKind: "pointDatumDistance",
+    label: { reach: 1 },
+    creation: [
+      [-3, 2],
+      [-3.5, 4],
+    ],
+    drag: DRAG,
+  },
   // The Distance tool switches its carrier at a zone boundary
   // (aligned / horizontal / vertical, the angle's minor / major side) by
   // design; the label sits at the pointer on every carrier, so it does not
@@ -508,6 +576,21 @@ const ROWS: readonly ContinuityRow[] = [
     name: "point to origin, across the zones",
     tool: "dimensionDistance",
     targets: (f) => [f.bEnd, f.origin],
+    referenceKind: null,
+    crosses: ["aligned", "horizontal", "vertical"],
+    committedKind: "pointDatumDistance",
+    label: "atPointer",
+    creation: [
+      [0.94, 2.93],
+      [3, 8],
+      [-4, 3],
+    ],
+    drag: DRAG,
+  },
+  {
+    name: "origin then point, across the zones",
+    tool: "dimensionDistance",
+    targets: (f) => [f.origin, f.bEnd],
     referenceKind: null,
     crosses: ["aligned", "horizontal", "vertical"],
     committedKind: "pointDatumDistance",

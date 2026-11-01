@@ -1122,7 +1122,6 @@ function orderPointPairAlongAxis<T>(
   annotationPlacement: DimensionLineAnnotationPlacement | undefined;
 } {
   const along = axis === "horizontal" ? 0 : 1;
-  const across = axis === "horizontal" ? 1 : 0;
   const linePlacement =
     placement?.kind === "dimensionLine" ? placement : undefined;
   if (second.anchor[along] >= first.anchor[along]) {
@@ -1133,16 +1132,62 @@ function orderPointPairAlongAxis<T>(
   }
   return {
     pointIds: [second.id, first.id],
-    annotationPlacement: linePlacement && {
-      ...linePlacement,
-      offset:
-        linePlacement.offset + first.anchor[across] - second.anchor[across],
-      // cadara-bmy0: the swapped ends reverse the line.
-      ...(linePlacement.labelPosition === undefined
-        ? {}
-        : { labelPosition: 1 - linePlacement.labelPosition }),
-    },
+    annotationPlacement:
+      linePlacement &&
+      swapPointPairPlacementEnds(
+        linePlacement,
+        first.anchor,
+        second.anchor,
+        axis,
+      ),
   };
+}
+
+/**
+ * A point-pair placement measured from `first` (its offset, and its label
+ * position along first -> second), rebased onto the same drawn line read
+ * from `second`: the stored pair's ends are swapped.
+ */
+function swapPointPairPlacementEnds(
+  placement: DimensionLineAnnotationPlacement,
+  first: readonly [number, number],
+  second: readonly [number, number],
+  axis: "aligned" | "horizontal" | "vertical",
+): DimensionLineAnnotationPlacement {
+  const across = axis === "horizontal" ? 1 : 0;
+  return {
+    ...placement,
+    // An aligned line's normal turns with its direction; a fixed-axis line's
+    // offset is read across the axis from the stored first point.
+    offset:
+      axis === "aligned"
+        ? -placement.offset
+        : placement.offset + first[across] - second[across],
+    // cadara-bmy0: the swapped ends reverse the line.
+    ...(placement.labelPosition === undefined
+      ? {}
+      : { labelPosition: 1 - placement.labelPosition }),
+  };
+}
+
+/**
+ * A point-to-datum distance stores the point first, but the tool measures its
+ * placement from the first pick; when the datum was picked first the
+ * placement is rebased so the committed line is the one the preview drew.
+ */
+function getPointDatumDistancePlacement(
+  first: SketchConstraintTargetRecord,
+  second: SketchConstraintTargetRecord,
+  pointTarget: SketchConstraintTargetRecord,
+  axis: "aligned" | "horizontal" | "vertical",
+  placement: SketchConstraintCommitInput["annotationPlacement"],
+): DimensionLineAnnotationPlacement | undefined {
+  if (placement?.kind !== "dimensionLine") {
+    return undefined;
+  }
+  return pointTarget === first
+    ? placement
+    : swapPointPairPlacementEnds(placement, first.anchor, second.anchor, axis);
 }
 
 function measureDimensionDistanceTargets(
@@ -3419,10 +3464,13 @@ const sketchConstraintDefinitions = [
               datum: datumPointTarget.datum!.reference.datumId,
             },
             value: input.value,
-            annotationPlacement:
-              input.annotationPlacement?.kind === "dimensionLine"
-                ? input.annotationPlacement
-                : undefined,
+            annotationPlacement: getPointDatumDistancePlacement(
+              first,
+              second,
+              localPointTarget,
+              axis,
+              input.annotationPlacement,
+            ),
           },
         ],
       };
@@ -3531,10 +3579,13 @@ const sketchConstraintDefinitions = [
               datum: datumPointTarget.datum!.reference.datumId,
             },
             value: input.value,
-            annotationPlacement:
-              input.annotationPlacement?.kind === "dimensionLine"
-                ? input.annotationPlacement
-                : undefined,
+            annotationPlacement: getPointDatumDistancePlacement(
+              first,
+              second,
+              localPointTarget,
+              "horizontal",
+              input.annotationPlacement,
+            ),
           },
         ],
       };
@@ -3643,10 +3694,13 @@ const sketchConstraintDefinitions = [
               datum: datumPointTarget.datum!.reference.datumId,
             },
             value: input.value,
-            annotationPlacement:
-              input.annotationPlacement?.kind === "dimensionLine"
-                ? input.annotationPlacement
-                : undefined,
+            annotationPlacement: getPointDatumDistancePlacement(
+              first,
+              second,
+              localPointTarget,
+              "vertical",
+              input.annotationPlacement,
+            ),
           },
         ],
       };
