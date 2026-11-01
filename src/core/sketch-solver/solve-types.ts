@@ -54,6 +54,31 @@ export const DEFAULT_SKETCH_DRAG_STEP: SketchDragStep =
     ? "constrained"
     : "penalty";
 
+/**
+ * What the constrained drag step does at a row-derived branch invariant
+ * (`deriveChiralityInvariants`): "park" enforces each as an inequality
+ * (the step stops on its boundary), "block" refuses a frame whose step had
+ * to stop on one, "resist" adds a soft objective row that grows inside a
+ * margin of the boundary. Unset (the default): invariants are not derived.
+ * Experimental, for the study harness only: it takes effect only with the
+ * constrained step, and the boundary policy itself is an open product
+ * decision. Test-only override: `CADARA_SKETCH_DRAG_CHIRALITY=<policy>` in
+ * the process environment (read once at module load), like
+ * `CADARA_SKETCH_DRAG_CONSTRAINED_STEP`.
+ */
+export type SketchDragBoundary = "park" | "block" | "resist";
+
+const dragBoundaryOverride = (
+  globalThis as { process?: { env?: Record<string, string | undefined> } }
+).process?.env?.CADARA_SKETCH_DRAG_CHIRALITY;
+
+export const DEFAULT_SKETCH_DRAG_BOUNDARY: SketchDragBoundary | undefined =
+  dragBoundaryOverride === "park" ||
+  dragBoundaryOverride === "block" ||
+  dragBoundaryOverride === "resist"
+    ? dragBoundaryOverride
+    : undefined;
+
 export interface SketchDraggedPointTarget {
   kind: "sketchPoint";
   pointId: SketchPointId;

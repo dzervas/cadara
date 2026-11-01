@@ -48,6 +48,8 @@ export interface SketchSolverWorkTrace {
   constrainedStepStartNotCorrectable: number;
   /** Stages stopped by a row unavailable after an accepted move (stop `rowUnavailable`). */
   constrainedStepRowUnavailableStops: number;
+  /** Row-derived branch invariants taken into constrained steps (`SketchDragBoundary`). */
+  constrainedStepBoundaryInvariants: number;
   /** Hard-row hinge components replaced by their restating inequalities, summed over stages. */
   constrainedStepRestatedComponents: number;
 }
@@ -84,6 +86,7 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     constrainedStepJacobianUnavailable: 0,
     constrainedStepStartNotCorrectable: 0,
     constrainedStepRowUnavailableStops: 0,
+    constrainedStepBoundaryInvariants: 0,
     constrainedStepRestatedComponents: 0,
   };
   gaussNewtonFallbackTrace = trace;

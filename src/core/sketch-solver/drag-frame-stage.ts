@@ -311,9 +311,13 @@ export function* solveDragFrameStage(
         }),
       ],
       start: input.startValues ?? session.values,
+      previous: previousFrame,
       variables: solvedVariables,
     });
-    if (constrained) return exactReach(judge(candidateOf(constrained)));
+    if (constrained?.boundaryActive)
+      return { ...judge(candidateOf(constrained.values)), accepted: false };
+    if (constrained)
+      return exactReach(judge(candidateOf(constrained.values)));
   }
 
   // Phase A: hard constraints + soft cursor target + uniform minimum motion.
