@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   editVariable,
+  historySketchId,
   importBundle,
   MOUNTS_BUNDLE_PATH,
   PART_STUDIO_BUNDLE_PATH,
@@ -25,16 +26,19 @@ test("Mounts import, history-at-end nail edit, and reload keep Chamfer live", as
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect(imported.featureIds.at(-1)).toBe("feature_chamfer-1");
   expect(imported.snapshotDiagnosticsCount).toBe(0);
+  // Sketch 1 holds the region Extrude 1 consumes.
+  const sketch1Id = await historySketchId(page, "Sketch 1");
+  const sketch1Regions = (state: { selectableTargets: readonly string[] } | null) =>
+    state!.selectableTargets.filter((target) => target.startsWith(`${sketch1Id}.region_`)).sort();
+  expect(sketch1Regions(imported)).not.toEqual([]);
 
   const rebuilt = await editVariable(page, "nail", "4.1");
   expect(rebuilt.featureIds.at(-1)).toBe("feature_chamfer-1");
   expect(rebuilt.snapshotDiagnosticsCount).toBe(0);
-  // Region durable id derives from the exact-region arrangement (source keys,
-  // split ordinals, traversal), which the exact-Onshape-region resolution work
-  // deterministically re-derived; the region still rebuilds cleanly here.
-  expect(rebuilt.selectableTargets).toContain(
-    "sketch_primary.region_primary-sketch_entity_FOoap8tw3jKAJf5_0_ATLNdmpEpWg5-2nko3yikmohbt",
-  );
+  // Region durable ids derive from the exact-region arrangement (source keys,
+  // split ordinals, traversal), not from solved coordinates, so the nail edit
+  // keeps the set of Sketch 1 region ids.
+  expect(sketch1Regions(rebuilt)).toEqual(sketch1Regions(imported));
 
   await harness.reloadPreservingRepositoryStorage();
   await page.waitForSelector('[data-render-idle="true"]', { timeout: 60_000 });

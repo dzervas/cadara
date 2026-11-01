@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { settledProjections } from "./helpers/acceptance";
 import { meanPixelDelta } from "./helpers/feature-workbench";
 import {
   currentRevision,
   editVariable,
+  historySketchId,
   importBundle,
   LAPTOP_STAND_BUNDLE_PATH,
   MOUNTS_BUNDLE_PATH,
@@ -20,8 +22,9 @@ import { SketchWorkbenchHarness } from "./helpers/sketch-workbench";
 test.setTimeout(600_000);
 test.use({ viewport: { width: 1440, height: 960 } });
 
-const MOUNTS_CONSTRAINED_VERTEX =
-  "sketch_2.sketch_point_FkkBVfXRKopMlIW_1_ZSK0f3tIhxWZ_center";
+// Sketch-local entity id derived from the captured Onshape ids (Sketch 2 is
+// Onshape feature FkkBVfXRKopMlIW_1); the owning sketch id is minted on import.
+const MOUNTS_CONSTRAINED_VERTEX_ENTITY = "sketch_point_FkkBVfXRKopMlIW_1_ZSK0f3tIhxWZ_center";
 const MOUNTS_LIVE_BODY = "body_feature_extrude-1";
 const MOUNTS_FULL_FEATURE_IDS = [
   "feature_extrude-1",
@@ -35,6 +38,16 @@ const MOUNTS_FULL_FEATURE_IDS = [
 const PART_STUDIO_BAKED_BODIES = [
   "body_feature_bakedBody-1_1",
   "body_feature_bakedBody-1_2",
+];
+const PART_STUDIO_PARAMETRIC_SKETCHES = [
+  "Sketch 1",
+  "Screen Outline",
+  "Side Outline",
+  "Sketch 2",
+  "Cutter",
+  "Sketch 3",
+  "Sketch 4",
+  "Sketch 8",
 ];
 const INVALID_REFERENCE_ALERT =
   /does not resolve|no longer exists|invalid reference|missing reference|solver|workbench action failed/i;
@@ -56,6 +69,9 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   await expectNoWorkbenchAlerts(page);
 
   await chooseHistoryAction(page, "feature_transform-1", "Roll History Here");
+  const sketch1Id = await historySketchId(page, "Sketch 1");
+  const sketch2Id = await historySketchId(page, "Sketch 2");
+  const constrainedVertex = `${sketch2Id}.${MOUNTS_CONSTRAINED_VERTEX_ENTITY}`;
   await page.getByRole("button", {
     name: "Select Sketch 2. Double-click to reopen.",
   }).dblclick();
@@ -66,7 +82,8 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   // directly instead.
   await workbench.expectMachine("editingSketch");
   const beforeRevision = await currentRevision(page);
-  const beforePoint = await projectTarget(page, MOUNTS_CONSTRAINED_VERTEX);
+  // Entering the sketch turns the camera to its plane; measure once it is still.
+  const beforePoint = (await settledProjections(workbench, [constrainedVertex]))[0]!;
 
   const viewport = await workbench.viewportSurface().boundingBox();
   if (!viewport) throw new Error("Viewport surface is not visible.");
@@ -79,7 +96,7 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
   );
   await page.mouse.up();
 
-  const constrainedPoint = await projectTarget(page, MOUNTS_CONSTRAINED_VERTEX);
+  const constrainedPoint = (await settledProjections(workbench, [constrainedVertex]))[0]!;
   expect.soft(constrainedPoint.x).toBeCloseTo(beforePoint.x, 1);
   expect.soft(constrainedPoint.y).toBeCloseTo(beforePoint.y, 1);
 
@@ -97,7 +114,8 @@ test("Mounts constrained sketch drag commits without breaking constraints", asyn
       "construction_plane-xy",
       "construction_plane-yz",
       "construction_plane-xz",
-      "sketch_primary",
+      sketch1Id,
+      sketch2Id,
     ]),
   );
   expectMountsLiveBodyIdentity(state);
@@ -221,16 +239,19 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // Such a failure is now contained at the prefix-probe boundary, so `Shell 1`
   // is decided by the whole-plan probes that build the sequence apply runs.
   //
-  // The full real-OCC apply-equivalent containment pass rejects the downstream
-  // stale face lineage before review. Those features remain baked rather than
-  // advertising a timeline the commit seam cannot author.
-  expect(reviewText).toContain("15 parametric, 26 baked, 0 geometry-only features.");
+  // `Extrude 3`, `Cutter`, the surface `Extrude 4`, `Split 1` and the
+  // split-interface `Sketch 3` / `Sketch 4` are parametric and commit, the same
+  // promotions the opt-in real-OCC apply row (apply-pipeline.heavy.spec.ts,
+  // "9841 applies its reviewed prepared action sequence through real OCC")
+  // proves through apply, the walls edit and restore. The features after
+  // `Sketch 4` bake behind one checkpoint, apart from `Sketch 8`.
+  expect(reviewText).toContain("20 parametric, 21 baked, 0 geometry-only features.");
   // The two BLIND start offsets (`Extrude 10` / `Extrude 11`) are no longer
   // blocked by the start plane itself: the capture pins that displacement
   // exactly. They now wait on their own `UP_TO_SURFACE` / `UP_TO_BODY`
-  // terminators and boolean scopes, which name bodies the excluded-scope
-  // `Split 1` produces, so they name the upstream cascade instead of the
-  // start-extent gap.
+  // terminators and boolean scopes, which name bodies `Split 1` produces and
+  // have no unique historical witness, so they name that topology instead of
+  // the start-extent gap.
   for (const label of ["Extrude 10", "Extrude 11"]) {
     expect(reviewText).toContain(
       `${label}\n\nbaked (suppressed) — extrude start-entity, up-to, or boolean-scope topology could not be resolved as a durable reference`,
@@ -241,29 +262,37 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   expect(reviewText).toMatch(/Chamfer 2\s+parametric/);
   expect(reviewText).toMatch(/Shell 1\s+parametric/);
   expect(reviewText).toMatch(/Extrude 2\s+parametric/);
-  // Split 1 remains downstream of the contained surface-extrude branch.
+  for (const label of ["Extrude 3", "Cutter", "Extrude 4", "Split 1", "Sketch 3", "Sketch 4"]) {
+    expect(reviewText, `${label} must be parametric.`).toMatch(
+      new RegExp(`${label}\\s+parametric`),
+    );
+  }
 
   const imported = await page.evaluate(() => window.__cadaraDebug!.getState());
   expect.soft(imported.snapshotDiagnosticsCount).toBe(0);
   expect.soft(imported.featureIds).toEqual([
     "feature_plane-1",
-    // The commit seam authorizes the contained parametric prefix through Extrude 3;
-    // its downstream surface/split branch remains baked.
+    // The commit seam authorizes the parametric prefix through the surface
+    // Extrude 4 and Split 1; the features after Sketch 4 commit as one checkpoint.
     "feature_extrude-1",
     "feature_chamfer-1",
     "feature_chamfer-2",
     "feature_shell-1",
     "feature_extrude-2",
     "feature_extrude-3",
+    "feature_extrude-4",
+    "feature_split-1",
     "feature_bakedBody-1",
   ]);
+  // Every parametric sketch reaches the timeline and stays selectable.
+  const importedSketchIds: string[] = [];
+  for (const label of PART_STUDIO_PARAMETRIC_SKETCHES) {
+    importedSketchIds.push(await historySketchId(page, label));
+  }
   expect.soft(imported.selectableTargets).toEqual(
     expect.arrayContaining([
       "construction_feature_plane-1",
-      "sketch_primary",
-      "sketch_2",
-      "sketch_3",
-      "sketch_4",
+      ...importedSketchIds,
       ...PART_STUDIO_BAKED_BODIES,
     ]),
   );
@@ -280,11 +309,9 @@ test("Part Studio 1 imports its supported planes and sketches, then rebuilds wal
   // `walls` edit rebuilds the whole timeline, so `Chamfer 2`'s reference to
   // `Chamfer 1`'s generated boundary edges must resolve again from the adjacency
   // claims alone. Losing it would drop the feature instead of raising an alert.
-  expect.soft(rebuilt.featureIds).toContain("feature_chamfer-2");
-  // Same proof for this iteration's promotions: `Shell 1`'s deferred body
-  // selector and `Extrude 2` behind it must rematch through the rebuild.
-  expect.soft(rebuilt.featureIds).toContain("feature_shell-1");
-  expect.soft(rebuilt.featureIds).toContain("feature_extrude-2");
+  // The same holds for `Shell 1`'s deferred body selector, `Extrude 2`, and the
+  // surface `Extrude 4` / `Split 1`: every committed feature rematches.
+  expect.soft(rebuilt.featureIds).toEqual(imported.featureIds);
   expect.soft(rebuilt.selectableTargets).toEqual(
     expect.arrayContaining(PART_STUDIO_BAKED_BODIES),
   );
@@ -607,21 +634,21 @@ async function editRevolveAngleAndExpectGeometryChange(page: Page) {
 async function dragSweepPathAndExpectGeometryChange(page: Page) {
   const workbench = new SketchWorkbenchHarness(page);
   const beforeGeometry = await page.locator("main canvas").first().screenshot();
+  const sweepPathId = await historySketchId(page, "Sweep path");
   await page.getByRole("button", {
     name: "Select Sweep path. Double-click to reopen.",
   }).dblclick();
   await workbench.expectSketchSessionActive();
 
-  // Confirmed against the real Wave T bundle: sketch entity ids are prefixed with
-  // the owning Onshape sketch feature id (`sketch_point_<sketchFeatureId>_<entityId>_<role>`).
-  const pointCandidates = ["sketch_2.sketch_point_FmRzyMZqAsUDXhZ_0_Sweep_path_0_end"];
+  // Sketch entity ids are prefixed with the owning Onshape sketch feature id
+  // (`sketch_point_<sketchFeatureId>_<entityId>_<role>`); Sweep path is
+  // FmRzyMZqAsUDXhZ_0.
   const beforeRevision = await currentRevision(page);
-  let point: { x: number; y: number } | null = null;
-  for (const targetId of pointCandidates) {
-    point = await page.evaluate((id) => window.__cadProjectToScreen?.(id) ?? null, targetId);
-    if (point) break;
-  }
-  if (!point) throw new Error(`Sweep path endpoint is not projected: ${pointCandidates.join(", ")}`);
+  const point = (
+    await settledProjections(workbench, [
+      `${sweepPathId}.sketch_point_FmRzyMZqAsUDXhZ_0_Sweep_path_0_end`,
+    ])
+  )[0]!;
   const viewport = await workbench.viewportSurface().boundingBox();
   if (!viewport) throw new Error("Viewport surface is not visible.");
   await page.mouse.move(viewport.x + point.x, viewport.y + point.y);
@@ -653,20 +680,6 @@ async function chooseHistoryAction(
   });
   await waitForRevisionChange(page, beforeRevision);
   if (action !== "Edit") await waitForMachineIdle(page);
-}
-
-async function projectTarget(page: Page, targetId: string) {
-  const point = await page.evaluate(
-    (id) => window.__cadProjectToScreen?.(id) ?? null,
-    targetId,
-  );
-  if (!point) {
-    const candidates = await page.evaluate(() =>
-      window.__cadaraDebug?.getState().selectableTargets.filter((id) => id.includes("sketch_2")),
-    );
-    throw new Error(`Target ${targetId} is not projected in the viewport. Candidates: ${candidates?.join(", ")}`);
-  }
-  return point;
 }
 
 

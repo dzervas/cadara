@@ -159,6 +159,20 @@ export async function editVariable(page: Page, name: string, value: string) {
   return page.evaluate(() => window.__cadaraDebug!.getState());
 }
 
+/**
+ * Sketch ids are minted when the import commits a sketch, so rows resolve an
+ * imported sketch through its timeline label. Entity ids inside the sketch stay
+ * derived from the captured Onshape ids and can be joined to the returned id.
+ */
+export async function historySketchId(page: Page, label: string) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const entry = page
+    .locator("[data-history-sketch-id]")
+    .and(page.getByRole("button", { name: new RegExp(`^(Select|Repair) ${escapedLabel}\\.`) }));
+  await expect(entry, `timeline sketch ${label}`).toHaveCount(1, { timeout: 15_000 });
+  return (await entry.getAttribute("data-history-sketch-id"))!;
+}
+
 export async function currentRevision(page: Page) {
   return page.evaluate(() => window.__cadaraDebug!.getState()!.revision);
 }
