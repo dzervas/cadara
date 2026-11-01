@@ -46,6 +46,7 @@ export function WorkbenchNotification({
   message,
   onDismiss,
   placement,
+  secondaryAction,
   style,
   title,
   type,
@@ -126,19 +127,22 @@ export function WorkbenchNotification({
           >
             {message}
           </Text>
-          {action || link ? (
+          {action || secondaryAction || link ? (
             <Group gap="xs" className="mt-1">
-              {action ? (
-                <Button
-                  variant="default"
-                  size="xs"
-                  className={notificationActionClassName}
-                  disabled={action.disabled}
-                  onClick={action.onClick}
-                >
-                  {action.label}
-                </Button>
-              ) : null}
+              {[action, secondaryAction].map((current) =>
+                current ? (
+                  <Button
+                    key={current.label}
+                    variant="default"
+                    size="xs"
+                    className={notificationActionClassName}
+                    disabled={current.disabled}
+                    onClick={current.onClick}
+                  >
+                    {current.label}
+                  </Button>
+                ) : null,
+              )}
               {link ? (
                 <Button
                   component="a"

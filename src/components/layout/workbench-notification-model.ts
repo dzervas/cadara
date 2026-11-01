@@ -19,6 +19,8 @@ export interface WorkbenchNotificationModel {
   title: string;
   message: ReactNode;
   action?: WorkbenchNotificationAction;
+  /** A second recovery, rendered after `action`. */
+  secondaryAction?: WorkbenchNotificationAction;
   onDismiss?: () => void;
   placement?: WorkbenchNotificationPlacement;
 }

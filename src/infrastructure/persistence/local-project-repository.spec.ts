@@ -13,12 +13,16 @@ import { createDocumentSyncWorkerMessageHandler } from "@/infrastructure/workers
 import type { DocumentSyncWorkerResponse } from "@/infrastructure/workers/document-sync-worker-protocol";
 import { isProjectSyncWorkerRequest } from "@/infrastructure/workers/project-sync-worker-protocol";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
-import { Repo } from "@automerge/automerge-repo";
+import { Repo, generateAutomergeUrl } from "@automerge/automerge-repo";
 import * as Automerge from "@automerge/automerge";
 import type { AutomergeRepositoryLike } from "./indexeddb-automerge-document-repository";
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import { MemoryDocumentRepositoryUrlStore } from "./document-repository-url-store";
-import { LocalProjectRepository } from "./local-project-repository";
+import {
+  LocalProjectRepository,
+  listStoredAutomergeDocumentIds,
+} from "./local-project-repository";
+import { SharedMemoryStorage } from "./shared-memory-automerge-storage.fixtures";
 import { createWorkbenchProjectBootstrap } from "./workbench-project-bootstrap";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { createMemoryGeometryAssetStore } from "@/core/modeling/geometry-asset-store";
@@ -669,8 +673,9 @@ test("missing part identities are diagnosed after the document owner settles wit
 async function seedLegacyManifest(
   repo: Repo,
   urls: MemoryDocumentRepositoryUrlStore,
+  partRepo = repo,
 ) {
-  const part = repo.create({ content: "part" });
+  const part = partRepo.create({ content: "part" });
   const readme = repo.create({ content: "readme" });
   urls.set("doc_part", part.url);
   urls.set("doc_notes", readme.url);
@@ -718,39 +723,51 @@ test("opening a legacy manifest persists identities resolved once through the lo
   }
 });
 
-test.each(["missing URL", "unavailable document"])(
-  "unresolvable legacy entries return a diagnostic without a partial migration: %s",
-  async (failure) => {
-    const { repo, urls, projects } = setup();
-    try {
-      const { manifest, readme } = await seedLegacyManifest(repo, urls);
-      if (failure === "missing URL") urls.delete("doc_notes");
-      else {
-        const find = repo.find.bind(repo);
-        vi.spyOn(repo, "find").mockImplementation((id) => {
-          if (id === readme.url)
-            return Promise.reject(new Error("Stored document unavailable"));
-          return find(id);
-        });
-      }
-      const result = await projects.open("legacy-project");
-      expect(result).toMatchObject({
-        ok: false,
-        diagnostic: {
-          reasonCode: "project-persistence-failed",
-          message: expect.any(String),
-        },
-      });
-      expect(
-        manifest
-          .doc()
-          .entries.every((entry) => !("automergeDocumentId" in entry)),
-      ).toBe(true);
-    } finally {
-      await repo.shutdown();
-    }
-  },
-);
+test("an unresolvable legacy entry returns a diagnostic without a partial migration", async () => {
+  const { repo, urls, projects } = setup();
+  try {
+    const { manifest } = await seedLegacyManifest(repo, urls);
+    urls.delete("doc_notes");
+    const result = await projects.open("legacy-project");
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostic: {
+        reasonCode: "project-persistence-failed",
+        message: expect.stringContaining("no stored Automerge URL"),
+      },
+    });
+    expect(
+      manifest
+        .doc()
+        .entries.every((entry) => !("automergeDocumentId" in entry)),
+    ).toBe(true);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+// Lane: logic. Seam: LocalProjectRepository.open migrating a legacy manifest
+// in a local-peer database, whose main-thread Repo has no peer network.
+test("a legacy manifest migrates a local peer's part from its shared URL without loading it here", async () => {
+  const sharedPartUrls = new MemoryDocumentRepositoryUrlStore();
+  const peer = setup(sharedPartUrls);
+  const local = setup(sharedPartUrls);
+  try {
+    const { manifest, part } = await seedLegacyManifest(
+      local.repo,
+      sharedPartUrls,
+      peer.repo,
+    );
+    const find = vi.spyOn(local.repo, "find");
+    const opened = unwrap(await local.projects.open("legacy-project"));
+    expect(opened.entries[0].automergeDocumentId).toBe(part.documentId);
+    expect(manifest.doc().entries).toEqual(opened.entries);
+    expect(find).not.toHaveBeenCalledWith(part.url);
+  } finally {
+    await peer.repo.shutdown();
+    await local.repo.shutdown();
+  }
+});
 
 test("setParts retains known identities and persists newly added unsaved parts", async () => {
   const { repo, urls, projects } = setup();
@@ -772,40 +789,6 @@ test("setParts retains known identities and persists newly added unsaved parts",
     const added = await repo.find(urls.get("doc_added")!);
     expect(edited.entries[1].automergeDocumentId).toBe(added.documentId);
     expect(unwrap(await projects.open(project.projectId))).toEqual(edited);
-  } finally {
-    await repo.shutdown();
-  }
-});
-
-test("migration refuses writes when entries change during identity resolution", async () => {
-  const { repo, urls, projects } = setup();
-  try {
-    const { manifest, readme } = await seedLegacyManifest(repo, urls);
-    const find = repo.find.bind(repo);
-    vi.spyOn(repo, "find").mockImplementation((id) => {
-      if (id === readme.url) {
-        const entries = JSON.parse(
-          JSON.stringify(manifest.doc().entries),
-        ).reverse();
-        manifest.change((draft) => {
-          draft.entries = entries;
-        });
-      }
-      return find(id);
-    });
-    expect(await projects.open("legacy-project")).toMatchObject({
-      ok: false,
-      diagnostic: { message: expect.stringContaining("entries changed") },
-    });
-    expect(manifest.doc().entries.map((entry) => entry.docId)).toEqual([
-      "doc_notes",
-      "doc_part",
-    ]);
-    expect(
-      manifest
-        .doc()
-        .entries.every((entry) => !("automergeDocumentId" in entry)),
-    ).toBe(true);
   } finally {
     await repo.shutdown();
   }
@@ -985,3 +968,176 @@ test("a stale tab list applies only its own change: a collaborator's part and or
     await repo.shutdown();
   }
 });
+
+/** A repository over storage that repairCatalog can scan, with a part outside every project. */
+async function setupStoredProjects() {
+  const storage = new SharedMemoryStorage();
+  const stored = setup(undefined, new Repo({ storage }));
+  const projects = new LocalProjectRepository(
+    stored.documents,
+    stored.urls,
+    stored.urls,
+    stored.ensurePartReady,
+    () => listStoredAutomergeDocumentIds(storage),
+  );
+  const project = unwrap(
+    await projects.create("Enclosure", [
+      { name: "Base", kind: "part", docId: "doc_base" },
+    ]),
+  );
+  await stored.ensurePartReady("doc_unlisted" as DocumentId);
+  return { ...stored, storage, projects, project };
+}
+
+function catalogUrl(urls: MemoryDocumentRepositoryUrlStore) {
+  return urls.get("doc_project_catalog")!;
+}
+
+// Lane: logic. Seam: LocalProjectRepository.repairCatalog, the recovery the
+// "Project could not be opened" notice offers when the stored catalog or a
+// manifest no longer opens.
+test("repairing a catalog that points at another document relists the stored project and gathers unlisted parts", async () => {
+  const { repo, urls, projects, project } = await setupStoredProjects();
+  try {
+    const previousCatalog = catalogUrl(urls);
+    urls.set("doc_project_catalog", urls.get("doc_base")!);
+    expect(await projects.list()).toMatchObject({
+      ok: false,
+      diagnostic: { message: "Invalid local project catalog." },
+    });
+
+    expect(unwrap(await projects.repairCatalog())).toEqual({ leftOut: 0 });
+
+    const listed = unwrap(await projects.list());
+    expect(listed).toHaveLength(2);
+    expect(listed).toContainEqual(project);
+    expect(listed).toContainEqual(
+      expect.objectContaining({
+        name: "Recovered parts",
+        entries: [
+          expect.objectContaining({
+            kind: "part",
+            docId: "doc_unlisted",
+            automergeDocumentId: parseUrl(urls.get("doc_unlisted")!),
+          }),
+        ],
+      }),
+    );
+    // Nothing is deleted: the previous catalog still holds the project.
+    const previous = await repo.find<ProjectCatalog>(previousCatalog);
+    expect(previous.doc().projects).toEqual([
+      expect.objectContaining({ projectId: project.projectId }),
+    ]);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test.each(["an invalid manifest", "a legacy entry without a stored URL"])(
+  "repairing leaves out %s and gathers its parts into Recovered parts",
+  async (fault) => {
+    const { repo, urls, projects, project } = await setupStoredProjects();
+    try {
+      const catalog = await repo.find<ProjectCatalog>(catalogUrl(urls));
+      const manifest = await repo.find<ProjectManifest>(
+        catalog.doc().projects[0].url as AutomergeUrl,
+      );
+      manifest.change((draft) => {
+        if (fault === "an invalid manifest") draft.name = "";
+        else
+          draft.entries.push({
+            name: "Notes",
+            kind: "readme",
+            docId: "doc_notes",
+          } as unknown as ProjectManifest["entries"][number]);
+      });
+      expect((await projects.open(project.projectId)).ok).toBe(false);
+
+      expect(unwrap(await projects.repairCatalog())).toEqual({ leftOut: 1 });
+
+      const [recovered, ...others] = unwrap(await projects.list());
+      expect(others).toEqual([]);
+      expect(recovered).toMatchObject({ name: "Recovered parts" });
+      expect(recovered!.entries.map((entry) => entry.docId).sort()).toEqual([
+        "doc_base",
+        "doc_unlisted",
+      ]);
+    } finally {
+      await repo.shutdown();
+    }
+  },
+);
+
+test("repairing leaves out a synced manifest whose part this browser holds as another document, and maps a manifest's unseen entries", async () => {
+  const { repo, urls, projects, project } = await setupStoredProjects();
+  try {
+    // A refused adoption: another browser's legacy first part shares doc_base.
+    const colliding = repo.create<ProjectManifest>({
+      ...project,
+      projectId: "colliding-project",
+      entries: [
+        {
+          ...project.entries[0]!,
+          automergeDocumentId: repo.create({}).documentId,
+        },
+      ],
+    });
+    const remotePart = repo.create({});
+    const synced = repo.create<ProjectManifest>({
+      ...project,
+      projectId: "synced-project",
+      entries: [
+        {
+          name: "Remote",
+          kind: "part",
+          docId: "doc_remote" as DocumentId,
+          automergeDocumentId: remotePart.documentId,
+        },
+      ],
+    });
+    await repo.flush([colliding.documentId, synced.documentId]);
+    urls.set("doc_project_catalog", urls.get("doc_base")!);
+    const baseUrl = urls.get("doc_base");
+
+    expect(unwrap(await projects.repairCatalog())).toEqual({ leftOut: 1 });
+
+    const listed = unwrap(await projects.list());
+    const listedIds = listed.map((manifest) => manifest.projectId);
+    expect(listedIds).toContain(project.projectId);
+    expect(listedIds).toContain("synced-project");
+    expect(listedIds).not.toContain("colliding-project");
+    expect(urls.get("doc_base")).toBe(baseUrl);
+    expect(urls.get("doc_remote")).toBe(remotePart.url);
+  } finally {
+    await repo.shutdown();
+  }
+});
+
+test("repairing skips a stored document that cannot be read and counts it", async () => {
+  const { repo, urls, projects, project, storage } =
+    await setupStoredProjects();
+  const damaged = parseUrl(generateAutomergeUrl());
+  try {
+    await storage.save(
+      [damaged, "snapshot", "damaged"],
+      new Uint8Array([1, 2, 3]),
+    );
+    urls.set("doc_project_catalog", urls.get("doc_base")!);
+
+    expect(unwrap(await projects.repairCatalog())).toEqual({ leftOut: 1 });
+
+    expect(unwrap(await projects.list())).toContainEqual(project);
+  } finally {
+    // shutdown() flushes every handle, and the damaged one never became
+    // ready; this Repo has no network, so flushing the others is its shutdown.
+    await repo.flush(
+      (await listStoredAutomergeDocumentIds(storage)).filter(
+        (id) => id !== damaged,
+      ) as Parameters<Repo["flush"]>[0],
+    );
+  }
+});
+
+function parseUrl(url: AutomergeUrl) {
+  return url.slice("automerge:".length);
+}

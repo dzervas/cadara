@@ -85,3 +85,62 @@ test("a project that could not be opened ends the opening cover with a reload no
   await expect(cover).toHaveCount(0, { timeout: 30_000 });
   await expect(page.getByText("Project could not be opened")).toHaveCount(0);
 });
+
+/** The active project's id from the workbench's stored project session. */
+function activeProjectId(page: Page) {
+  return page.evaluate(() => {
+    const key = Object.keys(localStorage).find((key) =>
+      key.startsWith("cad.workbench.activeProject.v1:"),
+    );
+    return key
+      ? (JSON.parse(localStorage.getItem(key)!) as { projectId: string })
+          .projectId
+      : null;
+  });
+}
+
+// Lane: e2e. Seam: the "Project could not be opened" notice's repair action
+// in the workbench shell. The repository's rebuild is proven in the logic
+// lane (local-project-repository.spec.ts); this row proves the button runs
+// it against the browser's own storage and reloads into the same project.
+test("repairing the project list from the failure notice reopens the stored project and its part", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.goto("/app");
+  const newProject = page.getByRole("button", {
+    name: "New project",
+    exact: true,
+  });
+  await expect(newProject).toBeEnabled({ timeout: 60_000 });
+  const projectId = await activeProjectId(page);
+  expect(projectId).not.toBeNull();
+  const partId = await page
+    .locator("[data-document-tab]")
+    .getAttribute("data-document-id");
+  await corruptCatalog(page);
+
+  await page.reload();
+  const notice = page
+    .getByRole("alert")
+    .filter({ hasText: "Project could not be opened" });
+  await expect(notice).toBeVisible({ timeout: 60_000 });
+  await Promise.all([
+    page.waitForEvent("load", { timeout: 60_000 }),
+    notice.getByRole("button", { name: "Repair project list" }).click(),
+  ]);
+
+  await expect(newProject).toBeEnabled({ timeout: 60_000 });
+  await expect(
+    page.getByRole("status", { name: "Initial model render pending" }),
+  ).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText("Project could not be opened")).toHaveCount(0);
+  await expect(
+    page.getByRole("combobox", { name: "Project", exact: true }),
+  ).toHaveValue("My project");
+  expect(await activeProjectId(page)).toBe(projectId);
+  await expect(page.locator("[data-document-tab]")).toHaveAttribute(
+    "data-document-id",
+    partId!,
+  );
+});

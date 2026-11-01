@@ -221,6 +221,37 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     };
   }, [context, openProjectId, report]);
 
+  // A repair that left stored documents out ends "done": the notice says
+  // so, and Reload opens the repaired list.
+  const [repair, setRepair] = useState<"idle" | "running" | "done">("idle");
+  /**
+   * Rebuilds the project list from this browser's stored manifests (see
+   * LocalProjectRepository.repairCatalog), then reloads into discovery.
+   */
+  const repairCatalog = useCallback(async () => {
+    setRepair("running");
+    try {
+      const { leftOut } = unwrap(
+        await (await context.getRepository()).repairCatalog(),
+      );
+      if (!leftOut) {
+        window.location.reload();
+        return;
+      }
+      setFailure(
+        `Project list repaired. ${leftOut} stored ${leftOut === 1 ? "project" : "projects"} could not be read; their parts kept by this browser are in 'Recovered parts'. Reload to open your projects.`,
+      );
+      setRepair("done");
+    } catch (error) {
+      report(
+        new Error(
+          `The project list could not be repaired: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+      setRepair("idle");
+    }
+  }, [context, report, unwrap]);
+
   /** Shows a manifest the active project gained in place (e.g. its service link). */
   const replaceProject = useCallback(
     async (manifest: ProjectManifest) => {
@@ -247,6 +278,8 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     busy: busy || saving > 0,
     failure,
     discoveryFailed,
+    repair,
+    repairCatalog,
     select,
     saveParts,
     saveSession,

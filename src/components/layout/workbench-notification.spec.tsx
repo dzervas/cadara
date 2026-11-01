@@ -123,6 +123,30 @@ test("src/components/layout/workbench-notification.spec.tsx", () => {
   ).toBeTruthy();
 });
 
+// UI lane: the static markup of a notice with two recoveries; clicking them is
+// proven in E2E (project-open-failure.spec.ts).
+test("a secondary action renders as a button after the primary action", () => {
+  const markup = renderNotification(
+    <WorkbenchNotification
+      type="error"
+      title="Project could not be opened"
+      message="Invalid local project catalog."
+      action={{ label: "Reload", onClick: () => undefined }}
+      secondaryAction={{
+        label: "Repair project list",
+        onClick: () => undefined,
+        disabled: true,
+      }}
+    />,
+  );
+  const buttons = [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/g)];
+  expect(buttons.map((button) => button[0].replace(/<[^>]+>/g, ""))).toEqual([
+    "Reload",
+    "Repair project list",
+  ]);
+  expect(buttons[1]![0]).toContain("disabled");
+});
+
 function renderNotification(node: ReactElement) {
   return renderToStaticMarkup(
     <MantineProvider theme={workbenchTheme} defaultColorScheme="dark">

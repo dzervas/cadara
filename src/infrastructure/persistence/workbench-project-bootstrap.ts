@@ -138,7 +138,7 @@ export function createWorkbenchProjectBootstrap(
       import("@/infrastructure/persistence/indexeddb-automerge-document-repository"),
     ]).then(
       ([
-        { LocalProjectRepository },
+        { LocalProjectRepository, listIndexedDbAutomergeDocumentIds },
         { IndexedDbAutomergeDocumentRepository },
       ]) => {
         const catalogUrls = createLocalStorageDocumentRepositoryUrlStore(
@@ -156,6 +156,7 @@ export function createWorkbenchProjectBootstrap(
             urls,
             catalogUrls,
             (docId) => partReadiness.ensure(docId),
+            () => listIndexedDbAutomergeDocumentIds(databaseName),
           ),
         };
       },

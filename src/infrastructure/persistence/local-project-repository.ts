@@ -1,9 +1,13 @@
 import { getHeads } from "@automerge/automerge/slim";
-import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
+import type {
+  AutomergeUrl,
+  StorageAdapterInterface,
+} from "@automerge/automerge-repo/slim";
 import {
   isValidAutomergeUrl,
   parseAutomergeUrl,
 } from "@automerge/automerge-repo/slim";
+import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
 import type { DocumentId } from "@/contracts/shared/ids";
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { ProjectCatalog } from "@/contracts/modeling/project-catalog.runtime-schema";
@@ -23,7 +27,9 @@ import {
 import type { AutomergeHandleLike } from "./indexeddb-automerge-document-repository";
 import { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import type { DocumentRepositoryUrlStore } from "./document-repository-url-store";
+import { isDocumentChunk } from "./automerge-chunk-key-recorder";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
+import type { CollaborativeDocument } from "@/core/modeling/collaborative-document";
 
 const CATALOG_ID = "doc_project_catalog" as DocumentId;
 
@@ -78,6 +84,23 @@ function applyProjectPartEdits(
   });
 }
 
+/** The Automerge documents whose changes the storage holds (sync states aside). */
+export async function listStoredAutomergeDocumentIds(
+  storage: Pick<StorageAdapterInterface, "loadRange">,
+) {
+  const ids = new Set<string>();
+  for (const { key } of await storage.loadRange([]))
+    if (isDocumentChunk(key)) ids.add(key[0]!);
+  return [...ids];
+}
+
+/** The Automerge documents stored in one IndexedDB document database. */
+export function listIndexedDbAutomergeDocumentIds(databaseName: string) {
+  return listStoredAutomergeDocumentIds(
+    new IndexedDBStorageAdapter(databaseName, "documents"),
+  );
+}
+
 /** Manifests reference part identities; linking or removing an entry never rewrites its part. */
 export class LocalProjectRepository {
   private queue: Promise<unknown> = Promise.resolve();
@@ -85,16 +108,20 @@ export class LocalProjectRepository {
   private readonly urls: DocumentRepositoryUrlStore;
   private readonly catalogUrls: DocumentRepositoryUrlStore;
   private readonly ensurePartReady?: (docId: DocumentId) => Promise<void>;
+  /** The documents in the repository's storage; repairCatalog scans them. */
+  private readonly listStoredDocumentIds?: () => Promise<readonly string[]>;
   constructor(
     documents: IndexedDbAutomergeDocumentRepository,
     urls: DocumentRepositoryUrlStore,
     catalogUrls: DocumentRepositoryUrlStore = urls,
     ensurePartReady?: (docId: DocumentId) => Promise<void>,
+    listStoredDocumentIds?: () => Promise<readonly string[]>,
   ) {
     this.documents = documents;
     this.urls = urls;
     this.catalogUrls = catalogUrls;
     this.ensurePartReady = ensurePartReady;
+    this.listStoredDocumentIds = listStoredDocumentIds;
   }
 
   private run<T>(operation: () => Promise<T>): Promise<ProjectResult<T>> {
@@ -148,13 +175,15 @@ export class LocalProjectRepository {
     return JSON.parse(JSON.stringify(result.value)) as ProjectManifest;
   }
 
-  private async resolveDocumentId(docId: DocumentId) {
+  /**
+   * The Automerge identity is part of the stored URL. A local peer's
+   * document (URL shared, data only in the peer's storage and the sync
+   * worker) is not loadable here, so it is never loaded for its identity.
+   */
+  private storedDocumentId(docId: DocumentId) {
     const url = this.urls.get(docId);
     if (!url) throw new Error(`Document ${docId} has no stored Automerge URL.`);
-    const repo = await this.documents.getAutomergeRepository();
-    const handle = await repo.find<Record<string, unknown>>(url);
-    await handle.whenReady();
-    return handle.documentId;
+    return parseAutomergeUrl(url).documentId;
   }
 
   private async partEntry(entry: {
@@ -165,46 +194,52 @@ export class LocalProjectRepository {
       throw new Error("Project entries require names and document identities.");
     // The workbench's document owner initializes unsaved tabs; a second repository must not seed them.
     if (!this.urls.get(entry.docId)) await this.ensurePartReady?.(entry.docId);
-    const url = this.urls.get(entry.docId);
-    if (!url)
-      throw new Error(`Document ${entry.docId} has no stored Automerge URL.`);
-    // The identity is part of the URL. A local peer's part (URL shared, data
-    // only in the peer's storage and the sync worker) is not loadable here.
     return {
       ...entry,
       kind: "part",
-      automergeDocumentId: parseAutomergeUrl(url).documentId,
+      automergeDocumentId: this.storedDocumentId(entry.docId),
     };
   }
 
-  private async migrate(handle: AutomergeHandleLike<ProjectManifest>) {
-    const legacy = validateLegacyProjectManifest(handle.doc());
-    if (!legacy.success) throw new Error("Invalid project manifest.");
-    if (
-      !legacy.data.entries.some(
-        (entry) => entry.automergeDocumentId === undefined,
-      )
-    )
-      return;
-    const originalEntries = JSON.stringify(legacy.data.entries);
+  /**
+   * The manifest with legacy entries' missing identities (from before
+   * manifests recorded them) filled from their stored URLs, and the indices
+   * of the filled entries.
+   */
+  private migration(
+    value: unknown,
+  ): ProjectResult<{ manifest: ProjectManifest; filled: number[] }> {
+    const failed = (message: string) => ({
+      ok: false as const,
+      diagnostic: { reasonCode: "invalid-project-manifest", message },
+    });
+    const legacy = validateLegacyProjectManifest(value);
+    if (!legacy.success) return failed("Invalid project manifest.");
     const next = JSON.parse(JSON.stringify(legacy.data)) as ProjectManifest;
-    const assignments = next.entries.flatMap((entry, index) =>
-      entry.automergeDocumentId === undefined ? [index] : [],
-    );
-    for (const entry of next.entries) {
-      if (entry.automergeDocumentId === undefined)
-        entry.automergeDocumentId = await this.resolveDocumentId(entry.docId);
+    const filled: number[] = [];
+    for (const [index, entry] of next.entries.entries()) {
+      if (entry.automergeDocumentId !== undefined) continue;
+      const url = this.urls.get(entry.docId);
+      if (!url)
+        return failed(`Document ${entry.docId} has no stored Automerge URL.`);
+      entry.automergeDocumentId = parseAutomergeUrl(url).documentId;
+      filled.push(index);
     }
     const parsed = parseProjectManifest(next);
-    if (!parsed.ok) throw new Error(parsed.diagnostic.message);
-    if (JSON.stringify(handle.doc().entries) !== originalEntries)
-      throw new Error(
-        "Project entries changed while resolving document identities. Reopen the project to retry.",
-      );
+    return parsed.ok
+      ? { ok: true, value: { manifest: parsed.value, filled } }
+      : parsed;
+  }
+
+  private async migrate(handle: AutomergeHandleLike<ProjectManifest>) {
+    const migration = this.migration(handle.doc());
+    if (!migration.ok) throw new Error(migration.diagnostic.message);
+    const { manifest, filled } = migration.value;
+    if (!filled.length) return;
     handle.change((draft) => {
-      for (const index of assignments)
+      for (const index of filled)
         draft.entries[index].automergeDocumentId =
-          next.entries[index].automergeDocumentId;
+          manifest.entries[index].automergeDocumentId;
     });
     await (
       await this.documents.getAutomergeRepository()
@@ -256,9 +291,7 @@ export class LocalProjectRepository {
               ? this.partEntry(entry)
               : {
                   ...entry,
-                  automergeDocumentId: await this.resolveDocumentId(
-                    entry.docId,
-                  ),
+                  automergeDocumentId: this.storedDocumentId(entry.docId),
                 },
           ),
         ),
@@ -513,6 +546,15 @@ export class LocalProjectRepository {
     return () => handle.off?.("change", changed);
   }
 
+  /** Whether this browser maps no entry of the manifest to another document. */
+  private entryUrlsAgree(manifest: ProjectManifest) {
+    return manifest.entries.every((entry) => {
+      const entryUrl = `automerge:${entry.automergeDocumentId}`;
+      const known = this.urls.get(entry.docId);
+      return isValidAutomergeUrl(entryUrl) && (!known || known === entryUrl);
+    });
+  }
+
   private mapEntryUrls(manifest: ProjectManifest, conflict: "throw" | "skip") {
     for (const entry of manifest.entries) {
       const entryUrl = `automerge:${entry.automergeDocumentId}`;
@@ -598,6 +640,106 @@ export class LocalProjectRepository {
         await repo.flush?.([catalog.documentId]);
       }
       return manifest;
+    });
+  }
+
+  /**
+   * Rebuilds this browser's project catalog from the manifests in its
+   * storage, for a catalog or manifest that no longer opens, and returns how
+   * many stored documents it left out. A manifest is listed once per project
+   * when it parses after legacy migration and this browser maps none of its
+   * entries to another document (adoptManifest's refusal); its unmapped
+   * entries are mapped as adoption would. Stored parts (their URL is this
+   * browser's URL for their identity) that no listed project contains join
+   * one new project, "Recovered parts". The scan changes no stored
+   * document: the previous catalog stays in storage, and only the stored
+   * catalog URL moves.
+   */
+  repairCatalog() {
+    return this.run(async () => {
+      if (!this.listStoredDocumentIds)
+        throw new Error("This browser's stored documents cannot be listed.");
+      const repo = await this.documents.getAutomergeRepository();
+      const projects: ProjectCatalog["projects"] = [];
+      const listed = new Set<string>();
+      const parts: ProjectEntry[] = [];
+      let leftOut = 0;
+      for (const id of await this.listStoredDocumentIds()) {
+        const url = `automerge:${id}`;
+        if (!isValidAutomergeUrl(url)) continue;
+        let stored: {
+          format?: unknown;
+          authored?: { documentId?: unknown; name?: unknown };
+        };
+        try {
+          const handle = await repo.find<typeof stored>(url);
+          await handle.whenReady();
+          stored = handle.doc();
+        } catch {
+          // A damaged document must not stop the repair; the caller reports the count.
+          leftOut += 1;
+          continue;
+        }
+        if (stored.format === "cadara-project") {
+          const migration = this.migration(stored);
+          if (!migration.ok || !this.entryUrlsAgree(migration.value.manifest)) {
+            leftOut += 1;
+            continue;
+          }
+          const { manifest } = migration.value;
+          if (
+            projects.some((project) => project.projectId === manifest.projectId)
+          )
+            continue;
+          this.mapEntryUrls(manifest, "skip");
+          projects.push({ projectId: manifest.projectId, url });
+          for (const entry of manifest.entries)
+            listed.add(entry.automergeDocumentId);
+        } else if (
+          stored.format ===
+            ("cadara-stable-authored-v3" satisfies CollaborativeDocument["format"]) &&
+          typeof stored.authored?.documentId === "string" &&
+          this.urls.get(stored.authored.documentId as DocumentId) === url
+        ) {
+          const name = stored.authored.name;
+          parts.push({
+            kind: "part",
+            name: typeof name === "string" && name.trim() ? name : "Part",
+            docId: stored.authored.documentId as DocumentId,
+            automergeDocumentId: id,
+          });
+        }
+      }
+      const unlisted = parts.filter(
+        (part) => !listed.has(part.automergeDocumentId),
+      );
+      if (unlisted.length) {
+        const parsed = parseProjectManifest({
+          format: "cadara-project",
+          schemaVersion: 1,
+          projectId: crypto.randomUUID(),
+          name: "Recovered parts",
+          entries: unlisted,
+          versions: [],
+        } satisfies ProjectManifest);
+        if (!parsed.ok) throw new Error(parsed.diagnostic.message);
+        const recovered = repo.create(parsed.value);
+        await recovered.whenReady();
+        await repo.flush?.([recovered.documentId]);
+        projects.push({
+          projectId: parsed.value.projectId,
+          url: recovered.url,
+        });
+      }
+      const catalog = repo.create<ProjectCatalog>({
+        format: "cadara-project-catalog",
+        schemaVersion: 1,
+        projects,
+      });
+      await catalog.whenReady();
+      await repo.flush?.([catalog.documentId]);
+      this.catalogUrls.set(CATALOG_ID, catalog.url);
+      return { leftOut };
     });
   }
 

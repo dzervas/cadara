@@ -296,7 +296,10 @@ function ProjectWorkbenchApp({
   const kernelVersionRetired = useOccKernelVersionRetired();
   // A retired kernel fails the part readiness the project waits for; the
   // update notification's reload is the outcome. A failed discovery leaves
-  // nothing to edit, so its only recovery is a reload.
+  // nothing to edit: a reload recovers from a passing cause; repairing the
+  // project list recovers from a stored catalog or manifest that no longer
+  // opens.
+  const { repairCatalog, repair } = projects;
   const projectNotification = useMemo(
     (): WorkbenchNotificationModel | null =>
       !projects.failure || kernelVersionRetired
@@ -310,13 +313,24 @@ function ProjectWorkbenchApp({
                 label: "Reload",
                 onClick: () => window.location.reload(),
               },
+              secondaryAction: {
+                label: "Repair project list",
+                onClick: () => void repairCatalog(),
+                disabled: repair !== "idle",
+              },
             }
           : {
               type: "error",
               title: "Project could not be saved",
               message: projects.failure,
             },
-    [kernelVersionRetired, projects.discoveryFailed, projects.failure],
+    [
+      kernelVersionRetired,
+      projects.discoveryFailed,
+      projects.failure,
+      repair,
+      repairCatalog,
+    ],
   );
 
   const durableHistory = useMemo(

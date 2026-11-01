@@ -7,7 +7,7 @@ import type {
 /** The chunk kinds that hold a document's changes; sync states do not. */
 const DOCUMENT_CHUNK_KINDS = new Set(["snapshot", "incremental"]);
 
-function isDocumentChunk(key: StorageKey) {
+export function isDocumentChunk(key: StorageKey) {
   return key.length === 3 && DOCUMENT_CHUNK_KINDS.has(key[1]!);
 }
 
