@@ -108,3 +108,32 @@ export function getDocumentRepositoryStorageNamespace(search: string) {
     DEFAULT_DOCUMENT_REPOSITORY_NAMESPACE
   );
 }
+
+/**
+ * Where this browser keeps local projects for an address's query. The editor
+ * and the dashboard both resolve it here, so they always read one catalog.
+ */
+export function resolveLocalProjectStorage(
+  storage: Parameters<typeof createLocalStorageDocumentRepositoryUrlStore>[0],
+  search: string,
+) {
+  const namespace = getDocumentRepositoryStorageNamespace(search);
+  const databaseName =
+    new URLSearchParams(search).get("cadRepositoryDbName") ??
+    "cad-authored-documents";
+  // Local peer channels share part pointers across databases, not project catalogs.
+  const projectNamespace = `${namespace}:projects:${databaseName}`;
+  return {
+    namespace,
+    databaseName,
+    projectNamespace,
+    partUrls: createLocalStorageDocumentRepositoryUrlStore(
+      storage,
+      createDocumentRepositoryUrlStorageKey(namespace),
+    ),
+    catalogUrls: createLocalStorageDocumentRepositoryUrlStore(
+      storage,
+      createDocumentRepositoryUrlStorageKey(projectNamespace),
+    ),
+  };
+}

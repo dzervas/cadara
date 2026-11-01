@@ -90,12 +90,13 @@ test("test/static/build-config.spec.ts", async () => {
   ).toBeUndefined();
 });
 
-test("Cloudflare builds distinct landing/editor entries and a landing 404 page", () => {
+test("Cloudflare builds distinct landing/editor/dashboard entries and a landing 404 page", () => {
   const config = viteConfig as UserConfig;
   expect(config.base).toBe("/");
   expect(config.build?.rollupOptions?.input).toEqual({
     landing: path.resolve("index.html"),
     editor: path.resolve("app.html"),
+    dashboard: path.resolve("dashboard.html"),
     notFound: path.resolve("404.html"),
   });
   for (const file of ["index.html", "404.html"]) {

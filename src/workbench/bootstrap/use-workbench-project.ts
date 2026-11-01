@@ -53,6 +53,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
         window.localStorage,
         window.location.search,
         persistenceEnabled,
+        window.location.pathname,
       ),
     [persistenceEnabled],
   );
@@ -114,6 +115,12 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     },
     [reporter],
   );
+  // The project an address named could not be opened (an unknown or
+  // inaccessible id); the startup project stays open and editable.
+  const [openFailure, setOpenFailure] = useState<string | null>(null);
+  const reportOpenFailure = useCallback((error: unknown) => {
+    setOpenFailure(error instanceof Error ? error.message : String(error));
+  }, []);
   const saveSession = useCallback(
     (
       projectId: string,
@@ -176,6 +183,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
       setBusy(true);
       const finish = pendingWrites.begin();
       setFailure(null);
+      setOpenFailure(null);
       try {
         const repository = await context.getRepository();
         const opened = await withPart(
@@ -322,6 +330,7 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     initialFailure: context.initialFailure,
     busy: busy || saving > 0,
     failure,
+    openFailure,
     discoveryFailed,
     repair,
     repairCatalog,
@@ -329,5 +338,6 @@ export function useWorkbenchProject(persistenceEnabled: boolean) {
     saveParts,
     saveSession,
     report,
+    reportOpenFailure,
   };
 }

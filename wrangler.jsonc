@@ -9,6 +9,7 @@
       "public",
       "index.html",
       "app.html",
+      "dashboard.html",
       "404.html",
       "vite.config.ts",
     ],

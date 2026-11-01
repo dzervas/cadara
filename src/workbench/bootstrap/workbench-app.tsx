@@ -38,6 +38,7 @@ import type { NewProjectChoice } from "@/core/account/project-location-options";
 import { useBrowserOnline } from "@/hooks/use-browser-online";
 import { summarizeQuota } from "@/core/account/quota-summary";
 import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
+import { useEditorPageMemory } from "./editor-page-memory";
 import { useWorkbenchProject } from "./use-workbench-project";
 import { useTabStorageStatus } from "./use-tab-storage-status";
 import { useProjectSync, type ProjectSync } from "./use-project-sync";
@@ -145,6 +146,7 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
   );
   const projects = useWorkbenchProject(props.documentSyncWorkerClient !== null);
   const sync = useProjectSync(props.documentSyncWorkerClient, projects);
+  useEditorPageMemory(projects.project);
   if (projects.initialFailure)
     return (
       <Alert color="red" title="Project could not be opened">
@@ -363,32 +365,41 @@ function ProjectWorkbenchApp({
   const { repairCatalog, repair } = projects;
   const projectNotification = useMemo(
     (): WorkbenchNotificationModel | null =>
-      !projects.failure || kernelVersionRetired
+      kernelVersionRetired
         ? null
-        : projects.discoveryFailed
-          ? {
-              type: "error",
-              title: "Project could not be opened",
-              message: projects.failure,
-              action: {
-                label: "Reload",
-                onClick: () => window.location.reload(),
+        : !projects.failure
+          ? projects.openFailure
+            ? {
+                type: "error",
+                title: "Project could not be opened",
+                message: projects.openFailure,
+              }
+            : null
+          : projects.discoveryFailed
+            ? {
+                type: "error",
+                title: "Project could not be opened",
+                message: projects.failure,
+                action: {
+                  label: "Reload",
+                  onClick: () => window.location.reload(),
+                },
+                secondaryAction: {
+                  label: "Repair project list",
+                  onClick: () => void repairCatalog(),
+                  disabled: repair !== "idle",
+                },
+              }
+            : {
+                type: "error",
+                title: "Project could not be saved",
+                message: projects.failure,
               },
-              secondaryAction: {
-                label: "Repair project list",
-                onClick: () => void repairCatalog(),
-                disabled: repair !== "idle",
-              },
-            }
-          : {
-              type: "error",
-              title: "Project could not be saved",
-              message: projects.failure,
-            },
     [
       kernelVersionRetired,
       projects.discoveryFailed,
       projects.failure,
+      projects.openFailure,
       repair,
       repairCatalog,
     ],
@@ -609,6 +620,10 @@ function ProjectWorkbenchApp({
     }, [documentRepository, projectWriteGate]);
 
   const { requestSignIn } = useSignInRequest();
+  // A signed-out visit to an account project's address offers the sign-in.
+  useEffect(() => {
+    if (sync.addressNeedsSignIn) requestSignIn();
+  }, [requestSignIn, sync.addressNeedsSignIn]);
   const newProjectChoices = useMemo(
     () => createLocalStorageNewProjectChoiceStore(window.localStorage),
     [],
@@ -618,7 +633,11 @@ function ProjectWorkbenchApp({
     lastChoice: NewProjectChoice | null;
     busy: boolean;
     error: string | null;
-  } | null>(null);
+  } | null>(() =>
+    new URLSearchParams(window.location.search).get("newProject") === "1"
+      ? { lastChoice: newProjectChoices.load(), busy: false, error: null }
+      : null,
+  );
   const { refreshAccount, createAccountProject } = sync;
   const openNewProjectDialog = useCallback(() => {
     void refreshAccount();
@@ -628,6 +647,13 @@ function ProjectWorkbenchApp({
       error: null,
     });
   }, [newProjectChoices, refreshAccount]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("newProject") !== "1") return;
+    void refreshAccount();
+    url.searchParams.delete("newProject");
+    window.history.replaceState(null, "", url);
+  }, [refreshAccount]);
   const [moveDialog, setMoveDialog] = useState<{
     documentId: DocumentId;
     targetId: string | null;

@@ -4,14 +4,12 @@ import {
 } from "@/application/modeling/geometry-asset-persistence";
 import { createIndexedDbGeometryAssetStore } from "@/infrastructure/persistence/indexeddb-geometry-asset-store";
 import {
-  initializeWasm,
   parseAutomergeUrl,
   Repo,
 } from "@automerge/automerge-repo/slim";
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { getActorId, getMissingDeps } from "@automerge/automerge/slim";
-import { automergeWasmBase64 } from "@automerge/automerge/automerge.wasm.base64";
-import { BroadcastChannelNetworkAdapter } from "@automerge/automerge-repo-network-broadcastchannel";
+import { createBrowserAutomergeRepo } from "./browser-automerge-repo";
 import { IndexedDBStorageAdapter } from "@automerge/automerge-repo-storage-indexeddb";
 import { parseAuthoredModelDocument } from "@/contracts/modeling/authored-document.runtime-schema";
 import type {
@@ -85,23 +83,6 @@ export interface AutomergeRepositoryLike {
   delete(id: AutomergeUrl): void;
   flush?(documents?: string[]): Promise<void>;
 }
-/** The Automerge module's bytes. initializeBase64Wasm decodes them with a
- * callback per byte, about 170 ms of a reload's critical path for 2.7 MB. */
-function decodeAutomergeWasm() {
-  const binary = atob(automergeWasmBase64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1)
-    bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-let wasm: Promise<void> | undefined;
-function prepare() {
-  wasm ??= initializeWasm(decodeAutomergeWasm()).catch((error: unknown) => {
-    wasm = undefined;
-    throw error;
-  });
-  return wasm;
-}
 /** What a load read from storage: a cache record that provably is the
  * stored document, or the Automerge handle being loaded. */
 type StoredDocumentRead =
@@ -142,6 +123,7 @@ export interface IndexedDbAutomergeDocumentRepositoryOptions {
 }
 export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocumentRepository {
   private repo: AutomergeRepositoryLike | null;
+  private repoOpening: Promise<AutomergeRepositoryLike> | null = null;
   private readonly urlStore: DocumentRepositoryUrlStore;
   private readonly assetStore: GeometryAssetStore;
   private readonly handles = new Map<
@@ -268,21 +250,14 @@ export class IndexedDbAutomergeDocumentRepository implements GeometryAssetDocume
   }
   private async getRepo() {
     if (!this.repo) {
-      await prepare();
-      this.repo ??= new Repo({
-        storage: this.getChunkKeyRecorder()!,
-        network:
-          this.options.localPeerSync && typeof BroadcastChannel !== "undefined"
-            ? [
-                new BroadcastChannelNetworkAdapter({
-                  channelName:
-                    this.options.localPeerSync.channelName ??
-                    "cad-authored-documents",
-                  peerWaitMs: this.options.localPeerSync.peerWaitMs ?? 100,
-                }),
-              ]
-            : [],
-      }) as AutomergeRepositoryLike;
+      this.repoOpening ??= createBrowserAutomergeRepo(
+        this.getChunkKeyRecorder()!,
+        this.options.localPeerSync,
+      ).catch((error: unknown) => {
+        this.repoOpening = null;
+        throw error;
+      });
+      this.repo = await this.repoOpening;
     }
     return this.repo;
   }

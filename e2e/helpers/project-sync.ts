@@ -40,6 +40,7 @@ export async function signIn(page: Page, email: string) {
   await expect
     .poll(
       () => {
+        // statSync reports byte offsets, not decoded character offsets.
         const output = readFileSync(mailerLog!)
           .subarray(logOffset)
           .toString("utf8");

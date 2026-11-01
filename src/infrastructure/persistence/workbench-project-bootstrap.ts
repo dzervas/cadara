@@ -14,10 +14,8 @@ import type { LocalProjectRepository } from "./local-project-repository";
 import type { IndexedDbAutomergeDocumentRepository } from "./indexeddb-automerge-document-repository";
 import { createWorkbenchProjectSessionStore } from "./workbench-project-session-store";
 import {
-  createDocumentRepositoryUrlStorageKey,
-  createLocalStorageDocumentRepositoryUrlStore,
-  getDocumentRepositoryStorageNamespace,
   isLocalPeerDocumentRepositoryNamespace,
+  resolveLocalProjectStorage,
 } from "./document-repository-url-store";
 import { createOperationHistoryStorageKey } from "./local-storage-operation-history-store";
 import {
@@ -43,13 +41,19 @@ export function createWorkbenchProjectBootstrap(
   storage: StorageLike,
   search: string,
   persistenceEnabled: boolean,
+  pathname = "/app",
 ) {
-  const namespace = getDocumentRepositoryStorageNamespace(search);
-  const databaseName =
-    new URLSearchParams(search).get("cadRepositoryDbName") ??
-    "cad-authored-documents";
-  // Local peer channels share part pointers across databases, not project catalogs.
-  const projectNamespace = `${namespace}:projects:${databaseName}`;
+  const {
+    namespace,
+    databaseName,
+    projectNamespace,
+    partUrls: urls,
+    catalogUrls,
+  } = resolveLocalProjectStorage(storage, search);
+  const localAddress = /^\/app\/local\/([^/]+)\/?$/.exec(pathname);
+  const requestedLocalProjectId = localAddress
+    ? decodeURIComponent(localAddress[1])
+    : null;
   const sessionStore = persistenceEnabled
     ? createWorkbenchProjectSessionStore(
         storage,
@@ -65,18 +69,22 @@ export function createWorkbenchProjectBootstrap(
   } catch (error) {
     initialFailure = error;
   }
+  // An address naming another local project opens that project with its own
+  // tabs: the stored session's parts must not join (and be written into) it.
+  if (
+    requestedLocalProjectId !== null &&
+    session?.projectId !== requestedLocalProjectId
+  )
+    session = null;
+  const tabsProjectId = session?.projectId ?? requestedLocalProjectId;
   const cached = persistenceEnabled
     ? createLocalStorageWorkbenchTabsStore(
         storage,
-        session
-          ? `cad.workbench.tabs.project.v1:${session.projectId}`
-          : undefined,
+        tabsProjectId === null
+          ? undefined
+          : `cad.workbench.tabs.project.v1:${tabsProjectId}`,
       ).load()
     : null;
-  const urls = createLocalStorageDocumentRepositoryUrlStore(
-    storage,
-    createDocumentRepositoryUrlStorageKey(namespace),
-  );
   /*
    * Invariant: with persistence on, a fresh browser's first part gets a
    * generated identity like any other part, so another browser can open the
@@ -141,10 +149,6 @@ export function createWorkbenchProjectBootstrap(
         { LocalProjectRepository, listIndexedDbAutomergeDocumentIds },
         { IndexedDbAutomergeDocumentRepository },
       ]) => {
-        const catalogUrls = createLocalStorageDocumentRepositoryUrlStore(
-          storage,
-          createDocumentRepositoryUrlStorageKey(projectNamespace),
-        );
         const documents = new IndexedDbAutomergeDocumentRepository({
           databaseName,
           urlStore: urls,
@@ -199,6 +203,15 @@ export function createWorkbenchProjectBootstrap(
         if (initialFailure) throw initialFailure;
         const projects = await getRepository();
         const available = unwrapProjectResult(await projects.list());
+        if (requestedLocalProjectId !== null) {
+          const requested = available.find(
+            (entry) =>
+              entry.projectId === requestedLocalProjectId && !entry.service,
+          );
+          if (!requested)
+            throw new Error("The project could not be opened on this device.");
+          return unwrapProjectResult(await projects.open(requested.projectId));
+        }
         if (available.length)
           return unwrapProjectResult(
             await projects.open(

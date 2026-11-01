@@ -33,6 +33,10 @@ test("test/static/document-repository-boundary.spec.ts", () => {
       ) &&
       // Project sync's network adapters join the repository's own Repo.
       ![
+        "src/infrastructure/persistence/dashboard-local-projects.ts",
+        "src/infrastructure/persistence/automerge-runtime.ts",
+        "src/infrastructure/persistence/browser-automerge-repo.ts",
+        "src/infrastructure/persistence/local-project-catalog.ts",
         "src/infrastructure/project-sync/project-room-network-adapter.ts",
         "src/infrastructure/project-sync/project-sync-bridge.ts",
         "src/infrastructure/project-sync/project-sync-worker-host.ts",

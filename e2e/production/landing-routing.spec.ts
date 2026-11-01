@@ -64,6 +64,35 @@ test("app and its trailing-slash canonical URL load the editor", async ({
   ).toHaveCount(0);
 });
 
+test("dashboard pages and project addresses serve their own entries", async ({
+  page,
+  request,
+}) => {
+  const entryOf = async (path: string) => {
+    // Served in place: a redirect would drop the project or page from the address.
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+    return (await response.text()).match(
+      /<script type="module"[^>]*src="([^"]+)"/,
+    )![1]!;
+  };
+  const editor = await entryOf("/app");
+  const dashboard = await entryOf("/dashboard");
+  expect(dashboard).not.toBe(editor);
+  for (const path of ["/app/p/remote-id", "/app/local/local-id"])
+    expect(await entryOf(path), path).toBe(editor);
+  for (const path of ["/dashboard/plan", "/dashboard/p/remote-id"])
+    expect(await entryOf(path), path).toBe(dashboard);
+  await page.route("**/api/auth/get-session*", (route) =>
+    route.fulfill({ json: null }),
+  );
+  await page.goto("/dashboard/plan");
+  await expect(page).toHaveURL(/\/dashboard\/plan$/);
+  await expect(
+    page.getByRole("heading", { name: "Usage & plan", exact: true }),
+  ).toBeVisible();
+});
+
 test("root assets retain their types and missing assets stay failures", async ({
   request,
 }) => {

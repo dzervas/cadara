@@ -27,7 +27,10 @@ test("magic link creates a persistent API session; sign out clears it without af
   await expect
     .poll(
       () => {
-        const output = readFileSync(mailerLog!, "utf8").slice(logOffset);
+        // statSync reports byte offsets, not decoded character offsets.
+        const output = readFileSync(mailerLog!)
+          .subarray(logOffset)
+          .toString("utf8");
         link = output.match(/Magic link: (http\S+)/)?.[1] ?? "";
         return Boolean(link);
       },

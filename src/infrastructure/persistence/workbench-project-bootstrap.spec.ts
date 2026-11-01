@@ -3,6 +3,8 @@ import { PendingLocalWrites } from "@/application/workspace/local-save-guard";
 import { OCC_KERNEL_DOCUMENT_ID } from "@/core/modeling/opencascade-kernel-seed";
 import { createWorkbenchProjectBootstrap } from "./workbench-project-bootstrap";
 import { createLocalStorageWorkbenchTabsStore } from "./local-storage-workbench-tabs-store";
+import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
+import { mergeDiscoveredWorkbenchProjectTabs } from "@/core/workspace/workbench-project-tabs";
 
 const search = "?cadRepositoryDbName=projects-under-test";
 const sessionKey = "cad.workbench.activeProject.v1:";
@@ -235,4 +237,65 @@ test("a legacy project session keeps its fixed-identity part and its cached tabs
   expect(bootstrap.session?.activeDocumentId).toBe(OCC_KERNEL_DOCUMENT_ID);
   expect(bootstrap.initialTabs).toEqual(tabs);
   expect(storage.writes).toEqual([]);
+});
+
+test("an address naming another local project starts without the stored session's parts, so none join that project", () => {
+  const storage = createRecordingStorage();
+  seedStoredSession(storage, "doc_lid");
+  createLocalStorageWorkbenchTabsStore(
+    storage.storage,
+    "cad.workbench.tabs.project.v1:enclosure",
+  ).save({
+    tabs: [
+      {
+        documentId: "doc_lid",
+        title: "Lid",
+        storageKind: "browser",
+        storageDescriptor: null,
+      },
+    ],
+    activeDocumentId: "doc_lid",
+  });
+  const bracket: ProjectManifest = {
+    format: "cadara-project",
+    schemaVersion: 1,
+    projectId: "bracket",
+    name: "Bracket",
+    entries: [
+      {
+        kind: "part",
+        automergeDocumentId: "automerge_doc_arm",
+        docId: "doc_arm",
+        name: "Arm",
+      },
+    ],
+    versions: [],
+  };
+
+  const bootstrap = createWorkbenchProjectBootstrap(
+    storage.storage,
+    search,
+    true,
+    "/app/local/bracket",
+  );
+  const opened = mergeDiscoveredWorkbenchProjectTabs(
+    bracket,
+    bootstrap.initialTabs,
+    bootstrap.firstPartPlaceholder,
+  );
+
+  expect(bootstrap.session).toBeNull();
+  expect(opened).toEqual({
+    tabs: [expect.objectContaining({ documentId: "doc_arm" })],
+    activeDocumentId: "doc_arm",
+  });
+  expect(
+    createWorkbenchProjectBootstrap(
+      storage.storage,
+      search,
+      true,
+      "/app/local/enclosure",
+    ).session?.projectId,
+    "the address of the session's own project keeps the session",
+  ).toBe("enclosure");
 });

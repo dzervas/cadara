@@ -1,0 +1,97 @@
+/* As in src/index.css: only app sources carry utility classes. */
+@import "tailwindcss" source(none);
+@source "../**/*.{ts,tsx}";
+@source not "../**/*.spec.{ts,tsx}";
+
+/* The icon rules of src/index.css, which the dashboard does not load: its
+   page scrolls, while the editor's global styles pin the root. */
+.cadara-icon {
+  --cadara-icon-action: currentColor;
+  display: inline-flex;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.cadara-icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.dashboard-shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--workbench-shell-surface);
+  color: var(--workbench-shell-text);
+}
+.dashboard-sidebar {
+  width: 256px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--workbench-shell-surface-strong);
+  border-right: 1px solid var(--workbench-shell-border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.dashboard-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--workbench-shell-border);
+}
+.dashboard-main {
+  flex: 1;
+  min-width: 0;
+  padding: 32px 40px 80px;
+}
+.dashboard-section {
+  margin-bottom: 36px;
+}
+.dashboard-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(188px, 224px));
+  gap: 24px 20px;
+}
+.dashboard-thumbnail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  background: var(--workbench-shell-control-surface);
+  border: 1px solid var(--workbench-shell-border);
+  border-radius: 8px;
+  color: var(--mantine-color-dimmed);
+  box-shadow: var(--workbench-parts-tree-row-active-shadow);
+}
+.dashboard-thumbnail:hover {
+  border-color: var(--mantine-color-workbench-5);
+}
+@media (max-width: 760px) {
+  .dashboard-sidebar {
+    width: 200px;
+  }
+  .dashboard-main {
+    padding: 24px 16px;
+  }
+}
+.dashboard-organization {
+  display: block;
+  padding: 10px;
+  border: 1px solid var(--workbench-shell-border);
+  border-radius: 10px;
+}
+.dashboard-organization-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--workbench-shell-control-surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+button.dashboard-organization:hover {
+  background: var(--workbench-shell-control-surface);
+}

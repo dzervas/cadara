@@ -1,4 +1,9 @@
-import { defineConfig } from "vite";
+import {
+  defineConfig,
+  type Plugin,
+  type ViteDevServer,
+  type PreviewServer,
+} from "vite";
 import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
@@ -84,6 +89,25 @@ function createOpenCascadeAssetHeadersPlugin() {
   };
 }
 
+/** All nested application routes use their own lightweight HTML entry. */
+function applicationRoutesPlugin(): Plugin {
+  const install = (server: ViteDevServer | PreviewServer) => {
+    server.middlewares.use((request, _response, next) => {
+      const url = request.url ?? "";
+      if (/^\/dashboard(?:[/?]|$)/.test(url))
+        request.url = `/dashboard.html${url.includes("?") ? url.slice(url.indexOf("?")) : ""}`;
+      else if (/^\/app\/(?:p|local)\//.test(url))
+        request.url = `/app.html${url.includes("?") ? url.slice(url.indexOf("?")) : ""}`;
+      next();
+    });
+  };
+  return {
+    name: "cadara-application-routes",
+    configureServer: install,
+    configurePreviewServer: install,
+  };
+}
+
 const buildMetadata = readBuildMetadata(import.meta.dirname);
 const shouldUploadSentrySourceMaps = Boolean(
   process.env.SENTRY_AUTH_TOKEN && buildMetadata.sentryRelease,
@@ -152,6 +176,7 @@ export default defineConfig({
     plugins: () => createTypiaVitePlugins(import.meta.dirname),
   },
   plugins: [
+    applicationRoutesPlugin(),
     createOpenCascadeAssetHeadersPlugin(),
     createServiceWorkerPlugin(path.resolve(import.meta.dirname, "src")),
     ...createTypiaVitePlugins(import.meta.dirname),
@@ -204,6 +229,7 @@ export default defineConfig({
     entries: [
       "index.html",
       "app.html",
+      "dashboard.html",
       "404.html",
       "src/infrastructure/workers/document-sync.worker.ts",
       "src/infrastructure/occ/worker.ts",
@@ -234,6 +260,7 @@ export default defineConfig({
       input: {
         landing: path.resolve(import.meta.dirname, "index.html"),
         editor: path.resolve(import.meta.dirname, "app.html"),
+        dashboard: path.resolve(import.meta.dirname, "dashboard.html"),
         notFound: path.resolve(import.meta.dirname, "404.html"),
       },
     },

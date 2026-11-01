@@ -76,7 +76,8 @@
     "react-hook-form": "^7.74.0",
     "tailwind-merge": "^3.5.0",
     "three": "^0.183.2",
-    "typia": "^12.1.1"
+    "typia": "^12.1.1",
+    "wouter": "3.13.0"
   },
   "//": "@playwright/test is pinned exactly: keep it equal to pkgs.playwright-driver.version from devenv.lock (devenv supplies the matching browsers via PLAYWRIGHT_BROWSERS_PATH and warns on mismatch). Without devenv, run `bunx playwright install chromium`.",
   "devDependencies": {

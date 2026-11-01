@@ -367,6 +367,62 @@ export function useProjectSync(
     [getRepository, service, transport],
   );
 
+  // An /app/p/<id> address opens that account project once the startup
+  // project is shown. A copy this browser already holds opens without the
+  // network, so a remembered address also works offline.
+  const [addressProjectId] = useState(() => {
+    const match = /^\/app\/p\/([^/]+)\/?$/.exec(window.location.pathname);
+    return match ? decodeURIComponent(match[1]) : null;
+  });
+  const [addressNeedsSignIn, setAddressNeedsSignIn] = useState(false);
+  const openedAddress = useRef(false);
+  useEffect(() => {
+    if (
+      addressProjectId === null ||
+      openedAddress.current ||
+      !transport ||
+      projects.busy ||
+      !projects.project
+    )
+      return;
+    openedAddress.current = true;
+    if (projects.project.service?.projectId === addressProjectId) return;
+    void (async () => {
+      const cached = projects.projects.find(
+        (entry) => entry.service?.projectId === addressProjectId,
+      );
+      if (cached) {
+        await projects.select((repository) =>
+          repository.open(cached.projectId),
+        );
+        return;
+      }
+      const account = await getWorkbenchSessionPort().getAccount();
+      if (!account) {
+        setAddressNeedsSignIn(true);
+        throw new Error("Sign in to open this project, then reload the page.");
+      }
+      const lists = await Promise.all(
+        account.organizations.map((org) => service.listProjects(org.id)),
+      );
+      const remote = lists
+        .flat()
+        .find((entry) => entry.id === addressProjectId);
+      if (!remote)
+        throw new Error(
+          "This project does not exist or your account cannot open it.",
+        );
+      const opened = await openRemote(remote);
+      try {
+        await projects.select((repository) =>
+          repository.open(opened.manifest.projectId),
+        );
+      } finally {
+        opened.release();
+      }
+    })().catch(projects.reportOpenFailure);
+  }, [addressProjectId, transport, projects, service, openRemote]);
+
   /**
    * Creates a local project with one part and uploads it as an account
    * project. A failed upload leaves the local project, which the CADara
@@ -459,6 +515,8 @@ export function useProjectSync(
     retry,
     listProjects: (orgId: string) => service.listProjects(orgId),
     openRemote,
+    /** The /app/p address named a project, but nobody is signed in. */
+    addressNeedsSignIn,
   };
 }
 

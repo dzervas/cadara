@@ -55,7 +55,9 @@ self.addEventListener("activate", (event) => {
 
 // Navigations go to the network first, so an online reload gets the newest
 // HTML. Offline, the host's rewrites are mirrored onto the precached HTML:
-// /app -> app.html, / -> index.html, any other path -> itself. Registered
+// /app, /app/p/<id> and /app/local/<id> -> app.html, /dashboard and
+// /dashboard/* -> dashboard.html, / -> index.html, any other path -> itself.
+// Registered
 // before the precache route, which would otherwise answer /app.html and
 // /index.html (cleanURLs/directoryIndex) cache-first.
 registerRoute(
@@ -65,11 +67,15 @@ registerRoute(
         {
           handlerDidError: async ({ request }) => {
             const { pathname } = new URL(request.url);
-            const shellPath = /^\/app\/?$/.test(pathname)
+            const shellPath = /^\/app(?:\/(?:p|local)\/[^/]+)?\/?$/.test(
+              pathname,
+            )
               ? "/app.html"
-              : pathname === "/"
-                ? "/index.html"
-                : pathname;
+              : /^\/dashboard(?:\/|$)/.test(pathname)
+                ? "/dashboard.html"
+                : pathname === "/"
+                  ? "/index.html"
+                  : pathname;
             return matchPrecache(shellPath);
           },
         },
