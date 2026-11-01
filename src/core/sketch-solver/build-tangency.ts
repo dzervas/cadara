@@ -159,11 +159,12 @@ export function buildTangentConstraint(
               : null;
           },
         );
-      // cadara-p4r5.2: where the oriented row's contact is the arc start (it
-      // defines the point-defined arc's radius, so |d| − r is second order
-      // there), the oriented component (s − c)·u is component 0 of this
-      // row's loss. An end contact keeps |d| − r (already first order).
-      let radiusContact: {
+      // On a point-defined arc, |d| − r is second order in the kink at either
+      // contact: at the start because r = |s − c| holds identically, at the
+      // end jointly with the internal common-radius row. So the oriented
+      // component (contact − c)·u, first order at both, is component 0 of
+      // this row's loss.
+      let orientedContact: {
         contact: SolverPointRecord;
         center: SolverPointRecord;
       } | null = null;
@@ -175,9 +176,8 @@ export function buildTangentConstraint(
         );
         const contact = contactPointId && pointRecords.get(contactPointId);
         const center = pointRecords.get(curve.centerPointId);
-        if (contactPointId === curve.startPointId && contact && center)
-          radiusContact = { contact, center };
-        if (contactPointId && contact && center)
+        if (contactPointId && contact && center) {
+          orientedContact = { contact, center };
           orientedTangencyRows.push({
             record: {
               id: `orientedTangency_${constraint.constraintId}`,
@@ -205,6 +205,7 @@ export function buildTangentConstraint(
                   );
             },
           });
+        }
       }
 
       scalarConstraints.push(
@@ -224,11 +225,11 @@ export function buildTangentConstraint(
               const { circleLike, signedDistance, contactPoint, unit } =
                 tangency;
               return [
-                radiusContact
+                orientedContact
                   ? dual2.dot(
                       dual2.sub(
-                        pointDual(columns, radiusContact.contact),
-                        pointDual(columns, radiusContact.center),
+                        pointDual(columns, orientedContact.contact),
+                        pointDual(columns, orientedContact.center),
                       ),
                       unit,
                     )
@@ -263,11 +264,11 @@ export function buildTangentConstraint(
               circleLike.center[0] - signedDistance * lineNormal[0],
               circleLike.center[1] - signedDistance * lineNormal[1],
             ];
-            const tangentResidual = radiusContact
+            const tangentResidual = orientedContact
               ? dot2(
                   subtract(
-                    getPoint(values, radiusContact.contact),
-                    getPoint(values, radiusContact.center),
+                    getPoint(values, orientedContact.contact),
+                    getPoint(values, orientedContact.center),
                   ),
                   unit,
                 )
@@ -300,11 +301,11 @@ export function buildTangentConstraint(
               circleLike.center[0] - signedDistance * lineNormal[0],
               circleLike.center[1] - signedDistance * lineNormal[1],
             ];
-            const tangentResidual = radiusContact
+            const tangentResidual = orientedContact
               ? dot2(
                   subtract(
-                    getPoint(values, radiusContact.contact),
-                    getPoint(values, radiusContact.center),
+                    getPoint(values, orientedContact.contact),
+                    getPoint(values, orientedContact.center),
                   ),
                   unit,
                 )

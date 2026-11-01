@@ -7786,11 +7786,13 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
     // T08b-g7-F: the row's tangency is now the Fillet's own, so the 1e-4
     // centre drag is solved back (was 1_012_471 / 265_257 / 482).
     // cadara-p4r5.2: the first-order tangency loss moves the solved seeds by
-    // ≤ 5.0e-5 (was 1_326_776 / 355_775 / 505).
+    // ≤ 5.0e-5 (was 1_326_776 / 355_775 / 505). With the end contacts first
+    // order too they move ≤ 1.6e-5 more (end kinks 1e-2° → 7.5e-5°; was
+    // 1_168_501 / 312_270 / 487).
     "rounded rect rotated 0.3, fillet centre dragged 1e-4 -0.01": {
-      operations: 1_168_501,
-      euclideanSteps: 312_270,
-      integerBits: 487,
+      operations: 1_165_598,
+      euclideanSteps: 311_434,
+      integerBits: 497,
     },
     "rect + 1 fillet 0.01": {
       operations: 93_682,

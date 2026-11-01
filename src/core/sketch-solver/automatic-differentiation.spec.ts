@@ -857,7 +857,7 @@ test("T18 drag frames: target, translate, radius, tangent-vector, exact-zero, an
   );
 });
 
-test("T18 fillet tangents (cadara-p4r5.2): the start contact's loss component 0 is its first-order oriented row; the end contact keeps |d| \u2212 r", () => {
+test("T18 fillet tangents: at both contacts of a point-defined arc the loss component 0 is the first-order oriented row", () => {
   const row = dragConditioningFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
@@ -883,15 +883,24 @@ test("T18 fillet tangents (cadara-p4r5.2): the start contact's loss component 0 
   const a = pair("constraint_17_fillet-tangent-a_");
   const b = pair("constraint_17_fillet-tangent-b_");
   expect([a.atStart, b.atStart]).toEqual([true, false]);
-  // Tangent A: the loss reads (s \u2212 c)\u00b7u (rank 1, \u2016\u2207\u2016 \u2248 1.5), not the
-  // second-order |d| \u2212 r (\u2016\u2207\u2016 \u2248 1e-5 at satisfaction).
-  expect(Object.is(a.components[0], a.oriented.components[0])).toBe(true);
-  expect(Object.is(a.loss.components[0], a.oriented.components[0])).toBe(true);
-  expect([...a.loss.rows[0]!]).toEqual([...a.oriented.rows[0]!]);
-  expect(Math.hypot(...a.loss.rows[0]!)).toBeGreaterThan(0.5);
-  // Tangent B keeps |d| \u2212 r: its oriented row reads ~2e-3 at this state.
-  expect(Math.abs(b.oriented.components[0]!)).toBeGreaterThan(1e-4);
-  expect(Math.abs(b.components[0]!)).toBeLessThan(1e-5);
+  // Both read (contact \u2212 c)\u00b7u (rank 1, \u2016\u2207\u2016 \u2248 1.5), not |d| \u2212 r: at the
+  // start that is second order alone (\u2016\u2207\u2016 \u2248 1e-5 at satisfaction), at the
+  // end jointly with the internal common-radius row.
+  for (const contact of [a, b]) {
+    expect(
+      Object.is(contact.components[0], contact.oriented.components[0]),
+    ).toBe(true);
+    expect(
+      Object.is(contact.loss.components[0], contact.oriented.components[0]),
+    ).toBe(true);
+    // Equal entries; an untouched column may be +0 in one and −0 in the other.
+    const unsigned = (row: Float64Array) =>
+      Array.from(row, (entry) => entry + 0);
+    expect(unsigned(contact.loss.rows[0]!)).toEqual(
+      unsigned(contact.oriented.rows[0]!),
+    );
+    expect(Math.hypot(...contact.loss.rows[0]!)).toBeGreaterThan(0.5);
+  }
 });
 
 /**

@@ -5903,46 +5903,35 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
     return { solveState: first.status.solveState, snapshot, publication };
   };
   /**
-   * Recorded cells that do not certify, by final code (review R15): the
-   * solver's tangency residual is quadratic in the angle, so the edited
-   * fillet ends keep a ≈ 0.2° kink; at |d| = 0.5 that is δ ≈ 2e-3 ≥ τ and
-   * the outward corner needs an arc that rule Z cannot place. Routed to T12
-   * (a linear G1 residual).
-   * cadara-p4r5.2: the start contacts' tangency is first order now, so their
-   * kinks vanish (≤ 2e-4°), but the residual redistributes to the end
-   * contacts, still second order jointly with the common-radius row. The
-   * −0.5 0.2 cells now end topology-changed (were spline-joint-unsupported),
-   * and rounded rect −0.5 0.05 moved certified → uncertain (fillet 171's
-   * end kink 0.049° → 0.185°, its seeds moved ≤ 1.5e-3). [H] attributed to
-   * that end kink; max kink alone does not decide verdicts here (the slot
-   * cells certify with larger kinks), and the verdict is not shown to be the
-   * only truthful one.
+   * Recorded cells that do not certify, by final code. The |d| = 0.5 limit
+   * cells (a ≈ 0.2° fillet-end kink left by a tangency residual quadratic in
+   * the kink angle) certify since both contacts' tangency is first order;
+   * every fillet-end kink is ≤ 4.3e-4°.
+   * Hexagon + 2 fillets 0.1 0.2 does not: the batch solve (least squares
+   * from the start values, no motion term) lands on fillet radius 0.052
+   * < d = 0.1, so the inward offset collapses the arc, which is the truthful
+   * verdict at that geometry. The radius is where BFGS's first steps leave
+   * it on an under-determined solution set, not a property of the rows: a
+   * minimum-motion solve of the same rows keeps r ≈ 0.106 and certifies.
+   * Before, the second-order end-contact row let r creep back to 0.105 while
+   * keeping a 0.31° kink.
    */
   const FAILURES = new Map<string, string>(
-    ["rounded rect", "rounded rect rotated 0.3"].flatMap((row) =>
-      (["unhinted", "hinted"] as const).flatMap((label) => [
-        [
-          `${row} -0.5 0.2 ${label}`,
-          "derived-offset-topology-changed",
-        ] as const,
-        ...(row === "rounded rect"
-          ? ([
-              [
-                `${row} -0.5 0.05 ${label}`,
-                "derived-offset-topology-uncertain",
-              ],
-            ] as const)
-          : []),
-      ]),
-    ),
+    (["unhinted", "hinted"] as const).map((label) => [
+      `hexagon + 2 fillets 0.1 0.2 ${label}`,
+      "derived-offset-arc-collapse",
+    ]),
   );
+  /** The region check's edit: Δ = 0.2, except where that cell is recorded above. */
+  const regionDelta = (row: string) =>
+    row === "hexagon + 2 fillets" ? 0.05 : 0.2;
 
   test.each(
     EDITED_FILLET_ROWS.filter((row) => row !== "rect").map(
       (row) => [row] as const,
     ),
   )(
-    "%s with native fillets: every d × Δ cell solves and certifies, unhinted and hinted, except the recorded |d| = 0.5 limit cells; at d = 0.1, Δ = 0.2 every fillet arc bounds a region with the published offset",
+    "%s with native fillets: every d × Δ cell solves and certifies, unhinted and hinted, except the recorded cells; at d = 0.1, Δ = 0.2 (hexagon: 0.05) every fillet arc bounds a region with the published offset",
     async (row) => {
       const { sketch, line } = editedFilletSketch(
         offsetArcHarness,
@@ -5977,7 +5966,11 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
           ] as const) {
             const cell = `${row} ${distance} ${delta} ${label}`;
             expect(result.solveState, cell).toBe("solved");
-            if (distance === 0.1 && delta === 0.2 && label === "hinted")
+            if (
+              distance === 0.1 &&
+              delta === regionDelta(row) &&
+              label === "hinted"
+            )
               regionCell = { edited, ...result };
             cells.set(
               cell,
@@ -6031,7 +6024,7 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
               ),
             ),
           ),
-          `${row} d = 0.1 Δ = 0.2: fillet ${arc} bounds a region`,
+          `${row} d = 0.1 Δ = ${regionDelta(row)}: fillet ${arc} bounds a region`,
         ).toBe(true);
     },
     600_000,

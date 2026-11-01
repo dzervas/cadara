@@ -181,8 +181,8 @@ export type BuildSystemResult = {
   /** cadara-p4r5.1: explicit inequalities g(x) ≥ 0, data only (no solve enforces them). */
   inequalities: readonly SolverInequalityRecord[];
   /**
-   * cadara-p4r5.1: first-order line↔arc tangency rows. cadara-p4r5.2: a
-   * start-contact row is also component 0 of its requirement's loss.
+   * First-order line↔arc tangency rows; each is also component 0 of its
+   * requirement's loss.
    */
   orientedTangencies: readonly SolverOrientedTangencyRecord[];
 };
@@ -213,11 +213,11 @@ export type BuildSystemResult = {
  * |d| − r is. r = |s − c| holds identically when s is the arc start (it
  * defines a point-defined arc's radius): there |d| − r ≈ −((s − c)·u)²/(2r)
  * is second order (so is σ·d − r, since σ·d ≤ |d| ≤ r) and only this row
- * keeps rank. At the arc end it holds through the internal common-radius
- * row, and |d| − r is already first order.
- * cadara-p4r5.2: so a start-contact record's component is also component 0
- * of its requirement's loss (bitwise); an end-contact record stays data
- * only (on T18 swapping it would move the accepted state by about 2e-3).
+ * keeps rank. At the arc end r = |e − c| holds through the internal
+ * common-radius row, so |d| − r is second order jointly with that row:
+ * |d| − |s − c| ≈ (|e − c| − |s − c|) − ((e − c)·u)²/(2r). The record's
+ * component is therefore component 0 of its requirement's loss (bitwise)
+ * at both contacts.
  */
 export type SolverOrientedTangencyRecord = {
   id: string;
