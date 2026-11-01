@@ -2,6 +2,7 @@
 import type { DurableRef } from "@/contracts/shared/references";
 import type { ProjectPresencePeer } from "@/contracts/project-sync/project-service";
 import { WorkbenchAccount } from "./workbench-account";
+import type { LocalDocumentOffers } from "@/application/account/local-document-offers";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { InitialLoadingStatus } from "@/components/layout/initial-loading-status";
 import { useInitialLoadingPhase } from "@/hooks/use-initial-loading-phase";
@@ -236,6 +237,9 @@ interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
   tabStorageFeedback?: Partial<Record<DocumentId, DocumentTabStorageFeedback>>;
   projectControls?: ReactNode;
+  localDocumentOffers?: LocalDocumentOffers;
+  localProject?: boolean;
+  onMoveActiveDocumentToAccount?: () => void;
   projectPresence?: ReactNode;
   presencePeers?: readonly ProjectPresencePeer[];
   onPresenceSelectionChange?: (selection: readonly DurableRef[]) => void;
@@ -269,6 +273,9 @@ export function CadWorkbench({
   tabsState,
   tabStorageFeedback,
   projectControls,
+  localDocumentOffers,
+  localProject,
+  onMoveActiveDocumentToAccount,
   projectPresence,
   presencePeers,
   onPresenceSelectionChange,
@@ -1770,9 +1777,27 @@ export function CadWorkbench({
   // sketch drag move re-renders the workbench but not them, so their
   // handlers keep one identity (each call runs the latest handler). The
   // account element also keeps its identity across workbench renders.
+  const [localDocumentOfferSlot, setLocalDocumentOfferSlot] =
+    useState<HTMLDivElement | null>(null);
   const accountMenu = useMemo(
-    () => <WorkbenchAccount onError={showWorkbenchError} />,
-    [showWorkbenchError],
+    () => (
+      <WorkbenchAccount
+        onError={showWorkbenchError}
+        localDocumentOffers={localDocumentOffers}
+        localDocumentOfferSlot={localDocumentOfferSlot}
+        localDocumentOfferHeld={variablesPanelOpen}
+        localProject={localProject}
+        onMoveToAccount={onMoveActiveDocumentToAccount}
+      />
+    ),
+    [
+      showWorkbenchError,
+      localDocumentOffers,
+      localDocumentOfferSlot,
+      variablesPanelOpen,
+      localProject,
+      onMoveActiveDocumentToAccount,
+    ],
   );
   const toolbarCallbacks = useLatestCallbacks({
     onNewDocument: handleNewDocument,
@@ -1987,6 +2012,13 @@ export function CadWorkbench({
             >
               <div className="contents" data-viewport-annotation-chrome="">
                 <div className="pointer-events-auto relative z-30 col-start-1 row-start-1 flex flex-col items-end gap-2">
+                  {/* The account menu owns the session and portals the local
+                      document offer here, as the column's first card. */}
+                  <div
+                    ref={setLocalDocumentOfferSlot}
+                    className="contents"
+                    data-local-document-offer-slot=""
+                  />
                   {sketchDiagnostic && sketchSession?.validationMessage ? (
                     <SketchValidationStatus
                       message={sketchSession.validationMessage}

@@ -90,8 +90,10 @@ test("Move to project lists targets by location, explains disabled ones and says
           action: null,
         },
       ]}
+      targetId={null}
       busy={false}
       error={null}
+      onTargetChange={() => undefined}
       onCancel={() => undefined}
       onMove={() => undefined}
     />,
@@ -103,4 +105,21 @@ test("Move to project lists targets by location, explains disabled ones and says
   expect(html).toContain("Its undo steps stay behind.");
   // Nothing is chosen yet, so the move needs a confirmed target.
   expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+});
+
+test("a move into the account names the signed-in account it lands in", () => {
+  const props = {
+    documentTitle: "Lid",
+    targets: [],
+    targetId: null,
+    busy: false,
+    error: null,
+    onTargetChange: () => undefined,
+    onCancel: () => undefined,
+    onMove: () => undefined,
+  };
+  expect(
+    render(<MoveToProjectForm {...props} accountEmail="ada@example.test" />),
+  ).toContain("Signed in as ada@example.test");
+  expect(render(<MoveToProjectForm {...props} />)).not.toContain("Signed in");
 });

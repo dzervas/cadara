@@ -57,6 +57,22 @@ test("a signed-in user at the private limit sees the reason and a Change plan li
   expect(checkedLocation(html)).toBe("local");
 });
 
+test("a project created to receive a move into the account offers no Local card", () => {
+  const html = render({
+    account: makeAccount(),
+    accountOnly: true,
+    lastChoice: { location: "local", ownerId: "personal" },
+  });
+  expect(html).not.toContain('value="local"');
+  expect(checkedLocation(html)).toBe("private");
+  const offline = render({
+    account: makeAccount(),
+    accountOnly: true,
+    offline: true,
+  });
+  expect(checkedLocation(offline)).toBeUndefined();
+});
+
 test("team members pick the owner of a new project", () => {
   const account = makeAccount();
   account.organizations.push({ id: "team", name: "Workshop team" });

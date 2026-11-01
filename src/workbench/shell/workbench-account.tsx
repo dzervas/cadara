@@ -11,11 +11,25 @@ import { useAccountSession } from "@/hooks/use-account-session";
 import { useLatestCallbacks } from "@/hooks/use-latest-callbacks";
 import { useSignInRequest } from "@/hooks/sign-in-request-context";
 import { getWorkbenchSessionPort } from "./workbench-session";
+import type { LocalDocumentOffers } from "@/application/account/local-document-offers";
+import { WorkbenchLocalDocumentOffer } from "./workbench-local-document-offer";
 
 export function WorkbenchAccount({
   onError,
+  localDocumentOffers,
+  localDocumentOfferSlot = null,
+  localDocumentOfferHeld = false,
+  localProject = false,
+  onMoveToAccount,
 }: {
   onError: (message: string) => void;
+  localDocumentOffers?: LocalDocumentOffers;
+  /** Where the offer card renders: the first row of the notifications column. */
+  localDocumentOfferSlot?: HTMLElement | null;
+  /** The Variables panel is open under the column: the offer waits, as for a tool. */
+  localDocumentOfferHeld?: boolean;
+  localProject?: boolean;
+  onMoveToAccount?: () => void;
 }) {
   const session = useAccountSession(getWorkbenchSessionPort(), onError);
   const [opened, setOpened] = useState(false);
@@ -59,6 +73,18 @@ export function WorkbenchAccount({
           else setOpened(next);
         }}
       />
+      {localDocumentOffers && localDocumentOfferSlot && onMoveToAccount && (
+        <WorkbenchLocalDocumentOffer
+          offers={localDocumentOffers}
+          slot={localDocumentOfferSlot}
+          held={localDocumentOfferHeld}
+          local={localProject}
+          account={session.account}
+          accountChecked={session.accountChecked}
+          offline={session.offline}
+          onMove={onMoveToAccount}
+        />
+      )}
       {signInOpened && !session.account && (
         <SignInModal {...session} onGuest={closeSignIn} />
       )}

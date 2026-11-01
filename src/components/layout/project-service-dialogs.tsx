@@ -277,22 +277,31 @@ export function OpenServiceProjectModal({
 export interface MoveToProjectFormProps {
   documentTitle: string;
   targets: readonly ProjectMoveTarget[];
+  /** The chosen target; the owner keeps it while a nested New project is open. */
+  targetId: string | null;
   busy: boolean;
   error: string | null;
+  onTargetChange: (projectId: string) => void;
   onCancel: () => void;
   onMove: (projectId: string) => void;
+  onNewProject?: () => void;
+  /** The signed-in account a move "to your account" lands in. */
+  accountEmail?: string;
 }
 
 /** Move to project: the user picks the target and confirms it. */
 export function MoveToProjectForm({
   documentTitle,
   targets,
+  targetId,
   busy,
   error,
+  onTargetChange,
   onCancel,
   onMove,
+  onNewProject,
+  accountEmail,
 }: MoveToProjectFormProps) {
-  const [targetId, setTargetId] = useState<string | null>(null);
   const groups = [...new Set(targets.map((target) => target.group))];
   const target = targets.find(
     (candidate) =>
@@ -310,11 +319,16 @@ export function MoveToProjectForm({
           “{documentTitle}” moves with its full history, including content
           deleted earlier, and leaves this project. Its undo steps stay behind.
         </Text>
+        {accountEmail && (
+          <Text size="xs" c="dimmed">
+            Signed in as {accountEmail}
+          </Text>
+        )}
         <Radio.Group
           label="Target project"
           size="xs"
           value={targetId}
-          onChange={setTargetId}
+          onChange={onTargetChange}
         >
           <Stack gap="xs" mt={4}>
             {groups.map((group) => (
@@ -360,6 +374,16 @@ export function MoveToProjectForm({
           </Text>
         )}
         <Group justify="flex-end" gap="xs">
+          {onNewProject && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              disabled={busy}
+              onClick={onNewProject}
+            >
+              New project…
+            </Button>
+          )}
           <Button
             size="compact-sm"
             variant="subtle"

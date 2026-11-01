@@ -10,6 +10,10 @@ import {
 } from "react";
 
 import { Alert, Group, Text } from "@mantine/core";
+import {
+  LocalDocumentOffers,
+  localDocumentOfferOptOutKey,
+} from "@/application/account/local-document-offers";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
 import {
   NewProjectModal,
@@ -125,6 +129,20 @@ interface WorkbenchAppProps {
 
 export function WorkbenchApp(props: WorkbenchAppProps) {
   // Without a document repository there is no durable project (see createWorkbenchProjectBootstrap).
+  const [localDocumentOffers] = useState(
+    () =>
+      new LocalDocumentOffers({
+        isSuppressed: (documentId) =>
+          window.localStorage.getItem(
+            localDocumentOfferOptOutKey(documentId),
+          ) === "1",
+        suppress: (documentId) =>
+          window.localStorage.setItem(
+            localDocumentOfferOptOutKey(documentId),
+            "1",
+          ),
+      }),
+  );
   const projects = useWorkbenchProject(props.documentSyncWorkerClient !== null);
   const sync = useProjectSync(props.documentSyncWorkerClient, projects);
   if (projects.initialFailure)
@@ -140,6 +158,7 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
         {...props}
         projects={projects}
         sync={sync}
+        localDocumentOffers={localDocumentOffers}
       />
     </SignInRequestProvider>
   );
@@ -153,7 +172,9 @@ function ProjectWorkbenchApp({
   runtimeExtensionRegistries,
   projects,
   sync,
+  localDocumentOffers,
 }: WorkbenchAppProps & {
+  localDocumentOffers: LocalDocumentOffers;
   projects: ReturnType<typeof useWorkbenchProject>;
   sync: ProjectSync;
 }) {
@@ -607,10 +628,19 @@ function ProjectWorkbenchApp({
       error: null,
     });
   }, [newProjectChoices, refreshAccount]);
+  const [moveDialog, setMoveDialog] = useState<{
+    documentId: DocumentId;
+    targetId: string | null;
+    /** Opened from the local document offer: name the account it moves into. */
+    toAccount: boolean;
+    busy: boolean;
+    error: string | null;
+  } | null>(null);
   const createProject = async (input: NewProjectInput) => {
     const lastChoice = { location: input.location, ownerId: input.ownerId };
     setNewProjectDialog({ lastChoice, busy: true, error: null });
-    newProjectChoices.save(lastChoice);
+    // A project made from Move is account-only; it is not the user's default.
+    if (!moveDialog) newProjectChoices.save(lastChoice);
     try {
       await waitForLocalChanges();
       const created =
@@ -621,18 +651,27 @@ function ProjectWorkbenchApp({
               orgId: input.ownerId,
               visibility: input.location,
             });
+      // Created from Move to project (account locations only): the window
+      // stays on the source and the Move dialog returns with it chosen.
+      if (moveDialog && created) {
+        await projects.refreshProjects();
+        setMoveDialog(
+          (current) => current && { ...current, targetId: created.projectId },
+        );
+      }
       // A switch failure is reported with the other project notices.
-      await projects.select((repository) =>
-        created
-          ? repository.open(created.projectId)
-          : repository.create(input.name, [
-              {
-                docId: generateDocumentId(),
-                name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
-                kind: "part",
-              },
-            ]),
-      );
+      else
+        await projects.select((repository) =>
+          created
+            ? repository.open(created.projectId)
+            : repository.create(input.name, [
+                {
+                  docId: generateDocumentId(),
+                  name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
+                  kind: "part",
+                },
+              ]),
+        );
       setNewProjectDialog(null);
     } catch (error) {
       // A failed upload keeps the new project on this device; list it.
@@ -646,11 +685,16 @@ function ProjectWorkbenchApp({
     }
   };
 
-  const [moveDialog, setMoveDialog] = useState<{
-    documentId: DocumentId;
-    busy: boolean;
-    error: string | null;
-  } | null>(null);
+  const openAccountMoveDialog = useCallback(() => {
+    void refreshAccount();
+    setMoveDialog({
+      documentId: tabsState.activeDocumentId,
+      targetId: null,
+      toAccount: true,
+      busy: false,
+      error: null,
+    });
+  }, [refreshAccount, tabsState.activeDocumentId]);
   const organizations = sync.account?.organizations ?? [];
   const sourceEditable = projectAccessAllows(
     { linked: projectLinked, role: projectRole },
@@ -671,6 +715,8 @@ function ProjectWorkbenchApp({
           void refreshAccount();
           setMoveDialog({
             documentId: tab.documentId,
+            targetId: null,
+            toAccount: false,
             busy: false,
             error: null,
           });
@@ -770,6 +816,9 @@ function ProjectWorkbenchApp({
           >
             <CadWorkbench
               projectLoading={!projectApplied}
+              localDocumentOffers={localDocumentOffers}
+              localProject={project !== null && !project.service}
+              onMoveActiveDocumentToAccount={openAccountMoveDialog}
               projectOpenFailed={projects.discoveryFailed}
               readOnly={
                 !projectAccessAllows(
@@ -851,6 +900,7 @@ function ProjectWorkbenchApp({
         lastChoice={newProjectDialog?.lastChoice ?? null}
         busy={newProjectDialog?.busy ?? false}
         error={newProjectDialog?.error ?? null}
+        accountOnly={moveDialog !== null}
         onSignIn={() => {
           setNewProjectDialog(null);
           requestSignIn();
@@ -861,11 +911,25 @@ function ProjectWorkbenchApp({
         onSubmit={(input) => void createProject(input)}
       />
       <MoveToProjectModal
-        opened={moveDialog !== null}
+        opened={moveDialog !== null && newProjectDialog === null}
+        // Only a signed-in move out of a local project can use a new
+        // account project; its form offers no Local card.
+        onNewProject={
+          sync.account && project && !project.service
+            ? openNewProjectDialog
+            : undefined
+        }
+        accountEmail={
+          moveDialog?.toAccount ? sync.account?.user.email : undefined
+        }
         documentTitle={moveDocumentTitle}
         targets={moveTargets}
+        targetId={moveDialog?.targetId ?? null}
         busy={moveDialog?.busy ?? false}
         error={moveDialog?.error ?? null}
+        onTargetChange={(targetId) => {
+          if (moveDialog) setMoveDialog({ ...moveDialog, targetId });
+        }}
         onCancel={() => {
           if (!moveDialog?.busy) setMoveDialog(null);
         }}

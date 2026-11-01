@@ -30,6 +30,8 @@ export interface NewProjectFormProps {
   lastChoice: NewProjectChoice | null;
   busy: boolean;
   error: string | null;
+  /** Hides Local: the project is created to receive a move into the account. */
+  accountOnly?: boolean;
   onSignIn: () => void;
   onCancel: () => void;
   onSubmit: (input: NewProjectInput) => void;
@@ -41,6 +43,7 @@ export function NewProjectForm({
   lastChoice,
   busy,
   error,
+  accountOnly = false,
   onSignIn,
   onCancel,
   onSubmit,
@@ -54,7 +57,9 @@ export function NewProjectForm({
     owners.find((owner) => owner.id === lastChoice?.ownerId)?.id ??
     owners[0]?.id ??
     "";
-  const options = projectLocationOptions(account, ownerId, offline);
+  const options = projectLocationOptions(account, ownerId, offline).filter(
+    (option) => !accountOnly || option.value !== "local",
+  );
   const [chosenLocation, setChosenLocation] = useState<ProjectLocation | null>(
     null,
   );
@@ -67,7 +72,10 @@ export function NewProjectForm({
       ? chosenLocation
       : preselectProjectLocation(options, lastChoice?.location ?? null);
   const [name, setName] = useState("");
-  const canSubmit = Boolean(name.trim()) && !busy;
+  const locationAvailable = options.some(
+    (option) => option.value === location && option.disabledReason === null,
+  );
+  const canSubmit = Boolean(name.trim()) && !busy && locationAvailable;
   return (
     <form
       onSubmit={(event) => {
