@@ -254,6 +254,14 @@ export function createSemanticSketchPort(input: {
       (hasAcceptedLiveSolveOfDefinition(s) &&
         s.liveRegions.status === "current" &&
         getLiveRegionBoundaryDiagnostics(s.liveRegions).length === 0));
+    // A certificate certifies only its own command session's generation; a
+    // reopened sketch edited by style alone leaves one at the generation a
+    // following empty draft starts with.
+    const certified =
+      certificate?.commandSessionId === editor.command.commandSessionId &&
+      certificate.generation === s.liveRegions.generation
+        ? certificate
+        : null;
     return {
       kind: current
         ? "current"
@@ -266,15 +274,13 @@ export function createSemanticSketchPort(input: {
       sketchBasis: state.draft,
       // The synchronous solve has no async request; this names its actual owned basis.
       solve: { kind: "synchronous", generation: s.liveRegions.generation },
-      derivation:
-        certificate?.commandSessionId === editor.command.commandSessionId &&
-        certificate.generation === s.liveRegions.generation
-          ? {
-              requestId: certificate.requestId,
-              generation: certificate.generation,
-            }
-          : null,
-      ...(!certificate || certificate.generation !== s.liveRegions.generation
+      derivation: certified
+        ? {
+            requestId: certified.requestId,
+            generation: certified.generation,
+          }
+        : null,
+      ...(!certified
         ? {
             derivationUnavailableReason: empty
               ? ("empty-sketch" as const)

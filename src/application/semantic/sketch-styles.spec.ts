@@ -260,3 +260,44 @@ test.each([0, 1])("solid fill alpha %s survives color edits, native save/reopen 
     await rm(directory, { recursive: true, force: true });
   }
 }, 120_000);
+
+// A reopened sketch edited only by style patches keeps its region generation,
+// so its last derivation certificate has the same generation as the empty
+// draft a following sketch.begin opens. That certificate belongs to the other
+// command session and must not stand in for, or suppress, the new draft's
+// "empty sketch" derivation receipt.
+test("sketch.begin after a style-only republish completes with an empty-sketch derivation receipt", async () => {
+  const w = await createSketchWorkflow();
+  try {
+    await w.author({ kind: "circle", center: [4, 3], radius: 2 });
+    const published = await w.execute({
+      operation: "sketch.publish",
+      draft: w.draft(),
+      requireProfiles: true,
+    });
+    const sketchId = published.discovery!.sketch!.sketchId;
+    const reopened = await w.execute({ operation: "sketch.open", sketchId });
+    const region = reopened.discovery!.references.find(
+      (r) => r.target.kind === "region",
+    )!.target;
+    await w.execute({
+      operation: "sketch.style.patch",
+      draft: w.draft(),
+      targets: [region],
+      patch: { field: "fillMode", value: "solid" },
+      intent: "fulfill",
+    });
+    await w.execute({
+      operation: "sketch.publish",
+      draft: w.draft(),
+      requireProfiles: true,
+    });
+    const begun = await w.execute({ operation: "sketch.begin", plane: "xy" });
+    expect(begun.completion.geometry).toMatchObject({
+      derivation: null,
+      derivationUnavailableReason: "empty-sketch",
+    });
+  } finally {
+    await w.close();
+  }
+}, 120_000);
