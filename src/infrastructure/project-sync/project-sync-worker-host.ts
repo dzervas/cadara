@@ -128,6 +128,17 @@ class HostedProject {
       ...host.options.roomAdapterOptions,
       url: request.roomUrl,
       issueToken: () => host.requestToken(request.link),
+      documentReceivePolicy: (documentId) => {
+        if (this.allows(documentId)) return "accept";
+        // A listed offer may arrive after the ack but before its queued refresh.
+        if (
+          this.foreignDocumentIds.has(documentId) ||
+          (this.roomHas(this.manifest) &&
+            !manifestEntryIds(this.manifest?.doc()).includes(documentId))
+        )
+          return "reject";
+        return "defer";
+      },
       onConnectionChange: (connection) => {
         this.connection = connection;
         this.refresh();
@@ -237,6 +248,11 @@ class HostedProject {
             this.refresh();
           });
     }
+    // The room can offer existing parts alongside the manifest, before its
+    // acknowledgement reaches us. Deliver those offers only after the share
+    // policy admits them; rejecting them loses an equal-head sync handshake.
+    if (this.connection === "connected" && this.roomHas(manifest))
+      this.adapter.releaseDeferredMessages();
     this.startPresence();
     this.postStatus();
   }

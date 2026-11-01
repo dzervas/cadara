@@ -313,3 +313,40 @@ test("a document is reported synced only while the room holds its current heads"
   expect(room.repo.handles[moved.documentId]?.doc()).toEqual({ length: 3 });
   await client.host.handle({ kind: "projectSyncStop", link });
 });
+
+test("reopening persisted project documents reports the room's unchanged heads as synced", async () => {
+  const storage = new SharedMemoryStorage();
+  const repo = new Repo({ storage, network: [] });
+  const part = repo.create({ length: 1 });
+  const manifest = repo.create(
+    makeManifest([
+      {
+        name: "Part",
+        kind: "part",
+        docId: "doc_part",
+        automergeDocumentId: part.documentId,
+      },
+    ]),
+  );
+  const room = makeRoom(manifest.documentId);
+  const first = makeClient(room, repo);
+  await first.start(manifest.documentId);
+  await vi.waitFor(() => expect(first.status()?.connection).toBe("synced"));
+  await first.host.handle({ kind: "projectSyncStop", link });
+  await repo.shutdown();
+  const reopened = new Repo({ storage, network: [] });
+  const second = makeClient(room, reopened);
+  try {
+    await reopened.find(part.documentId);
+    await second.start(manifest.documentId);
+    await vi.waitFor(() => expect(second.status()?.connection).toBe("synced"));
+    expect(second.status()?.syncedDocumentIds).toEqual(
+      expect.arrayContaining([manifest.documentId, part.documentId]),
+    );
+    expect(room.network.violations).toEqual([]);
+  } finally {
+    await second.host.handle({ kind: "projectSyncStop", link });
+    await reopened.shutdown();
+    await room.repo.shutdown();
+  }
+});

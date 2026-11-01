@@ -31,7 +31,9 @@ export async function signIn(page: Page, email: string) {
   await expect
     .poll(
       () => {
-        const output = readFileSync(mailerLog!, "utf8").slice(logOffset);
+        const output = readFileSync(mailerLog!)
+          .subarray(logOffset)
+          .toString("utf8");
         link = output.match(/Magic link: (http\S+)/)?.[1] ?? "";
         return Boolean(link);
       },

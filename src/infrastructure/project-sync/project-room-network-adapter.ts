@@ -43,9 +43,14 @@ export interface ProjectRoomNetworkAdapterOptions {
   /** Whether the network is up when the adapter starts (navigator.onLine). */
   initiallyOnline?: boolean;
   now?: () => number;
+  /** Defer early offers until the host can enforce its acknowledged manifest. */
+  documentReceivePolicy?: (documentId: string) => "accept" | "defer" | "reject";
 }
 
 const SOCKET_OPEN = 1;
+const MAX_DEFERRED_MESSAGES_PER_DOCUMENT = 16;
+const MAX_DEFERRED_MESSAGES = 128;
+const MAX_DEFERRED_BYTES = 8 * 1024 * 1024;
 
 /** The online/offline events of the current global scope (window or worker). */
 export function browserNetworkWatcher(onChange: (online: boolean) => void) {
@@ -93,6 +98,8 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
   #online: boolean;
   #unwatchNetwork: (() => void) | null = null;
   #connection: ProjectRoomConnection = "offline";
+  #deferred: Message[] = [];
+  #deferredBytes = 0;
 
   constructor(options: ProjectRoomNetworkAdapterOptions) {
     super();
@@ -140,6 +147,20 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     // relays presence itself and closes a socket that sends as someone else.
     if (message.senderId !== this.peerId) return;
     socket.send(cbor.encode(message));
+  }
+
+  /** Recheck early offers once the manifest is acknowledged; discard all others. */
+  releaseDeferredMessages() {
+    const deferred = this.#deferred;
+    this.#deferred = [];
+    this.#deferredBytes = 0;
+    for (const message of deferred)
+      if (
+        "documentId" in message &&
+        message.documentId &&
+        this.#options.documentReceivePolicy?.(message.documentId) === "accept"
+      )
+        this.emit("message", message);
   }
 
   disconnect() {
@@ -260,6 +281,8 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     grant: SyncTokenResponse,
   ) {
     const previous = this.#roomPeerId;
+    this.#deferred = [];
+    this.#deferredBytes = 0;
     this.#roomPeerId = message.senderId;
     this.#joinedAt = this.#now();
     this.#schedule(
@@ -298,7 +321,33 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
       this.#joined(socket, message, grant);
       return;
     }
-    if (this.#roomPeerId) this.emit("message", message);
+    if (!this.#roomPeerId) return;
+    const policy =
+      "documentId" in message && message.documentId
+        ? this.#options.documentReceivePolicy?.(message.documentId)
+        : undefined;
+    if (policy === "reject") return;
+    if (policy === "defer") {
+      const documentCount = this.#deferred.filter(
+        (entry) =>
+          "documentId" in entry &&
+          "documentId" in message &&
+          entry.documentId === message.documentId,
+      ).length;
+      if (
+        documentCount >= MAX_DEFERRED_MESSAGES_PER_DOCUMENT ||
+        this.#deferred.length >= MAX_DEFERRED_MESSAGES ||
+        this.#deferredBytes + data.byteLength > MAX_DEFERRED_BYTES
+      ) {
+        // An offer cannot be silently lost: reconnect to restart its handshake.
+        this.#closeAll("Deferred sync buffer full");
+        return;
+      }
+      this.#deferred.push(message);
+      this.#deferredBytes += data.byteLength;
+      return;
+    }
+    this.emit("message", message);
   }
 
   /** The socket lasted a whole token: open its successor before closing it. */
@@ -326,6 +375,8 @@ export class ProjectRoomNetworkAdapter extends NetworkAdapter {
     if (socket !== this.#socket) return;
     this.#detach(socket);
     this.#socket = null;
+    this.#deferred = [];
+    this.#deferredBytes = 0;
     this.#clearTimer();
     const roomPeerId = this.#roomPeerId;
     this.#roomPeerId = null;

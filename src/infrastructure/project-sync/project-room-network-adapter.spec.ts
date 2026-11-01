@@ -4,6 +4,7 @@ import {
   ProjectRoomNetworkAdapter,
   type ProjectRoomConnection,
   type ProjectRoomSocket,
+  type ProjectRoomNetworkAdapterOptions,
 } from "./project-room-network-adapter";
 
 class FakeRoomSocket implements ProjectRoomSocket {
@@ -61,6 +62,7 @@ function makeHarness(
     let count = 0;
     return async () => ({ token: `token${++count}`, expiresIn: 600 });
   })(),
+  documentReceivePolicy?: ProjectRoomNetworkAdapterOptions["documentReceivePolicy"],
 ) {
   const sockets: FakeRoomSocket[] = [];
   const timers: { callback: () => void; delayMs: number; live: boolean }[] = [];
@@ -71,6 +73,7 @@ function makeHarness(
   const adapter = new ProjectRoomNetworkAdapter({
     url: "ws://api.test/sync/p1",
     issueToken,
+    documentReceivePolicy,
     now: () => clock.now,
     createSocket: (url, protocols) => {
       const socket = new FakeRoomSocket(url, protocols);
@@ -332,3 +335,154 @@ test("an adapter started offline waits for the network", async () => {
   await settle();
   expect(sockets).toHaveLength(1);
 });
+
+test("deferred offers drain in order only for documents the acknowledged manifest admits", async () => {
+  let acknowledged = false;
+  const harness = makeHarness(undefined, (id) =>
+    id === "manifest" || (acknowledged && id === "part")
+      ? "accept"
+      : acknowledged
+        ? "reject"
+        : "defer",
+  );
+  const received: unknown[] = [];
+  harness.adapter.on("message", (message) => received.push(message));
+  harness.adapter.connect("client" as PeerId);
+  await settle();
+  const socket = harness.sockets[0]!;
+  socket.accept();
+  const offer = (documentId: string, sequence: number) => ({
+    type: "sync",
+    senderId: "room-p1",
+    targetId: "client",
+    documentId,
+    data: new Uint8Array([sequence]),
+  });
+  socket.deliver(offer("part", 1));
+  socket.deliver(offer("unlisted", 1));
+  socket.deliver(offer("part", 2));
+  socket.deliver(offer("manifest", 1));
+  expect(received).toEqual([offer("manifest", 1)]);
+  acknowledged = true;
+  harness.adapter.releaseDeferredMessages();
+  socket.deliver(offer("part", 3));
+  socket.deliver(offer("unlisted", 2));
+  harness.adapter.releaseDeferredMessages();
+  expect(received).toEqual([
+    offer("manifest", 1),
+    offer("part", 1),
+    offer("part", 2),
+    offer("part", 3),
+  ]);
+  harness.adapter.disconnect();
+});
+
+test.each(["disconnect", "offline", "renewal"] as const)(
+  "%s discards deferred offers from the old connection",
+  async (transition) => {
+    let accept = false;
+    const harness = makeHarness(undefined, () => (accept ? "accept" : "defer"));
+    harness.adapter.connect("client" as PeerId);
+    await settle();
+    harness.sockets[0]!.accept();
+    harness.sockets[0]!.deliver({
+      type: "sync",
+      senderId: "room-p1",
+      targetId: "client",
+      documentId: "part",
+    });
+    if (transition === "disconnect") harness.adapter.disconnect();
+    else if (transition === "offline") harness.setOnline(false);
+    else {
+      await harness.fireTimer();
+      harness.sockets[1]!.accept();
+    }
+    accept = true;
+    harness.adapter.releaseDeferredMessages();
+    expect(
+      harness.events.filter((event) => event.startsWith("message")),
+    ).toEqual([]);
+    harness.adapter.disconnect();
+  },
+);
+
+test.each(["per-document", "total", "bytes"] as const)(
+  "the %s deferred-offer bound restarts the handshake instead of losing offers silently",
+  async (bound) => {
+    let acknowledged = false;
+    const harness = makeHarness(undefined, (id) =>
+      id === "manifest" || acknowledged ? "accept" : "defer",
+    );
+    const received: string[] = [];
+    harness.adapter.on("message", (message) => {
+      if ("documentId" in message && "data" in message && message.data)
+        received.push(`${message.documentId}:${message.data[0]}`);
+    });
+    harness.adapter.connect("client" as PeerId);
+    await settle();
+    const socket = harness.sockets[0]!;
+    socket.accept();
+    const byteLimit = 8 * 1024 * 1024;
+    let bufferedBytes = 0;
+    let offersSent = 0;
+    for (; offersSent < 1024 && socket.closedWith === null; offersSent++) {
+      const offer = {
+        type: "sync",
+        senderId: "room-p1",
+        targetId: "client",
+        documentId: bound === "total" ? `part-${offersSent}` : "part",
+        data: new Uint8Array(bound === "bytes" ? 3 * 1024 * 1024 : 1),
+      };
+      if (bound === "bytes") {
+        const frameBytes = cbor.encode(offer).byteLength;
+        expect(frameBytes, "each frame fits individually").toBeLessThan(
+          byteLimit,
+        );
+        bufferedBytes += frameBytes;
+      }
+      socket.deliver(offer);
+      if (bound === "bytes")
+        expect(socket.closedWith, "only the cumulative size overflows").toBe(
+          bufferedBytes > byteLimit ? 1000 : null,
+        );
+    }
+    expect(socket.closedWith, "overflow closes the old peer").toBe(1000);
+    expect(received, "overflow never delivers the old buffered offers").toEqual(
+      [],
+    );
+    await harness.fireTimer();
+    expect(harness.sockets).toHaveLength(2);
+    const replacement = harness.sockets[1]!;
+    replacement.accept();
+    expect(replacement.sent[0]).toMatchObject({
+      type: "join",
+      senderId: "client",
+      supportedProtocolVersions: ["1"],
+    });
+    const offer = (documentId: string, sequence: number) => ({
+      type: "sync",
+      senderId: "room-p1",
+      targetId: "client",
+      documentId,
+      data: new Uint8Array([sequence]),
+    });
+    replacement.deliver(offer("part", 1));
+    replacement.deliver(offer("manifest", 1));
+    expect(
+      received,
+      "the replacement still waits for the manifest ack",
+    ).toEqual(["manifest:1"]);
+    acknowledged = true;
+    harness.adapter.releaseDeferredMessages();
+    replacement.deliver(offer("part", 2));
+    expect(received, "only the replacement's offers converge in order").toEqual(
+      ["manifest:1", "part:1", "part:2"],
+    );
+    expect(
+      replacement.closedWith,
+      "recovery does not overflow again",
+    ).toBeNull();
+    expect(harness.adapter.connection).toBe("connected");
+    harness.adapter.disconnect();
+  },
+);
