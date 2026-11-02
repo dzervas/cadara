@@ -503,6 +503,7 @@ function ThreeCadViewportScene({
     hoverTarget,
     measurementWitnesses,
     renderables,
+    lodRenderables,
     sketchDisplayRenderables,
     sketchAnnotations,
     selection,
@@ -4082,7 +4083,7 @@ function ThreeCadViewportScene({
         />
         <BodyLodWatcher
           enabled={!sketchSession}
-          renderables={renderables}
+          renderables={lodRenderables}
           onLodTierChange={(tierId) => lodTierChangeRef.current(tierId)}
         />
         <RenderIdleSignal

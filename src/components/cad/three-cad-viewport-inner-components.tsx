@@ -39,7 +39,7 @@ import {
 } from "@/infrastructure/viewport/viewport-projection";
 import { selectViewportLodTierForRenderables } from "@/infrastructure/occ/tessellation";
 import { type OccTessellationTierId } from "@/contracts/modeling/tessellation";
-import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import {
   createRenderIdleTracker,
   configureWorkspaceScaffoldWireObject,
@@ -413,7 +413,8 @@ export function BodyLodWatcher({
   onLodTierChange,
 }: {
   enabled: boolean;
-  renderables: ViewportRenderableRecord[];
+  /** Every body's records, hidden ones too (`ViewportModel.lodRenderables`). */
+  renderables: readonly RenderableEntityRecord[];
   onLodTierChange: (tierId: OccTessellationTierId) => void;
 }) {
   const lastCameraTokenRef = useRef<string | null>(null);
@@ -460,7 +461,7 @@ export function BodyLodWatcher({
               verticalFovDegrees: camera.fov,
               zoom: camera.zoom,
             },
-      renderables: renderablesRef.current.map((entry) => entry.renderable),
+      renderables: renderablesRef.current,
     });
 
     if (lastTierRef.current === tierId) {

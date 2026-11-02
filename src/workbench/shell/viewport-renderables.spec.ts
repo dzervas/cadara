@@ -4,6 +4,7 @@ import type { RenderableEntityRecord } from "@/contracts/render/schema";
 import type { SketchSnapshotRecord } from "@/contracts/modeling/schema";
 import {
   composeViewportDocumentRenderables,
+  composeViewportLodRenderables,
   composeViewportRenderables,
   getBodyDisplayColors,
   isTargetHidden,
@@ -18,6 +19,7 @@ import {
   startSketchDraw,
 } from "@/core/editor/sketch-session";
 import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
+import { selectViewportLodTierForRenderables } from "@/infrastructure/occ/tessellation";
 import {
   createStandardPlaneDefinition,
   OCC_KERNEL_SETTINGS,
@@ -892,4 +894,52 @@ test("a committed sketch point carries its own sketch's plane frame, so its mark
     ["document", "body vertex", undefined],
     ["preview", "sketch_xy point", undefined],
   ]);
+});
+
+test("hiding a body does not change the tessellation tier the viewport requests", () => {
+  function bodyFace(bodyId: string, size: number): RenderableEntityRecord {
+    return {
+      id: `renderable_${bodyId}`,
+      label: bodyId,
+      ownerBodyId: bodyId as never,
+      ownerFeatureId: null,
+      binding: {
+        pickId: `pick_${bodyId}`,
+        pickPriority: 10,
+        target: { kind: "body", bodyId: bodyId as never },
+        topology: null,
+        semanticClass: "body",
+      },
+      geometry: createRenderMeshGeometry({
+        vertexPositions: [
+          [-size, -size, 0],
+          [size, -size, 0],
+          [0, size, 0],
+        ],
+        triangleIndices: [[0, 1, 2]],
+      }),
+    };
+  }
+  // Seen from 100 units: the large body selects the fine tier, the small
+  // one alone the coarse startup tier.
+  const records = [bodyFace("body_large", 30), bodyFace("body_small", 2)];
+  const tier = (renderables: readonly RenderableEntityRecord[]) =>
+    selectViewportLodTierForRenderables({
+      cameraPosition: [0, 0, 100],
+      renderables,
+    });
+  const visibleWithLargeHidden = composeViewportDocumentRenderables({
+    snapshotRenderables: records,
+    previewRenderables: null,
+    activeSketch: null,
+    hiddenTargetKeys: { "body:body_large": true },
+  }).map((entry) => entry.renderable);
+  expect(
+    tier(visibleWithLargeHidden),
+    "premise: the visible bodies alone select a coarser tier",
+  ).not.toBe(tier(records));
+  expect(
+    tier(composeViewportLodRenderables(records, null)),
+    "the tier is chosen over every body, hidden ones too, so hiding one re-tessellates none",
+  ).toBe(tier(records));
 });

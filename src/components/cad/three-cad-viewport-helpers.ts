@@ -537,23 +537,35 @@ export function createRenderIdleTracker(
 ) {
   const requiredStableFrames = options.requiredStableFrames ?? 3;
   let stableFrameCount = 0;
+  let neededStableFrames = requiredStableFrames;
   let lastSceneKey: string | null = null;
 
   return {
     update(sample: RenderIdleSample) {
       const sceneChanged =
         lastSceneKey !== null && lastSceneKey !== sample.sceneKey;
+      const wasIdle = stableFrameCount >= neededStableFrames;
       // Readiness follows rendered state, not frame rate. Software rendering
       // can take seconds per unchanged frame without leaving any work pending.
       lastSceneKey = sample.sceneKey;
 
-      if (!sample.isEditorIdle || sceneChanged) {
+      if (!sample.isEditorIdle) {
         stableFrameCount = 0;
+        neededStableFrames = requiredStableFrames;
+        return false;
+      }
+      if (sceneChanged) {
+        // Only a change to an already proven idle scene (hiding or showing
+        // a body, a delivered snapshot) is proven by one more frame of it; a
+        // change that arrives before the previous proof settled, or after
+        // editor work, keeps the original count.
+        stableFrameCount = 0;
+        neededStableFrames = wasIdle ? 1 : requiredStableFrames;
         return false;
       }
 
       stableFrameCount += 1;
-      return stableFrameCount >= requiredStableFrames;
+      return stableFrameCount >= neededStableFrames;
     },
   };
 }

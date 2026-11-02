@@ -90,6 +90,7 @@ import {
 } from "@/contracts/performance/telemetry";
 import {
   composeViewportDocumentRenderables,
+  composeViewportLodRenderables,
   composeViewportSketchDisplayRenderables,
   getBodyDisplayColors,
   isTargetHidden,
@@ -942,6 +943,16 @@ export function CadWorkbench({
       snapshot,
     ],
   );
+  // Kept across hide/show and colour previews: the LOD watcher rescans body
+  // geometry whenever its input changes.
+  const lodRenderables = useMemo(
+    () =>
+      composeViewportLodRenderables(
+        snapshot?.document.render.records ?? [],
+        previewRenderables,
+      ),
+    [previewRenderables, snapshot],
+  );
   const sketchDisplayRenderables = useMemo(
     () => composeViewportSketchDisplayRenderables(sketchSession),
     [sketchSession],
@@ -1715,6 +1726,7 @@ export function CadWorkbench({
         hoverTarget: visibleHoverTarget,
         measurementWitnesses: measurementViewModel?.witnesses ?? [],
         renderables: viewportRenderables.documentRenderables,
+        lodRenderables,
         sketchDisplayRenderables: viewportRenderables.sketchDisplayRenderables,
         sketchAnnotations,
         selection: visibleSelection,
@@ -1754,6 +1766,7 @@ export function CadWorkbench({
       sketchToolPresentation,
       viewportRenderables.documentRenderables,
       viewportRenderables.sketchDisplayRenderables,
+      lodRenderables,
       visibleHoverTarget,
       visibleSelection,
     ],

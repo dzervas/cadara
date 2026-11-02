@@ -31,6 +31,7 @@ interface WorkbenchViewportModelInput {
   hoverTarget: PrimitiveRef | null;
   measurementWitnesses: readonly MeasurementWitness[];
   renderables: ViewportRenderableRecord[];
+  lodRenderables: ViewportModel["lodRenderables"];
   sketchDisplayRenderables: SketchSessionDisplayRenderable[];
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];
@@ -56,6 +57,7 @@ export function createWorkbenchViewportModel({
   hoverTarget,
   measurementWitnesses,
   renderables,
+  lodRenderables,
   sketchDisplayRenderables,
   sketchAnnotations,
   selection,
@@ -79,6 +81,7 @@ export function createWorkbenchViewportModel({
     hoverTarget,
     measurementWitnesses,
     renderables,
+    lodRenderables,
     sketchDisplayRenderables,
     sketchAnnotations,
     selection,

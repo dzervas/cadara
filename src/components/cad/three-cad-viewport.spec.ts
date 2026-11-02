@@ -1784,6 +1784,30 @@ test.each([0.016, 0.8, 5])(
   },
 );
 
+test("a settled idle scene that changes without editor work is ready after one frame of the new scene; after editor work it takes the full count", () => {
+  const tracker = createRenderIdleTracker();
+  const idle = (sceneKey: string) =>
+    tracker.update({ isEditorIdle: true, sceneKey });
+  expect([idle("a"), idle("a"), idle("a")]).toEqual([false, false, true]);
+
+  // Hiding a body: the frame drawing the new scene, then one confirming it.
+  expect(
+    [idle("b"), idle("b")],
+    "a local scene change on a settled scene is proven in two frames",
+  ).toEqual([false, true]);
+
+  // Editor work, then its result arrives as a scene change before the
+  // proof settled: the full count again.
+  expect(tracker.update({ isEditorIdle: false, sceneKey: "b" })).toBe(false);
+  expect([idle("b"), idle("c"), idle("c"), idle("c"), idle("c")]).toEqual([
+    false,
+    false,
+    false,
+    false,
+    true,
+  ]);
+});
+
 test("the document BVH key ignores the sketch session: a region going stale at drag start keeps it", () => {
   // The document half of the scene key does not follow the sketch session:
   // a drag start or end only changes the sketch half.

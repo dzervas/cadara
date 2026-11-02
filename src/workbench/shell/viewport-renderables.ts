@@ -129,6 +129,20 @@ export interface ComposeViewportDocumentRenderablesInput
   activeSketch: Pick<SketchSessionState, "sketchId"> | null;
 }
 
+/**
+ * The renderables the viewport's tessellation tier is chosen over: the same
+ * committed and preview records as `composeViewportDocumentRenderables`,
+ * hidden ones included. The tier is document-wide, so hiding or showing a
+ * body does not re-tessellate the others; the trade is a few more triangles
+ * while a large body is hidden. The tier still follows the camera.
+ */
+export function composeViewportLodRenderables(
+  snapshotRenderables: readonly RenderableEntityRecord[],
+  previewRenderables: readonly RenderableEntityRecord[] | null,
+): RenderableEntityRecord[] {
+  return [...snapshotRenderables, ...(previewRenderables ?? [])];
+}
+
 /** The committed and preview renderables of `composeViewportRenderables`. */
 export function composeViewportDocumentRenderables(
   input: ComposeViewportDocumentRenderablesInput,

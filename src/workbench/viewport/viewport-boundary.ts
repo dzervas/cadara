@@ -18,6 +18,7 @@ import type {
 import type { MeasurementWitness } from "@/core/measure/measurement";
 import type { OccTessellationTierId } from "@/contracts/modeling/tessellation";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
+import type { RenderableEntityRecord } from "@/contracts/render/schema";
 
 export interface ViewportSpecialModeTargetInput {
   session: SketchSessionState;
@@ -32,6 +33,8 @@ export interface ViewportModel {
   hoverTarget: PrimitiveRef | null;
   measurementWitnesses: readonly MeasurementWitness[];
   renderables: ViewportRenderableRecord[];
+  /** The records the tessellation tier is chosen over (hidden bodies too). */
+  lodRenderables: readonly RenderableEntityRecord[];
   sketchDisplayRenderables: SketchSessionDisplayRenderable[];
   sketchAnnotations: SketchAnnotationDescriptor[];
   selection: PrimitiveRef[];

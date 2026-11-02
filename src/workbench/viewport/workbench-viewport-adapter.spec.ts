@@ -16,6 +16,7 @@ test("workbench viewport adapter exposes typed model and command ports", () => {
     hoverTarget: target,
     measurementWitnesses: [],
     renderables: [],
+    lodRenderables: [],
     sketchDisplayRenderables: [],
     sketchAnnotations: [],
     selection: [target],
