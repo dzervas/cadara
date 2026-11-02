@@ -411,6 +411,7 @@ export function DashboardApp() {
                 account={signedIn}
                 workspace={workspace}
                 workspaceName={organizationName(workspace.organizationId)}
+                onCreateTeam={createTeam.open}
               />
             ))}
           </Route>

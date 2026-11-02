@@ -41,7 +41,7 @@ test("a new team continues to the team-plan checkout of the created team", async
 });
 
 test("a failed checkout keeps the created team and the reason", async () => {
-  const failure = new Error("Checkout could not start (HTTP 503).");
+  const failure = new Error("Billing is unavailable right now.");
   const { port } = fakePort(async () => {
     throw failure;
   });

@@ -55,8 +55,15 @@ test("Usage & plan shows the sidebar's usage bars and opens hosted checkout and 
   const card = (tier: keyof typeof planOffers) =>
     main.getByRole("article", { name: `${planOffers[tier].label} plan` });
   await expect(card("free").getByText("Current plan")).toBeVisible();
-  // A personal workspace never buys Team; it is pointed at creating a team.
-  await expect(card("team").getByRole("button")).toHaveCount(0);
+  // A personal workspace never buys Team; its Team card creates a team.
+  await expect(card("team").getByRole("button")).toHaveCount(1);
+  await card("team")
+    .getByRole("button", { name: "Create team", exact: true })
+    .click();
+  const createTeam = page.getByRole("dialog", { name: "Create team" });
+  await expect(createTeam).toBeVisible();
+  await createTeam.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(createTeam).toHaveCount(0);
   await expect(
     main.getByRole("button", { name: "Manage billing" }),
   ).toHaveCount(0);

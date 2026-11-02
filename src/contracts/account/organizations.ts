@@ -42,8 +42,3 @@ export interface OrganizationInvitation {
   status: "pending" | "accepted" | "rejected" | "canceled";
   expiresAt: string;
 }
-
-/** POST /orgs/:orgId/billing/checkout: the hosted checkout to open. */
-export interface BillingCheckout {
-  url: string;
-}

@@ -127,7 +127,7 @@ test("service refusals become actionable messages", async () => {
       "team",
       "team",
     ),
-  ).rejects.toThrow("Checkout could not start (HTTP 503).");
+  ).rejects.toThrow("Billing is unavailable right now.");
 });
 
 test("an organization record without the personal flag is rejected", async () => {

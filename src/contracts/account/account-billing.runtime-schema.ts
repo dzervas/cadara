@@ -1,11 +1,10 @@
 import typia from "typia";
-import type { HostedBillingPage, WorkspaceKind } from "./account-billing";
+import type { HostedBillingPage } from "./account-billing";
 import { requireContract } from "@/contracts/shared/validation";
 
-// Hosted pages and organization records carry provider/plugin fields this
-// client does not own, so they validate only the fields it reads.
+// Hosted pages carry provider fields this client does not own, so they
+// validate only the fields it reads.
 const validateHostedBillingPage = typia.createValidate<HostedBillingPage>();
-const validateWorkspaceKind = typia.createValidate<WorkspaceKind>();
 
 /** Only https pages (or http on localhost for local acceptance) are followed. */
 export function parseHostedBillingPage(input: unknown): HostedBillingPage {
@@ -24,13 +23,4 @@ export function parseHostedBillingPage(input: unknown): HostedBillingPage {
   )
     throw new Error("The billing service returned an invalid page address.");
   return { url: url.href };
-}
-
-export function parseWorkspaceKind(input: unknown): WorkspaceKind {
-  const { id, personal } = requireContract(
-    validateWorkspaceKind,
-    input,
-    "Workspace",
-  );
-  return { id, personal };
 }

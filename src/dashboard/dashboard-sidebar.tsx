@@ -1,12 +1,5 @@
 import { Link } from "wouter";
-import {
-  Button,
-  Menu,
-  Progress,
-  Stack,
-  Text,
-  UnstyledButton,
-} from "@mantine/core";
+import { Box, Button, Menu, Stack, Text, UnstyledButton } from "@mantine/core";
 import type { MouseEvent } from "react";
 import { AccountMenu } from "@/components/layout/account-menu";
 import {
@@ -14,8 +7,8 @@ import {
   type WorkbenchIconName,
 } from "@/components/ui/workbench-icon";
 import type { AccountMe } from "@/contracts/account/account";
-import { summarizeQuota } from "@/core/account/quota-summary";
 import type { useAccountSession } from "@/hooks/use-account-session";
+import { WorkspaceUsageBars } from "./dashboard-usage-bars";
 
 type OwnerOrganization = AccountMe["organizations"][number];
 
@@ -71,7 +64,6 @@ export function DashboardSidebar({
       switchable={canSwitch}
     />
   );
-  const quota = selected && summarizeQuota(selected);
   const navItems: { href: string; label: string; icon: WorkbenchIconName }[] = [
     { href: "/dashboard", label: "Projects", icon: "box" },
     ...(selectedIsTeam
@@ -149,34 +141,15 @@ export function DashboardSidebar({
           ))}
         </Stack>
       </nav>
-      {quota && selected && (
-        <Stack gap="md" px="lg" pb="lg" mt="auto">
-          <UsageBar
-            label="Storage"
-            value={quota.storageLabel}
-            percent={quota.storagePercent}
-            ariaLabel={`${selectedName} storage usage`}
+      {selected && (
+        <Box px="lg" pb="lg" mt="auto">
+          <WorkspaceUsageBars
+            workspace={selected}
+            workspaceName={selectedName}
           />
-          <UsageBar
-            label={quota.privateProjectsLabel}
-            percent={
-              selected.entitlements.private_project_limit === null
-                ? 0
-                : Math.min(
-                    100,
-                    (selected.usage.private_projects /
-                      Math.max(
-                        1,
-                        selected.entitlements.private_project_limit,
-                      )) *
-                      100,
-                  )
-            }
-            ariaLabel={`${selectedName} private projects usage`}
-          />
-        </Stack>
+        </Box>
       )}
-      <div className={`dashboard-account ${quota ? "" : "mt-auto"}`}>
+      <div className={`dashboard-account ${selected ? "" : "mt-auto"}`}>
         <AccountMenu
           {...session}
           opened={accountMenuOpened}
@@ -221,39 +194,5 @@ function OrganizationCard({
       </span>
       {switchable && <WorkbenchIcon name="chevronDown" size={13} />}
     </span>
-  );
-}
-
-function UsageBar({
-  label,
-  value,
-  percent,
-  ariaLabel,
-}: {
-  label: string;
-  value?: string;
-  percent: number;
-  ariaLabel: string;
-}) {
-  return (
-    <Stack gap={6}>
-      <div className="flex items-baseline justify-between gap-2">
-        <Text size="xs" c="dimmed">
-          {label}
-        </Text>
-        {value && (
-          <Text size="xs" ff="monospace" ta="right">
-            {value}
-          </Text>
-        )}
-      </div>
-      <Progress
-        size={4}
-        radius="xl"
-        color="workbench.2"
-        aria-label={ariaLabel}
-        value={percent}
-      />
-    </Stack>
   );
 }

@@ -29,39 +29,28 @@ type OwnerOrganization = AccountMe["organizations"][number];
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
-/** Loads the workspace kind and follows hosted checkout/portal pages. */
+/** Follows hosted checkout/portal pages for the workspace. */
 export function UsagePlanPage({
   account,
   workspace,
   workspaceName,
+  onCreateTeam,
 }: {
   account: Account;
   workspace: OwnerOrganization;
   workspaceName: string;
+  onCreateTeam: () => void;
 }) {
   const billing = useMemo(
     () => createBillingClient({ apiOrigin: getAccountApiOrigin() }),
     [],
   );
   const organizationId = workspace.organizationId;
-  // The page is keyed by workspace, so this never holds another workspace's kind.
-  const [personal, setPersonal] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"portal" | PlanTier | null>(null);
-  useEffect(() => {
-    let live = true;
-    billing
-      .readWorkspacePersonal(organizationId)
-      .then((isPersonal) => {
-        if (live) setPersonal(isPersonal);
-      })
-      .catch((reason: unknown) => {
-        if (live) setError(errorMessage(reason));
-      });
-    return () => {
-      live = false;
-    };
-  }, [billing, organizationId]);
+  const personal =
+    account.organizations.find((org) => org.id === organizationId)?.personal ??
+    null;
   const role = account.me.actor.memberships.find(
     (membership) => membership.organizationId === organizationId,
   )?.role;
@@ -107,6 +96,7 @@ export function UsagePlanPage({
       onManageBilling={() =>
         follow("portal", () => billing.openPortal(organizationId))
       }
+      onCreateTeam={onCreateTeam}
     />
   );
 }
@@ -120,16 +110,18 @@ export function UsagePlanView({
   onDismissError,
   onCheckout,
   onManageBilling,
+  onCreateTeam,
 }: {
   workspace: OwnerOrganization;
   workspaceName: string;
-  /** Null while the workspace kind is loading: cards show, actions wait. */
+  /** Null while the workspace kind is unknown: cards show, actions wait. */
   planWorkspace: PlanWorkspace | null;
   pending: "portal" | PlanTier | null;
   error: string | null;
   onDismissError: () => void;
   onCheckout: (tier: Exclude<PlanTier, "free">) => void;
   onManageBilling: () => void;
+  onCreateTeam: () => void;
 }) {
   const current = planOffers[workspace.entitlements.tier];
   return (
@@ -187,6 +179,7 @@ export function UsagePlanView({
               action={planWorkspace && planCardAction(planWorkspace, tier)}
               pending={pending}
               onCheckout={onCheckout}
+              onCreateTeam={onCreateTeam}
             />
           ))}
         </SimpleGrid>
@@ -207,11 +200,13 @@ function PlanCard({
   action,
   pending,
   onCheckout,
+  onCreateTeam,
 }: {
   tier: PlanTier;
   action: PlanCardAction | null;
   pending: "portal" | PlanTier | null;
   onCheckout: (tier: Exclude<PlanTier, "free">) => void;
+  onCreateTeam: () => void;
 }) {
   const offer = planOffers[tier];
   const current = action?.kind === "current";
@@ -275,10 +270,19 @@ function PlanCard({
           </Button>
         )}
         {action?.kind === "create-team" && (
-          <Text size="xs" c="dimmed">
-            Teams have their own workspace. Create a team from the account menu
-            to start one.
-          </Text>
+          <Stack gap={8}>
+            <Text size="xs" c="dimmed">
+              Teams have their own workspace.
+            </Text>
+            <Button
+              variant="default"
+              leftSection={<WorkbenchIcon name="plus" size={13} />}
+              disabled={pending !== null}
+              onClick={onCreateTeam}
+            >
+              Create team
+            </Button>
+          </Stack>
         )}
       </Stack>
     </Paper>

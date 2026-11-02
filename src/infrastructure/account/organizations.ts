@@ -1,11 +1,11 @@
 import type { OrganizationPort } from "@/application/account/organization-port";
 import {
-  parseBillingCheckout,
   parseOrganization,
   parseOrganizationInvitation,
   parseOrganizationInvitations,
   parseOrganizationMembers,
 } from "@/contracts/account/organizations.runtime-schema";
+import { createBillingClient } from "./billing";
 
 const SERVICE_ERRORS: Record<string, string> = {
   ORGANIZATION_ALREADY_EXISTS: "Another team already uses that URL name.",
@@ -57,6 +57,7 @@ export function createOrganizationHttpClient({
   };
   const org = (organizationId: string) =>
     `/orgs/${encodeURIComponent(organizationId)}`;
+  const billing = createBillingClient({ apiOrigin, fetcher });
   return {
     async createOrganization(input) {
       return parseOrganization(
@@ -127,14 +128,7 @@ export function createOrganizationHttpClient({
         { method: "DELETE", body: {} },
       );
     },
-    async startCheckout(organizationId, tier) {
-      return parseBillingCheckout(
-        await call(
-          `${org(organizationId)}/billing/checkout`,
-          "Checkout could not start",
-          { method: "POST", body: { tier } },
-        ),
-      ).url;
-    },
+    startCheckout: (organizationId, tier) =>
+      billing.startCheckout(organizationId, tier),
   };
 }

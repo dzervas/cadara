@@ -22,6 +22,7 @@ function render(planWorkspace: PlanWorkspace | null) {
         onDismissError={() => undefined}
         onCheckout={() => undefined}
         onManageBilling={() => undefined}
+        onCreateTeam={() => undefined}
       />
     </MantineProvider>,
   );
@@ -30,7 +31,7 @@ function render(planWorkspace: PlanWorkspace | null) {
 const upgrade = (tier: "individual" | "team") =>
   `Upgrade to ${planOffers[tier].label}`;
 
-test("a free personal workspace offers Pro checkout beside the usage bars, not the portal", () => {
+test("a free personal workspace offers Pro checkout and Create team beside the usage bars, not the portal", () => {
   const markup = render({
     tier: "free",
     personal: true,
@@ -38,6 +39,7 @@ test("a free personal workspace offers Pro checkout beside the usage bars, not t
   });
   expect(markup).toContain(upgrade("individual"));
   expect(markup).not.toContain(upgrade("team"));
+  expect(markup).toContain("Create team");
   expect(markup).not.toContain("Manage billing");
   expect(markup).toContain('aria-label="Personal storage usage"');
   expect(markup).toContain('aria-label="Personal private projects usage"');

@@ -8,9 +8,3 @@ export type CheckoutTier = "individual" | "team";
 export interface HostedBillingPage {
   url: string;
 }
-
-/** The part of GET /orgs/:orgId the plan page reads. */
-export interface WorkspaceKind {
-  id: string;
-  personal: boolean;
-}

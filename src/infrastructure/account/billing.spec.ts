@@ -77,17 +77,3 @@ test("billing refusals surface the server's sentence and unsafe pages are never 
     "invalid page address",
   );
 });
-
-test("the workspace kind comes from the organization record", async () => {
-  const { client, requests } = fakeBillingApi(() =>
-    Response.json({
-      id: "org",
-      name: "Personal",
-      slug: "personal-user",
-      personal: true,
-      createdAt: "2026-01-01T00:00:00.000Z",
-    }),
-  );
-  await expect(client.readWorkspacePersonal("org")).resolves.toBe(true);
-  expect(new URL(requests[0]!.url).pathname).toBe("/orgs/org");
-});

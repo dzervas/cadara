@@ -1,8 +1,5 @@
 import type { CheckoutTier } from "@/contracts/account/account-billing";
-import {
-  parseHostedBillingPage,
-  parseWorkspaceKind,
-} from "@/contracts/account/account-billing.runtime-schema";
+import { parseHostedBillingPage } from "@/contracts/account/account-billing.runtime-schema";
 import { accountApiError } from "./account-api-error";
 
 export interface BillingClient {
@@ -10,8 +7,6 @@ export interface BillingClient {
   startCheckout(organizationId: string, tier: CheckoutTier): Promise<string>;
   /** Opens the hosted billing portal of the signed-in payer. */
   openPortal(organizationId: string): Promise<string>;
-  /** Whether the workspace is the user's personal one rather than a team. */
-  readWorkspacePersonal(organizationId: string): Promise<boolean>;
 }
 
 export function createBillingClient({
@@ -50,14 +45,5 @@ export function createBillingClient({
       billingPage(organizationId, "checkout", { tier }),
     // The portal needs no options; the server keeps the provider's return URL.
     openPortal: (organizationId) => billingPage(organizationId, "portal", {}),
-    async readWorkspacePersonal(organizationId) {
-      const response = await fetcher(
-        new URL(`/orgs/${encodeURIComponent(organizationId)}`, apiOrigin),
-        { credentials: "include" },
-      );
-      if (!response.ok)
-        throw await accountApiError(response, "Unable to load this workspace.");
-      return parseWorkspaceKind(await response.json()).personal;
-    },
   };
 }
