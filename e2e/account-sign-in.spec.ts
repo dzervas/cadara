@@ -49,7 +49,8 @@ test("magic link creates a persistent API session; sign out clears it without af
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByText(email, { exact: true })).toBeVisible();
-  await expect(page.getByText(/Personal · owner/)).toBeVisible();
+  // The account's own workspace loaded; without a team it is not named.
+  await expect(page.getByText("Storage", { exact: true })).toBeVisible();
   const settledSessionRequests = sessionRequests;
   await page.evaluate(async () => {
     for (let frame = 0; frame < 20; frame += 1) {

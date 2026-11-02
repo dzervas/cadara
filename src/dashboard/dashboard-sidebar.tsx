@@ -21,7 +21,7 @@ type OwnerOrganization = AccountMe["organizations"][number];
 
 const planLabels: Record<OwnerOrganization["entitlements"]["tier"], string> = {
   free: "Free plan",
-  individual: "Individual plan",
+  individual: "Pro plan",
   team: "Team plan",
 };
 
@@ -34,8 +34,12 @@ export interface DashboardSidebarProps {
   owners: OwnerOrganization[];
   selected: OwnerOrganization | undefined;
   organizationName: (organizationId: string) => string;
+  /** The selected workspace is a team (only then is there a Members page). */
+  selectedIsTeam: boolean;
   onSelectOrganization: (organizationId: string) => void;
   onSignIn: () => void;
+  onCreateTeam: () => void;
+  onOpenTeam: (organizationId: string) => void;
 }
 
 export function DashboardSidebar({
@@ -46,13 +50,17 @@ export function DashboardSidebar({
   owners,
   selected,
   organizationName,
+  selectedIsTeam,
   onSelectOrganization,
   onSignIn,
+  onCreateTeam,
+  onOpenTeam,
 }: DashboardSidebarProps) {
   const account = session.account;
   const selectedName = selected
     ? organizationName(selected.organizationId)
     : "On this device";
+  // Only an account with a team has more than its own workspace to switch to.
   const canSwitch = owners.length > 1;
   const organizationCard = (
     <OrganizationCard
@@ -66,7 +74,7 @@ export function DashboardSidebar({
   const quota = selected && summarizeQuota(selected);
   const navItems: { href: string; label: string; icon: WorkbenchIconName }[] = [
     { href: "/dashboard", label: "Projects", icon: "box" },
-    ...(selected?.entitlements.tier === "team"
+    ...(selectedIsTeam
       ? [
           {
             href: "/dashboard/members",
@@ -105,6 +113,13 @@ export function DashboardSidebar({
                   {organizationName(org.organizationId)}
                 </Menu.Item>
               ))}
+              <Menu.Divider />
+              <Menu.Item
+                leftSection={<WorkbenchIcon name="plus" size={14} />}
+                onClick={onCreateTeam}
+              >
+                Create team
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         ) : (
@@ -166,6 +181,8 @@ export function DashboardSidebar({
           {...session}
           opened={accountMenuOpened}
           onOpenedChange={onAccountMenuOpenedChange}
+          onCreateTeam={onCreateTeam}
+          onOpenTeam={onOpenTeam}
         />
         <Stack gap={0} style={{ minWidth: 0 }}>
           <Text size="sm" truncate>

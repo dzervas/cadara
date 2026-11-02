@@ -46,18 +46,61 @@ test("pending link tells the user which inbox to check", () => {
   );
 });
 
-test("signed-in account displays profile and membership with registration and sign-out", () => {
+test("signed-in account displays profile with registration and sign-out", () => {
   const html = render({ account: makeAccount() });
   for (const label of [
     "Maker",
     "maker@example.test",
-    "Personal",
-    "owner",
     "Register passkey",
     "Sign out",
   ])
     expect(html).toContain(label);
   expect(html).not.toContain("Continue with Google");
+});
+
+test("an account without a team never reads of teams or organizations, save the offer to create one", () => {
+  const account = makeAccount();
+  // Collaborator access to another account's team projects is not a team.
+  account.organizations.push({
+    id: "studio",
+    name: "Studio",
+    personal: false,
+  });
+  account.me.actor.memberships.push({
+    ...account.me.actor.memberships[0]!,
+    id: "collaborator",
+    organizationId: "studio",
+    role: "collaborator",
+    defaultProjectRole: null,
+  });
+  const text = (html: string) => html.replace(/<[^>]*>/g, " ");
+  const withOffer = text(
+    render({ account, onCreateTeam: () => undefined }),
+  ).replace("Create team", "");
+  expect(withOffer).not.toMatch(/organi[sz]ation|team/i);
+  expect(withOffer).not.toContain("Personal");
+  expect(text(render({ account }))).not.toContain("Create team");
+});
+
+test("a team member sees their teams and roles", () => {
+  const account = makeAccount();
+  account.organizations.push({
+    id: "team",
+    name: "Workshop crew",
+    personal: false,
+  });
+  account.me.actor.memberships.push({
+    ...account.me.actor.memberships[0]!,
+    id: "team-membership",
+    organizationId: "team",
+    role: "admin",
+  });
+  const html = render({ account, onCreateTeam: () => undefined });
+  expect(html).toContain("Teams");
+  expect(html).toMatch(
+    /href="\/dashboard\/members"[^>]*>Workshop crew · admin/,
+  );
+  expect(html).toContain("Create team");
 });
 
 test("quota explains usage and preserves sync when over the limit", () => {

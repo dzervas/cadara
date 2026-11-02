@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CreateTeamModal } from "@/components/account/create-team-modal";
+import { rememberChosenOrganization } from "@/core/account/account-teams";
+import { getAccountApiOrigin } from "@/infrastructure/account/api-origin";
+import { createOrganizationHttpClient } from "@/infrastructure/account/organizations";
+import {
+  CHECKOUT_FAILED_MEMBERS_PATH,
+  useCreateTeam,
+} from "@/hooks/use-create-team";
 import { SignInModal } from "@/components/layout/sign-in-modal";
 import { useIdleSignIn } from "@/hooks/use-idle-sign-in";
 import { SIGN_IN_OFFER_KEY } from "@/application/account/sign-in-offer";
@@ -45,6 +53,17 @@ export function WorkbenchAccount({
     setSignInOpened(true);
   }, []);
   const closeSignIn = useCallback(() => setSignInOpened(false), []);
+  const organizations = useMemo(
+    () => createOrganizationHttpClient({ apiOrigin: getAccountApiOrigin() }),
+    [],
+  );
+  const userId = session.account?.user.id;
+  // Teams are managed on the dashboard, which opens on the new team.
+  const createTeam = useCreateTeam(organizations, (organization, checkout) => {
+    if (userId)
+      rememberChosenOrganization(window.localStorage, userId, organization.id);
+    window.location.assign(checkout ?? CHECKOUT_FAILED_MEMBERS_PATH);
+  });
   // An unanswered or failed account check is not a signed-out guest.
   useIdleSignIn(
     session.accountChecked &&
@@ -72,7 +91,12 @@ export function WorkbenchAccount({
           if (next && !session.account) openSignIn();
           else setOpened(next);
         }}
+        onCreateTeam={() => {
+          setOpened(false);
+          createTeam.open();
+        }}
       />
+      {session.account && <CreateTeamModal {...createTeam} />}
       {localDocumentOffers && localDocumentOfferSlot && onMoveToAccount && (
         <WorkbenchLocalDocumentOffer
           offers={localDocumentOffers}

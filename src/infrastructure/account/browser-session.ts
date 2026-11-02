@@ -7,6 +7,7 @@ import {
 import { passkeyClient } from "@better-auth/passkey/client";
 import type { SessionPort } from "@/application/account/session-port";
 import { parseAccountMe } from "@/contracts/account/account.runtime-schema";
+import { parseOrganizationSummaries } from "@/contracts/account/organizations.runtime-schema";
 
 export function createBrowserSession({
   apiOrigin,
@@ -43,20 +44,7 @@ export function createBrowserSession({
       if (!meResponse.ok || !orgResponse.ok)
         throw new Error("Unable to load your account.");
       const me = parseAccountMe(await meResponse.json());
-      const orgs: unknown = await orgResponse.json();
-      if (
-        !Array.isArray(orgs) ||
-        !orgs.every(
-          (org: unknown) =>
-            typeof org === "object" &&
-            org !== null &&
-            "id" in org &&
-            typeof org.id === "string" &&
-            "name" in org &&
-            typeof org.name === "string",
-        )
-      )
-        throw new Error("Invalid account organizations.");
+      const orgs = parseOrganizationSummaries(await orgResponse.json());
       if (me.actor.userId !== session.data.user.id)
         throw new Error("Account identity mismatch.");
       return {
@@ -66,9 +54,10 @@ export function createBrowserSession({
           email: session.data.user.email,
         },
         me,
-        organizations: orgs.map((org) => ({
-          id: org.id as string,
-          name: org.name as string,
+        organizations: orgs.map(({ id, name, personal }) => ({
+          id,
+          name,
+          personal,
         })),
       };
     },

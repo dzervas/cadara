@@ -15,7 +15,7 @@ import type {
 /** The organization already has a project with the requested slug. */
 export class ProjectSlugConflictError extends Error {
   constructor() {
-    super("Another project in this organization already uses that URL name.");
+    super("Another project in this workspace already uses that URL name.");
     this.name = "ProjectSlugConflictError";
   }
 }

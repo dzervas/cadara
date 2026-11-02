@@ -88,7 +88,11 @@ test("a project created to share a local part shows Local disabled with the reas
 
 test("team members pick the owner of a new project", () => {
   const account = makeAccount();
-  account.organizations.push({ id: "team", name: "Workshop team" });
+  account.organizations.push({
+    id: "team",
+    name: "Workshop team",
+    personal: false,
+  });
   account.me.actor.memberships.push({
     ...account.me.actor.memberships[0]!,
     id: "team-membership",

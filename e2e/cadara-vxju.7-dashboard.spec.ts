@@ -250,8 +250,8 @@ test("team selection changes usage and owner tiles while shared projects stay gr
     usage: { storage_bytes: 5000, private_projects: 7 },
   });
   account.organizations.push(
-    { id: "team", name: "Workshop team" },
-    { id: "shared-org", name: "Alex's workshop" },
+    { id: "team", name: "Workshop team", personal: false },
+    { id: "shared-org", name: "Alex's workshop", personal: true },
   );
   account.me.actor.memberships.push(
     {

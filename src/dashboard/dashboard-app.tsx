@@ -1,6 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Route, Switch, useLocation } from "wouter";
-import { Alert, Anchor, Button, Stack, Text, Title } from "@mantine/core";
+import { Link, Route, Switch, useLocation, useSearch } from "wouter";
+import {
+  Alert,
+  Anchor,
+  Button,
+  Loader,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+import { CreateTeamModal } from "@/components/account/create-team-modal";
+import { ACCOUNT_SESSION_CHANGED } from "@/application/account/account-session";
+import {
+  accountTeams,
+  readChosenOrganization,
+  rememberChosenOrganization,
+} from "@/core/account/account-teams";
+import {
+  CHECKOUT_FAILED_MEMBERS_PATH,
+  useCreateTeam,
+} from "@/hooks/use-create-team";
+import { createOrganizationHttpClient } from "@/infrastructure/account/organizations";
 import { useAccountSession } from "@/hooks/use-account-session";
 import { useBrowserOnline } from "@/hooks/use-browser-online";
 import { createBrowserSession } from "@/infrastructure/account/browser-session";
@@ -14,6 +34,7 @@ import { useShareDialog } from "@/components/account/sharing/use-share-dialog";
 import { DashboardProjectPage } from "./project/dashboard-project-page";
 import { rememberPage } from "@/core/navigation/last-page";
 import { DashboardSidebar } from "./dashboard-sidebar";
+import { DashboardMembersPage } from "./members/dashboard-members-page";
 import {
   DashboardProjectsPage,
   type DashboardProjectSection,
@@ -28,6 +49,7 @@ const errorMessage = (error: unknown) =>
 
 export function DashboardApp() {
   const [location, navigate] = useLocation();
+  const search = useSearch();
   const [error, setError] = useState<string | null>(null);
   const notifyError = useCallback((message: string) => setError(message), []);
   const port = useMemo(
@@ -56,18 +78,50 @@ export function DashboardApp() {
   const account = session.account;
   const userId = account?.user.id ?? null;
   const owners = account?.me.organizations ?? [];
+  const teams = accountTeams(account);
   // Choices and lists belong to the account that made them: after an account
   // change nothing of the previous account shows while the new one loads.
   const [chosenOrganization, setChosenOrganization] = useState<{
     userId: string;
     organizationId: string;
   } | null>(null);
+  const chosenId = !userId
+    ? null
+    : chosenOrganization?.userId === userId
+      ? chosenOrganization.organizationId
+      : readChosenOrganization(window.localStorage, userId);
+  const chooseOrganization = (organizationId: string) => {
+    if (!userId) return;
+    rememberChosenOrganization(window.localStorage, userId, organizationId);
+    setChosenOrganization({ userId, organizationId });
+  };
+  const chosen = owners.find((org) => org.organizationId === chosenId);
+  // Members is a team page: it shows the chosen team, else the first one.
   const selected =
-    owners.find(
-      (org) =>
-        chosenOrganization?.userId === userId &&
-        org.organizationId === chosenOrganization.organizationId,
-    ) ?? owners[0];
+    location === "/dashboard/members" &&
+    !teams.some((team) => team.id === chosen?.organizationId)
+      ? (owners.find((org) =>
+          teams.some((team) => team.id === org.organizationId),
+        ) ?? chosen)
+      : (chosen ?? owners[0]);
+  const selectedTeam = teams.find(
+    (team) => team.id === selected?.organizationId,
+  );
+  const organizationPort = useMemo(
+    () => createOrganizationHttpClient({ apiOrigin: getAccountApiOrigin() }),
+    [],
+  );
+  const createTeam = useCreateTeam(
+    organizationPort,
+    (organization, checkout) => {
+      chooseOrganization(organization.id);
+      if (checkout) return window.location.assign(checkout);
+      // Every open page learns about the new team.
+      window.localStorage.setItem(ACCOUNT_SESSION_CHANGED, String(Date.now()));
+      session.onOpen();
+      navigate(CHECKOUT_FAILED_MEMBERS_PATH);
+    },
+  );
   const organizationName = (organizationId: string) =>
     account?.organizations.find((org) => org.id === organizationId)?.name ??
     "Your workspace";
@@ -233,6 +287,17 @@ export function DashboardApp() {
       {!account && <Button onClick={signIn}>Sign in</Button>}
     </Stack>
   );
+  // Without a team there is no Members page to speak of.
+  const notFound = (
+    <Stack align="flex-start">
+      <Title order={1} size={20}>
+        Page not found
+      </Title>
+      <Anchor component={Link} href="/dashboard">
+        Back to projects
+      </Anchor>
+    </Stack>
+  );
   return (
     <div className="dashboard-shell">
       <DashboardSidebar
@@ -243,11 +308,28 @@ export function DashboardApp() {
         owners={owners}
         selected={selected}
         organizationName={organizationName}
-        onSelectOrganization={(organizationId) =>
-          userId && setChosenOrganization({ userId, organizationId })
-        }
+        selectedIsTeam={selectedTeam !== undefined}
+        onSelectOrganization={(organizationId) => {
+          chooseOrganization(organizationId);
+          // A workspace without members leaves the Members page for its projects.
+          if (
+            location === "/dashboard/members" &&
+            !teams.some((team) => team.id === organizationId)
+          )
+            navigate("/dashboard");
+        }}
         onSignIn={signIn}
+        onCreateTeam={() => {
+          setAccountMenuOpened(false);
+          createTeam.open();
+        }}
+        onOpenTeam={(organizationId) => {
+          setAccountMenuOpened(false);
+          chooseOrganization(organizationId);
+          navigate("/dashboard/members");
+        }}
       />
+      {account && <CreateTeamModal {...createTeam} />}
       <main className="dashboard-main">
         {error && (
           <Alert
@@ -269,7 +351,26 @@ export function DashboardApp() {
               onSignIn={signIn}
             />
           </Route>
-          <Route path="/dashboard/members">{placeholder("Members")}</Route>
+          <Route path="/dashboard/members">
+            {account && selectedTeam ? (
+              <DashboardMembersPage
+                key={selectedTeam.id}
+                port={organizationPort}
+                organizationId={selectedTeam.id}
+                userId={account.user.id}
+                role={selectedTeam.role}
+                checkoutFailed={
+                  new URLSearchParams(search).get("checkout") === "failed"
+                }
+              />
+            ) : session.busy || !session.accountChecked ? (
+              <Loader size="sm" aria-label="Loading account" />
+            ) : !account ? (
+              placeholder("Members")
+            ) : (
+              notFound
+            )}
+          </Route>
           <Route path="/dashboard/plan">{placeholder("Usage & plan")}</Route>
           <Route path="/dashboard/settings">{placeholder("Settings")}</Route>
           <Route path="/dashboard/p/:projectId">
@@ -290,16 +391,7 @@ export function DashboardApp() {
               />
             )}
           </Route>
-          <Route>
-            <Stack align="flex-start">
-              <Title order={1} size={20}>
-                Page not found
-              </Title>
-              <Anchor component={Link} href="/dashboard">
-                Back to projects
-              </Anchor>
-            </Stack>
-          </Route>
+          <Route>{notFound}</Route>
         </Switch>
       </main>
       {shareDialog}

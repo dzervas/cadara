@@ -105,18 +105,20 @@ export function UploadProjectForm({
       }}
     >
       <Stack gap="sm">
-        <Select
-          label="Organization"
-          size="xs"
-          data={organizations.map((org) => ({
-            value: org.id,
-            label: org.name,
-          }))}
-          value={orgId}
-          onChange={(value) => setOrgId(value ?? "")}
-          allowDeselect={false}
-          disabled={busy}
-        />
+        {organizations.length > 1 && (
+          <Select
+            label="Owner"
+            size="xs"
+            data={organizations.map((org) => ({
+              value: org.id,
+              label: org.name,
+            }))}
+            value={orgId}
+            onChange={(value) => setOrgId(value ?? "")}
+            allowDeselect={false}
+            disabled={busy}
+          />
+        )}
         <TextInput
           label="Name"
           size="xs"
@@ -211,20 +213,25 @@ export function OpenServiceProjectForm({
 }: OpenServiceProjectFormProps) {
   return (
     <Stack gap="sm">
-      <Select
-        label="Organization"
-        size="xs"
-        data={organizations.map((org) => ({ value: org.id, label: org.name }))}
-        value={orgId}
-        onChange={(value) => value && onSelectOrganization(value)}
-        allowDeselect={false}
-        disabled={busy}
-      />
+      {organizations.length > 1 && (
+        <Select
+          label="Owner"
+          size="xs"
+          data={organizations.map((org) => ({
+            value: org.id,
+            label: org.name,
+          }))}
+          value={orgId}
+          onChange={(value) => value && onSelectOrganization(value)}
+          allowDeselect={false}
+          disabled={busy}
+        />
+      )}
       {projects === null ? (
         <Loader size="xs" aria-label="Loading projects" />
       ) : projects.length === 0 ? (
         <Text size="xs" c="dimmed">
-          No projects in this organization yet.
+          No projects yet.
         </Text>
       ) : (
         <Stack gap={2} role="list" aria-label="CADara projects">

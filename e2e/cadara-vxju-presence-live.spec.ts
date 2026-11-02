@@ -104,7 +104,7 @@ test("two accounts see each other's role and matching selection colour, then cle
       role: "editor",
     });
     await openCadaraMenuItem(guest, "Open from CADara…");
-    await guest.getByRole("combobox", { name: "Organization" }).click();
+    await guest.getByRole("combobox", { name: "Owner" }).click();
     await guest.getByRole("option", { name: orgName }).click();
     await guest
       .getByRole("list", { name: "CADara projects" })

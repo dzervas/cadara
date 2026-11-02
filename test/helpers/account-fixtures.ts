@@ -33,6 +33,6 @@ export function makeAccount(): Account {
         },
       ],
     },
-    organizations: [{ id: "personal", name: "Personal" }],
+    organizations: [{ id: "personal", name: "Personal", personal: true }],
   };
 }

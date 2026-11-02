@@ -31,8 +31,28 @@ test("the upload form proposes the project name and a slug derived from it, priv
   );
   expect(html).toContain('value="My Bracket"');
   expect(html).toContain('value="my-bracket"');
-  expect(html).toContain("Personal");
   expect(html).toMatch(/checked="" value="private"/);
+  // A single workspace is not a choice: no owner (nor organization) to pick.
+  expect(html).not.toMatch(/Owner|Organization|Personal/);
+});
+
+test("an account with several workspaces picks the upload's owner", () => {
+  const html = render(
+    <UploadProjectForm
+      organizations={[
+        { id: "org", name: "Personal" },
+        { id: "team", name: "Workshop crew" },
+      ]}
+      defaultName="My Bracket"
+      busy={false}
+      error={null}
+      deriveSlug={(name) => name}
+      onCancel={() => undefined}
+      onSubmit={() => undefined}
+    />,
+  );
+  expect(html).toContain("Owner");
+  expect(html).toContain('value="Personal"');
 });
 
 test("the upload form shows the service's refusal", () => {
@@ -68,6 +88,22 @@ test("projects without uploaded documents cannot be opened", () => {
   );
   expect(html).toContain("Bracket");
   expect(html).toMatch(/disabled=""[^>]*>.*Hinge.*Not uploaded yet/s);
+});
+
+test("an empty project list names no organization", () => {
+  const html = render(
+    <OpenServiceProjectForm
+      organizations={[{ id: "org", name: "Personal" }]}
+      orgId="org"
+      projects={[]}
+      busy={false}
+      error={null}
+      onSelectOrganization={() => undefined}
+      onOpen={() => undefined}
+    />,
+  );
+  expect(html).toContain("No projects yet.");
+  expect(html).not.toMatch(/organi[sz]ation|\bteams?\b/i);
 });
 
 test("Move to project lists targets by location, explains disabled ones and says undo steps stay behind", () => {

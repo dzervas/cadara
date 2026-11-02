@@ -1,3 +1,5 @@
+import type { OrganizationSummary } from "./organizations";
+
 /**
  * `collaborator` is access to individually shared projects only: no default
  * project role, never shown as team membership.
@@ -41,5 +43,6 @@ export interface AccountMe {
 export interface Account {
   user: { id: string; name: string; email: string };
   me: AccountMe;
-  organizations: { id: string; name: string }[];
+  /** Every organization the account belongs to, collaborator access included. */
+  organizations: OrganizationSummary[];
 }

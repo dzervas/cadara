@@ -97,7 +97,11 @@ test("the last available choice is preselected, else Private for a signed-in use
 
 test("collaborator organizations cannot own new projects", () => {
   const account = makeAccount();
-  account.organizations.push({ id: "shared", name: "Shared with me" });
+  account.organizations.push({
+    id: "shared",
+    name: "Shared with me",
+    personal: true,
+  });
   account.me.actor.memberships.push({
     ...account.me.actor.memberships[0]!,
     id: "collaboration",

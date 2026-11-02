@@ -150,7 +150,7 @@ test("an invited viewer opens a synced project read only: shortcuts, undo, tab c
 
     // The viewer opens it from the service.
     await openCadaraMenuItem(viewer, "Open from CADara…");
-    await viewer.getByRole("combobox", { name: "Organization" }).click();
+    await viewer.getByRole("combobox", { name: "Owner" }).click();
     await viewer.getByRole("option", { name: orgName }).click();
     await viewer
       .getByRole("list", { name: "CADara projects" })

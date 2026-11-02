@@ -15,6 +15,10 @@ import {
 import { useId, useState } from "react";
 import type { Account } from "@/contracts/account/account";
 import { summarizeQuota } from "@/core/account/quota-summary";
+import {
+  accountTeams,
+  rememberChosenOrganization,
+} from "@/core/account/account-teams";
 
 export interface AccountPanelProps {
   account: Account | null;
@@ -28,10 +32,18 @@ export interface AccountPanelProps {
   onPasskey: () => void;
   onRegisterPasskey: () => void;
   onSignOut: () => void;
+  /** Offers "Create team": the one mention of teams for an account without one. */
+  onCreateTeam?: () => void;
+  /**
+   * Opens a team's Members page in this page (the dashboard). Without it, a
+   * team link opens the dashboard in a new tab on that team.
+   */
+  onOpenTeam?: (organizationId: string) => void;
 }
 
 export function AccountPanel(props: AccountPanelProps) {
   const [email, setEmail] = useState("");
+  const teams = accountTeams(props.account);
   return (
     <Stack gap="xs">
       {props.errorMessage && (
@@ -52,19 +64,37 @@ export function AccountPanel(props: AccountPanelProps) {
           <Text size="xs" c="dimmed">
             {props.account.user.email}
           </Text>
-          <Text size="xs" fw={600}>
-            Organizations
-          </Text>
-          {props.account.organizations.map((org) => (
-            <Text size="xs" key={org.id}>
-              {org.name} ·{" "}
-              {
-                props.account?.me.actor.memberships.find(
-                  (entry) => entry.organizationId === org.id,
-                )?.role
-              }
-            </Text>
-          ))}
+          {teams.length > 0 && (
+            <>
+              <Text size="xs" fw={600}>
+                Teams
+              </Text>
+              {teams.map((team) => (
+                <Anchor
+                  key={team.id}
+                  href="/dashboard/members"
+                  size="xs"
+                  {...(props.onOpenTeam
+                    ? {}
+                    : { target: "_blank", rel: "noopener noreferrer" })}
+                  onClick={(event) => {
+                    if (props.onOpenTeam) {
+                      event.preventDefault();
+                      props.onOpenTeam(team.id);
+                    } else if (props.account)
+                      // The new dashboard tab opens its Members page on this team.
+                      rememberChosenOrganization(
+                        window.localStorage,
+                        props.account.user.id,
+                        team.id,
+                      );
+                  }}
+                >
+                  {team.name} · {team.role}
+                </Anchor>
+              ))}
+            </>
+          )}
           {props.account.me.organizations.map((organization) => {
             const quota = summarizeQuota(organization);
             const color =
@@ -76,10 +106,13 @@ export function AccountPanel(props: AccountPanelProps) {
             return (
               <Stack gap={4} key={organization.organizationId}>
                 <Text size="xs" fw={600}>
-                  {props.account?.organizations.find(
-                    (org) => org.id === organization.organizationId,
-                  )?.name ?? "Account"}{" "}
-                  storage
+                  {teams.length > 0
+                    ? `${
+                        props.account?.organizations.find(
+                          (org) => org.id === organization.organizationId,
+                        )?.name ?? "Account"
+                      } storage`
+                    : "Storage"}
                 </Text>
                 <Text size="xs" ff="monospace">
                   {quota.storageLabel}
@@ -109,6 +142,17 @@ export function AccountPanel(props: AccountPanelProps) {
           >
             Change plan
           </Anchor>
+          {props.onCreateTeam && (
+            <Button
+              size="compact-sm"
+              variant="default"
+              leftSection={<WorkbenchIcon name="plus" size={13} />}
+              disabled={props.busy}
+              onClick={props.onCreateTeam}
+            >
+              Create team
+            </Button>
+          )}
           {props.passkeyRegistered && (
             <Text size="xs" role="status">
               Passkey registered.

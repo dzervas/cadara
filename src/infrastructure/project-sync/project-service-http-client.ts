@@ -11,7 +11,7 @@ import {
 } from "@/contracts/project-sync/project-service.runtime-schema";
 
 const SERVICE_ERRORS: Record<string, string> = {
-  quota_exceeded: "This organization has reached its plan's project limit.",
+  quota_exceeded: "This workspace has reached its plan's project limit.",
   manifest_conflict: "This service project already syncs another manifest.",
 };
 
@@ -81,7 +81,7 @@ export function createProjectServiceHttpClient({
       return parseRemoteProjects(
         await call(
           `/orgs/${encodeURIComponent(orgId)}/projects`,
-          "The organization's projects could not be listed",
+          "The projects could not be listed",
         ),
       );
     },
