@@ -24,7 +24,10 @@ import {
 
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 import { ShortcutSettingsButton } from "@/components/shortcuts/shortcut-settings";
-import { DocumentFileMenu } from "@/components/layout/document-file-menu";
+import {
+  DocumentFileMenu,
+  type DocumentFileMenuProject,
+} from "@/components/layout/document-file-menu";
 import { SaveActivityRing } from "@/components/layout/save-activity-ring";
 import { ToolButton } from "@/components/layout/tool-button";
 import {
@@ -101,6 +104,8 @@ interface WorkspaceToolbarProps {
   showBrowserStorageWarning?: boolean;
   /** A local save is underway in any open tab: the logo shows its ring. */
   localSaving?: boolean;
+  /** The open project's entries in the logo menu. */
+  fileMenuProject?: DocumentFileMenuProject;
   onNewDocument?: () => void;
   onOpenDocument?: () => void;
   onSaveDocumentAs?: () => void;
@@ -127,6 +132,7 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
   readOnly = false,
   showBrowserStorageWarning = false,
   localSaving = false,
+  fileMenuProject,
   onNewDocument = () => undefined,
   onOpenDocument = () => undefined,
   onSaveDocumentAs = () => undefined,
@@ -516,6 +522,7 @@ export const WorkspaceToolbar = memo(function WorkspaceToolbar({
     >
       <DocumentFileMenu
         showBrowserStorageWarning={showBrowserStorageWarning}
+        project={fileMenuProject}
         onNewDocument={onNewDocument}
         onOpenDocument={onOpenDocument}
         onSaveDocumentAs={onSaveDocumentAs}

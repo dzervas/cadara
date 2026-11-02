@@ -30,10 +30,14 @@ export async function openWorkbench(
     .not.toBe("");
 }
 
-/** Signs in through the emailed magic link; resolves to the API origin it points at. */
-export async function signIn(page: Page, email: string) {
+/**
+ * Signs in through the emailed magic link; resolves to the API origin it
+ * points at. `modalOpen`: an account-gated action already opened the modal.
+ */
+export async function signIn(page: Page, email: string, modalOpen = false) {
   const logOffset = statSync(mailerLog!).size;
-  await page.getByRole("button", { name: "Account", exact: true }).click();
+  if (!modalOpen)
+    await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("textbox", { name: "Email", exact: true }).fill(email);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   let link = "";

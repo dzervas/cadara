@@ -32,6 +32,10 @@ export interface NewProjectFormProps {
   error: string | null;
   /** Hides Local: the project is created to receive a move into the account. */
   accountOnly?: boolean;
+  /** Shows Local disabled with this reason, e.g. when sharing needs an account project. */
+  localUnavailableReason?: string;
+  /** The name field's starting value. */
+  initialName?: string;
   onSignIn: () => void;
   onCancel: () => void;
   onSubmit: (input: NewProjectInput) => void;
@@ -44,6 +48,8 @@ export function NewProjectForm({
   busy,
   error,
   accountOnly = false,
+  localUnavailableReason,
+  initialName = "",
   onSignIn,
   onCancel,
   onSubmit,
@@ -57,9 +63,13 @@ export function NewProjectForm({
     owners.find((owner) => owner.id === lastChoice?.ownerId)?.id ??
     owners[0]?.id ??
     "";
-  const options = projectLocationOptions(account, ownerId, offline).filter(
-    (option) => !accountOnly || option.value !== "local",
-  );
+  const options = projectLocationOptions(account, ownerId, offline)
+    .filter((option) => !accountOnly || option.value !== "local")
+    .map((option) =>
+      option.value === "local" && localUnavailableReason
+        ? { ...option, disabledReason: localUnavailableReason }
+        : option,
+    );
   const [chosenLocation, setChosenLocation] = useState<ProjectLocation | null>(
     null,
   );
@@ -71,7 +81,7 @@ export function NewProjectForm({
     )
       ? chosenLocation
       : preselectProjectLocation(options, lastChoice?.location ?? null);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const locationAvailable = options.some(
     (option) => option.value === location && option.disabledReason === null,
   );

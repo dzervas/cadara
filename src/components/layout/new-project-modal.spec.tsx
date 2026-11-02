@@ -73,6 +73,19 @@ test("a project created to receive a move into the account offers no Local card"
   expect(checkedLocation(offline)).toBeUndefined();
 });
 
+test("a project created to share a local part shows Local disabled with the reason and the part's name", () => {
+  const html = render({
+    account: makeAccount(),
+    localUnavailableReason: "Sharing needs an account project.",
+    initialName: "Bracket",
+    lastChoice: { location: "local", ownerId: "personal" },
+  });
+  expect(html).toMatch(/<input[^>]*disabled=""[^>]*value="local"/);
+  expect(html).toContain("Sharing needs an account project.");
+  expect(html).toMatch(/<input[^>]*value="Bracket"/);
+  expect(checkedLocation(html)).toBe("private");
+});
+
 test("team members pick the owner of a new project", () => {
   const account = makeAccount();
   account.organizations.push({ id: "team", name: "Workshop team" });

@@ -28,6 +28,9 @@ function unwrapProjectResult<T>(result: ProjectResult<T>): T {
   return result.value;
 }
 
+/** The project made when this browser has none to open. */
+export const DEFAULT_PROJECT_NAME = "My project";
+
 /**
  * Opens the workbench's project state before the shell mounts.
  *
@@ -223,7 +226,7 @@ export function createWorkbenchProjectBootstrap(
         try {
           return unwrapProjectResult(
             await projects.create(
-              "My project",
+              DEFAULT_PROJECT_NAME,
               initialTabs.tabs.map((tab) => ({
                 docId: tab.documentId,
                 name: tab.title,

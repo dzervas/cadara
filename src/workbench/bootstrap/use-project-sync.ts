@@ -104,6 +104,7 @@ export function useProjectSync(
   // opens, so local-only use makes no account requests of its own.
   const [account, setAccount] = useState<Account | null>(null);
   const [accountChecked, setAccountChecked] = useState(false);
+  /** Re-reads the account; resolves to it, null when signed out or unreachable. */
   const refreshAccount = useCallback(
     () =>
       getWorkbenchSessionPort()
@@ -112,12 +113,14 @@ export function useProjectSync(
           (next) => {
             setAccount(next);
             setAccountChecked(true);
+            return next;
           },
           () => {
             // Unreachable service: the project keeps working locally and
             // the indicator shows "offline".
             setAccount(null);
             setAccountChecked(true);
+            return null;
           },
         ),
     [],
@@ -433,21 +436,33 @@ export function useProjectSync(
       name: string;
       orgId: string;
       visibility: ProjectVisibility;
+      /** A part moves in next: no empty part is created. */
+      withoutParts?: boolean;
     }) => {
+      const { withoutParts, ...remote } = input;
       const repository = await getRepository();
       const manifest = unwrap(
-        await repository.create(input.name, [
-          { docId: generateDocumentId(), name: "Workspace", kind: "part" },
-        ]),
+        await repository.create(
+          remote.name,
+          withoutParts
+            ? []
+            : [
+                {
+                  docId: generateDocumentId(),
+                  name: "Workspace",
+                  kind: "part",
+                },
+              ],
+        ),
       );
       try {
         return await uploadProjectToService(
           { service, projects: syncedProjectStore(repository) },
-          { manifest, ...input, slug: projectSlugFromName(input.name) },
+          { manifest, ...remote, slug: projectSlugFromName(remote.name) },
         );
       } catch (error) {
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)} "${input.name}" was kept on this device; upload it from the CADara menu.`,
+          `${error instanceof Error ? error.message : String(error)} "${remote.name}" was kept on this device; upload it from the CADara menu.`,
           { cause: error },
         );
       }

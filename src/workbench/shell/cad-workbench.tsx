@@ -54,6 +54,7 @@ import { DocumentExportModal } from "@/components/layout/document-export-modal";
 import {
   OpenDocumentModal,
   SaveAsDocumentModal,
+  type DocumentFileMenuProject,
 } from "@/components/layout/document-file-menu";
 import { WorkbenchInspectorOverlay } from "@/components/layout/workbench-inspector-overlay";
 import { WorkspaceToolbar } from "@/components/layout/workspace-toolbar";
@@ -237,6 +238,8 @@ interface CadWorkbenchProps {
   tabsState: WorkbenchTabsState;
   tabStorageFeedback?: Partial<Record<DocumentId, DocumentTabStorageFeedback>>;
   projectControls?: ReactNode;
+  /** The open project's entries in the logo menu (switch, New project, Share). */
+  fileMenuProject?: DocumentFileMenuProject;
   localDocumentOffers?: LocalDocumentOffers;
   localProject?: boolean;
   onMoveActiveDocumentToAccount?: () => void;
@@ -282,6 +285,7 @@ export function CadWorkbench({
   tabsState,
   tabStorageFeedback,
   projectControls,
+  fileMenuProject,
   localDocumentOffers,
   localProject,
   onMoveActiveDocumentToAccount,
@@ -2204,6 +2208,7 @@ export function CadWorkbench({
               readOnly={readOnly}
               showBrowserStorageWarning={showBrowserStorageWarning}
               localSaving={localSaving}
+              fileMenuProject={fileMenuProject}
               {...toolbarCallbacks}
             />
 

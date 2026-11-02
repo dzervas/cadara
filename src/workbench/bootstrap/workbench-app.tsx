@@ -15,6 +15,14 @@ import {
   localDocumentOfferOptOutKey,
 } from "@/application/account/local-document-offers";
 import { ProjectSwitcher } from "@/components/layout/project-switcher";
+import type { DocumentFileMenuProject } from "@/components/layout/document-file-menu";
+import type { ShareDialogTarget } from "@/components/account/sharing/share-dialog";
+import { useShareDialog } from "@/components/account/sharing/use-share-dialog";
+import { ACCOUNT_SESSION_CHANGED } from "@/application/account/account-session";
+import { createProjectAccessHttpClient } from "@/infrastructure/account/project-access";
+import { getAccountApiOrigin } from "@/infrastructure/account/api-origin";
+import { recentProjects } from "@/core/project-sync/recent-projects";
+import { createLocalStorageRecentProjectsStore } from "@/infrastructure/persistence/local-storage-recent-projects-store";
 import {
   NewProjectModal,
   type NewProjectInput,
@@ -34,8 +42,10 @@ import {
 import { SignInRequestProvider } from "@/hooks/sign-in-request-provider";
 import { useSignInRequest } from "@/hooks/sign-in-request-context";
 import { createLocalStorageNewProjectChoiceStore } from "@/infrastructure/persistence/local-storage-new-project-choice-store";
+import { DEFAULT_PROJECT_NAME } from "@/infrastructure/persistence/workbench-project-bootstrap";
 import type { NewProjectChoice } from "@/core/account/project-location-options";
 import { useBrowserOnline } from "@/hooks/use-browser-online";
+import { useLatestCallbacks } from "@/hooks/use-latest-callbacks";
 import { summarizeQuota } from "@/core/account/quota-summary";
 import { createProjectWriteGatedDocumentRepository } from "@/application/project-sync/project-write-gated-document-repository";
 import { useEditorPageMemory } from "./editor-page-memory";
@@ -149,6 +159,42 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
   const projects = useWorkbenchProject(props.documentSyncWorkerClient !== null);
   const sync = useProjectSync(props.documentSyncWorkerClient, projects);
   useEditorPageMemory(projects.project);
+  // The logo menu orders its recent projects from this record; the
+  // per-project workbench reads it when it mounts for a switched project.
+  const openProjectId = projects.project?.projectId;
+  useEffect(() => {
+    if (openProjectId)
+      createLocalStorageRecentProjectsStore(window.localStorage).record(
+        openProjectId,
+      );
+  }, [openProjectId]);
+  // Above the per-project workbench: Share on a local part opens the dialog
+  // after the window has switched to the part's new account project.
+  const accessPort = useMemo(
+    () => createProjectAccessHttpClient({ apiOrigin: getAccountApiOrigin() }),
+    [],
+  );
+  const { openShareDialog, shareDialog } = useShareDialog({
+    port: accessPort,
+    account: sync.account,
+    // Leaving the open project: the window moves to a project on this
+    // device, a new one when there is none.
+    onLeft: (left) => {
+      if (projects.project?.service?.projectId !== left.projectId) return;
+      const local = projects.projects.find((listed) => !listed.service);
+      void projects.select((repository) =>
+        local
+          ? repository.open(local.projectId)
+          : repository.create(DEFAULT_PROJECT_NAME, [
+              {
+                docId: generateDocumentId(),
+                name: DEFAULT_WORKBENCH_DOCUMENT_NAME,
+                kind: "part",
+              },
+            ]),
+      );
+    },
+  });
   if (projects.initialFailure)
     return (
       <Alert color="red" title="Project could not be opened">
@@ -163,7 +209,9 @@ export function WorkbenchApp(props: WorkbenchAppProps) {
         projects={projects}
         sync={sync}
         localDocumentOffers={localDocumentOffers}
+        openShareDialog={openShareDialog}
       />
+      {shareDialog}
     </SignInRequestProvider>
   );
 }
@@ -177,10 +225,12 @@ function ProjectWorkbenchApp({
   projects,
   sync,
   localDocumentOffers,
+  openShareDialog,
 }: WorkbenchAppProps & {
   localDocumentOffers: LocalDocumentOffers;
   projects: ReturnType<typeof useWorkbenchProject>;
   sync: ProjectSync;
+  openShareDialog: (target: ShareDialogTarget) => void;
 }) {
   const errorReporter = useErrorReporter();
   const project = projects.project;
@@ -670,20 +720,77 @@ function ProjectWorkbenchApp({
     lastChoice: NewProjectChoice | null;
     busy: boolean;
     error: string | null;
+    /** Opened by Share on a local part: the project receives it, then is shared. */
+    share: { documentId: DocumentId; name: string } | null;
   } | null>(() =>
     new URLSearchParams(window.location.search).get("newProject") === "1"
-      ? { lastChoice: newProjectChoices.load(), busy: false, error: null }
+      ? {
+          lastChoice: newProjectChoices.load(),
+          busy: false,
+          error: null,
+          share: null,
+        }
       : null,
   );
   const { refreshAccount, createAccountProject } = sync;
+  // Share on a local part waiting for a sign-in: it continues once this tab
+  // or the tab a sign-in link opened reports the new session. Opening
+  // another project dialog drops it, since the sign-in may have been dismissed.
+  const [shareAfterSignIn, setShareAfterSignIn] = useState<DocumentId | null>(
+    null,
+  );
   const openNewProjectDialog = useCallback(() => {
     void refreshAccount();
+    setShareAfterSignIn(null);
     setNewProjectDialog({
       lastChoice: newProjectChoices.load(),
       busy: false,
       error: null,
+      share: null,
     });
   }, [newProjectChoices, refreshAccount]);
+  const openShareNewProjectDialog = useCallback(
+    (documentId: DocumentId) => {
+      // The part may have closed or moved while the sign-in ran: the active
+      // part is shared instead.
+      const tab =
+        tabsState.tabs.find(
+          (candidate) => candidate.documentId === documentId,
+        ) ??
+        tabsState.tabs.find(
+          (candidate) => candidate.documentId === tabsState.activeDocumentId,
+        );
+      if (!tab) return;
+      setNewProjectDialog({
+        lastChoice: newProjectChoices.load(),
+        busy: false,
+        error: null,
+        share: { documentId: tab.documentId, name: tab.title },
+      });
+    },
+    [newProjectChoices, tabsState.activeDocumentId, tabsState.tabs],
+  );
+  useEffect(() => {
+    if (shareAfterSignIn === null) return;
+    let live = true;
+    const continueWhenSignedIn = () => {
+      void refreshAccount().then((account) => {
+        if (!live || !account) return;
+        setShareAfterSignIn(null);
+        openShareNewProjectDialog(shareAfterSignIn);
+      });
+    };
+    const storageChanged = (event: StorageEvent) => {
+      if (event.key === ACCOUNT_SESSION_CHANGED) continueWhenSignedIn();
+    };
+    window.addEventListener(ACCOUNT_SESSION_CHANGED, continueWhenSignedIn);
+    window.addEventListener("storage", storageChanged);
+    return () => {
+      live = false;
+      window.removeEventListener(ACCOUNT_SESSION_CHANGED, continueWhenSignedIn);
+      window.removeEventListener("storage", storageChanged);
+    };
+  }, [openShareNewProjectDialog, refreshAccount, shareAfterSignIn]);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.get("newProject") !== "1") return;
@@ -696,30 +803,78 @@ function ProjectWorkbenchApp({
     targetId: string | null;
     /** Opened from the local document offer: name the account it moves into. */
     toAccount: boolean;
+    /** Retrying a Share whose part did not move: share the target after the move. */
+    shareAfterMove?: boolean;
     busy: boolean;
     error: string | null;
   } | null>(null);
+  /** Moves a part into `target`, then the window follows it there. */
+  const moveDocumentAndFollow = async (
+    target: ProjectManifest,
+    documentId: DocumentId,
+  ) => {
+    if (!workerDocumentRepository)
+      throw new Error("Moving a part needs browser storage.");
+    const moved = await sync.moveDocument({
+      target,
+      documentId,
+      waitForLocalChanges,
+      cloneWithHistory: (sourceDocumentId, targetDocumentId) =>
+        workerDocumentRepository.cloneWithHistory(
+          sourceDocumentId,
+          targetDocumentId,
+        ),
+    });
+    if (moved.sourceRemovalUnconfirmed)
+      errorReporter.report(
+        normalizeUnknownError(moved.sourceRemovalUnconfirmed, {
+          code: "app/operation-failed",
+          fallbackMessage: moved.sourceRemovalUnconfirmed.message,
+        }),
+        { source: "project-sync", visibility: "user" },
+      );
+    // A switch failure is reported with the other project notices.
+    try {
+      await projects.select(
+        (repository) => repository.open(target.projectId),
+        moved.documentId,
+      );
+    } finally {
+      moved.release();
+    }
+  };
   const createProject = async (input: NewProjectInput) => {
+    const share = newProjectDialog?.share ?? null;
     const lastChoice = { location: input.location, ownerId: input.ownerId };
-    setNewProjectDialog({ lastChoice, busy: true, error: null });
-    // A project made from Move is account-only; it is not the user's default.
-    if (!moveDialog) newProjectChoices.save(lastChoice);
+    setNewProjectDialog({ lastChoice, busy: true, error: null, share });
+    // A project made from Move or Share is account-only; it is not the
+    // user's default.
+    if (!moveDialog && !share) newProjectChoices.save(lastChoice);
+    let created: ProjectManifest | null = null;
     try {
       await waitForLocalChanges();
-      const created =
+      created =
         input.location === "local"
           ? null
           : await createAccountProject({
               name: input.name,
               orgId: input.ownerId,
               visibility: input.location,
+              withoutParts: share !== null,
             });
+      // Created from Share (account locations only): the part moves in, the
+      // window follows it and the new project's Share dialog opens.
+      if (share && created?.service) {
+        await moveDocumentAndFollow(created, share.documentId);
+        openShareDialog({ ...created.service, name: created.name });
+      }
       // Created from Move to project (account locations only): the window
       // stays on the source and the Move dialog returns with it chosen.
-      if (moveDialog && created) {
+      else if (moveDialog && created) {
+        const createdId = created.projectId;
         await projects.refreshProjects();
         setMoveDialog(
-          (current) => current && { ...current, targetId: created.projectId },
+          (current) => current && { ...current, targetId: createdId },
         );
       }
       // A switch failure is reported with the other project notices.
@@ -740,16 +895,28 @@ function ProjectWorkbenchApp({
       // A failed upload keeps the new project on this device; list it.
       if (input.location !== "local")
         void projects.refreshProjects().catch(projects.report);
-      setNewProjectDialog({
-        lastChoice,
-        busy: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const message = error instanceof Error ? error.message : String(error);
+      // The project exists but the part did not move: Move to project
+      // retries into it rather than creating another.
+      if (share && created) {
+        setNewProjectDialog(null);
+        setMoveDialog({
+          documentId: share.documentId,
+          targetId: created.projectId,
+          toAccount: true,
+          shareAfterMove: true,
+          busy: false,
+          error: message,
+        });
+        return;
+      }
+      setNewProjectDialog({ lastChoice, busy: false, error: message, share });
     }
   };
 
   const openAccountMoveDialog = useCallback(() => {
     void refreshAccount();
+    setShareAfterSignIn(null);
     setMoveDialog({
       documentId: tabsState.activeDocumentId,
       targetId: null,
@@ -776,6 +943,7 @@ function ProjectWorkbenchApp({
         disabled: moveUnavailableReason !== null,
         onSelect: () => {
           void refreshAccount();
+          setShareAfterSignIn(null);
           setMoveDialog({
             documentId: tab.documentId,
             targetId: null,
@@ -828,38 +996,13 @@ function ProjectWorkbenchApp({
     const target = projects.projects.find(
       (candidate) => candidate.projectId === targetProjectId,
     );
-    if (!moveDialog || !target || !workerDocumentRepository) return;
+    if (!moveDialog || !target) return;
     setMoveDialog({ ...moveDialog, busy: true, error: null });
     try {
-      const moved = await sync.moveDocument({
-        target,
-        documentId: moveDialog.documentId,
-        waitForLocalChanges,
-        cloneWithHistory: (documentId, targetDocumentId) =>
-          workerDocumentRepository.cloneWithHistory(
-            documentId,
-            targetDocumentId,
-          ),
-      });
-      if (moved.sourceRemovalUnconfirmed)
-        errorReporter.report(
-          normalizeUnknownError(moved.sourceRemovalUnconfirmed, {
-            code: "app/operation-failed",
-            fallbackMessage: moved.sourceRemovalUnconfirmed.message,
-          }),
-          { source: "project-sync", visibility: "user" },
-        );
-      // The window follows the part to its new project; a switch failure
-      // is reported with the other project notices.
-      try {
-        await projects.select(
-          (repository) => repository.open(target.projectId),
-          moved.documentId,
-        );
-      } finally {
-        moved.release();
-      }
+      await moveDocumentAndFollow(target, moveDialog.documentId);
       setMoveDialog(null);
+      if (moveDialog.shareAfterMove && target.service)
+        openShareDialog({ ...target.service, name: target.name });
     } catch (error) {
       setMoveDialog({
         ...moveDialog,
@@ -868,6 +1011,64 @@ function ProjectWorkbenchApp({
       });
     }
   };
+
+  // Switching keeps the page, its kernel and workers: only the per-project
+  // workbench remounts.
+  const switchProject = (projectId: string) => {
+    void waitForLocalChanges()
+      .then(() => projects.select((repository) => repository.open(projectId)))
+      .catch(projects.report);
+  };
+  /**
+   * Share opens an account project's Share dialog. A local part first needs
+   * an account project to move into: sign in if needed, then New project
+   * with the part's name, then the move (see createProject).
+   */
+  const shareFromFileMenu = () => {
+    if (!project) return;
+    if (project.service) {
+      openShareDialog({ ...project.service, name: project.name });
+      return;
+    }
+    const documentId = tabsState.activeDocumentId;
+    void refreshAccount().then((account) => {
+      // Offline, the New project modal explains why account cards are off.
+      if (account || !online) openShareNewProjectDialog(documentId);
+      else {
+        setShareAfterSignIn(documentId);
+        requestSignIn();
+      }
+    });
+  };
+  const [recentProjectIds] = useState(() =>
+    createLocalStorageRecentProjectsStore(window.localStorage).load(),
+  );
+  const fileMenuCallbacks = useLatestCallbacks({
+    onSwitch: switchProject,
+    onNewProject: openNewProjectDialog,
+    onShare: shareFromFileMenu,
+  });
+  const fileMenuBusy = projects.busy || localSaving;
+  const fileMenuProject = useMemo((): DocumentFileMenuProject | undefined => {
+    if (!project) return undefined;
+    return {
+      name: project.name,
+      recents: recentProjects(
+        projects.projects,
+        recentProjectIds,
+        project.projectId,
+      ).map(({ projectId, name }) => ({ projectId, name })),
+      busy: fileMenuBusy,
+      allProjectsHref: `/dashboard${window.location.search}`,
+      ...fileMenuCallbacks,
+    };
+  }, [
+    fileMenuBusy,
+    fileMenuCallbacks,
+    project,
+    projects.projects,
+    recentProjectIds,
+  ]);
 
   return (
     <RuntimeExtensionRegistryProvider registries={runtimeExtensionRegistries}>
@@ -890,6 +1091,7 @@ function ProjectWorkbenchApp({
                 )
               }
               projectWriteGate={projectWriteGate}
+              fileMenuProject={fileMenuProject}
               projectPresence={<ProjectSyncPresence sync={sync} />}
               presencePeers={sync.otherPeers}
               onPresenceSelectionChange={sync.setSelection}
@@ -904,15 +1106,7 @@ function ProjectWorkbenchApp({
                       }))}
                       activeProjectId={project.projectId}
                       busy={projects.busy || localSaving}
-                      onSwitch={(projectId) => {
-                        void waitForLocalChanges()
-                          .then(() =>
-                            projects.select((repository) =>
-                              repository.open(projectId),
-                            ),
-                          )
-                          .catch(projects.report);
-                      }}
+                      onSwitch={switchProject}
                       onCreate={openNewProjectDialog}
                     />
                     <ProjectSyncControls
@@ -965,6 +1159,12 @@ function ProjectWorkbenchApp({
         busy={newProjectDialog?.busy ?? false}
         error={newProjectDialog?.error ?? null}
         accountOnly={moveDialog !== null}
+        localUnavailableReason={
+          newProjectDialog?.share
+            ? "Sharing needs an account project."
+            : undefined
+        }
+        initialName={newProjectDialog?.share?.name}
         onSignIn={() => {
           setNewProjectDialog(null);
           requestSignIn();

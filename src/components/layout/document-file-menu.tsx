@@ -43,6 +43,19 @@ function BrowserStorageWarningTooltipLabel() {
   );
 }
 
+/** The open project's entries at the top of the logo menu. */
+export interface DocumentFileMenuProject {
+  name: string;
+  /** Projects to switch to, most recent first; the open one is not listed. */
+  recents: readonly { projectId: string; name: string }[];
+  /** Recent projects are disabled while a switch or save is underway. */
+  busy: boolean;
+  allProjectsHref: string;
+  onSwitch: (projectId: string) => void;
+  onNewProject: () => void;
+  onShare: () => void;
+}
+
 interface DocumentFileMenuHandlers {
   onNewDocument: () => void;
   onOpenDocument: () => void;
@@ -52,6 +65,8 @@ interface DocumentFileMenuHandlers {
 interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
   defaultOpened?: boolean;
   showBrowserStorageWarning?: boolean;
+  /** Absent without a durable project (no browser storage). */
+  project?: DocumentFileMenuProject;
   /**
    * Custom Menu.Target trigger. When provided, the file menu opens from this element
    * instead of the default file ActionIcon. Used by the floating toolbar to attach the
@@ -63,6 +78,7 @@ interface DocumentFileMenuProps extends DocumentFileMenuHandlers {
 export function DocumentFileMenu({
   defaultOpened = false,
   showBrowserStorageWarning = false,
+  project,
   onNewDocument,
   onOpenDocument,
   onSaveDocumentAs,
@@ -93,7 +109,7 @@ export function DocumentFileMenu({
           defaultOpened={defaultOpened}
           position="bottom-start"
           transitionProps={{ duration: 0 }}
-          width={180}
+          width={220}
         >
           <Menu.Target>
             {trigger ?? (
@@ -126,6 +142,12 @@ export function DocumentFileMenu({
               boxShadow: "var(--workbench-panel-shadow)",
             }}
           >
+            {project && (
+              <>
+                <DocumentFileMenuProjectItems project={project} />
+                <Menu.Divider />
+              </>
+            )}
             {DOCUMENT_FILE_MENU_ITEMS.map((item) => (
               <Menu.Item
                 key={item.id}
@@ -157,6 +179,70 @@ export function DocumentFileMenu({
         ) : null}
       </div>
       <AboutModal opened={aboutOpened} onClose={() => setAboutOpened(false)} />
+    </>
+  );
+}
+
+function DocumentFileMenuProjectItems({
+  project,
+}: {
+  project: DocumentFileMenuProject;
+}) {
+  return (
+    <>
+      <Menu.Sub>
+        <Menu.Sub.Target>
+          <Menu.Sub.Item
+            leftSection={<WorkbenchIcon name="layers" className="h-4 w-4" />}
+            data-document-file-menu-project
+          >
+            <Text component="span" size="sm" fw={600} truncate="end">
+              {project.name}
+            </Text>
+          </Menu.Sub.Item>
+        </Menu.Sub.Target>
+        <Menu.Sub.Dropdown
+          style={{
+            backgroundColor: "var(--workbench-shell-overlay-strong)",
+            borderColor: "var(--workbench-shell-border)",
+            boxShadow: "var(--workbench-panel-shadow)",
+            maxWidth: 280,
+          }}
+        >
+          {project.recents.length > 0 && (
+            <>
+              <Menu.Label>Recent projects</Menu.Label>
+              {project.recents.map((recent) => (
+                <Menu.Item
+                  key={recent.projectId}
+                  disabled={project.busy}
+                  onClick={() => project.onSwitch(recent.projectId)}
+                >
+                  <Text component="span" size="sm" truncate="end">
+                    {recent.name}
+                  </Text>
+                </Menu.Item>
+              ))}
+              <Menu.Divider />
+            </>
+          )}
+          <Menu.Item component="a" href={project.allProjectsHref}>
+            All projects…
+          </Menu.Item>
+          <Menu.Item
+            leftSection={<WorkbenchIcon name="plus" className="h-4 w-4" />}
+            onClick={project.onNewProject}
+          >
+            New project…
+          </Menu.Item>
+        </Menu.Sub.Dropdown>
+      </Menu.Sub>
+      <Menu.Item
+        leftSection={<WorkbenchIcon name="account" className="h-4 w-4" />}
+        onClick={project.onShare}
+      >
+        Share…
+      </Menu.Item>
     </>
   );
 }
