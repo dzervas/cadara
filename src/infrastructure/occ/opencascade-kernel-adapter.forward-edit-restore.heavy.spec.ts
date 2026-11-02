@@ -12,6 +12,7 @@
 // references. Counting spies follow
 // opencascade-kernel-adapter.history-prefix-reuse.heavy.spec.ts.
 import { readFile } from "node:fs/promises";
+import * as Automerge from "@automerge/automerge";
 import { expect, test, vi } from "vitest";
 
 // Counts feature executions without retaining their (large) arguments.
@@ -50,8 +51,12 @@ vi.mock("@/infrastructure/occ/sketch-profile", async (importOriginal) => {
 import type { AuthoredModelDocument } from "@/contracts/modeling/authored-document";
 import type { FeatureDefinition } from "@/contracts/modeling/schema";
 import type { FeatureId, SketchId } from "@/contracts/shared/ids";
-import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 import { CONTRACT_VERSION } from "@/contracts/shared/versioning";
+import {
+  createCollaborativeDocument,
+  materializeCollaborativeDocument,
+  type CollaborativeDocument,
+} from "@/core/modeling/collaborative-document";
 
 import {
   expectColdEquivalent,
@@ -151,9 +156,24 @@ async function editFeature(
   return featureRuns.count;
 }
 
-/** `document` as the repository stores it: object keys sorted. */
+/**
+ * `document` as the browser repository hands it back after a load: the
+ * stable-record codec in a saved and reloaded Automerge document, whose maps
+ * list their keys sorted, unlike the session's edited feature.
+ */
 const stored = (document: AuthoredModelDocument) =>
-  stableJsonValue(document) as AuthoredModelDocument;
+  materializeCollaborativeDocument(
+    Automerge.load<CollaborativeDocument>(
+      Automerge.save(
+        Automerge.from(
+          createCollaborativeDocument(document) as unknown as Record<
+            string,
+            unknown
+          >,
+        ),
+      ),
+    ),
+  );
 
 /**
  * Restores `document` into the session, then takes a snapshot. Returns the
@@ -348,6 +368,16 @@ test.each(Object.keys(tailEdits))(
       // tokens and invalidated references; the next restore reruns the edit.
       const reruns = await editFeature(session, tailEdits[model]!);
       const edited = await session.exported();
+      const editedDefinition = (document: AuthoredModelDocument) =>
+        JSON.stringify(
+          document.features.find(
+            (feature) => feature.featureId === tailEdits[model]!.featureId,
+          )!.definition,
+        );
+      expect(
+        editedDefinition(stored(edited)),
+        "premise: the repository orders the edited definition's keys unlike the session",
+      ).not.toBe(editedDefinition(edited));
       expect
         .soft(
           await finishInEditor(),
