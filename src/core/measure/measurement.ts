@@ -60,6 +60,11 @@ import {
 } from "@/core/editor/schema";
 import type { EditorState } from "@/core/editor/state-machine/types";
 import {
+  closestPolylinePair,
+  closestPolylineTrianglePair,
+  closestTrianglePair,
+} from "@/core/measure/closest-element-pair";
+import {
   mapSketchPointToWorkspaceWorld,
   mapWorldPointToWorkspaceSketch,
   type WorkspaceVec3,
@@ -1575,8 +1580,8 @@ function farthestPointPair(
   first: readonly WorkspaceVec3[],
   second: readonly WorkspaceVec3[],
 ): PairwiseDistanceResult | null {
-  const firstChunks = chunkElements(first, pointBound);
-  const secondChunks = chunkElements(second, pointBound);
+  const firstChunks = chunkPoints(first);
+  const secondChunks = chunkPoints(second);
   const chunkPairs = firstChunks
     .flatMap((firstChunk) =>
       secondChunks.map((secondChunk) => ({
@@ -1595,12 +1600,12 @@ function farthestPointPair(
     if (best && chunkReach + PRUNE_SLACK < best.result.distance) break;
     for (
       let firstOffset = 0;
-      firstOffset < firstChunk.bounds.length;
+      firstOffset < firstChunk.count;
       firstOffset += 1
     ) {
       for (
         let secondOffset = 0;
-        secondOffset < secondChunk.bounds.length;
+        secondOffset < secondChunk.count;
         secondOffset += 1
       ) {
         const firstIndex = firstChunk.offset + firstOffset;
@@ -2211,55 +2216,22 @@ function measurePolylineToPolyline(
   first: readonly WorkspaceVec3[],
   second: readonly WorkspaceVec3[],
 ): PairwiseDistanceResult | null {
-  return closestElementPair(
-    polylineSegments(first),
-    polylineSegments(second),
-    segmentBound,
-    segmentBound,
-    (firstSegment, secondSegment) => {
-      const result = closestPointsBetweenSegments(
-        firstSegment[0],
-        firstSegment[1],
-        secondSegment[0],
-        secondSegment[1],
-      );
-      return {
-        distance: distanceBetween(result.start, result.end),
-        start: result.start,
-        end: result.end,
-      };
-    },
-  );
+  return closestPolylinePair(first, second);
 }
 
 function measurePolylineToMesh(
   polyline: readonly WorkspaceVec3[],
   triangles: readonly Triangle[],
 ): PairwiseDistanceResult | null {
-  return closestElementPair(
-    polylineSegments(polyline),
-    triangles,
-    segmentBound,
-    triangleBound,
-    (segment, triangle) =>
-      closestPointsBetweenSegmentAndTriangle(segment[0], segment[1], triangle),
-  );
+  return closestPolylineTrianglePair(polyline, triangles);
 }
 
 function measureMeshToMesh(
   first: readonly Triangle[],
   second: readonly Triangle[],
 ): PairwiseDistanceResult | null {
-  return closestElementPair(
-    first,
-    second,
-    triangleBound,
-    triangleBound,
-    closestPointsBetweenTriangles,
-  );
+  return closestTrianglePair(first, second);
 }
-
-type Segment = readonly [WorkspaceVec3, WorkspaceVec3];
 
 /** An axis-aligned box: per axis, its least and greatest coordinate. */
 interface BoundingBox {
@@ -2267,29 +2239,17 @@ interface BoundingBox {
   max: WorkspaceVec3;
 }
 
-/** An element's box, its vertices and, for a triangle, its plane. */
-interface ElementBound extends BoundingBox {
-  points: readonly WorkspaceVec3[];
-  plane: { normal: WorkspaceVec3; offset: number } | null;
-}
-
-interface ElementChunk {
-  /** Index of the chunk's first element in its list. */
+interface PointChunk {
+  /** Index of the chunk's first point in its list. */
   offset: number;
-  bounds: readonly ElementBound[];
+  count: number;
   box: BoundingBox;
 }
 
-/** Consecutive elements per chunk: tessellations are spatially coherent. */
-const ELEMENT_CHUNK_SIZE = 32;
+/** Consecutive points per chunk: tessellations are spatially coherent. */
+const POINT_CHUNK_SIZE = 32;
 /** Box bounds are compared with this margin (mm) for rounding. */
 const PRUNE_SLACK = 1e-9;
-
-function polylineSegments(points: readonly WorkspaceVec3[]): Segment[] {
-  const segments: Segment[] = [];
-  forEachSegment(points, false, (start, end) => segments.push([start, end]));
-  return segments;
-}
 
 function boxOfPoints(points: readonly WorkspaceVec3[]): BoundingBox {
   const axis = (index: 0 | 1 | 2, pick: (...values: number[]) => number) =>
@@ -2300,95 +2260,13 @@ function boxOfPoints(points: readonly WorkspaceVec3[]): BoundingBox {
   };
 }
 
-const segmentBound = (segment: Segment): ElementBound => ({
-  ...boxOfPoints(segment),
-  points: segment,
-  plane: null,
-});
-
-function triangleBound(triangle: Triangle): ElementBound {
-  const points = [triangle.first, triangle.second, triangle.third];
-  const cross = crossProduct(
-    subtract(triangle.second, triangle.first),
-    subtract(triangle.third, triangle.first),
-  );
-  const length = magnitude(cross);
-  const normal = length > DISTANCE_EPSILON ? scale(cross, 1 / length) : null;
-  return {
-    ...boxOfPoints(points),
-    points,
-    plane: normal
-      ? { normal, offset: dotProduct(normal, triangle.first) }
-      : null,
-  };
-}
-
-const pointBound = (point: WorkspaceVec3): ElementBound => ({
-  min: point,
-  max: point,
-  points: [point],
-  plane: null,
-});
-
-function chunkElements<T>(
-  elements: readonly T[],
-  boundOf: (element: T) => ElementBound,
-): ElementChunk[] {
-  const chunks: ElementChunk[] = [];
-  for (let offset = 0; offset < elements.length; offset += ELEMENT_CHUNK_SIZE) {
-    const bounds = elements
-      .slice(offset, offset + ELEMENT_CHUNK_SIZE)
-      .map(boundOf);
-    chunks.push({
-      offset,
-      bounds,
-      box: boxOfPoints(bounds.flatMap((bound) => [bound.min, bound.max])),
-    });
+function chunkPoints(points: readonly WorkspaceVec3[]): PointChunk[] {
+  const chunks: PointChunk[] = [];
+  for (let offset = 0; offset < points.length; offset += POINT_CHUNK_SIZE) {
+    const chunk = points.slice(offset, offset + POINT_CHUNK_SIZE);
+    chunks.push({ offset, count: chunk.length, box: boxOfPoints(chunk) });
   }
   return chunks;
-}
-
-/** No two points of the boxes are closer than this. */
-function boxGap(first: BoundingBox, second: BoundingBox) {
-  let sum = 0;
-  for (const index of [0, 1, 2] as const) {
-    const gap = Math.max(
-      0,
-      second.min[index] - first.max[index],
-      first.min[index] - second.max[index],
-    );
-    sum += gap * gap;
-  }
-  return Math.sqrt(sum);
-}
-
-/** No point of `points` is closer than this to the plane. */
-function planeGap(
-  plane: ElementBound["plane"],
-  points: readonly WorkspaceVec3[],
-) {
-  if (!plane) return 0;
-  let above = Infinity;
-  let below = Infinity;
-  for (const point of points) {
-    const offset = dotProduct(plane.normal, point) - plane.offset;
-    if (offset >= 0) above = Math.min(above, offset);
-    else below = Math.min(below, -offset);
-  }
-  return above === Infinity ? below : below === Infinity ? above : 0;
-}
-
-/**
- * No two points of the elements are closer than this: their boxes' gap, or
- * how far one lies off the other's plane (tight for parallel surfaces,
- * where boxes of slanted triangles are loose).
- */
-function elementGap(first: ElementBound, second: ElementBound) {
-  return Math.max(
-    boxGap(first, second),
-    planeGap(first.plane, second.points),
-    planeGap(second.plane, first.points),
-  );
 }
 
 /** No two points of the boxes are farther apart than this. */
@@ -2402,138 +2280,6 @@ function boxReach(first: BoundingBox, second: BoundingBox) {
     sum += reach * reach;
   }
   return Math.sqrt(sum);
-}
-
-/**
- * The closest pair over `first` × `second`, exactly as the brute-force scan
- * in list order finds it: the least distance, ties going to the earliest
- * pair (first index, then second). Chunk pairs are visited nearest first
- * and any pair whose bounds (`elementGap`) are farther apart than the best
- * so far is skipped (cadara-h026.3: two dense curved faces took seconds to a
- * minute on the main thread; the plain selection measures every pick).
- */
-function closestElementPair<A, B>(
-  first: readonly A[],
-  second: readonly B[],
-  firstBound: (element: A) => ElementBound,
-  secondBound: (element: B) => ElementBound,
-  measure: (first: A, second: B) => PairwiseDistanceResult,
-): PairwiseDistanceResult | null {
-  const firstChunks = chunkElements(first, firstBound);
-  const secondChunks = chunkElements(second, secondBound);
-  const chunkPairs = firstChunks
-    .flatMap((firstChunk) =>
-      secondChunks.map((secondChunk) => ({
-        firstChunk,
-        secondChunk,
-        gap: boxGap(firstChunk.box, secondChunk.box),
-      })),
-    )
-    .sort((left, right) => left.gap - right.gap);
-  let best: {
-    result: PairwiseDistanceResult;
-    first: number;
-    second: number;
-  } | null = null;
-  for (const { firstChunk, secondChunk, gap } of chunkPairs) {
-    if (best && gap - PRUNE_SLACK > best.result.distance) break;
-    for (const [firstOffset, firstElement] of firstChunk.bounds.entries()) {
-      for (const [
-        secondOffset,
-        secondElement,
-      ] of secondChunk.bounds.entries()) {
-        if (
-          best &&
-          elementGap(firstElement, secondElement) - PRUNE_SLACK >
-            best.result.distance
-        )
-          continue;
-        const firstIndex = firstChunk.offset + firstOffset;
-        const secondIndex = secondChunk.offset + secondOffset;
-        const result = measure(first[firstIndex]!, second[secondIndex]!);
-        if (
-          !best ||
-          result.distance < best.result.distance ||
-          (result.distance === best.result.distance &&
-            (firstIndex < best.first ||
-              (firstIndex === best.first && secondIndex < best.second)))
-        )
-          best = { result, first: firstIndex, second: secondIndex };
-      }
-    }
-  }
-  return best?.result ?? null;
-}
-
-function closestPointsBetweenTriangles(
-  first: Triangle,
-  second: Triangle,
-): PairwiseDistanceResult {
-  const candidates: PairwiseDistanceResult[] = [];
-
-  for (const [start, end] of triangleEdges(first)) {
-    candidates.push(closestPointsBetweenSegmentAndTriangle(start, end, second));
-  }
-
-  for (const [start, end] of triangleEdges(second)) {
-    const reversed = closestPointsBetweenSegmentAndTriangle(start, end, first);
-    candidates.push({
-      distance: reversed.distance,
-      start: reversed.end,
-      end: reversed.start,
-    });
-  }
-
-  // Each vertex's distance to the other triangle is already a candidate,
-  // earlier and equal, as an endpoint of its edges' segment results.
-
-  return candidates.reduce((best, entry) =>
-    entry.distance < best.distance ? entry : best,
-  );
-}
-
-function closestPointsBetweenSegmentAndTriangle(
-  start: WorkspaceVec3,
-  end: WorkspaceVec3,
-  triangle: Triangle,
-): PairwiseDistanceResult {
-  const intersection = intersectSegmentTriangle(start, end, triangle);
-
-  if (intersection) {
-    return {
-      distance: 0,
-      start: intersection,
-      end: intersection,
-    };
-  }
-
-  const startClosest = closestPointOnTriangle(start, triangle);
-  const endClosest = closestPointOnTriangle(end, triangle);
-  const candidates: PairwiseDistanceResult[] = [
-    {
-      distance: distanceBetween(start, startClosest),
-      start,
-      end: startClosest,
-    },
-    {
-      distance: distanceBetween(end, endClosest),
-      start: end,
-      end: endClosest,
-    },
-  ];
-
-  for (const [edgeStart, edgeEnd] of triangleEdges(triangle)) {
-    const result = closestPointsBetweenSegments(start, end, edgeStart, edgeEnd);
-    candidates.push({
-      distance: distanceBetween(result.start, result.end),
-      start: result.start,
-      end: result.end,
-    });
-  }
-
-  return candidates.reduce((best, entry) =>
-    entry.distance < best.distance ? entry : best,
-  );
 }
 
 function getBodyFaceRenderables(snapshot: WorkspaceSnapshot, bodyId: string) {
@@ -3109,53 +2855,6 @@ function getClosedMeshVolume(meshes: readonly RenderMeshGeometry[]) {
   return windingConsistent ? Math.abs(signedTotal) : magnitudeTotal;
 }
 
-function triangleEdges(triangle: Triangle) {
-  return [
-    [triangle.first, triangle.second],
-    [triangle.second, triangle.third],
-    [triangle.third, triangle.first],
-  ] as const;
-}
-
-function intersectSegmentTriangle(
-  start: WorkspaceVec3,
-  end: WorkspaceVec3,
-  triangle: Triangle,
-) {
-  const direction = subtract(end, start);
-  const edgeOne = subtract(triangle.second, triangle.first);
-  const edgeTwo = subtract(triangle.third, triangle.first);
-  const pVector = crossProduct(direction, edgeTwo);
-  const determinant = dotProduct(edgeOne, pVector);
-
-  if (Math.abs(determinant) <= DISTANCE_EPSILON) {
-    return null;
-  }
-
-  const inverseDeterminant = 1 / determinant;
-  const tVector = subtract(start, triangle.first);
-  const u = dotProduct(tVector, pVector) * inverseDeterminant;
-
-  if (u < 0 || u > 1) {
-    return null;
-  }
-
-  const qVector = crossProduct(tVector, edgeOne);
-  const v = dotProduct(direction, qVector) * inverseDeterminant;
-
-  if (v < 0 || u + v > 1) {
-    return null;
-  }
-
-  const t = dotProduct(edgeTwo, qVector) * inverseDeterminant;
-
-  if (t < 0 || t > 1) {
-    return null;
-  }
-
-  return add(start, scale(direction, t));
-}
-
 function closestPointOnTriangle(
   point: WorkspaceVec3,
   triangle: Triangle,
@@ -3209,136 +2908,6 @@ function closestPointOnTriangle(
   const v = vb * denominator;
   const w = vc * denominator;
   return add(triangle.first, add(scale(ab, v), scale(ac, w)));
-}
-
-function closestPointsBetweenSegments(
-  firstStart: WorkspaceVec3,
-  firstEnd: WorkspaceVec3,
-  secondStart: WorkspaceVec3,
-  secondEnd: WorkspaceVec3,
-) {
-  const firstDirection = subtract(firstEnd, firstStart);
-  const secondDirection = subtract(secondEnd, secondStart);
-  const between = subtract(firstStart, secondStart);
-  const a = dotProduct(firstDirection, firstDirection);
-  const e = dotProduct(secondDirection, secondDirection);
-  const f = dotProduct(secondDirection, between);
-
-  let firstT = 0;
-  let secondT = 0;
-
-  if (a <= DISTANCE_EPSILON && e <= DISTANCE_EPSILON) {
-    return { start: firstStart, end: secondStart };
-  }
-
-  const b = dotProduct(firstDirection, secondDirection);
-  const denominator = a * e - b * b;
-
-  if (
-    a > DISTANCE_EPSILON &&
-    e > DISTANCE_EPSILON &&
-    Math.abs(denominator) <= DISTANCE_EPSILON * a * e
-  ) {
-    return closestPointsBetweenParallelSegments(
-      firstStart,
-      firstEnd,
-      secondStart,
-      secondEnd,
-    );
-  }
-
-  if (a <= DISTANCE_EPSILON) {
-    secondT = clamp(f / e, 0, 1);
-  } else {
-    const c = dotProduct(firstDirection, between);
-    if (e <= DISTANCE_EPSILON) {
-      firstT = clamp(-c / a, 0, 1);
-    } else {
-      firstT =
-        denominator !== 0 ? clamp((b * f - c * e) / denominator, 0, 1) : 0;
-      secondT = (b * firstT + f) / e;
-
-      if (secondT < 0) {
-        secondT = 0;
-        firstT = clamp(-c / a, 0, 1);
-      } else if (secondT > 1) {
-        secondT = 1;
-        firstT = clamp((b - c) / a, 0, 1);
-      }
-    }
-  }
-
-  return {
-    start: add(firstStart, scale(firstDirection, firstT)),
-    end: add(secondStart, scale(secondDirection, secondT)),
-  };
-}
-
-function closestPointsBetweenParallelSegments(
-  firstStart: WorkspaceVec3,
-  firstEnd: WorkspaceVec3,
-  secondStart: WorkspaceVec3,
-  secondEnd: WorkspaceVec3,
-) {
-  const firstDirection = subtract(firstEnd, firstStart);
-  const firstLength = magnitude(firstDirection);
-
-  if (firstLength <= DISTANCE_EPSILON) {
-    return {
-      start: firstStart,
-      end: closestPointOnSegment(firstStart, secondStart, secondEnd),
-    };
-  }
-
-  const axis = scale(firstDirection, 1 / firstLength);
-  const secondStartProjection = dotProduct(
-    subtract(secondStart, firstStart),
-    axis,
-  );
-  const secondEndProjection = dotProduct(subtract(secondEnd, firstStart), axis);
-  const secondMinimum = Math.min(secondStartProjection, secondEndProjection);
-  const secondMaximum = Math.max(secondStartProjection, secondEndProjection);
-  const overlapStart = Math.max(0, secondMinimum);
-  const overlapEnd = Math.min(firstLength, secondMaximum);
-
-  if (overlapStart <= overlapEnd + DISTANCE_EPSILON) {
-    const overlapMidpoint = (overlapStart + overlapEnd) / 2;
-    const anchor = add(
-      firstStart,
-      scale(axis, clamp(overlapMidpoint, 0, firstLength)),
-    );
-
-    return {
-      start: closestPointOnSegment(anchor, firstStart, firstEnd),
-      end: closestPointOnSegment(anchor, secondStart, secondEnd),
-    };
-  }
-
-  const candidates = [
-    {
-      start: firstStart,
-      end: closestPointOnSegment(firstStart, secondStart, secondEnd),
-    },
-    {
-      start: firstEnd,
-      end: closestPointOnSegment(firstEnd, secondStart, secondEnd),
-    },
-    {
-      start: closestPointOnSegment(secondStart, firstStart, firstEnd),
-      end: secondStart,
-    },
-    {
-      start: closestPointOnSegment(secondEnd, firstStart, firstEnd),
-      end: secondEnd,
-    },
-  ];
-
-  return candidates.reduce((best, entry) =>
-    distanceBetween(entry.start, entry.end) <
-    distanceBetween(best.start, best.end)
-      ? entry
-      : best,
-  );
 }
 
 function closestPointOnSegment(
