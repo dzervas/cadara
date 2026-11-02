@@ -50,6 +50,9 @@ in {
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
     PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "1";
     PLAYWRIGHT_BROWSERS_PATH = "${playwright-driver}";
+    # Local E2E renders on the host GPU (Chromium falls back to SwiftShader
+    # without one); CI does not use devenv and keeps the headless shell.
+    PLAYWRIGHT_GPU = "1";
     # Without any fontconfig font, headless Chromium lays text out at zero
     # height, so screenshots/GIFs show no text at all (cadara-m4ti).
     FONTCONFIG_FILE = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
