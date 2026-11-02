@@ -391,9 +391,9 @@ test("matched loft rebuilds preserve source references and expose the existing m
     expectMatchedEdge(oc, moved.shape, add(scale(add(world(0, 0, 0), to === pair[0]!.to ? world(2, 0, 10) : world(0, 2, 10)), 0.5), [0, 0, 3]));
     const mirrored = state.bodies.find(body => body.ownerFeatureId === "feature_match_mirror")!;
     expect(mirrored).toBeDefined();
-    // Mirror copy deliberately has an unsupported producer stage today
-    // (cadara-dd3.177). Do not confuse complete native transform history with
-    // stable copy-output lineage, or use this test to claim full admission.
+    // Mirror copies publish an unsupported producer stage for every source
+    // body, so copy references invalidate on each rebuild. Do not confuse
+    // complete native transform history with stable copy-output lineage.
     for (const ref of mirrorRefs) {
       expect(resolveOccReference(state, ref).resolution.invalidation?.reason).toBe("occ-topology-unsupported-history");
     }
@@ -419,6 +419,33 @@ test("matched loft rebuilds preserve source references and expose the existing m
 });
 
 type VertexRef = Extract<DurableRef, { kind: "vertex" }>;
+
+test("a refused pair edit fails the whole rebuild and leaves the previous matched state usable", async () => {
+  const { context, definition, ownedStates, upper, world, vertexAt } = await productionFixture({ opposite: true });
+  const before = rebuildOccAuthoringState(context, [{ featureId: "feature_match", definition, suppressed: false }]);
+  ownedStates.push(before);
+  const body = before.bodies.find(body => body.ownerFeatureId === "feature_match")!;
+  const refs: DurableRef[] = [
+    ...[...body.facesById.keys()].map(faceId => ({ kind: "face" as const, bodyId: body.bodyId, faceId })),
+    ...[...body.edgesById.keys()].map(edgeId => ({ kind: "edge" as const, bodyId: body.bodyId, edgeId })),
+    ...[...body.verticesById.keys()].map(vertexId => ({ kind: "vertex" as const, bodyId: body.bodyId, vertexId })),
+  ];
+  const pair = definition.parameters.options!.matchConnections as { from: VertexRef; to: VertexRef }[];
+  const diagonal = { ...definition, parameters: { ...definition.parameters, options: { matchConnections: [
+    { from: pair[0]!.from, to: { ...pair[0]!.to, vertexId: vertexAt(upper, world(2, 2, 10)) } },
+  ] } } };
+  expect(() => ownedStates.push(rebuildOccAuthoringState(before, [{ featureId: "feature_match", definition: diagonal, suppressed: false }])))
+    .toThrow("degenerate, non-convex or self-intersecting correspondence");
+  // No partial publication: the previous state still resolves every matched
+  // loft reference and remains a valid base for the next accepted rebuild.
+  for (const state of [before, rebuildOccAuthoringState(before, [{ featureId: "feature_match", definition, suppressed: false }])]) {
+    ownedStates.push(state);
+    expect(state.diagnostics).toEqual([]);
+    for (const ref of refs) {
+      expect(resolveOccReference(state, ref).resolution.invalidation, JSON.stringify(ref)).toBeNull();
+    }
+  }
+});
 
 test("matching refuses collapse, extra pairs, edge pairs and off-boundary identity without mutating the source", async () => {
   const { oc, definition, build, context, upper, lower, world, vertexAt } = await productionFixture({ opposite: true });

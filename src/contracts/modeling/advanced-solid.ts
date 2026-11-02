@@ -273,9 +273,10 @@ export interface LoftAdvancedOptions extends Record<string, unknown> {
   matchConnections?: readonly LoftMatchConnection[];
 }
 
-/** Supported loft input. Guide/endpoint/connection controls are refused as
- * unsupported by the native owner, so they are deliberately not part of this
- * executable contract. */
+/** Supported loft input. The native owner refuses guide and endpoint controls
+ * and honours only one bounded vertex connection on stored definitions;
+ * connections are not admitted canonically, so none of these controls are
+ * part of this executable contract. */
 export interface LoftFeatureParameters {
   participants: readonly (
     | { role: "profile"; targets: readonly Extract<DurableRef, { kind: "region" | "face" }>[] }
