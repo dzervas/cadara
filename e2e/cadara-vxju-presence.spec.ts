@@ -51,6 +51,14 @@ test("the presence rail shows one avatar per account, overlaps four, opens overf
   await expect(overflow).toContainText("Person 4 · editor");
   await expect(overflow).toContainText("Person 5 · editor");
   await expect(overflow.getByRole("listitem")).toHaveCount(2);
+  // The focus trap moves focus into the dropdown on a timer; Escape closes
+  // the popover only from there.
+  await expect(
+    page
+      .getByRole("dialog")
+      .filter({ has: overflow })
+      .locator(":scope:focus-within"),
+  ).toHaveCount(1);
   await page.keyboard.press("Escape");
   await expect(overflow).toBeHidden();
   await expect(more).toBeFocused();

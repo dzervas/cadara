@@ -317,6 +317,14 @@ const SKETCH_ANNOTATION_DOM_MARKERS = [
 const SKETCH_PICK_HINT_SLOT_WIDTH_PX = 420;
 const SKETCH_PICK_HINT_SLOT_HEIGHT_PX = 72;
 
+// One object for every render: R3F applies a changed prop object and requests
+// a WebGL frame, so an inline literal drew a frame on each workbench commit.
+const ORBIT_CONTROLS_MOUSE_BUTTONS = {
+  LEFT: -1 as THREE.MOUSE,
+  MIDDLE: THREE.MOUSE.PAN,
+  RIGHT: THREE.MOUSE.ROTATE,
+};
+
 /**
  * T14d: one read of the canvas rect, the top overlay inset (a CSS variable
  * clearing the floating toolbar), the bottom band, and the floating DOM
@@ -4130,11 +4138,7 @@ function ThreeCadViewportScene({
           enableDamping
           dampingFactor={0.08}
           screenSpacePanning
-          mouseButtons={{
-            LEFT: -1 as THREE.MOUSE,
-            MIDDLE: THREE.MOUSE.PAN,
-            RIGHT: THREE.MOUSE.ROTATE,
-          }}
+          mouseButtons={ORBIT_CONTROLS_MOUSE_BUTTONS}
         />
       </ViewportCanvas>
       <div
