@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, Route, Switch, useLocation, useSearch } from "wouter";
 import {
   Alert,
@@ -28,6 +34,7 @@ import { getAccountApiOrigin } from "@/infrastructure/account/api-origin";
 import { createProjectServiceHttpClient } from "@/infrastructure/project-sync/project-service-http-client";
 import type { RemoteProject } from "@/contracts/project-sync/project-service";
 import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
+import type { Account, AccountMe } from "@/contracts/account/account";
 import { createDashboardLocalProjects } from "@/infrastructure/persistence/dashboard-local-projects";
 import { createProjectAccessHttpClient } from "@/infrastructure/account/project-access";
 import { useShareDialog } from "@/components/account/sharing/use-share-dialog";
@@ -39,7 +46,11 @@ import {
   DashboardProjectsPage,
   type DashboardProjectSection,
 } from "./dashboard-projects-page";
+import { UsagePlanPage } from "./plan/usage-plan-page";
+import { SettingsPage } from "./settings/settings-page";
 import "./dashboard.css";
+
+type AccountWorkspace = AccountMe["organizations"][number];
 
 const documentCount = (count: number) =>
   `${count} ${count === 1 ? "document" : "documents"}`;
@@ -298,6 +309,28 @@ export function DashboardApp() {
       </Anchor>
     </Stack>
   );
+  // Account pages wait for the first session check, so a signed-in visitor is
+  // never told to sign in while the account loads.
+  const accountPage = (
+    title: string,
+    page: (account: Account, workspace: AccountWorkspace) => ReactNode,
+  ) =>
+    account && selected ? (
+      page(account, selected)
+    ) : !session.accountChecked ? (
+      <Loader size="sm" aria-label={`Loading ${title}`} />
+    ) : session.offline ? (
+      <Stack align="flex-start">
+        <Title order={1} size={20}>
+          {title}
+        </Title>
+        <Text c="dimmed">
+          The account service is unreachable. Try again in a moment.
+        </Text>
+      </Stack>
+    ) : (
+      placeholder(title)
+    );
   return (
     <div className="dashboard-shell">
       <DashboardSidebar
@@ -371,8 +404,26 @@ export function DashboardApp() {
               notFound
             )}
           </Route>
-          <Route path="/dashboard/plan">{placeholder("Usage & plan")}</Route>
-          <Route path="/dashboard/settings">{placeholder("Settings")}</Route>
+          <Route path="/dashboard/plan">
+            {accountPage("Usage & plan", (signedIn, workspace) => (
+              <UsagePlanPage
+                key={workspace.organizationId}
+                account={signedIn}
+                workspace={workspace}
+                workspaceName={organizationName(workspace.organizationId)}
+              />
+            ))}
+          </Route>
+          <Route path="/dashboard/settings">
+            {accountPage("Settings", (signedIn, workspace) => (
+              <SettingsPage
+                key={signedIn.user.id}
+                account={signedIn}
+                organizationId={workspace.organizationId}
+                workspaceName={organizationName(workspace.organizationId)}
+              />
+            ))}
+          </Route>
           <Route path="/dashboard/p/:projectId">
             {(params) => (
               <DashboardProjectPage
