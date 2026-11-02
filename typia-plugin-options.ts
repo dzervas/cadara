@@ -14,28 +14,19 @@ export function shouldTransformWithTypia(filePath: string) {
   return typiaTransformInclude.some((pattern) => pattern.test(filePath));
 }
 
-export function createTypiaPluginOptions(
-  rootDir: string,
-  { cache = false }: { cache?: boolean } = {},
-) {
+/**
+ * Cached Typia transforms (docs/adr/0006-uncached-typia-transforms.md, 2026-11-02
+ * amendment). The cache key is the validator file's own source, so changing a
+ * type it imports reuses the stale validator until `bun run typia:clean`.
+ */
+export function createTypiaPluginOptions(rootDir: string) {
   return {
-    cache,
+    cache: true,
     include: typiaTransformInclude,
     tsconfig: path.resolve(rootDir, "tsconfig.app.json"),
   };
 }
 
-/**
- * Typia for Vite (docs/adr/0006-uncached-typia-transforms.md): the dev server
- * and Vitest (`serve`) transform uncached; `vite build` caches, which mostly
- * buys reusing parsed sources across the transformed files of one process.
- */
 export function createTypiaVitePlugins(rootDir: string): PluginOption[] {
-  return [
-    { ...UnpluginTypia(createTypiaPluginOptions(rootDir)), apply: "serve" },
-    {
-      ...UnpluginTypia(createTypiaPluginOptions(rootDir, { cache: true })),
-      apply: "build",
-    },
-  ];
+  return [UnpluginTypia(createTypiaPluginOptions(rootDir))];
 }

@@ -52,4 +52,6 @@ New docs go in the matching row. Files live in the repo, so links point only at 
 2. Before editing tests, state the lane (`logic`, `ui`, `e2e`, `static`), the seam under test and why that lane fits.
 3. In the final response, confirm `docs/testing.md` was reviewed, the lane used and the seam covered.
 
+Typia transforms are cached by the validator file's own source only (ADR 0006). After changing a type that a validator imports, or when a validation failure or pass contradicts the current types, run `bun run typia:clean` before trusting any result.
+
 Vitest runs through `bun run test`, never `bun test`. Run `bun run test` (about a minute) while working and before handing off. Add the slower lanes your change calls for, chosen with the table in `docs/testing.md` (Choosing validation lanes); `bun run test:all` is for changes that cross several of those areas.

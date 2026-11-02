@@ -17,6 +17,7 @@
     "build": "bun run typecheck && vite build",
     "build:single": "bun run typecheck && vite build --config vite.single.config.ts",
     "lint": "eslint .",
+    "typia:clean": "rm -rf node_modules/.cache/unplugin_typia",
     "preview": "vite preview",
     "preview:cf": "wrangler dev --local --ip 127.0.0.1 --port 4175 --show-interactive-dev-session=false",
     "landing:models:build": "bun scripts/build-cli.mjs && bun landing/scripts/build-bracket.ts && bun landing/scripts/build-wheel.ts && bun landing/scripts/build-enclosure.ts",

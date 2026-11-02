@@ -11,9 +11,9 @@ let cacheDirectory: string | undefined;
 
 /**
  * The heavy project's CLI specs spawn the self-contained bundle built here
- * once per run. Spawning `bun src/cli/main.ts` instead costs ~30 s and ~6 GB
- * per process (Bun transforms Typia at startup with the uncached production
- * options); the bundle starts in about a second. `workflow-recipes.spec.ts`
+ * once per run. Spawning `bun src/cli/main.ts` instead costs up to ~30 s and
+ * ~6 GB per process (Bun transforms Typia at startup; less once the Typia
+ * cache is warm); the bundle starts in about a second. `workflow-recipes.spec.ts`
  * still covers the source entry and the extracted release explicitly.
  */
 export async function setup(project: TestProject) {
