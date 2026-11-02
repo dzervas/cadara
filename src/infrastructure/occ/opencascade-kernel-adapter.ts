@@ -233,6 +233,7 @@ import {
 } from "@/contracts/modeling/feature-extents";
 import { createOccExportCapabilities } from "@/infrastructure/occ/occ-export-capabilities";
 import { getNativeTopologyDisplayPayloadBuilder, type NativeTopologyDisplayPayloadBuilder, type OpenCascadeNativeTopologyMeshBuffersHost } from "@/infrastructure/occ/native-topology-mesh-buffers";
+import { captureDisplayFaceTriangulations, releaseDisplayFaceTriangulations, restoreDisplayFaceTriangulations, type DisplayFaceTriangulations } from "@/infrastructure/occ/display-face-triangulations";
 import { createNativeTopologyDiagnostic, createOccNativeReferenceInvalidationsFromHistoryPayload, createOccNativeExactBrepPayloadFromShimPayload, createOccNativeMeshExportPayloadFromShimPayload, createOccNativeTopologyPayloadFromShimPayloads, parseNativeFeatureTransactionHistoryJson, parseNativeShimPayloadJson, type OccNativeShimPayload, type OpenCascadeNativeTopologyKernelHost, type OccNativeMeshExportPayload, type OccNativeTopologyPayload } from "@/infrastructure/occ/native-topology-payload";
 import {
   decodeNativeTopologyPayloadCheckpointRecord,
@@ -2354,6 +2355,17 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     string,
     CachedNativeTopologyBodyPayload
   >();
+  /**
+   * The face triangulations of each live body's last display meshing, by its
+   * shape wrapper: the next display payload of a body derived from it (a
+   * preview or commit of a local operation) reuses them for the faces it kept,
+   * so only the changed faces are meshed. Held only for the bodies a next
+   * feature starts from: the runtime state's and a kept tail preview's.
+   */
+  private displayFaceTriangulationsByShape = new Map<
+    OccTrackedBody["shape"],
+    DisplayFaceTriangulations
+  >();
   /** The inputs of each sketch record a restore solved (cadara-jxe3). */
   private readonly restoredSketchInputs = new WeakMap<
     SketchSnapshotRecord,
@@ -2564,14 +2576,23 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     }
     this.runtimeState = null;
     this.initializationPromise = null;
-    let errors: unknown[];
+    const errors: unknown[] = [];
+    // Here rather than in dispose: an operation still in flight then may
+    // display-mesh a body and save its face triangulations.
     try {
-      errors = this.releaseAfterCleanupRetries(
-        runtimeState?.authoringState ?? null,
-        [],
+      this.releaseDisplayFaceTriangulations(() => false);
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      errors.push(
+        ...this.releaseAfterCleanupRetries(
+          runtimeState?.authoringState ?? null,
+          [],
+        ),
       );
     } catch (error) {
-      errors = [error];
+      errors.push(error);
     }
 
     if (errors.length > 0) {
@@ -3947,6 +3968,29 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
         this.nativeTopologyBodyPayloadCache.delete(key);
       }
     }
+    const liveShapes = new Set(
+      heldStates.flatMap((held) => held.bodies.map((body) => body.shape)),
+    );
+    this.releaseDisplayFaceTriangulations((shape) => liveShapes.has(shape));
+  }
+
+  private releaseDisplayFaceTriangulations(
+    keep: (shape: OccTrackedBody["shape"]) => boolean,
+  ) {
+    for (const [shape, capture] of this.displayFaceTriangulationsByShape) {
+      if (keep(shape)) continue;
+      this.displayFaceTriangulationsByShape.delete(shape);
+      releaseDisplayFaceTriangulations(capture);
+    }
+  }
+
+  private rememberDisplayFaceTriangulations(
+    shape: OccTrackedBody["shape"],
+    capture: DisplayFaceTriangulations,
+  ) {
+    const previous = this.displayFaceTriangulationsByShape.get(shape);
+    this.displayFaceTriangulationsByShape.set(shape, capture);
+    if (previous) releaseDisplayFaceTriangulations(previous);
   }
 
   private getCurrentRevisionId(runtimeState: OccKernelRuntimeState) {
@@ -4715,13 +4759,26 @@ export class OpenCascadeKernelAdapter implements ModelingKernelAdapter {
     // tightens, so discard only display polygons before the native builder's
     // BRepMesh_IncrementalMesh (absolute tier deflections). Exact shapes and
     // naming owners stay intact; immutable payload arrays are cached per tier.
+    // Faces kept from a live body's display meshing at this tier then get
+    // that triangulation back, so BRepMesh meshes only the other faces.
     state.oc.BRepTools.Clean(body.shape, true);
+    restoreDisplayFaceTriangulations(
+      state.oc,
+      body.shape,
+      [...this.displayFaceTriangulationsByShape.values()].filter(
+        (capture) => capture.lodTierId === tier.id,
+      ),
+    );
     const parsedNativePayload = builder(
       body.shape,
       body.bodyId,
       body.topologyToken,
       tier.linearDeflectionModelUnits,
       tier.angularDeflectionRadians,
+    );
+    this.rememberDisplayFaceTriangulations(
+      body.shape,
+      captureDisplayFaceTriangulations(state.oc, body.shape, tier.id),
     );
     // A remesh must keep semantic/history-preserved face bindings rather
     // than exposing the builder's canonical native ids as new public ids.
