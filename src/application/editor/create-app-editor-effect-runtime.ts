@@ -49,6 +49,31 @@ async function runSketchSpecialModeAppEffect(input: {
   }
 }
 
+/**
+ * Resolves in a task after the page renders its next frame. A hidden page
+ * renders none, so it resolves at once there, and after a timeout if
+ * rendering stops while waiting.
+ */
+function afterNextRenderedFrame(): Promise<void> {
+  if (
+    typeof globalThis.requestAnimationFrame !== "function" ||
+    typeof document === "undefined" ||
+    document.visibilityState === "hidden"
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const stalled = setTimeout(resolve, 100);
+    requestAnimationFrame(() => {
+      // Frame callbacks run before the frame renders; the next task after it.
+      setTimeout(() => {
+        clearTimeout(stalled);
+        resolve();
+      }, 0);
+    });
+  });
+}
+
 export function createAppEditorEffectRuntime(
   modelingService: ModelingService,
   dependencies: AppEditorEffectRuntimeDependencies = {},
@@ -59,6 +84,7 @@ export function createAppEditorEffectRuntime(
 
   return {
     ...baseRuntime,
+    afterNextFrame: afterNextRenderedFrame,
     async runSketchSpecialModeEffect(
       input: Parameters<
         NonNullable<EditorEffectRuntime["runSketchSpecialModeEffect"]>

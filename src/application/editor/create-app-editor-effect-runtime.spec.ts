@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 
 import type { ReferenceImagePayload } from "@/contracts/reference-image/schema";
 import type { ModelingService } from "@/application/modeling/modeling-service";
@@ -47,4 +47,50 @@ test("create-app-editor-effect-runtime.ts routes reference-image replacement spe
       result.payload.image === pickedImage,
     "Reference-image replacement special-mode effects should resolve by attaching the picked image payload to the effect result.",
   ).toBeTruthy();
+});
+
+test("the browser runtime's frame wait resolves after a rendered frame, at once on a hidden page, and by timeout when frames stop", async () => {
+  vi.useFakeTimers();
+  const frameCallbacks: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frameCallbacks.push(callback);
+    return frameCallbacks.length;
+  });
+  const page = { visibilityState: "visible" as DocumentVisibilityState };
+  vi.stubGlobal("document", page);
+  try {
+    const runtime = createAppEditorEffectRuntime(
+      makeModelingService(await createSeedDocumentSnapshot()),
+    );
+    let resolved = false;
+    const settle = (wait: Promise<void> | undefined) =>
+      wait?.then(() => {
+        resolved = true;
+      });
+
+    void settle(runtime.afterNextFrame?.());
+    await vi.advanceTimersByTimeAsync(50);
+    expect(resolved, "a visible page waits for its frame").toBe(false);
+    frameCallbacks.shift()!(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved, "the task after the rendered frame resolves it").toBe(
+      true,
+    );
+
+    resolved = false;
+    void settle(runtime.afterNextFrame?.());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(resolved, "a frame that never comes times out").toBe(true);
+
+    page.visibilityState = "hidden";
+    frameCallbacks.length = 0;
+    resolved = false;
+    void settle(runtime.afterNextFrame?.());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolved, "a hidden page renders no frames: no wait").toBe(true);
+    expect(frameCallbacks).toHaveLength(0);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
 });

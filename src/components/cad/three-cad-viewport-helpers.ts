@@ -578,9 +578,9 @@ type ViewportGeometry =
 // The scene key is rebuilt whenever the renderable lists change identity,
 // which is every sketch drag move and in-sketch edit, while the document's
 // mesh geometry objects stay the same. Geometry values are never mutated in
-// place, so each object's content token is computed once instead of
-// re-serializing every document mesh per update.
+// place, so each object's token is computed once.
 const geometryTokenByGeometry = new WeakMap<ViewportGeometry, string>();
+let nextMeshToken = 0;
 
 function getGeometryToken(geometry: ViewportGeometry) {
   const cached = geometryTokenByGeometry.get(geometry);
@@ -592,15 +592,15 @@ function getGeometryToken(geometry: ViewportGeometry) {
 
 function serializeGeometryToken(geometry: ViewportGeometry) {
   switch (geometry.kind) {
+    // A mesh's token is its identity: the snapshot hand-off keeps an
+    // unchanged mesh's geometry object (keepUnchangedSnapshotRenderMeshes),
+    // and a new object rebuilds the mesh's viewport node, so serializing the
+    // vertex arrays of every changed mesh on delivery tells nothing more.
     case "mesh":
-      return [
-        "mesh",
-        geometry.vertexPositions.join(","),
-        geometry.triangleIndices.join(","),
-        geometry.vertexNormals
-          ? geometry.vertexNormals.join(",")
-          : "auto-normals",
-      ].join(":");
+      nextMeshToken += 1;
+      return `mesh#${nextMeshToken}`;
+    // Polylines are rebuilt by every snapshot's normalization; their content
+    // keeps the key of an unchanged scene stable.
     case "polyline":
       return [
         "polyline",

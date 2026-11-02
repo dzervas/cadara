@@ -464,9 +464,10 @@ export function createModelingService(
     );
     const runtimeRevisionId = await currentRevisionId();
     // A later runtime operation cannot supply evidence for this restore.
-    if (generation !== runtimeGeneration) return;
+    if (generation !== runtimeGeneration) return undefined;
     restoredMutationPredecessor = { document: structuredClone(document), runtimeRevisionId };
     if (metadata) markRepositorySnapshotFresh(metadata, document, runtimeRevisionId);
+    return { generation, runtimeRevisionId };
   }
 
   /** T17k3 (K3): the repository's current state, which may hold changes this
@@ -1279,7 +1280,7 @@ export function createModelingService(
       diagnostics: ModelingDiagnostic[] = [],
       metadata?: DocumentRepositoryMetadata,
     ) => {
-      await (authoredDocumentsEqual(document, candidate)
+      const restored = await (authoredDocumentsEqual(document, candidate)
         ? restoreAuthoredRepositoryDocument(document, diagnostics, [], undefined, metadata)
         : restoreRepositoryState(document, diagnostics, metadata));
       // A peer change queued during the write needs no second restore when
@@ -1289,6 +1290,7 @@ export function createModelingService(
         authoredDocumentsEqual(latestRepositoryEvent.document, document)
       )
         restoredRepositoryEvent = latestRepositoryEvent;
+      return restored;
     };
     if (write.ok || write.appliedLive) {
       const committed = write.ok ? write : write.appliedLive!;
@@ -1305,8 +1307,13 @@ export function createModelingService(
       try {
         // T17k3: keep awaiting the merged restore so a successful handoff names
         // the actual runtime revision, not the candidate's pre-merge revision.
-        await restorePublished(committed.document, committed.diagnostics, committed.metadata);
-        revisionId = await currentRevisionId();
+        const restored = await restorePublished(committed.document, committed.diagnostics, committed.metadata);
+        // The restore read the runtime's revision from a whole snapshot; while
+        // no runtime change followed it, reading it again repeats that round
+        // trip (and the main-thread receipt and validation of the snapshot).
+        revisionId = restored?.generation === runtimeGeneration
+          ? restored.runtimeRevisionId
+          : await currentRevisionId();
       } catch (error) {
         // The authored write is already committed. Reporting an unapplied edit
         // retains the editor's old private baseline and poisons every Finish.

@@ -107,7 +107,7 @@ import type {
   WorkbenchTab,
   WorkbenchTabsState,
 } from "@/core/workspace/workbench-tabs";
-import type { BodyId, DocumentId } from "@/contracts/shared/ids";
+import type { BodyId, DocumentId, FeatureId } from "@/contracts/shared/ids";
 import {
   resolveBodyAppearanceHex,
   type BodyAppearance,
@@ -711,20 +711,40 @@ export function CadWorkbench({
   );
 
   const isSketchEditing = sketchSession !== null;
-  const effectiveHiddenTargetKeys = useMemo(
+  // Recomputed for every delivered snapshot. Keyed by its content, so a
+  // snapshot that hides nothing new keeps the record and the parts tree, the
+  // timeline and the presence selection neither re-render nor re-send.
+  const effectiveHiddenTargetKeysToken = useMemo(
     () =>
-      getWorkbenchVisibilityState({
-        snapshot,
-        explicitHiddenTargetKeys,
-        explicitlyShownAutoHiddenTargetKeys,
-        isSketchEditing,
-      }).effectiveHiddenTargetKeys,
+      JSON.stringify(
+        Object.entries(
+          getWorkbenchVisibilityState({
+            snapshot,
+            explicitHiddenTargetKeys,
+            explicitlyShownAutoHiddenTargetKeys,
+            isSketchEditing,
+          }).effectiveHiddenTargetKeys,
+        )
+          .filter(([, hidden]) => hidden)
+          .map(([key]) => key)
+          .sort(),
+      ),
     [
       explicitHiddenTargetKeys,
       explicitlyShownAutoHiddenTargetKeys,
       isSketchEditing,
       snapshot,
     ],
+  );
+  const effectiveHiddenTargetKeys = useMemo(
+    (): Record<string, boolean> =>
+      Object.fromEntries(
+        (JSON.parse(effectiveHiddenTargetKeysToken) as string[]).map((key) => [
+          key,
+          true,
+        ]),
+      ),
+    [effectiveHiddenTargetKeysToken],
   );
 
   const visibleSelection = useMemo(
@@ -734,12 +754,22 @@ export function CadWorkbench({
       ),
     [effectiveHiddenTargetKeys, selection],
   );
-  const historyHighlightFeatureIds = useMemo(
+  // Keyed by its content, like the hidden keys above.
+  const historyHighlightFeatureIdsToken = useMemo(
     () =>
-      snapshot
-        ? getTargetContributingFeatureIds(snapshot, visibleSelection[0] ?? null)
-        : [],
+      JSON.stringify(
+        snapshot
+          ? getTargetContributingFeatureIds(
+              snapshot,
+              visibleSelection[0] ?? null,
+            )
+          : [],
+      ),
     [snapshot, visibleSelection],
+  );
+  const historyHighlightFeatureIds = useMemo(
+    () => JSON.parse(historyHighlightFeatureIdsToken) as FeatureId[],
+    [historyHighlightFeatureIdsToken],
   );
   const visibleHoverTarget =
     hoverTarget && !isTargetHidden(hoverTarget, effectiveHiddenTargetKeys)

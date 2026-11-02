@@ -230,6 +230,10 @@ export function createEffectExecutor(
             session: effect.session,
             publicationBase: effect.publicationBase,
           });
+          // Publishing ends by reading the restored runtime's revision, a
+          // whole snapshot received and validated on the main thread; the
+          // sketch session closes in the next frame, not in that one.
+          await runtime.afterNextFrame?.();
 
           if (!result) {
             return {

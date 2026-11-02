@@ -1067,3 +1067,52 @@ test("modeling-service effect runtime adapts sketch, feature, projection, and cu
     "Sketch-plane runtime adaptation should reuse the sketch mutation error mapping path.",
   ).toBeTruthy();
 });
+
+test("a sketch commit completes only after the runtime's next rendered frame", async () => {
+  const snapshot = await createSeedDocumentSnapshot();
+  const sketchSession = openSketchSessionFromSelection(
+    [{ kind: "sketch", sketchId: snapshot.document.sketches[0]!.sketchId }],
+    snapshot,
+  );
+  if (!sketchSession) throw new Error("Expected a sketch session fixture.");
+  let renderFrame = () => {};
+  const frameRendered = new Promise<void>((resolve) => {
+    renderFrame = resolve;
+  });
+  const calls: string[] = [];
+  const commit = runEditorEffect(
+    {
+      type: "sketch.commit",
+      requestId: "request_frame_commit" as EditorEffect["requestId"],
+      commandSessionId: "command_frame_commit",
+      documentId: snapshot.document.documentId,
+      baseRevisionId: snapshot.document.revisionId,
+      mutationBasis: { baseRevisionId: snapshot.document.revisionId },
+      session: sketchSession,
+    },
+    {
+      ...unusedRuntime,
+      async commitSketch() {
+        calls.push("commitSketch");
+        return null;
+      },
+      afterNextFrame: () => {
+        calls.push("afterNextFrame");
+        return frameRendered;
+      },
+    } satisfies EditorEffectRuntime,
+  ).then((event) => {
+    calls.push("completed");
+    return event;
+  });
+
+  // A task boundary: everything the commit chain can do without a frame.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(
+    calls,
+    "the committed sketch waits for the frame after the commit resolved",
+  ).toEqual(["commitSketch", "afterNextFrame"]);
+  renderFrame();
+  expect((await commit).type).toBe("effect.sketchCommitted");
+  expect(calls).toEqual(["commitSketch", "afterNextFrame", "completed"]);
+});

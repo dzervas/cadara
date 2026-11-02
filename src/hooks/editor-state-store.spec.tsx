@@ -24,6 +24,7 @@ import {
   selectSelectionState,
   shallowEqualRecords,
   useEditorStateSelector,
+  useEditorStateStore,
 } from "@/hooks/editor-state-store";
 
 const session = enterSketchSession(
@@ -129,5 +130,50 @@ test("a sketch drag move does not re-render the toolbar or the selection consume
 
   await renderWorkbench(editorValue({ sketchSession: null, mode: "part" }));
   expect(renders.toolbar, "leaving the sketch re-renders the toolbar").toBe(3);
+  await act(async () => root.unmount());
+});
+
+test("a delivered value renders a selector consumer once when its props change too, and the others only for their slice", async () => {
+  const renders = { withProps: 0, withoutProps: 0 };
+  // The parts tree and the timeline: re-rendered by the workbench for a
+  // new snapshot prop, and subscribed to a slice of the same value.
+  const PropsProbe = memo(function PropsProbe(_: { snapshot: object }) {
+    useEditorStateSelector(selectToolbarEditorState, shallowEqualRecords);
+    renders.withProps += 1;
+    return null;
+  });
+  const SliceProbe = memo(function SliceProbe() {
+    useEditorStateSelector(selectToolbarEditorState, shallowEqualRecords);
+    renders.withoutProps += 1;
+    return null;
+  });
+  function ProviderProbe({ value }: { value: EditorContextValue }) {
+    const store = useEditorStateStore(value);
+    return (
+      <EditorStateStoreContext.Provider value={store}>
+        <PropsProbe snapshot={value.state} />
+        <SliceProbe />
+      </EditorStateStoreContext.Provider>
+    );
+  }
+  const root = await createStubR3fRoot();
+  const deliver = (value: EditorContextValue) =>
+    act(async () => root.render(<ProviderProbe value={value} />));
+
+  await deliver(editorValue({}));
+  expect(renders).toEqual({ withProps: 1, withoutProps: 1 });
+
+  // Leaving the sketch: the props and the slice both change.
+  await deliver(editorValue({ sketchSession: null, mode: "part" }));
+  expect(
+    renders,
+    "the consumer with new props renders once, reading the new slice in that pass; the other renders for its slice",
+  ).toEqual({ withProps: 2, withoutProps: 2 });
+
+  // A geometry-only snapshot: new props, an unchanged slice.
+  await deliver(editorValue({ sketchSession: null, mode: "part" }));
+  expect(renders, "an unchanged slice re-renders only through props").toEqual(
+    { withProps: 3, withoutProps: 2 },
+  );
   await act(async () => root.unmount());
 });

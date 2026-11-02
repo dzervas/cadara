@@ -247,3 +247,68 @@ it("cursor restoration clears acknowledged replay history without dropping the c
     service.dispose();
   }
 });
+
+it("a published sketch's restored runtime revision is read from one snapshot", async () => {
+  // Each read is a whole snapshot through the worker, received and
+  // validated on the main thread.
+  const reads: string[] = [];
+  class CountingAdapter extends MockKernelAdapter {
+    override async restoreAuthoredModelDocument(
+      ...args: Parameters<MockKernelAdapter["restoreAuthoredModelDocument"]>
+    ) {
+      reads.length = 0;
+      return super.restoreAuthoredModelDocument(...args);
+    }
+    override async getDocumentSnapshot(
+      ...args: Parameters<MockKernelAdapter["getDocumentSnapshot"]>
+    ) {
+      reads.push("snapshot");
+      return super.getDocumentSnapshot(...args);
+    }
+  }
+  const service = createModelingService(new CountingAdapter(), {
+    currentDocumentId: "doc_workspace",
+    documentRepository: new MemoryDocumentRepository(),
+  });
+  try {
+    const snapshot = await service.getCurrentDocumentSnapshot();
+    const session = authorSketchPrimitive(
+      createNewSketchSession(
+        createStandardPlaneDefinition("xy"),
+        OCC_KERNEL_SETTINGS,
+      ),
+      { kind: "line", start: [0, 0], end: [10, 0] },
+      false,
+    );
+    const committed = await service.commitSketch({
+      baseRevisionId: snapshot.document.revisionId,
+      baseRepositoryHeads: snapshot.provenance!.repositoryHeads,
+      sketchId: null,
+      sketchLabel: "Publication",
+      plane: session.plane,
+      definition: session.definition,
+      solverCorrelation: {
+        requestId: "request_publish_reads",
+        projectionRequestId: "request_publish_reads:project",
+        validationRequestId: "request_publish_reads:validate",
+        solveRequestId: "request_publish_reads:solve",
+        regionRequestId: "request_publish_reads:regions",
+      },
+      publicationBase: {
+        actionContextId: session.actionContextId,
+        expectedSketch: null,
+      },
+    });
+    if (committed.isErr()) throw committed.error;
+    expect(committed.value.revisionState.kind).toBe("accepted");
+    expect(
+      reads,
+      "after the published document is restored, its runtime revision is read once",
+    ).toHaveLength(1);
+    expect(committed.value.revisionId).toBe(
+      (await service.getCurrentDocumentSnapshot()).document.revisionId,
+    );
+  } finally {
+    service.dispose();
+  }
+});

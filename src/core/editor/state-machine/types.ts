@@ -1467,6 +1467,13 @@ export interface EditorEffectRuntime {
   /** Fetches the latest typed snapshot for the active document. */
   getCurrentDocumentSnapshot(): Promise<WorkspaceSnapshot>;
   /**
+   * Resolves after the browser has rendered a frame. A sketch commit waits
+   * for it before it is applied, so the worker messages and validation that
+   * end the commit do not share a frame with the workbench commit closing
+   * the sketch. Absent outside the browser: applied at once.
+   */
+  afterNextFrame?(): Promise<void>;
+  /**
    * Refines snapshots to the viewport's requested tier in the background.
    * True when the snapshot tier changed. Absent: there is nothing to refine.
    */

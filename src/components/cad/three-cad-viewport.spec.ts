@@ -1708,7 +1708,7 @@ test("T12d: same sketch distance, two zooms → different capture decisions", ()
   ).toBe(false);
 });
 
-test("BVH scene key serializes each document mesh geometry once, not per update", () => {
+test("BVH scene key keys document meshes by geometry object, never by their vertices", () => {
   // A sketch drag or in-sketch edit rebuilds the renderable lists on every
   // update while the document's mesh geometry objects stay the same.
   let vertexReads = 0;
@@ -1742,26 +1742,17 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
     }) as never;
 
   const first = createViewportBvhSceneKey([record(geometry)], []);
-  const readsAfterFirst = vertexReads;
-  expect(readsAfterFirst, "The first key serializes the mesh.").toBeGreaterThan(
-    0,
-  );
   expect(
     createViewportBvhSceneKey([record(geometry)], []),
     "A rebuilt record list over the same geometry keeps the key.",
   ).toBe(first);
-  expect(vertexReads, "The same geometry object is not serialized again.").toBe(
-    readsAfterFirst,
-  );
+  expect(
+    vertexReads,
+    "A mesh is keyed by its geometry object; its vertices are never serialized.",
+  ).toBe(0);
 
-  const sameContent = createRenderMeshGeometry({
-    vertexPositions: [
-      [0, 0, 0],
-      [1, 0, 0],
-      [1, 1, 0],
-    ],
-    triangleIndices: [[0, 1, 2]],
-  });
+  // The snapshot hand-off keeps an unchanged mesh's geometry object
+  // (keepUnchangedSnapshotRenderMeshes); a new object is a changed mesh.
   const moved = createRenderMeshGeometry({
     vertexPositions: [
       [0, 0, 1],
@@ -1771,12 +1762,8 @@ test("BVH scene key serializes each document mesh geometry once, not per update"
     triangleIndices: [[0, 1, 2]],
   });
   expect(
-    createViewportBvhSceneKey([record(sameContent)], []),
-    "A new geometry object with equal content keeps the key.",
-  ).toBe(first);
-  expect(
     createViewportBvhSceneKey([record(moved)], []),
-    "A new geometry object with moved vertices changes the key.",
+    "A new geometry object changes the key.",
   ).not.toBe(first);
 });
 

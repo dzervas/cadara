@@ -250,6 +250,17 @@ describe("reduceWorkbenchTabs", () => {
       expect(next.activeDocumentId).toBe(docB);
     });
 
+    it("keeps the same state when the active session snapshot repeats the tab", () => {
+      const seeded = createInitialWorkbenchTabsState(tab(docA, "Bracket"));
+
+      const next = reduceWorkbenchTabs(seeded, {
+        type: "syncActive",
+        tab: { ...tab(docA, "Bracket") },
+      });
+
+      expect(next).toBe(seeded);
+    });
+
     it("ignores stale active-session sync for a tab that is no longer active or open", () => {
       const seeded = reduceWorkbenchTabs(
         createInitialWorkbenchTabsState(tab(docA, "Old A")),

@@ -149,6 +149,17 @@ export function reduceWorkbenchTabs(
       if (existingIndex < 0) {
         return state;
       }
+      // Every snapshot delivery syncs the active tab; an unchanged tab keeps
+      // the state so the workbench above the editor does not re-render and
+      // re-save the project's tabs.
+      const existing = state.tabs[existingIndex];
+      if (
+        existing.title === action.tab.title &&
+        existing.storageKind === action.tab.storageKind &&
+        existing.storageDescriptor === action.tab.storageDescriptor
+      ) {
+        return state;
+      }
 
       const nextTabs = state.tabs.map((tab, index) =>
         index === existingIndex ? action.tab : tab,

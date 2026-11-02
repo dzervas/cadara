@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { ActionIcon, Tooltip } from "@mantine/core";
 
 import {
@@ -61,7 +61,10 @@ interface HistoryTimelineShellProps {
   actionHistoryDisabled?: boolean;
 }
 
-export function HistoryTimelineShell({
+// Memoized: the workbench re-renders on every editor state change; these
+// props (the snapshot, value-stable selection and highlight lists, stable
+// callbacks) change far less often.
+export const HistoryTimelineShell = memo(function HistoryTimelineShell({
   snapshot,
   sketchSession,
   historyHighlightFeatureIds,
@@ -211,4 +214,4 @@ export function HistoryTimelineShell({
       </div>
     </div>
   );
-}
+});
