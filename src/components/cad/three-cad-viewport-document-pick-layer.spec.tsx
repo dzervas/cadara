@@ -138,3 +138,156 @@ test("a snapshot keeps the unchanged face's mesh, geometry and BVH; the changed 
 
   await act(async () => root.unmount());
 });
+
+/**
+ * Seam: the scene objects under the layer and R3F's frame request
+ * (`invalidate`). A body rename delivers a snapshot whose every record is a
+ * new object with the same geometry, material and picking: no scene object
+ * may be replaced (R3F swaps a replaced `<primitive>` and requests a frame),
+ * and each kept object must carry the new snapshot's record for picking and
+ * hover. An edge whose points stay but whose binding changes keeps its line
+ * with the new pick id and target; a moved edge is rebuilt.
+ */
+test("a rename snapshot replaces no scene object and requests no frame; kept objects carry the new records", async () => {
+  const root = await createStubR3fRoot();
+  const groupRef = createRef<THREE.Group>();
+  const meshGeometry = triangle(0);
+  const snapshot = (bodyLabel: string, edgeEndX = 1, edgeId = "edge_1") => {
+    const edge: ViewportRenderableRecord = {
+      origin: "document",
+      bodyColor: 0x336699,
+      renderable: {
+        id: "renderable_edge_1" as never,
+        label: `${bodyLabel} edge`,
+        ownerBodyId: "body_1" as never,
+        ownerFeatureId: null,
+        binding: {
+          pickId: `pick_${edgeId}` as never,
+          pickPriority: 10,
+          target: {
+            kind: "edge",
+            bodyId: "body_1" as never,
+            edgeId: edgeId as never,
+          },
+          topology: "edge",
+          semanticClass: "featureEdge",
+        },
+        geometry: {
+          kind: "polyline",
+          points: [
+            [0, 0, 0],
+            [edgeEndX, 0, 0],
+          ],
+          isClosed: false,
+        },
+      },
+    };
+    const vertex: ViewportRenderableRecord = {
+      origin: "document",
+      bodyColor: 0x336699,
+      renderable: {
+        id: "renderable_vertex_1" as never,
+        label: `${bodyLabel} vertex`,
+        ownerBodyId: "body_1" as never,
+        ownerFeatureId: null,
+        binding: {
+          pickId: "pick_vertex_1" as never,
+          pickPriority: 5,
+          target: {
+            kind: "vertex",
+            bodyId: "body_1" as never,
+            vertexId: "vertex_1" as never,
+          },
+          topology: "vertex",
+          semanticClass: "featureVertex",
+        },
+        geometry: { kind: "marker", position: [0, 0, 0], displayRadius: 0.2 },
+      },
+    };
+    const face = faceEntry("face_1", meshGeometry);
+    return [
+      { ...face, renderable: { ...face.renderable, label: bodyLabel } },
+      edge,
+      vertex,
+    ];
+  };
+  const render = (entries: ViewportRenderableRecord[]) =>
+    act(async () =>
+      root.render(
+        <group ref={groupRef}>
+          <DocumentPickLayer
+            renderables={entries}
+            palette={palette}
+            clippingPlane={null}
+          />
+        </group>,
+      ),
+    );
+  const sceneObjects = () => {
+    const objects = new Set<THREE.Object3D>();
+    groupRef.current?.traverse((object) => objects.add(object));
+    return objects;
+  };
+  const boundRecordLabels = () =>
+    [...sceneObjects()]
+      .map(
+        (object) =>
+          (object.userData.renderableRecord as { label?: string } | undefined)
+            ?.label,
+      )
+      .filter((label) => label !== undefined)
+      .sort();
+
+  const store = await render(snapshot("Hub"));
+  const before = sceneObjects();
+  let frameRequests = 0;
+  const invalidate = store.getState().invalidate;
+  store.setState({
+    invalidate: (...args: Parameters<typeof invalidate>) => {
+      frameRequests += 1;
+      return invalidate(...args);
+    },
+  });
+
+  await render(snapshot("Mount"));
+  const afterRename = sceneObjects();
+  expect(
+    [...afterRename].filter((object) => !before.has(object)).length,
+    "no scene object is reconstructed by a rename",
+  ).toBe(0);
+  expect(afterRename.size).toBe(before.size);
+  expect(frameRequests, "a rename requests no viewport frame").toBe(0);
+  expect(
+    boundRecordLabels(),
+    "every kept object is bound to the renamed snapshot's record",
+  ).toEqual(["Mount", "Mount edge", "Mount vertex"]);
+
+  const keptLine = [...before].find(
+    (object) => object.userData.pickId === "pick_edge_1",
+  );
+  expect(keptLine).toBeInstanceOf(THREE.Line);
+  await render(snapshot("Mount", 1, "edge_9"));
+  expect(
+    sceneObjects().has(keptLine!),
+    "an edge with unchanged points keeps its line",
+  ).toBe(true);
+  expect(keptLine!.userData.pickId, "the kept line picks the new id").toBe(
+    "pick_edge_9",
+  );
+  expect(keptLine!.userData.target).toEqual({
+    kind: "edge",
+    bodyId: "body_1",
+    edgeId: "edge_9",
+  });
+  expect(frameRequests, "a rebinding requests no viewport frame").toBe(0);
+
+  await render(snapshot("Mount", 2, "edge_9"));
+  const edgeLine = [...sceneObjects()].find(
+    (object) => object.userData.pickId === "pick_edge_9",
+  );
+  expect(edgeLine).toBeInstanceOf(THREE.Line);
+  expect(before.has(edgeLine!), "a moved edge gets a new line").toBe(false);
+  expect(frameRequests).toBeGreaterThan(0);
+
+  await act(async () => root.unmount());
+});

@@ -79,11 +79,10 @@ function viewportFramesSince(page: Page, since: number) {
   );
 }
 
-// A body rename changes no geometry, camera or highlight, so the viewport
-// must not redraw on every workbench commit along the mutation (3+ frames).
-// Today it draws one, for the line objects rebuilt from the refreshed
-// snapshot; the bound of two leaves one frame of slack under load.
-test("renaming a body draws at most two viewport frames", async ({ page }) => {
+// A body rename changes no geometry, material, camera or highlight: the
+// refreshed snapshot's renderables keep every mounted scene object, so the
+// viewport draws nothing.
+test("renaming a body draws no viewport frame", async ({ page }) => {
   await recordViewportFrames(page);
   await new FeatureWorkbenchHarness(page).openWithRepositoryAndOperationHistory(
     createBaseExtrudeOperationHistory(),
@@ -115,6 +114,6 @@ test("renaming a body draws at most two viewport frames", async ({ page }) => {
 
   expect(
     await viewportFramesSince(page, before),
-    "a rename must not redraw the unchanged viewport on every commit",
-  ).toBeLessThanOrEqual(2);
+    "a rename must not redraw the unchanged viewport",
+  ).toBe(0);
 });

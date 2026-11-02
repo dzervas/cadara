@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -23,6 +23,7 @@ import {
   getRenderableRenderOrder,
   getVisibleMarkerRadius,
   isSeededDatumPlaneRenderable,
+  unbindRenderableObject,
   type RenderableMaterialDisplayOptions,
 } from "@/infrastructure/viewport/render-picking";
 import type { ViewportRenderableRecord } from "@/core/workspace/viewport-renderables";
@@ -235,24 +236,30 @@ export function DocumentPolylineNode({
   diagnostic?: boolean;
 }) {
   const { renderable, origin } = entry;
-  const geometryData =
-    renderable.geometry.kind === "polyline" ? renderable.geometry : null;
+  if (renderable.geometry.kind !== "polyline") {
+    throw new Error(
+      `Renderable ${renderable.id} is missing polyline geometry.`,
+    );
+  }
+  // Every snapshot delivers new polyline objects, also for a rename: keyed
+  // on the values, an unchanged curve keeps its buffer and line object, so
+  // the viewport neither swaps scene objects nor draws a frame.
+  const polylineKey = JSON.stringify([
+    renderable.geometry.points,
+    renderable.geometry.isClosed,
+  ]);
   const geometry = useMemo(() => {
-    if (!geometryData) {
-      throw new Error(
-        `Renderable ${renderable.id} is missing polyline geometry.`,
-      );
-    }
-
-    const points = geometryData.points.map(
+    const [polylinePoints, isClosed] = JSON.parse(polylineKey) as [
+      [number, number, number][],
+      boolean,
+    ];
+    const points = polylinePoints.map(
       (point) => new THREE.Vector3(point[0], point[1], point[2]),
     );
     const displayPoints =
-      geometryData.isClosed && points.length > 0
-        ? [...points, points[0].clone()]
-        : points;
+      isClosed && points.length > 0 ? [...points, points[0].clone()] : points;
     return new THREE.BufferGeometry().setFromPoints(displayPoints);
-  }, [geometryData, renderable.id]);
+  }, [polylineKey]);
   const { materialSource, materialOptions, seededDatumPlane } =
     useDocumentMaterialInputs(entry, palette, diagnostic);
   const material = useMemo(
@@ -268,21 +275,28 @@ export function DocumentPolylineNode({
         : createRenderableLineMaterial(materialSource, origin, materialOptions),
     [materialOptions, materialSource, origin, seededDatumPlane],
   );
+  const renderOrder = seededDatumPlane
+    ? 2
+    : getRenderableRenderOrder(renderable, origin);
   const line = useMemo(() => {
     const nextLine = new THREE.Line(geometry, material);
-    nextLine.renderOrder = seededDatumPlane
-      ? 2
-      : getRenderableRenderOrder(renderable, origin);
+    nextLine.renderOrder = renderOrder;
+    return nextLine;
+  }, [geometry, material, renderOrder]);
+  // A line that survives a snapshot carries that snapshot's record, so
+  // picking and hover resolve the current ids. Runs before the pick layer's
+  // commit effects and before the next frame.
+  useLayoutEffect(() => {
+    unbindRenderableObject(line);
     bindRenderableObject(
-      nextLine,
+      line,
       renderable.binding.pickId,
       renderable.binding.target,
       renderable.binding.semanticClass,
       origin,
       renderable,
     );
-    return nextLine;
-  }, [geometry, material, origin, renderable, seededDatumPlane]);
+  }, [line, origin, renderable]);
 
   useEffect(() => () => geometry.dispose(), [geometry]);
   useEffect(() => () => material.dispose(), [material]);
@@ -298,20 +312,25 @@ export function DocumentMarkerNode({
   palette: SketchRenderingPalette;
 }) {
   const { renderable, origin } = entry;
-  const geometryData =
-    renderable.geometry.kind === "marker" ? renderable.geometry : null;
+  const geometryData = renderable.geometry;
+  if (geometryData.kind !== "marker") {
+    throw new Error("Renderable is missing marker geometry.");
+  }
+  // Keyed on the values: every snapshot delivers new marker objects, and an
+  // unchanged marker keeps its pick proxy (its binding is on the group).
+  const pickProxyKey = JSON.stringify([
+    geometryData.position,
+    geometryData.displayRadius,
+  ]);
   const pickProxy = useMemo(() => {
-    if (!geometryData) {
-      throw new Error("Renderable is missing marker geometry.");
-    }
-
-    const proxy = createMarkerPickProxy(
-      geometryData.position,
-      geometryData.displayRadius,
-    );
+    const [position, displayRadius] = JSON.parse(pickProxyKey) as [
+      [number, number, number],
+      number,
+    ];
+    const proxy = createMarkerPickProxy(position, displayRadius);
     proxy.userData.highlightExcluded = true;
     return proxy;
-  }, [geometryData]);
+  }, [pickProxyKey]);
   const { materialSource, materialOptions } = useDocumentMaterialInputs(
     entry,
     palette,
@@ -348,7 +367,7 @@ export function DocumentMarkerNode({
       }}
       renderOrder={getRenderableRenderOrder(renderable, origin)}
     >
-      {geometryData && entry.sketchPlaneFrame ? (
+      {entry.sketchPlaneFrame ? (
         <SketchPlaneMarkerDisc
           position={geometryData.position}
           radius={getVisibleMarkerRadius(geometryData.displayRadius)}
@@ -360,12 +379,8 @@ export function DocumentMarkerNode({
         <mesh
           geometry={MARKER_SPHERE_GEOMETRY}
           material={material}
-          position={geometryData?.position}
-          scale={
-            geometryData
-              ? getVisibleMarkerRadius(geometryData.displayRadius)
-              : 1
-          }
+          position={geometryData.position}
+          scale={getVisibleMarkerRadius(geometryData.displayRadius)}
           renderOrder={getRenderableRenderOrder(renderable, origin)}
         />
       )}
