@@ -14,6 +14,7 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import { Link } from "wouter";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 
 export interface DashboardProjectTile {
@@ -21,6 +22,9 @@ export interface DashboardProjectTile {
   name: string;
   detail: string;
   href: string;
+  /** Account projects: their project page and Share dialog. */
+  manageHref?: string;
+  onShare?: () => void;
 }
 
 export interface DashboardProjectSection {
@@ -176,11 +180,20 @@ function ProjectTile({ project }: { project: DashboardProjectTile }) {
             <Menu.Item component="a" href={project.href}>
               Open
             </Menu.Item>
-            <Tooltip label="Open the project to share it">
-              <span>
-                <Menu.Item disabled>Share…</Menu.Item>
-              </span>
-            </Tooltip>
+            {project.manageHref && (
+              <Menu.Item component={Link} href={project.manageHref}>
+                Project page
+              </Menu.Item>
+            )}
+            {project.onShare ? (
+              <Menu.Item onClick={project.onShare}>Share…</Menu.Item>
+            ) : (
+              <Tooltip label="Open the project to share it">
+                <span>
+                  <Menu.Item disabled>Share…</Menu.Item>
+                </span>
+              </Tooltip>
+            )}
           </Menu.Dropdown>
         </Menu>
       </Group>

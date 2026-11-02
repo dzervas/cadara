@@ -9,6 +9,9 @@ import { createProjectServiceHttpClient } from "@/infrastructure/project-sync/pr
 import type { RemoteProject } from "@/contracts/project-sync/project-service";
 import type { ProjectManifest } from "@/contracts/modeling/project-manifest";
 import { createDashboardLocalProjects } from "@/infrastructure/persistence/dashboard-local-projects";
+import { createProjectAccessHttpClient } from "@/infrastructure/account/project-access";
+import { useShareDialog } from "@/components/account/sharing/use-share-dialog";
+import { DashboardProjectPage } from "./project/dashboard-project-page";
 import { rememberPage } from "@/core/navigation/last-page";
 import { DashboardSidebar } from "./dashboard-sidebar";
 import {
@@ -24,7 +27,7 @@ const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
 export function DashboardApp() {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const [error, setError] = useState<string | null>(null);
   const notifyError = useCallback((message: string) => setError(message), []);
   const port = useMemo(
@@ -36,6 +39,10 @@ export function DashboardApp() {
     [],
   );
   const session = useAccountSession(port, notifyError);
+  const accessPort = useMemo(
+    () => createProjectAccessHttpClient({ apiOrigin: getAccountApiOrigin() }),
+    [],
+  );
   const [accountMenuOpened, setAccountMenuOpened] = useState(false);
   const signIn = () => {
     setAccountMenuOpened(true);
@@ -93,6 +100,13 @@ export function DashboardApp() {
   } | null>(null);
   const remote =
     remoteState && remoteState.userId === userId ? remoteState.projects : null;
+  // Bumped when a project is deleted, to list the projects again.
+  const [projectsRevision, setProjectsRevision] = useState(0);
+  // Leaving reloads the account, which lists the projects again.
+  const { openShareDialog, shareDialog } = useShareDialog({
+    port: accessPort,
+    account,
+  });
   useEffect(() => {
     if (!account || !online) return;
     let live = true;
@@ -119,7 +133,7 @@ export function DashboardApp() {
     return () => {
       live = false;
     };
-  }, [account, online]);
+  }, [account, online, projectsRevision]);
 
   const query = window.location.search;
   const sections: DashboardProjectSection[] = [
@@ -151,6 +165,13 @@ export function DashboardApp() {
                 name: project.name,
                 detail: project.visibility === "public" ? "Public" : "Private",
                 href: `/app/p/${encodeURIComponent(project.id)}${query}`,
+                manageHref: `/dashboard/p/${encodeURIComponent(project.id)}${query}`,
+                onShare: () =>
+                  openShareDialog({
+                    orgId: project.organization_id,
+                    projectId: project.id,
+                    name: project.name,
+                  }),
               })),
           },
         ]
@@ -170,8 +191,17 @@ export function DashboardApp() {
               .map((project) => ({
                 id: project.id,
                 name: project.name,
-                detail: organizationName(project.organization_id),
+                detail:
+                  project.owner_name ??
+                  organizationName(project.organization_id),
                 href: `/app/p/${encodeURIComponent(project.id)}${query}`,
+                manageHref: `/dashboard/p/${encodeURIComponent(project.id)}${query}`,
+                onShare: () =>
+                  openShareDialog({
+                    orgId: project.organization_id,
+                    projectId: project.id,
+                    name: project.name,
+                  }),
               })),
           },
         ]
@@ -244,15 +274,20 @@ export function DashboardApp() {
           <Route path="/dashboard/settings">{placeholder("Settings")}</Route>
           <Route path="/dashboard/p/:projectId">
             {(params) => (
-              <Stack align="flex-start">
-                <Title order={1} size={20}>
-                  Project
-                </Title>
-                <Text>Open this project in the editor to manage it.</Text>
-                <Anchor href={`/app/p/${params.projectId}`}>
-                  Open in editor
-                </Anchor>
-              </Stack>
+              <DashboardProjectPage
+                projectId={params.projectId}
+                account={account}
+                accountChecked={session.accountChecked}
+                projects={remote}
+                port={accessPort}
+                onSignIn={signIn}
+                onDeleted={() => {
+                  setProjectsRevision((revision) => revision + 1);
+                  navigate("/dashboard");
+                }}
+                onLeft={() => navigate("/dashboard")}
+                onChangePlan={() => navigate("/dashboard/plan")}
+              />
             )}
           </Route>
           <Route>
@@ -267,6 +302,7 @@ export function DashboardApp() {
           </Route>
         </Switch>
       </main>
+      {shareDialog}
     </div>
   );
 }

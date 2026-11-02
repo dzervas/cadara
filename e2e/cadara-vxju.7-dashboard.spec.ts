@@ -317,8 +317,11 @@ test("team selection changes usage and owner tiles while shared projects stay gr
     page.getByRole("menuitem", { name: "Open", exact: true }),
   ).toBeVisible();
   await expect(
+    page.getByRole("menuitem", { name: "Project page", exact: true }),
+  ).toBeVisible();
+  await expect(
     page.getByRole("menuitem", { name: "Share…", exact: true }),
-  ).toBeDisabled();
+  ).toBeEnabled();
 });
 
 test("an unknown local project uses the visible project-open failure path", async ({

@@ -12,6 +12,11 @@ export interface RemoteProject {
   visibility: ProjectVisibility;
   /** Null until the uploading client registers its manifest document. */
   manifest_doc_id: string | null;
+  /**
+   * Who owns the project, as people it is shared with see it: the person for
+   * a personal workspace, the team's name otherwise. Only project lists carry it.
+   */
+  owner_name?: string;
 }
 
 /** POST /orgs/:orgId/projects/:projectId/sync-token. */
