@@ -196,9 +196,9 @@ test("a Jacobian larger than one raw budget resumes its blocks; relative transla
     expect(position[0]).toBeCloseTo(i + 9, 5);
     expect(position[1]).toBeCloseTo(6, 5);
   }
-  // The old accepted target must not trigger the repeated-frame shortcut while
-  // a DIFFERENT goal is private. Release drains that goal first, then pins the
-  // reachable cursor exactly rather than publishing the private intermediate.
+  // A release at the accepted target drops the private, different preview goal
+  // and pins the reachable cursor exactly rather than publishing the private
+  // intermediate.
   const pointId = pointIds.at(-1)!;
   const acceptedGoal = { kind: "sketchPoint", pointId, position: [42, 6] } as const;
   const accepted = updateCompiledSketchSolveSession(session, acceptedGoal, 1e-6);

@@ -25,6 +25,23 @@ export const deferredDragTargets = new WeakMap<
   SketchDragTarget
 >();
 
+/**
+ * The last goal a drag update refused, with the accepted `session.values`
+ * object it was solved from. A refused goal leaves `session.values`
+ * untouched, so while that object is still current the same goal would be
+ * refused again from the same accepted state.
+ */
+export type RefusedDragGoal = {
+  goal: string;
+  values: Float64Array;
+  result: SketchDraggedPointSolveResult;
+};
+
+export const refusedDragGoals = new WeakMap<
+  SketchCompiledSolveSession,
+  RefusedDragGoal
+>();
+
 export const DRAG_MAX_SUBSTEPS = 8;
 
 export const DRAG_SUBSTEP_LIMIT = 4;

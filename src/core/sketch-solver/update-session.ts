@@ -7,6 +7,7 @@ import {
   DRAG_MAX_SUBSTEPS,
   DRAG_SUBSTEP_LIMIT,
   dragContinuations,
+  refusedDragGoals,
 } from "./drag-continuations";
 import { solveDragFrameGeneralWithRebuild } from "./drag-frame-stage";
 import {
@@ -46,6 +47,10 @@ import type { SketchCompiledSolveSession } from "./system-types";
  * (c3). A frame with a tolerance (the release frame, a single solver call)
  * starts from the identity curvature and runs the exact-reach step, so the
  * committed state carries no reuse path dependence (review R-1/R-3).
+ * Exception: a release that repeats a goal already refused from the same
+ * accepted values returns that refusal, even when a preview computed it. A
+ * refusal publishes nothing, so the committed state is still the last
+ * accepted frame.
  */
 export function updateCompiledSketchSolveSession(
   session: SketchCompiledSolveSession,
@@ -68,6 +73,7 @@ export function updateCompiledSketchSolveSession(
   if (session.disposed) {
     dragContinuations.delete(session);
     deferredDragTargets.delete(session);
+    refusedDragGoals.delete(session);
     return finishSolve(
       updateCompiledSketchSolveSessionFrame(session, dragTarget, targetTolerance),
     );
@@ -75,6 +81,31 @@ export function updateCompiledSketchSolveSession(
   const validationError = validateDragTarget(session, dragTarget);
   if (validationError) return validationError;
   let continuation = dragContinuations.get(session);
+  if (targetTolerance !== null) {
+    // A point goal is an absolute cursor, so the release target supersedes an
+    // in-flight point goal: solve the release from the last accepted state
+    // instead of draining the older goal first. Its already accepted substeps
+    // stay applied. Translation goals are relative and still drain below.
+    if (
+      continuation?.target.kind === "sketchPoint" &&
+      dragTarget.kind === "sketchPoint"
+    ) {
+      dragContinuations.delete(session);
+      continuation = undefined;
+    }
+    // The release repeats a goal already refused (possibly by a preview) from
+    // the current accepted state: return that verdict instead of solving it
+    // again.
+    const refused = refusedDragGoals.get(session);
+    if (
+      !continuation &&
+      !deferredDragTargets.has(session) &&
+      refused?.values === session.values &&
+      refused.goal === JSON.stringify(dragTarget)
+    ) {
+      return refused.result;
+    }
+  }
   const coalesce = (
     older: SketchDragTarget | undefined,
     newer: SketchDragTarget,
@@ -119,6 +150,17 @@ export function updateCompiledSketchSolveSession(
   }
   let result = continuation.next.value;
   dragContinuations.delete(session);
+  // A refused goal accepted no substep, so `session.values` is still the
+  // accepted state it was solved from.
+  if (result.kind === "blocked") {
+    refusedDragGoals.set(session, {
+      goal: JSON.stringify(continuation.target),
+      values: session.values,
+      result,
+    });
+  } else {
+    refusedDragGoals.delete(session);
+  }
   if (continuation.deferred) {
     const deferred = continuation.deferred;
     const repeatsGoal = deferred.kind === "sketchTranslate"
