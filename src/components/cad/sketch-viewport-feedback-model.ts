@@ -625,6 +625,43 @@ function getSketchPointAnchor(
   return { kind: "sketchPoint", point };
 }
 
+/** Floating editors share annotation gaps, viewport bands and obstacle avoidance. */
+export function placeSketchFloatingInput(
+  anchor: { x: number; y: number },
+  extent: { width: number; height: number },
+  viewport: SketchAnnotationLayoutViewport,
+  obstacles: readonly SketchAnnotationLayoutObstacle[],
+): { x: number; y: number } {
+  const item: SketchAnnotationLayoutItem = {
+    id: "floating-input",
+    anchor: { x: anchor.x + extent.width / 2, y: anchor.y - extent.height / 2 },
+    width: extent.width,
+    height: extent.height,
+    priority: "dimension",
+    keepWhenUnplaceable: false,
+  };
+  // Annotation glyphs anchored under chrome are hidden. An editor must stay
+  // available: move its search origin into the usable band before searching.
+  const chrome = obstacles.filter((obstacle) => obstacle.chrome);
+  const origins = getSketchAnnotationLayoutCandidates(item)
+    .map((origin) => clampLayoutCentre(origin, item, viewport))
+    .filter((origin) => isUsableAnchor(origin, viewport, chrome));
+  for (const origin of origins) {
+    const [placement] = layoutSketchAnnotations([{ ...item, anchor: origin }], viewport, obstacles);
+    if (placement) {
+      return { x: placement.x - extent.width / 2, y: placement.y - extent.height / 2 };
+    }
+  }
+  // Only after all usable origins fail may the annotation fallback relax
+  // geometry avoidance. It still respects the chrome and viewport bands.
+  const origin = origins[0] ?? clampLayoutCentre(item.anchor, item, viewport);
+  const [fallback] = layoutSketchAnnotations(
+    [{ ...item, anchor: origin, keepWhenUnplaceable: true }], viewport, obstacles,
+  );
+  const centre = fallback ?? origin;
+  return { x: centre.x - extent.width / 2, y: centre.y - extent.height / 2 };
+}
+
 /**
  * The patch a key in a floating input's field sends. Shortcuts skip a
  * focused text input, so Escape there is the popup's own Cancel (T14b review

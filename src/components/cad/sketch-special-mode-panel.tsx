@@ -5,7 +5,6 @@ import {
   Button,
   Code,
   Group,
-  NumberInput,
   Paper,
   Select,
   Stack,
@@ -25,6 +24,7 @@ import type {
   SketchSpecialModePanelField,
   SketchSpecialModePanelSchema,
 } from "@/core/sketch-special-modes/schema";
+import { CommittedNumberInput } from "@/components/ui/committed-number-input";
 import {
   SECTION_HEADER_CLASSES,
   compactInputStyles,
@@ -272,22 +272,16 @@ function SpecialModePanelField({
           ) : null}
         </label>
         <div className="min-w-0 flex-1">
-          <NumberInput
+          <CommittedNumberInput
             id={field.id}
-            value={field.value ?? ""}
+            value={field.value}
             disabled={field.disabled}
             size="xs"
             styles={compactInputStyles({ disabled: field.disabled })}
-            onChange={(nextValue) => {
+            onCommit={(value) => {
               onAction({
                 kind: "patch",
-                patch: {
-                  ...field.action.patch,
-                  value:
-                    typeof nextValue === "number" && !Number.isNaN(nextValue)
-                      ? nextValue
-                      : null,
-                },
+                patch: { ...field.action.patch, value },
               });
             }}
           />

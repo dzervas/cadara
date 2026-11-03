@@ -171,6 +171,7 @@ import {
 import type { SketchId } from "@/contracts/shared/ids";
 import { mapSketchPointToWorld } from "@/core/editor/sketch-session/state";
 import {
+  getTransientSketchSessionDisplayRenderables,
   getSketchRevealedPointIds,
   getSketchRevealedHandleEntityIds,
   getSketchToolMarkerPointIds,
@@ -702,6 +703,8 @@ function ThreeCadViewportScene({
   const [sketchFeedbackProjections, setSketchFeedbackProjections] = useState<
     SketchViewportFeedbackProjection[]
   >([]);
+  const [sketchPreviewBounds, setSketchPreviewBounds] =
+    useState<SketchAnnotationLayoutObstacle | null>(null);
   const [sketchAnnotationProjections, setSketchAnnotationProjections] =
     useState<SketchViewportFeedbackProjection[]>([]);
   const [sketchEntityScreenExtents, setSketchEntityScreenExtents] = useState<
@@ -1608,6 +1611,7 @@ function ThreeCadViewportScene({
 
     if (!camera || !canvasElement || !plane) {
       setSketchFeedbackProjections([]);
+      setSketchPreviewBounds(null);
       setSketchAnnotationProjections([]);
       setSpecialModeFeedbackProjections([]);
       setSketchNearGaps(EMPTY_SKETCH_NEAR_GAPS);
@@ -1645,6 +1649,29 @@ function ThreeCadViewportScene({
     });
 
     setSketchFeedbackProjections(projections);
+    // Preview curves are already tessellated by the display adapter. Reserve
+    // their projected envelope, not just the first curve's label anchor.
+    const previewPoints = sketchSession?.activeEditTool
+      ? getTransientSketchSessionDisplayRenderables(sketchSession).flatMap(
+          (renderable) =>
+            renderable.geometry.kind === "polyline"
+              ? renderable.geometry.points.flatMap((point) => {
+                  const screen = projectSketchFeedbackAnchor({
+                    anchor: { kind: "worldPoint", point },
+                    plane,
+                    viewport: { width: rect.width, height: rect.height },
+                    projectWorldPoint: (world: WorkspaceVec3) => {
+                      const projected = new THREE.Vector3(...world).project(
+                        camera,
+                      );
+                      return { x: projected.x, y: projected.y, z: projected.z };
+                    },
+                  });
+                  return screen ? [screen] : [];
+                })
+              : [],
+        )
+      : [];
     setSpecialModeFeedbackProjections(
       specialModeAnchors.flatMap((anchor) => {
         const screenPoint = projectSketchFeedbackAnchor({
@@ -1755,6 +1782,32 @@ function ThreeCadViewportScene({
         ]),
       ),
     );
+    // The floating value editor keeps clear of what the tool shows: the
+    // preview and the entities the user picked as its targets (the editor
+    // must not sit on a target, where the next click would hit it instead).
+    const targetBounds = (sketchSession?.activeEditTool?.selectedTargets ?? [])
+      .map((target) => entityScreenBounds.get(getPrimitiveRefKey(target)))
+      .filter((bounds) => bounds !== undefined);
+    const reservedX = [
+      ...previewPoints.map((point) => point.x),
+      ...targetBounds.flatMap((bounds) => [bounds.minX, bounds.maxX]),
+    ];
+    const reservedY = [
+      ...previewPoints.map((point) => point.y),
+      ...targetBounds.flatMap((bounds) => [bounds.minY, bounds.maxY]),
+    ];
+    if (reservedX.length) {
+      const x = Math.min(...reservedX);
+      const y = Math.min(...reservedY);
+      setSketchPreviewBounds({
+        x,
+        y,
+        width: Math.max(...reservedX) - x,
+        height: Math.max(...reservedY) - y,
+      });
+    } else {
+      setSketchPreviewBounds(null);
+    }
 
     // T12f: project the drag feedback cue (issue 05 local diagnostic).
     const dragFeedback = sketchSession?.activeDrag?.feedback;
@@ -1809,8 +1862,7 @@ function ThreeCadViewportScene({
     sketchDisplayRenderables,
     sketchNearGapBasis,
     sketchNearGapPositions,
-    sketchSession?.activeDrag?.feedback,
-    sketchSession?.plane,
+    sketchSession,
     sketchToolPresentation,
     specialModePresentation,
   ]);
@@ -4236,6 +4288,9 @@ function ThreeCadViewportScene({
       <SketchViewportFeedbackLayer
         schema={sketchToolPresentation}
         projections={sketchFeedbackProjections}
+        previewBounds={sketchPreviewBounds}
+        viewport={sketchAnnotationDomFrame.viewport}
+        obstacles={sketchAnnotationDomFrame.obstacles}
         documentVariableNames={model.documentVariableNames}
         onPatch={(patch) => sketchToolPatchRef.current(patch)}
         onDragHandle={(handle, clientX, clientY, gesturePhase) => {

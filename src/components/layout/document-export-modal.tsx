@@ -5,12 +5,12 @@ import {
   Checkbox,
   Group,
   Modal,
-  NumberInput,
   SegmentedControl,
   Select,
   Stack,
 } from "@mantine/core";
 
+import { CommittedNumberInput } from "@/components/ui/committed-number-input";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 import {
   SECTION_HEADER_CLASSES,
@@ -49,10 +49,6 @@ interface DocumentExportModalProps {
   opened: boolean;
   target: ObjectExportModalState | null;
   withinPortal?: boolean;
-}
-
-function toNumber(value: string | number, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 export function DocumentExportModal({
@@ -125,19 +121,16 @@ function renderFormField(
 
   if (field.kind === "numeric") {
     return (
-      <NumberInput
+      <CommittedNumberInput
         key={field.id}
         label={field.label}
         min={0.001}
         step={field.step}
-        value={typeof field.value === "number" ? field.value : undefined}
+        value={typeof field.value === "number" ? field.value : null}
         styles={compactInputStyles()}
-        onChange={(value) =>
+        onCommit={(value) =>
           onPatch({
-            [field.patch.patchKey]: toNumber(
-              value,
-              typeof field.value === "number" ? field.value : 0,
-            ),
+            [field.patch.patchKey]: value ?? (typeof field.value === "number" ? field.value : 0),
           })
         }
       />

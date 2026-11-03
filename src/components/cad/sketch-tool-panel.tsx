@@ -1,4 +1,5 @@
-import { NumberInput, Paper, Select, Switch, TextInput } from "@mantine/core";
+import { Paper, Select, Switch, TextInput } from "@mantine/core";
+import { CommittedNumberInput } from "@/components/ui/committed-number-input";
 import { WorkbenchNotification } from "@/components/layout/workbench-notification";
 
 import {
@@ -226,19 +227,15 @@ function SketchToolControlField({
             }}
           />
         ) : control.kind === "numeric" ? (
-          <NumberInput
+          <CommittedNumberInput
             id={control.id}
             error={invalid}
             disabled={control.disabled}
-            value={control.value ?? ""}
+            value={control.value}
             size="xs"
             styles={compactInputStyles({ disabled: control.disabled })}
-            onChange={(nextValue) => {
-              const resolved =
-                typeof nextValue === "number" && !Number.isNaN(nextValue)
-                  ? nextValue
-                  : null;
-              onPatch({ ...control.action.patch, value: resolved });
+            onCommit={(value) => {
+              onPatch({ ...control.action.patch, value });
             }}
           />
         ) : control.kind === "option" ? (

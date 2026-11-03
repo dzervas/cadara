@@ -21,6 +21,9 @@ import {
   getSketchPointerLabelHotspot,
   placeSketchPointerLabel,
   SKETCH_POINTER_LABEL_GAP_PX,
+  placeSketchFloatingInput,
+  type SketchAnnotationLayoutObstacle,
+  type SketchAnnotationLayoutViewport,
   type SketchViewportFeedbackProjection,
 } from "@/components/cad/sketch-viewport-feedback-model";
 
@@ -36,6 +39,9 @@ const VIEWPORT_FLOATING_INPUT_TOP_EDGE_PX =
 interface SketchViewportFeedbackLayerProps {
   schema: SketchToolPresentationSchema | null;
   projections: readonly SketchViewportFeedbackProjection[];
+  previewBounds?: SketchAnnotationLayoutObstacle | null;
+  viewport?: SketchAnnotationLayoutViewport;
+  obstacles?: readonly SketchAnnotationLayoutObstacle[];
   onPatch: (patch: Record<string, unknown>) => void;
   documentVariableNames?: readonly string[];
   onDragHandle?: (
@@ -72,6 +78,9 @@ interface SketchViewportDragCallbacks {
 export function SketchViewportFeedbackLayer({
   schema,
   projections,
+  previewBounds,
+  viewport,
+  obstacles = [],
   onPatch,
   onDragHandle,
   onHandlePointerMove,
@@ -159,6 +168,9 @@ export function SketchViewportFeedbackLayer({
         <div className="pointer-events-none absolute inset-0 z-40">
           <ViewportFloatingInput
             descriptor={schema.floatingInput}
+            previewBounds={previewBounds}
+            viewport={viewport}
+            obstacles={obstacles}
             invalid={Boolean(
               schema.floatingInput.numericOnly &&
                 schema.validation?.some((message) => message.severity === "error"),
@@ -668,18 +680,44 @@ function createCenteredArcPath(input: {
 
 function ViewportFloatingInput({
   descriptor,
+  previewBounds,
+  viewport,
+  obstacles,
   invalid,
   projection,
   onPatch,
   documentVariableNames,
 }: {
   descriptor: SketchToolFloatingInputDescriptor;
+  previewBounds: SketchAnnotationLayoutObstacle | null | undefined;
+  viewport: SketchAnnotationLayoutViewport | undefined;
+  obstacles: readonly SketchAnnotationLayoutObstacle[];
   invalid: boolean;
   projection: SketchViewportFeedbackProjection | undefined;
   onPatch: (patch: Record<string, unknown>) => void;
   documentVariableNames: readonly string[];
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || !projection || !viewport) return;
+    const place = () => {
+      const position = placeSketchFloatingInput(
+        projection,
+        panel.getBoundingClientRect(),
+        viewport,
+        previewBounds ? [...obstacles, previewBounds] : obstacles,
+      );
+      panel.style.left = `${position.x}px`;
+      panel.style.top = `${position.y}px`;
+      panel.style.bottom = "auto";
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [projection, viewport, obstacles, previewBounds]);
   // T13b (D29): operation parameters take plain numbers, not variables.
   const variableNames =
     descriptor.numericOnly || descriptor.confirmOnly
@@ -714,11 +752,13 @@ function ViewportFloatingInput({
   return (
     <div
       className="pointer-events-auto absolute w-[220px] rounded-lg border border-[var(--cad-border-strong)] bg-[var(--cad-surface-overlay)] p-3 text-xs text-[var(--cad-muted-foreground)] shadow-[var(--cad-panel-shadow)]"
+      ref={panelRef}
       data-sketch-viewport-floating-input={descriptor.id}
-      style={{
-        left: clampedLeft,
-        bottom: clampedBottom,
-      }}
+      style={
+        viewport
+          ? { left: projection.x, top: projection.y }
+          : { left: clampedLeft, bottom: clampedBottom }
+      }
     >
       <div className="text-sm font-medium text-[var(--cad-foreground)]">
         {descriptor.label}
