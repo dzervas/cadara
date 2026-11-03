@@ -39,9 +39,10 @@ export type SketchSolveStrategy =
  *   (`solveConstrainedMinimumMotionSteps`: the goal and the anchor minimised
  *   subject to the hard rows), with phases A and B only for a frame where
  *   that step is unavailable. The row-derived branch invariants
- *   (`deriveChiralityInvariants`), not the entity flip/collapse guard, keep
- *   it on the accepted branch: a frame whose step stops on one is refused
- *   ("block"). Experimental; measured on the k5d study harness.
+ *   (`deriveChiralityInvariants`) and the row layer's validity inequalities,
+ *   not the entity flip/collapse guard, keep it on the accepted branch: a
+ *   frame whose step reaches one is refused ("block": the drag stops at the
+ *   boundary). Experimental; measured on the k5d study harness.
  * Test-only override: `CADARA_SKETCH_DRAG_CONSTRAINED_STEP=1` in the process
  * environment (read once at module load) makes "constrained" the default of
  * every compiled program; the study harness has no other way to set it.

@@ -26,12 +26,15 @@ import type { ComponentJacobian } from "./automatic-differentiation";
  *   corrected point decreases ½‖f‖² (Armijo on the predicted decrease) and
  *   the corrector moved it at most half the predicted step.
  * - Inequalities: an inequality violated at the iterate, or newly violated
- *   by a trial, joins the iteration's active set and the trial is
- *   recomputed; the corrector holds an active inequality at g = 0 only while
- *   it is violated or on its boundary (`boundary`), so it projects onto
- *   g ≥ 0 and several inequalities that enter together cannot over-determine
- *   the rows. The active set restarts empty (plus the violated ones) at
- *   every iterate.
+ *   by a trial (or jumped over by it: its minimum along the straight move
+ *   is below its boundary), joins the iteration's active set and
+ *   the trial is recomputed; the corrector holds an active inequality at
+ *   g = 0 only while it is violated or on its boundary (`boundary`), so it
+ *   projects onto g ≥ 0 and several inequalities that enter together cannot
+ *   over-determine the rows. The active set restarts empty (plus the
+ *   violated ones) at every iterate. The step ends at the first accepted
+ *   move that reaches a `blocking` inequality's boundary (the corrector held
+ *   it there, or the move ends on it), not merely one that had it active.
  * - A row whose Jacobian is `unavailable` or non-finite at the start makes
  *   the step unavailable (the caller decides what runs instead); at a trial
  *   point it only rejects the trial.
@@ -58,6 +61,12 @@ export interface ConstrainedStepProblem {
    * depend on where the geometry sits.
    */
   boundary: number;
+  /**
+   * Inequalities whose boundary ends the step (stop "blocked") at the first
+   * accepted move that reaches it: the corrector held it at its boundary, or
+   * the move ends within `boundary` of it.
+   */
+  blocking?: readonly number[];
   objective: readonly ConstrainedStepRow[];
 }
 
@@ -81,8 +90,15 @@ export type ConstrainedStepResult =
       /**
        * `rowUnavailable`: a row became unavailable or non-finite after at
        * least one accepted move; the result is that last accepted iterate.
+       * `blocked`: an accepted move reached a `blocking` inequality's
+       * boundary; the result is that move.
        */
-      stop: "stationary" | "radius" | "maxIterations" | "rowUnavailable";
+      stop:
+        | "stationary"
+        | "radius"
+        | "maxIterations"
+        | "rowUnavailable"
+        | "blocked";
       stats: ConstrainedStepStats;
     }
   | {
@@ -117,8 +133,52 @@ export const ARMIJO = 1e-4;
 
 export const CORRECTOR_TRAVEL = 0.5;
 
-/** A blocking inequality reached within this fraction of a trial does not shorten it. */
+/**
+ * A non-blocking inequality reached within this fraction of a trial does not
+ * shorten it: a sliver of a step would restart the radius from nothing; the
+ * corrector holds it at g ≥ 0 at the same length. A `blocking` one always
+ * shortens the trial to its boundary, where the step then ends.
+ */
 export const MIN_BLOCKED_FRACTION = 1e-3;
+
+/** Bisections of the directional derivative that locate an inequality's minimum along a move. */
+export const LINE_MINIMUM_BISECTIONS = 40;
+
+/** An inequality's value and its derivative along a move at one point of it. */
+export type MoveSample = { value: number; slope: number };
+
+/**
+ * Whether an inequality g dips below `below` inside a straight move t ∈ [0,
+ * 1] although it may hold at both ends (an unsigned length through zero):
+ * both ends' first-order models must cross `below` (`start`, `end`), and
+ * then g's minimum along the move, where its slope changes sign, is located
+ * by bisection (`sample`) and read. Non-finite inside the move counts as a
+ * dip. `evaluations` counts the samples.
+ */
+export function dipsBelowAlongMove(
+  sample: (t: number) => MoveSample,
+  below: number,
+  start: MoveSample,
+  end: MoveSample,
+): { dips: boolean; evaluations: number } {
+  if (!(start.value + start.slope < below) || !(end.value - end.slope < below))
+    return { dips: false, evaluations: 0 };
+  let low = 0;
+  let high = 1;
+  for (
+    let evaluations = 1;
+    evaluations <= LINE_MINIMUM_BISECTIONS;
+    evaluations += 1
+  ) {
+    const middle = (low + high) / 2;
+    const { value, slope } = sample(middle);
+    if (!Number.isFinite(value) || value < below)
+      return { dips: true, evaluations };
+    if (slope < 0) low = middle;
+    else high = middle;
+  }
+  return { dips: false, evaluations: LINE_MINIMUM_BISECTIONS };
+}
 
 export type Linearization =
   | { kind: "ok"; residuals: Float64Array; rows: Float64Array[] }
@@ -141,6 +201,7 @@ export function* solveConstrainedMinimumMotionSteps(
   for (const index of variables)
     scale = Math.max(scale, Math.abs(problem.start[index]!));
   const { boundary } = problem;
+  const blocking = new Set(problem.blocking);
 
   const restrict = (jacobian: ComponentJacobian, component: number) => {
     const row = new Float64Array(size);
@@ -225,8 +286,9 @@ export function* solveConstrainedMinimumMotionSteps(
       next[variables[column]!] += scaleBy * delta[column]!;
     return next;
   };
+  /** `held`: the active inequalities the corrector held at g = 0 on the way. */
   type Correction =
-    | { kind: "feasible"; values: Float64Array }
+    | { kind: "feasible"; values: Float64Array; held: ReadonlySet<number> }
     | { kind: "unavailable" | "failed" };
   const correct = function* (
     values: Float64Array,
@@ -235,6 +297,7 @@ export function* solveConstrainedMinimumMotionSteps(
     let current = values;
     let previousNorm = Number.POSITIVE_INFINITY;
     let enforcedKey = "";
+    const held = new Set<number>();
     for (let iteration = 0; ; iteration += 1) {
       // An active inequality is held at g = 0 only while it is violated or
       // on its boundary at the Newton iterate (projection onto g ≥ 0); a
@@ -248,16 +311,17 @@ export function* solveConstrainedMinimumMotionSteps(
       if (enforced.join(",") !== enforcedKey)
         previousNorm = Number.POSITIVE_INFINITY;
       enforcedKey = enforced.join(",");
+      for (const index of enforced) held.add(index);
       const linear = yield* linearize(problem.equalities, enforced, current);
       if (linear.kind === "unavailable") return { kind: "unavailable" };
       if (linear.kind === "nonFinite") return { kind: "failed" };
       const largest = maxAbs(linear.residuals);
       if (largest <= FEASIBLE_TOLERANCE * scale)
-        return { kind: "feasible", values: current };
+        return { kind: "feasible", values: current, held };
       const norm = euclidean(linear.residuals);
       if (!(norm < previousNorm) || iteration === MAX_NEWTON_ITERATIONS)
         return largest <= FEASIBLE_STALL_TOLERANCE * scale
-          ? { kind: "feasible", values: current }
+          ? { kind: "feasible", values: current, held }
           : { kind: "failed" };
       previousNorm = norm;
       stats.newtonIterations += 1;
@@ -372,25 +436,62 @@ export function* solveConstrainedMinimumMotionSteps(
       }
       const after = yield* inequalityState(corrected.values);
       if (!after) rowUnavailable = true;
-      const entering = after
-        ? violatedInequalities(after.values).filter(
-            (index) => !active.includes(index),
+      // An inequality the move jumps over enters too, though it holds at
+      // both ends (an unsigned length through zero): both ends' first-order
+      // models cross its boundary, and its minimum along the straight move
+      // (where its directional derivative changes sign) is below it.
+      const move = new Float64Array(size);
+      for (let column = 0; column < size; column += 1)
+        move[column] =
+          corrected.values[variables[column]!]! - current[variables[column]!]!;
+      const forward = (index: number) =>
+        bounds.values[index]! + dot(bounds.rows[index]!, move);
+      const jumpedOver = function* (
+        index: number,
+      ): Generator<ConstrainedStepWork, boolean, void> {
+        const { dips, evaluations } = dipsBelowAlongMove(
+          (t) => {
+            const jacobian = problem.inequalities[index]!(
+              moved(current, move, t),
+            );
+            return {
+              value: jacobian.components[0]!,
+              slope: dot(restrict(jacobian, 0), move),
+            };
+          },
+          -INEQUALITY_TOLERANCE,
+          {
+            value: bounds.values[index]!,
+            slope: dot(bounds.rows[index]!, move),
+          },
+          {
+            value: after!.values[index]!,
+            slope: dot(after!.rows[index]!, move),
+          },
+        );
+        if (evaluations > 0) yield { kind: "raw", count: evaluations };
+        return dips;
+      };
+      const entering: number[] = [];
+      if (after)
+        for (let index = 0; index < after.values.length; index += 1)
+          if (
+            !active.includes(index) &&
+            (after.values[index]! < -INEQUALITY_TOLERANCE ||
+              (yield* jumpedOver(index)))
           )
-        : [];
+            entering.push(index);
       if (entering.length > 0) {
-        // A blocking inequality: shorten the step to its (linearly
-        // interpolated) boundary, which the corrector then lands on. One
-        // whose boundary is within `MIN_BLOCKED_FRACTION` of the trial is
-        // as good as on it at the iterate: it does not shorten the step (a
-        // sliver of a step would restart the radius from nothing); the
-        // corrector holds it at g ≥ 0 at the same length.
+        // An entering inequality: shorten the step to its (linearly
+        // interpolated) boundary, which the corrector then lands on (see
+        // `MIN_BLOCKED_FRACTION`).
         let blocked = 1;
         for (const index of entering) {
           const before = bounds.values[index]!;
-          const now = after!.values[index]!;
+          const now = Math.min(after!.values[index]!, forward(index));
           const fraction =
             before > now ? Math.max(0, before / (before - now)) : 1;
-          if (fraction >= MIN_BLOCKED_FRACTION)
+          if (blocking.has(index) || fraction >= MIN_BLOCKED_FRACTION)
             blocked = Math.min(blocked, fraction);
         }
         active.push(...entering);
@@ -449,6 +550,15 @@ export function* solveConstrainedMinimumMotionSteps(
       radius = 2 * travelled;
       accepted = true;
       stats.acceptedMoves += 1;
+      // The move reached a blocking inequality's boundary: the corrector
+      // held it there on the way, or the move ends on it.
+      if (
+        [...blocking].some(
+          (index) =>
+            corrected.held.has(index) || after.values[index]! <= boundary,
+        )
+      )
+        return { kind: "solved", values: current, stop: "blocked", stats };
       rowUnavailable = false;
     }
     if (!accepted) return radiusStop();

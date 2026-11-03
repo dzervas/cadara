@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
 import {
+  chamferCursor,
+  chamferedRectangle,
   dragSession,
   onBranch,
   OUT_AND_BACK,
@@ -11,6 +13,7 @@ import {
   release,
   roundedRectangle,
   slot,
+  swingingSegment,
   tangentArc,
   tangentSides,
   TAU,
@@ -18,7 +21,10 @@ import {
 } from "./constrained-drag-branch.fixtures";
 import type { Point } from "./constrained-drag-branch.fixtures";
 import { solveBfgsOver } from "./bfgs";
-import { BRANCH_BOUNDARY_TOLERANCES } from "./constrained-drag-stage";
+import {
+  BRANCH_BOUNDARY_TOLERANCES,
+  deriveDragBranchInvariants,
+} from "./constrained-drag-stage";
 import {
   materializeDraggedPointCandidate,
   reevaluateDraggedPointCandidate,
@@ -29,11 +35,12 @@ import type { ScalarConstraintRecord } from "./system-types";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 
 // Logic lane, compiled drag session seam: the constrained drag step's
-// branch rule (policy "block", invariants derived from the rows, no entity
-// guard). The rounded-rectangle gestures are in
+// boundary rule (policy "block": a frame whose step reaches a branch
+// invariant or validity margin is refused; margins derived from the rows, no
+// entity guard). The rounded-rectangle gestures are in
 // constrained-drag-branch.heavy.spec.ts.
 
-test("a constrained frame stopped on a branch invariant is refused and the session keeps the last accepted values", () => {
+test("a constrained frame whose step reaches a branch invariant is refused and the session keeps the last accepted values", () => {
   const session = dragSession(roundedRectangle(), "constrained");
   for (let step = 1; step <= 16; step += 1) {
     const values = session.values;
@@ -61,6 +68,7 @@ test("a constrained frame stopped on a branch invariant is refused and the sessi
       traced.work.constrainedStepStalledStops,
       "premise: the step moved (the refusal is the invariant's)",
     ).toBe(0);
+    expect(traced.work.constrainedStepBoundaryRefusals).toBeGreaterThan(0);
     expect(session.values, "the accepted values are kept").toBe(values);
     expect(session.lastAcceptedSnapshot, "the accepted snapshot is kept").toBe(
       snapshot,
@@ -184,6 +192,53 @@ test("under the constrained step every re-check of a candidate refuses values of
   ).toBe(true);
 });
 
+test("under the constrained step a re-check refuses values that end on a validity boundary clear at the accepted frame, the end-state view of reaching it", () => {
+  // A result with no step path (a projection, a re-check) shows only where
+  // it ends: a segment that ends at length τ reached its boundary.
+  const session = dragSession(swingingSegment(), "constrained");
+  const free = session.program.system.pointRecords.get(pid("p"))!;
+  const endingAt = (x: number, y: number) => {
+    const values = Float64Array.from(session.values);
+    values[free.baseIndex] = x;
+    values[free.baseIndex + 1] = y;
+    return reevaluateDraggedPointCandidate(session, values).accepted;
+  };
+  expect(endingAt(TAU, 0), "length τ: on the boundary").toBe(false);
+  expect(endingAt(2 * TAU, 0), "length 2τ: clear of it").toBe(true);
+  // A re-check sees no path: an end swung round (length 1) is accepted
+  // however it got there. A straight move from a known candidate (the
+  // exact-reach projection) is read along its way (`refusesMove`).
+  expect(endingAt(-1, 0), "swung round, length 1").toBe(true);
+});
+
+test("a straight move from a candidate is refused when a validity margin dips below its boundary inside it, though both ends hold", () => {
+  // The exact-reach projection's reading (`refusesMove`): the chamfer's lower
+  // end moved straight past its fixed upper end folds the chamfer through
+  // zero length; a move beside the fixed end does not.
+  const session = dragSession(chamferedRectangle(), "constrained");
+  const invariants = deriveDragBranchInvariants(
+    session.program,
+    session.program.system.scalarConstraints,
+    session.values,
+  );
+  const lower = session.program.system.pointRecords.get(pid("ca"))!;
+  const endingAt = (x: number, y: number) => {
+    const values = Float64Array.from(session.values);
+    values[lower.baseIndex] = x;
+    values[lower.baseIndex + 1] = y;
+    return values;
+  };
+  const folded = endingAt(2.3, 0.6);
+  expect(invariants.refuses(folded), "premise: the end state holds").toBe(
+    false,
+  );
+  expect(invariants.refusesMove(session.values, folded)).toBe(true);
+  expect(
+    invariants.refusesMove(session.values, endingAt(2.3, 0)),
+    "beside the fixed end",
+  ).toBe(false);
+});
+
 test("a constrained step that accepts no move yields no candidate: the frame is refused, not solved without motion", () => {
   // The tangency row gains a component satisfied only at the accepted values
   // with no gradient to correct along, so every trial of the step fails.
@@ -227,4 +282,92 @@ test("a constrained step that accepts no move yields no candidate: the frame is 
   expect(traced.work.constrainedStepStalledStops).toBe(1);
   expect(traced.result.kind).toBe("blocked");
   expect(session.values).toEqual(accepted);
+});
+
+test("chamfer fold under the constrained step: the drag stops at the chamfer's length boundary, a frame across it is refused, and the drag back follows", () => {
+  // Past (2, 0.3) the chamfer could only fold back; the step can get there
+  // by sliding its free end round the fixed one at length τ (the length row
+  // holds the whole way), so the step's path, not its end, decides.
+  const session = dragSession(chamferedRectangle(), "constrained");
+  const [ca, cb] = [pid("ca"), pid("cb")];
+  const along = () => {
+    const a = positionOf(session.lastAcceptedSnapshot, ca);
+    const b = positionOf(session.lastAcceptedSnapshot, cb);
+    return (b[0] - a[0] + (b[1] - a[1])) / Math.SQRT2;
+  };
+  let lastAcceptedForward = 0;
+  const kinds: string[] = [];
+  OUT_AND_BACK.forEach((step, index) => {
+    const cursor = chamferCursor(step);
+    const traced = traceSketchSolverForTest(() => preview(session, ca, cursor));
+    kinds.push(traced.result.kind);
+    expect(
+      along(),
+      `step ${step}: the chamfer keeps its direction and length ≥ τ (${kinds.join(",")})`,
+    ).toBeGreaterThanOrEqual(TAU);
+    if (index < 16 && step >= 8) {
+      expect(
+        traced.result.kind,
+        `step ${step}: a frame at or past the fold is refused`,
+      ).toBe("blocked");
+      expect(
+        traced.work.constrainedStepBoundaryRefusals,
+        `step ${step}: refused at the boundary`,
+      ).toBeGreaterThan(0);
+    }
+    if (traced.result.kind === "solved" && index < 16)
+      lastAcceptedForward = step;
+    if (index >= 16 && step <= lastAcceptedForward) {
+      expect(traced.result.kind, `back step ${step} (${kinds.join(",")})`).toBe(
+        "solved",
+      );
+      const at = positionOf(session.lastAcceptedSnapshot, ca);
+      expect(
+        Math.hypot(at[0] - cursor[0], at[1] - cursor[1]),
+        `back step ${step} follows the cursor`,
+      ).toBeLessThan(1e-3);
+    }
+  });
+  expect(lastAcceptedForward, "premise: the drag reaches the fold").toBe(7);
+});
+
+test("a segment swung round its fixed end in large frames, never near zero length, is accepted every frame", () => {
+  // Each frame turns the free end by 120°: the minimum-motion path is the
+  // chord, at least 0.5 from the fixed end, so no boundary is reached.
+  const session = dragSession(swingingSegment(), "constrained");
+  for (let frame = 1; frame <= 6; frame += 1) {
+    const angle = (frame * 2 * Math.PI) / 3;
+    const cursor: Point = [Math.cos(angle), Math.sin(angle)];
+    const traced = traceSketchSolverForTest(() =>
+      preview(session, pid("p"), cursor),
+    );
+    expect(traced.result.kind, `frame ${frame}`).toBe("solved");
+    expect(traced.work.constrainedStepBoundaryRefusals).toBe(0);
+    const at = positionOf(session.lastAcceptedSnapshot, pid("p"));
+    expect(Math.hypot(at[0] - cursor[0], at[1] - cursor[1])).toBeLessThan(1e-3);
+  }
+});
+
+test("validity margins (segment length, radius ≥ τ): each analytic gradient matches central differences", () => {
+  for (const definition of [chamferedRectangle(), tangentArc()]) {
+    const session = dragSession(definition, "constrained");
+    const validity = session.program.system.inequalities.filter(
+      (inequality) => inequality.requirement === undefined,
+    );
+    expect(validity.length, "premise: validity rows exist").toBeGreaterThan(0);
+    for (const inequality of validity) {
+      const at = inequality.evaluate(session.values);
+      for (const index of inequality.variableIndices) {
+        const shifted = (delta: number) => {
+          const values = Float64Array.from(session.values);
+          values[index] += delta;
+          return inequality.evaluate(values).components[0]!;
+        };
+        expect(at.rows[0]![index], `${inequality.id} ∂/∂x${index}`).toBeCloseTo(
+          (shifted(1e-6) - shifted(-1e-6)) / 2e-6,
+          5,
+        );
+      }
+    }
+  }
 });

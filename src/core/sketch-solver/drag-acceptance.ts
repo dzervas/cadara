@@ -118,9 +118,9 @@ export function guardedArcFlippedOrCollapsed(input: {
 }
 
 /**
- * The branch invariants of every hard row at the session's last accepted
- * frame, derived once per accepted values (a session replaces `values` when
- * it accepts a frame) and program.
+ * The branch invariants of every hard row and the validity margins at the
+ * session's last accepted frame, derived once per accepted values (a
+ * session replaces `values` when it accepts a frame) and program.
  */
 const branchInvariantsByAcceptedValues = new WeakMap<
   Float64Array,
@@ -169,10 +169,12 @@ export function createDraggedPointAcceptance(input: {
   // T13a2 (issue 05, no flips): a frame that flips or collapses a guarded
   // arc relative to the last accepted frame is not accepted either. Under the
   // constrained step (`SketchDragStep`) the guard is not consulted: a frame
-  // that leaves the last accepted frame's branch by the row-derived
-  // invariants, or stops on one (policy "block"), is refused instead
-  // (`DragBranchInvariants`). Every candidate of every drag path is judged
-  // here, including the re-checks after an offset rebuild.
+  // that crosses a branch invariant or validity margin of the last accepted
+  // frame, or ends on one clear at that frame, is refused instead (policy
+  // "block", `DragBranchInvariants`; the step itself refuses a frame whose
+  // path reached one).
+  // Every candidate of every drag path is judged here, including the
+  // re-checks after an offset rebuild.
   const accepted =
     program.validation.isValid &&
     derivationsValid &&

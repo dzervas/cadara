@@ -236,6 +236,52 @@ export function slot() {
 }
 
 /**
+ * The Chamfer tool's 2 × 1 rectangle with a 0.3 chamfer at its bottom-right
+ * corner (from (1.7, 0) to (2, 0.3)); the chamfer's upper end is fixed.
+ * Dragging its lower end along the chamfer to (2.3, 0.6) passes through
+ * zero chamfer length at (2, 0.3) and would fold it back past there.
+ */
+export function chamferedRectangle() {
+  const points: Record<string, Point> = {
+    bl: [0, 0],
+    tr: [2, 1],
+    tl: [0, 1],
+    ca: [1.7, 0],
+    cb: [2, 0.3],
+  };
+  return definitionOf({
+    points,
+    entities: {
+      bottom: ["line", "bl", "ca"],
+      right: ["line", "cb", "tr"],
+      top: ["line", "tr", "tl"],
+      left: ["line", "tl", "bl"],
+      chamfer: ["line", "ca", "cb"],
+    },
+    tangents: [],
+    horizontal: ["bottom", "top"],
+    vertical: ["right", "left"],
+    fixed: ["cb"],
+  });
+}
+
+/** The chamfer drag's cursor at `step` of 16: along the chamfer to twice its length. */
+export const chamferCursor = (step: number): Point => [
+  1.7 + (0.6 * step) / 16,
+  (0.6 * step) / 16,
+];
+
+/** A unit segment from the fixed origin to (1, 0); its free end can swing round. */
+export function swingingSegment() {
+  return definitionOf({
+    points: { o: [0, 0], p: [1, 0] },
+    entities: { arm: ["line", "o", "p"] },
+    tangents: [],
+    fixed: ["o"],
+  });
+}
+
+/**
  * A lower semicircle of diameter 1 around (1, 0.5), tangent to the fixed
  * line (0,0)–(2,0) from above. Its centre's only same-branch positions are
  * on y = 0.5; the mirrored branch (below the line) reaches y = −0.5.

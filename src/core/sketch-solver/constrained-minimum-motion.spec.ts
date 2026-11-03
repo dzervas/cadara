@@ -138,6 +138,91 @@ test("inequalities entering together with incompatible boundaries do not over-de
   expect(Math.abs(result.values[0]! - 0.1 * Math.SQRT2)).toBeLessThan(1e-6);
 });
 
+// |p| ≥ 0.01: an unsigned distance, true at both ends of a move through 0.
+const awayFromOrigin = (values: Float64Array): ComponentJacobian => {
+  const length = Math.hypot(values[0]!, values[1]!);
+  return {
+    components: [length - 0.01],
+    rows: [Float64Array.from([values[0]! / length, values[1]! / length])],
+  };
+};
+const pullTo = (gx: number, gy: number) =>
+  row((x, y) => ({
+    components: [0.1 * (x - gx), 0.1 * (y - gy)],
+    rows: [
+      [0.1, 0],
+      [0, 0.1],
+    ],
+  }));
+
+test("a move that jumps over an inequality's boundary (an unsigned distance through zero) is stopped at the boundary", () => {
+  const result = run({
+    start: Float64Array.from([0.5, 0]),
+    variables: [0, 1],
+    equalities: [],
+    inequalities: [awayFromOrigin],
+    objective: [pullTo(-0.5, 0)],
+    blocking: [0],
+  });
+  expect(result.kind).toBe("solved");
+  if (result.kind !== "solved") return;
+  expect(result.stop).toBe("blocked");
+  expect(result.values[0], "the point stays on its side").toBeGreaterThan(0);
+  expect(Math.hypot(result.values[0]!, result.values[1]!)).toBeCloseTo(0.01, 6);
+});
+
+test("a move whose straight path passes beside an inequality's boundary is not stopped by it", () => {
+  // From (0.5, 0) to (0, 0.5): the chord stays 0.35 from the origin, though
+  // both ends' first-order models of |p| cross 0.01.
+  const result = run({
+    start: Float64Array.from([0.5, 0]),
+    variables: [0, 1],
+    equalities: [],
+    inequalities: [awayFromOrigin],
+    objective: [pullTo(0, 0.5)],
+    blocking: [0],
+  });
+  expect(result.kind).toBe("solved");
+  if (result.kind !== "solved") return;
+  expect(result.stop).not.toBe("blocked");
+  expect(Math.hypot(result.values[0]!, result.values[1]! - 0.5)).toBeLessThan(
+    1e-6,
+  );
+});
+
+test("a blocking inequality that entered on a rejected trial does not stop a shorter accepted move that stays clear of its boundary", () => {
+  // x ≥ 0 (blocking) and r(u) = 1 + u/2 + 0.8u², u = x − 1: the first trial
+  // (x = −1) crosses x = 0 and is shortened to it, where r grows (Armijo
+  // rejects it); the half-length trial x = 0.5 is accepted, clear of the
+  // boundary, and the step goes on to r's minimum at x = 0.6875.
+  const result = run({
+    start: Float64Array.from([1, 0]),
+    variables: [0],
+    equalities: [],
+    inequalities: [
+      (values) => ({
+        components: [values[0]!],
+        rows: [Float64Array.from([1, 0])],
+      }),
+    ],
+    objective: [
+      row((x) => ({
+        components: [1 + 0.5 * (x - 1) + 0.8 * (x - 1) ** 2],
+        rows: [[0.5 + 1.6 * (x - 1), 0]],
+      })),
+    ],
+    blocking: [0],
+  });
+  expect(result.kind).toBe("solved");
+  if (result.kind !== "solved") return;
+  expect(
+    result.stats.rejectedTrials,
+    "premise: the entering trial and the shortened one were rejected",
+  ).toBeGreaterThanOrEqual(2);
+  expect(result.stop).not.toBe("blocked");
+  expect(Math.abs(result.values[0]! - 0.6875)).toBeLessThan(1e-6);
+});
+
 test("a step whose every trial fails to correct stops on its radius with no accepted move", () => {
   // A row satisfied only at the start, with no gradient to correct along.
   const start = Float64Array.from([0, 1]);

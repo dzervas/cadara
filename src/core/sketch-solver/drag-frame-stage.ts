@@ -9,6 +9,7 @@ import { pointVariableIndices } from "./compile-components";
 import {
   deriveDragBranchInvariants,
   solveConstrainedDragStage,
+  type DragBranchInvariants,
 } from "./constrained-drag-stage";
 import type {
   DraggedPointCandidate,
@@ -227,6 +228,20 @@ export function* solveDragFrameStage(
   };
   const judge = (values: Float64Array) =>
     reevaluateDraggedPointCandidate(session, values);
+  // Under the constrained step the frame's boundary margins; the exact-reach
+  // projection is a straight move from the candidate, read along its way too
+  // (`refusesMove`), so it cannot fold a length through zero.
+  let derivedInvariants: DragBranchInvariants | undefined;
+  const frameInvariants = () =>
+    (derivedInvariants ??= deriveDragBranchInvariants(
+      program,
+      hardConstraints,
+      previousFrame,
+      solvedVariables,
+    ));
+  const projectedAcross = (from: Float64Array, to: Float64Array) =>
+    program.dragStep === "constrained" &&
+    frameInvariants().refusesMove(from, to);
   const exactReach = (candidate: DraggedPointCandidate) => {
     if (!bfgs || !input.exactReach || !candidate.accepted) return candidate;
     const [x, y] = input.draggedVariableIndices;
@@ -257,7 +272,9 @@ export function* solveDragFrameStage(
         { variableIndices: solvedVariables },
       );
       const reached = judge(candidateOf(projected.values));
-      return reached.accepted && lagOf(reached.values) <= targetTolerance
+      return reached.accepted &&
+        !projectedAcross(candidate.values, reached.values) &&
+        lagOf(reached.values) <= targetTolerance
         ? { ...reached, curvature: candidate.curvature }
         : candidate;
     }
@@ -284,7 +301,8 @@ export function* solveDragFrameStage(
       variableIndices: nonDraggedVariableIndices,
     });
     const reached = judge(candidateOf(projected.values));
-    return reached.accepted
+    return reached.accepted &&
+      !projectedAcross(candidate.values, reached.values)
       ? { ...reached, curvature: candidate.curvature }
       : candidate;
   };
@@ -314,18 +332,13 @@ export function* solveDragFrameStage(
         }),
       ],
       start: input.startValues ?? session.values,
-      invariants: deriveDragBranchInvariants(
-        program,
-        hardConstraints,
-        previousFrame,
-      ),
+      invariants: frameInvariants(),
       variables: solvedVariables,
     });
-    // A step that could not move yields no candidate (the frame is refused):
-    // its values are the corrected start, which a re-check would accept.
-    if (constrained?.stalled) return null;
-    if (constrained)
-      return exactReach(judge(candidateOf(constrained.values)));
+    // A refused step (it reached a boundary, or could not move) yields no
+    // candidate, so no re-check of its values can accept the frame.
+    if (constrained?.kind === "refused") return null;
+    if (constrained) return exactReach(judge(candidateOf(constrained.values)));
   }
 
   // Phase A: hard constraints + soft cursor target + uniform minimum motion.

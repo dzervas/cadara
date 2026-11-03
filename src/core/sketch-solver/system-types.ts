@@ -178,7 +178,11 @@ export type BuildSystemResult = {
   scalarConstraints: ScalarConstraintRecord[];
   /** Per derived shell: the variables of its owning offset's seeds (its curve's support). */
   shellSourceVariables: ReadonlyMap<SketchEntityId, readonly number[]>;
-  /** cadara-p4r5.1: explicit inequalities g(x) ≥ 0, data only (no solve enforces them). */
+  /**
+   * cadara-p4r5.1: explicit inequalities g(x) ≥ 0. Only the constrained drag
+   * step (`SketchDragStep` "constrained") enforces them; no other solve reads
+   * them.
+   */
   inequalities: readonly SolverInequalityRecord[];
   /**
    * First-order line↔arc tangency rows; each is also component 0 of its
@@ -189,7 +193,8 @@ export type BuildSystemResult = {
 
 /**
  * cadara-p4r5.1: one explicit inequality g(x) ≥ 0 with its analytic gradient
- * (`evaluate` returns one component). Data only: no solve reads it yet.
+ * (`evaluate` returns one component). Only the constrained drag step reads
+ * it (`deriveDragBranchInvariants`, `solveConstrainedDragStage`).
  * - `segmentLength`: |end − start| − τ of a line segment;
  * - `radius`: r − τ of a circle or arc (a point-defined arc's radius is its
  *   driven slot, |start − centre|, through the projection);

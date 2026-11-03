@@ -50,7 +50,9 @@ export interface SketchSolverWorkTrace {
   constrainedStepRowUnavailableStops: number;
   /** Stages whose step accepted no move before no trial could be corrected (the frame is refused). */
   constrainedStepStalledStops: number;
-  /** Row-derived branch invariants taken into constrained steps (`DragBranchInvariants`). */
+  /** Stages refused because an accepted move reached a boundary margin clear at the previous frame (policy "block"). */
+  constrainedStepBoundaryRefusals: number;
+  /** Row-derived branch invariants and validity margins taken into constrained steps (`DragBranchInvariants`). */
   constrainedStepBoundaryInvariants: number;
   /** Hard-row hinge components replaced by their restating inequalities, summed over stages. */
   constrainedStepRestatedComponents: number;
@@ -91,6 +93,7 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     constrainedStepStartNotCorrectable: 0,
     constrainedStepRowUnavailableStops: 0,
     constrainedStepStalledStops: 0,
+    constrainedStepBoundaryRefusals: 0,
     constrainedStepBoundaryInvariants: 0,
     constrainedStepRestatedComponents: 0,
     dragArcGuardEvaluations: 0,
