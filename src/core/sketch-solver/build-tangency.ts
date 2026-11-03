@@ -163,7 +163,14 @@ export function buildTangentConstraint(
       // contact: at the start because r = |s − c| holds identically, at the
       // end jointly with the internal common-radius row. So the oriented
       // component (contact − c)·u, first order at both, is component 0 of
-      // this row's loss.
+      // this row's loss. It is zero whenever the radius at the contact is
+      // normal to the line, wherever the contact lies, so the contact's
+      // signed distance to the line is a further component: together they
+      // vanish exactly where the line touches the arc's circle at the
+      // contact. The contact is found through coincident classes, so it may
+      // be a separate point from the line's endpoint: one that shares the
+      // endpoint reads 0 there; one joined by a coincident constraint that
+      // does not hold leaves this tangency unsatisfied too.
       let orientedContact: {
         contact: SolverPointRecord;
         center: SolverPointRecord;
@@ -237,6 +244,15 @@ export function buildTangentConstraint(
                 circleLike.arc
                   ? arcSweepViolationDual(contactPoint, circleLike.arc)
                   : columns.constant(0),
+                ...(orientedContact
+                  ? [
+                      pointLineSignedDistanceDual(
+                        pointDual(columns, orientedContact.contact),
+                        pointDual(columns, start),
+                        pointDual(columns, end),
+                      ),
+                    ]
+                  : []),
               ];
             },
           ),
@@ -276,7 +292,17 @@ export function buildTangentConstraint(
             const arcViolation = circleLike.arc
               ? localArcSweepViolation(contactPoint, circleLike.arc)
               : 0;
-            return [tangentResidual, arcViolation];
+            return orientedContact
+              ? [
+                  tangentResidual,
+                  arcViolation,
+                  pointLineSignedDistance(
+                    getPoint(values, orientedContact.contact),
+                    startPoint,
+                    endPoint,
+                  ),
+                ]
+              : [tangentResidual, arcViolation];
           },
           evaluateResidual(values) {
             const circleLike = getLocalCircleLike(values, curve);
@@ -313,8 +339,17 @@ export function buildTangentConstraint(
             const arcViolation = circleLike.arc
               ? localArcSweepViolation(contactPoint, circleLike.arc)
               : 0;
+            const contactOffLine = orientedContact
+              ? pointLineSignedDistance(
+                  getPoint(values, orientedContact.contact),
+                  startPoint,
+                  endPoint,
+                )
+              : 0;
             return Math.sqrt(
-              tangentResidual * tangentResidual + arcViolation * arcViolation,
+              tangentResidual * tangentResidual +
+                arcViolation * arcViolation +
+                contactOffLine * contactOffLine,
             );
           },
         }),
