@@ -6,7 +6,10 @@ import {
   solveBfgsOverSteps,
 } from "./bfgs";
 import { pointVariableIndices } from "./compile-components";
-import { solveConstrainedDragStage } from "./constrained-drag-stage";
+import {
+  deriveDragBranchInvariants,
+  solveConstrainedDragStage,
+} from "./constrained-drag-stage";
 import type {
   DraggedPointCandidate,
   SketchDragCurvature,
@@ -175,8 +178,8 @@ export function* solveDragFrameGeneral(
     input.draggedVariableIndices,
   );
   const preferred = yield* solveDragFrameStage(input, frozen);
-  if (frozen.size === 0 || preferred === null || preferred.accepted)
-    return preferred;
+  // A refused or stalled (null) preferred stage runs the unrestricted one.
+  if (frozen.size === 0 || preferred?.accepted) return preferred;
   return yield* solveDragFrameStage(input, NO_FROZEN_VARIABLES);
 }
 
@@ -311,11 +314,16 @@ export function* solveDragFrameStage(
         }),
       ],
       start: input.startValues ?? session.values,
-      previous: previousFrame,
+      invariants: deriveDragBranchInvariants(
+        program,
+        hardConstraints,
+        previousFrame,
+      ),
       variables: solvedVariables,
     });
-    if (constrained?.boundaryActive)
-      return { ...judge(candidateOf(constrained.values)), accepted: false };
+    // A step that could not move yields no candidate (the frame is refused):
+    // its values are the corrected start, which a re-check would accept.
+    if (constrained?.stalled) return null;
     if (constrained)
       return exactReach(judge(candidateOf(constrained.values)));
   }

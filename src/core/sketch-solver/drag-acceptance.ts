@@ -1,4 +1,7 @@
+import { deriveDragBranchInvariants } from "./constrained-drag-stage";
+import type { DragBranchInvariants } from "./constrained-drag-stage";
 import { pointLineSignedDistance } from "./line-residuals";
+import { solverWorkTrace } from "./solve-tracing";
 import type { SketchCoreSolveResult } from "./solve-types";
 import { hasRejectingError } from "./start-session";
 import type {
@@ -92,6 +95,7 @@ export function guardedArcFlippedOrCollapsed(input: {
   previous: { values: Float64Array; snapshot: SolvedSketchSnapshot };
   next: { values: Float64Array; snapshot: SolvedSketchSnapshot };
 }) {
+  if (solverWorkTrace) solverWorkTrace.dragArcGuardEvaluations += 1;
   const tau = input.program.modelingTolerance;
   const previous = guardedArcQuantities(
     input.program,
@@ -111,6 +115,31 @@ export function guardedArcFlippedOrCollapsed(input: {
     const collapsed = Math.abs(before) >= tau && Math.abs(after) < tau;
     return flipped || collapsed;
   });
+}
+
+/**
+ * The branch invariants of every hard row at the session's last accepted
+ * frame, derived once per accepted values (a session replaces `values` when
+ * it accepts a frame) and program.
+ */
+const branchInvariantsByAcceptedValues = new WeakMap<
+  Float64Array,
+  { program: SketchCompiledSolveProgram; invariants: DragBranchInvariants }
+>();
+
+function acceptedBranchInvariants(session: SketchCompiledSolveSession) {
+  const cached = branchInvariantsByAcceptedValues.get(session.values);
+  if (cached?.program === session.program) return cached.invariants;
+  const invariants = deriveDragBranchInvariants(
+    session.program,
+    session.program.system.scalarConstraints,
+    session.values,
+  );
+  branchInvariantsByAcceptedValues.set(session.values, {
+    program: session.program,
+    invariants,
+  });
+  return invariants;
 }
 
 export function createDraggedPointAcceptance(input: {
@@ -138,23 +167,30 @@ export function createDraggedPointAcceptance(input: {
   // dropped from acceptance so a feasible-but-lagging frame is `solved`, not
   // `blocked`; `blocked` is reserved for invalid/non-convergent solves.
   // T13a2 (issue 05, no flips): a frame that flips or collapses a guarded
-  // arc relative to the last accepted frame is not accepted either.
+  // arc relative to the last accepted frame is not accepted either. Under the
+  // constrained step (`SketchDragStep`) the guard is not consulted: a frame
+  // that leaves the last accepted frame's branch by the row-derived
+  // invariants, or stops on one (policy "block"), is refused instead
+  // (`DragBranchInvariants`). Every candidate of every drag path is judged
+  // here, including the re-checks after an offset rebuild.
   const accepted =
     program.validation.isValid &&
     derivationsValid &&
     constraintsSatisfied &&
     dimensionsSatisfied &&
-    !guardedArcFlippedOrCollapsed({
-      program,
-      previous: {
-        values: input.session.values,
-        snapshot: input.session.lastAcceptedSnapshot,
-      },
-      next: {
-        values: input.values,
-        snapshot: input.materialized.solvedSnapshot,
-      },
-    });
+    (program.dragStep === "constrained"
+      ? !acceptedBranchInvariants(input.session).refuses(input.values)
+      : !guardedArcFlippedOrCollapsed({
+          program,
+          previous: {
+            values: input.session.values,
+            snapshot: input.session.lastAcceptedSnapshot,
+          },
+          next: {
+            values: input.values,
+            snapshot: input.materialized.solvedSnapshot,
+          },
+        }));
 
   return { accepted };
 }

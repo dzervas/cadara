@@ -40,7 +40,7 @@ export const dragConditioningFixture = captured as unknown as {
 
 export function startConditioningReplay(
   row: CapturedDragCase,
-  compileOverrides: Pick<CompileInput, "dragStep" | "dragBoundary"> = {},
+  compileOverrides: Pick<CompileInput, "dragStep"> = {},
 ) {
   const started = startCompiledSketchSolveSession({
     sessionId: "interactive_sketch_solve_conditioning_replay",

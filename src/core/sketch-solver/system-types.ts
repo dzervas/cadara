@@ -3,7 +3,6 @@ import type { DegenerateSplineSpanRecovery } from "./degenerate-spline-recovery"
 import type { SketchDragCurvature } from "./drag-candidates";
 import type {
   SketchCoreValidationResult,
-  SketchDragBoundary,
   SketchDraggedPointTarget,
   SketchSolveStrategy,
   SketchSolveTolerancePolicy,
@@ -286,8 +285,6 @@ export interface SketchCompiledSolveProgram {
    * default "penalty" (`SketchDragStep`).
    */
   dragStep?: "constrained";
-  /** Set only with `dragStep` and a `SketchDragBoundary` policy. */
-  dragBoundary?: SketchDragBoundary;
   diagnostics: readonly SketchSolveDiagnostic[];
   validation: SketchCoreValidationResult;
   /**

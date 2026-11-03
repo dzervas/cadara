@@ -16,8 +16,14 @@ import {
 // plain row data (no geometry): it lands on the rows, keeps an inequality,
 // and reports an unavailable Jacobian instead of moving nothing.
 
-function run(problem: ConstrainedStepProblem): ConstrainedStepResult {
-  const steps = solveConstrainedMinimumMotionSteps(problem);
+/** The step over `problem`, with an inequality boundary band of 1e-6 unless given. */
+function run(
+  problem: Omit<ConstrainedStepProblem, "boundary"> & { boundary?: number },
+): ConstrainedStepResult {
+  const steps = solveConstrainedMinimumMotionSteps({
+    boundary: 1e-6,
+    ...problem,
+  });
   let next = steps.next();
   while (!next.done) next = steps.next();
   return next.value;
@@ -97,6 +103,62 @@ test("an inequality that a step would violate joins the active set and holds the
   expect(result.values[1]).toBeGreaterThan(0.6 - 1e-9);
   expect(Math.abs(result.values[1]! - 0.6)).toBeLessThan(1e-6);
   expect(result.stats.activeInequalities).toBe(1);
+});
+
+test("inequalities entering together with incompatible boundaries do not over-determine the corrector: the step stops on the one that binds", () => {
+  // The goal pulls x from 1 to −1; x/√2 ≥ 0.1 binds first (x = 0.1414),
+  // x ≥ 0.1 enters on the same trial but is clear there. Holding both at
+  // g = 0 would ask x = 0.1414 and x = 0.1 at once.
+  const toward = row((x, y) => ({
+    components: [0.1 * (x + 1), 0.1 * y],
+    rows: [
+      [0.1, 0],
+      [0, 0.1],
+    ],
+  }));
+  const result = run({
+    start: Float64Array.from([1, 0]),
+    variables: [0, 1],
+    equalities: [],
+    inequalities: [
+      (values) => ({
+        components: [values[0]! / Math.SQRT2 - 0.1],
+        rows: [Float64Array.from([1 / Math.SQRT2, 0])],
+      }),
+      (values) => ({
+        components: [values[0]! - 0.1],
+        rows: [Float64Array.from([1, 0])],
+      }),
+    ],
+    objective: [toward],
+  });
+  expect(result.kind).toBe("solved");
+  if (result.kind !== "solved") return;
+  expect(result.stats.acceptedMoves).toBeGreaterThan(0);
+  expect(Math.abs(result.values[0]! - 0.1 * Math.SQRT2)).toBeLessThan(1e-6);
+});
+
+test("a step whose every trial fails to correct stops on its radius with no accepted move", () => {
+  // A row satisfied only at the start, with no gradient to correct along.
+  const start = Float64Array.from([0, 1]);
+  const pinned = {
+    evaluate: (values: Float64Array): ComponentJacobian => ({
+      components: [values[0] === start[0] && values[1] === start[1] ? 0 : 1],
+      rows: [Float64Array.from([0, 0])],
+    }),
+  };
+  const result = run({
+    start,
+    variables: [0, 1],
+    equalities: [pinned],
+    inequalities: [],
+    objective: [goal, anchor],
+  });
+  expect(result.kind).toBe("solved");
+  if (result.kind !== "solved") return;
+  expect(result.stop).toBe("radius");
+  expect(result.stats.acceptedMoves).toBe(0);
+  expect([...result.values]).toEqual([...start]);
 });
 
 test("a hinge component restated by an inequality is not an equality", () => {

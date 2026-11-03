@@ -10,7 +10,6 @@ import {
   dragConditioningFixture,
   startConditioningReplay,
 } from "./solver-drag-conditioning.fixtures";
-import type { SketchDragBoundary } from "./solve-types";
 import { createCompiledSketchSolveSession } from "./start-session";
 import { updateCompiledSketchSolveSession } from "./update-session";
 
@@ -20,12 +19,9 @@ const corner = dragConditioningFixture.cases.find(
   (row) => row.scenario === "drag-corner",
 )!;
 
-/** The k5d two-target corner: settle target 0, then target 1. */
-function secondPreview(dragBoundary?: SketchDragBoundary) {
-  const session = startConditioningReplay(corner, {
-    dragStep: "constrained",
-    ...(dragBoundary ? { dragBoundary } : {}),
-  });
+/** The k5d two-target corner: settle target 0, then target 1 (both drag the bottom-left corner). */
+function secondPreview(dragStep: "penalty" | "constrained") {
+  const session = startConditioningReplay(corner, { dragStep });
   const settle = (target: (typeof corner.targets)[number][0]) => {
     let kind = "pending";
     for (let calls = 0; kind === "pending" && calls < 40; calls += 1)
@@ -40,21 +36,47 @@ function secondPreview(dragBoundary?: SketchDragBoundary) {
         session.lastAcceptedSnapshot,
       ),
     ].filter(([key]) => key.startsWith("side:"));
+  const target = corner.targets[1]![0];
+  if (target.kind !== "sketchPoint") throw new Error("premise: a point drag");
+  const dragged = () =>
+    session.lastAcceptedSnapshot.solvedPoints.find(
+      (point) => point.pointId === target.pointId,
+    )!.solvedPosition;
   settle(corner.targets[0]![0]);
-  const before = sides();
-  const kind = settle(corner.targets[1]![0]);
-  return { session, kind, before, after: sides() };
+  const before = { sides: sides(), corner: dragged(), values: session.values };
+  const kind = settle(target);
+  return {
+    session,
+    kind,
+    before,
+    after: { sides: sides(), corner: dragged() },
+  };
 }
 
-test('dragBoundary "park": the k5d second corner preview, which the flip guard blocks, is solved on the accepted branch', () => {
-  const unguided = secondPreview();
-  expect(unguided.kind).toBe("blocked");
-  const parked = secondPreview("park");
-  expect(parked.session.program.dragBoundary).toBe("park");
-  expect(parked.kind).toBe("solved");
-  expect(parked.after.map(([key, side]) => [key, Math.sign(side)])).toEqual(
-    parked.before.map(([key, side]) => [key, Math.sign(side)]),
+test("the constrained step: the k5d second corner preview either moves the dragged corner on the accepted branch or is refused, never solved without motion", () => {
+  expect(secondPreview("penalty").kind).toBe("blocked");
+  const constrained = secondPreview("constrained");
+  expect(
+    constrained.after.sides.map(([key, side]) => [key, Math.sign(side)]),
+    "Fillet 17 keeps its sides",
+  ).toEqual(
+    constrained.before.sides.map(([key, side]) => [key, Math.sign(side)]),
   );
+  const motion = Math.hypot(
+    constrained.after.corner[0] - constrained.before.corner[0],
+    constrained.after.corner[1] - constrained.before.corner[1],
+  );
+  if (constrained.kind === "solved")
+    expect(motion, "a solved preview moves the dragged corner").toBeGreaterThan(
+      1e-6,
+    );
+  else {
+    expect(constrained.kind).toBe("blocked");
+    expect(
+      constrained.session.values,
+      "a refused preview keeps the accepted values",
+    ).toBe(constrained.before.values);
+  }
 });
 
 test("row-derived invariants: each margin is nonnegative where derived and its analytic gradient matches central differences", () => {
@@ -162,9 +184,4 @@ test("row-derived invariants: a row that sees a point only through its distance 
   expect(deriveChiralityInvariants(program, equalRows, session.values)).toEqual(
     [],
   );
-});
-
-test("without a boundary policy the compiled program carries none", () => {
-  const session = startConditioningReplay(corner, { dragStep: "constrained" });
-  expect("dragBoundary" in session.program).toBe(false);
 });

@@ -26,9 +26,12 @@ import type { ComponentJacobian } from "./automatic-differentiation";
  *   corrected point decreases ½‖f‖² (Armijo on the predicted decrease) and
  *   the corrector moved it at most half the predicted step.
  * - Inequalities: an inequality violated at the iterate, or newly violated
- *   by a trial, joins the iteration's active set as an equality g = 0 and the
- *   trial is recomputed; the active set restarts empty (plus the violated
- *   ones) at every iterate.
+ *   by a trial, joins the iteration's active set and the trial is
+ *   recomputed; the corrector holds an active inequality at g = 0 only while
+ *   it is violated or on its boundary (`boundary`), so it projects onto
+ *   g ≥ 0 and several inequalities that enter together cannot over-determine
+ *   the rows. The active set restarts empty (plus the violated ones) at
+ *   every iterate.
  * - A row whose Jacobian is `unavailable` or non-finite at the start makes
  *   the step unavailable (the caller decides what runs instead); at a trial
  *   point it only rejects the trial.
@@ -46,6 +49,15 @@ export interface ConstrainedStepProblem {
   equalities: readonly ConstrainedStepRow[];
   /** g(x) ≥ 0; each evaluates one component. */
   inequalities: readonly ((values: Float64Array) => ComponentJacobian)[];
+  /**
+   * An inequality with g below this (absolute, in the rows' units) is on its
+   * boundary: the step slides along it (the leaving test), and the corrector
+   * holds an active one at g = 0, so a violated one, or one a shortened
+   * trial landed just short of, lands on the boundary while one clear of it
+   * is released. The caller sets it from its model tolerance, so it does not
+   * depend on where the geometry sits.
+   */
+  boundary: number;
   objective: readonly ConstrainedStepRow[];
 }
 
@@ -56,6 +68,8 @@ export type ConstrainedStepStats = {
   iterations: number;
   newtonIterations: number;
   rejectedTrials: number;
+  /** Trials accepted as moves (0: the result is the corrected start). */
+  acceptedMoves: number;
   /** The most inequalities active in one iteration. */
   activeInequalities: number;
 };
@@ -103,6 +117,9 @@ export const ARMIJO = 1e-4;
 
 export const CORRECTOR_TRAVEL = 0.5;
 
+/** A blocking inequality reached within this fraction of a trial does not shorten it. */
+export const MIN_BLOCKED_FRACTION = 1e-3;
+
 export type Linearization =
   | { kind: "ok"; residuals: Float64Array; rows: Float64Array[] }
   | { kind: "unavailable" }
@@ -117,11 +134,13 @@ export function* solveConstrainedMinimumMotionSteps(
     iterations: 0,
     newtonIterations: 0,
     rejectedTrials: 0,
+    acceptedMoves: 0,
     activeInequalities: 0,
   };
   let scale = 1;
   for (const index of variables)
     scale = Math.max(scale, Math.abs(problem.start[index]!));
+  const { boundary } = problem;
 
   const restrict = (jacobian: ComponentJacobian, component: number) => {
     const row = new Float64Array(size);
@@ -215,8 +234,21 @@ export function* solveConstrainedMinimumMotionSteps(
   ): Generator<ConstrainedStepWork, Correction, void> {
     let current = values;
     let previousNorm = Number.POSITIVE_INFINITY;
+    let enforcedKey = "";
     for (let iteration = 0; ; iteration += 1) {
-      const linear = yield* linearize(problem.equalities, active, current);
+      // An active inequality is held at g = 0 only while it is violated or
+      // on its boundary at the Newton iterate (projection onto g ≥ 0); a
+      // change of that set restarts the norm-decrease test.
+      const enforced: number[] = [];
+      for (const index of active) {
+        yield { kind: "raw", count: 1 };
+        if (problem.inequalities[index]!(current).components[0]! < boundary)
+          enforced.push(index);
+      }
+      if (enforced.join(",") !== enforcedKey)
+        previousNorm = Number.POSITIVE_INFINITY;
+      enforcedKey = enforced.join(",");
+      const linear = yield* linearize(problem.equalities, enforced, current);
       if (linear.kind === "unavailable") return { kind: "unavailable" };
       if (linear.kind === "nonFinite") return { kind: "failed" };
       const largest = maxAbs(linear.residuals);
@@ -256,14 +288,12 @@ export function* solveConstrainedMinimumMotionSteps(
   let current = startCorrection.values;
   let radius = Number.POSITIVE_INFINITY;
   let curvature = squareMatrix(size);
-  const boundary = INEQUALITY_TOLERANCE * scale;
   // A row that becomes unavailable mid-solve is never silent zero motion:
   // before the first accepted move the whole step is unavailable (the caller
   // runs its fallback); after it, the stop says so.
-  let movedOnce = false;
   let rowUnavailable = false;
   const unavailableStop = (): ConstrainedStepResult =>
-    movedOnce
+    stats.acceptedMoves > 0
       ? { kind: "solved", values: current, stop: "rowUnavailable", stats }
       : { kind: "unavailable", reason: "jacobianUnavailable", stats };
   const radiusStop = (): ConstrainedStepResult =>
@@ -349,13 +379,19 @@ export function* solveConstrainedMinimumMotionSteps(
         : [];
       if (entering.length > 0) {
         // A blocking inequality: shorten the step to its (linearly
-        // interpolated) boundary, which the corrector then lands on.
+        // interpolated) boundary, which the corrector then lands on. One
+        // whose boundary is within `MIN_BLOCKED_FRACTION` of the trial is
+        // as good as on it at the iterate: it does not shorten the step (a
+        // sliver of a step would restart the radius from nothing); the
+        // corrector holds it at g ≥ 0 at the same length.
         let blocked = 1;
         for (const index of entering) {
           const before = bounds.values[index]!;
           const now = after!.values[index]!;
-          if (before > now)
-            blocked = Math.min(blocked, Math.max(0, before / (before - now)));
+          const fraction =
+            before > now ? Math.max(0, before / (before - now)) : 1;
+          if (fraction >= MIN_BLOCKED_FRACTION)
+            blocked = Math.min(blocked, fraction);
         }
         active.push(...entering);
         stats.rejectedTrials += 1;
@@ -412,7 +448,7 @@ export function* solveConstrainedMinimumMotionSteps(
       current = corrected.values;
       radius = 2 * travelled;
       accepted = true;
-      movedOnce = true;
+      stats.acceptedMoves += 1;
       rowUnavailable = false;
     }
     if (!accepted) return radiusStop();

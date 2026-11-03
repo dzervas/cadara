@@ -12,13 +12,9 @@ import {
   findProjectedGeometry,
   resolveSketchDatumPoint,
 } from "./projected-geometry";
-import {
-  DEFAULT_SKETCH_DRAG_BOUNDARY,
-  DEFAULT_SKETCH_DRAG_STEP,
-} from "./solve-types";
+import { DEFAULT_SKETCH_DRAG_STEP } from "./solve-types";
 import type {
   SketchCoreValidationResult,
-  SketchDragBoundary,
   SketchDragStep,
   SketchSolveStrategy,
   SketchSolveTolerancePolicy,
@@ -199,8 +195,6 @@ export function compileSketchSolveProgram(input: {
    * pass it explicitly).
    */
   dragStep?: SketchDragStep;
-  /** The constrained step's branch-invariant policy (`SketchDragBoundary`); same lifetime as `dragStep`. */
-  dragBoundary?: SketchDragBoundary;
   /**
    * T17c5: the point a drag moves. A spline whose only authored errors are
    * coincident spans at this point, not joined by Coincident constraints,
@@ -248,7 +242,6 @@ export function compileSketchSolveProgram(input: {
     offsetPlans: input.offsetPlans,
   });
   const strategy = input.strategy ?? "bfgs";
-  const dragBoundary = input.dragBoundary ?? DEFAULT_SKETCH_DRAG_BOUNDARY;
   const compatibilityKey = createSketchSolveCompatibilityKey({
     definition,
     projectedReferences,
@@ -274,10 +267,7 @@ export function compileSketchSolveProgram(input: {
     partialSolvePolicy: input.partialSolvePolicy,
     strategy,
     ...((input.dragStep ?? DEFAULT_SKETCH_DRAG_STEP) === "constrained"
-      ? {
-          dragStep: "constrained" as const,
-          ...(dragBoundary ? { dragBoundary } : {}),
-        }
+      ? { dragStep: "constrained" as const }
       : {}),
     diagnostics: derived.diagnostics,
     validation,

@@ -48,10 +48,14 @@ export interface SketchSolverWorkTrace {
   constrainedStepStartNotCorrectable: number;
   /** Stages stopped by a row unavailable after an accepted move (stop `rowUnavailable`). */
   constrainedStepRowUnavailableStops: number;
-  /** Row-derived branch invariants taken into constrained steps (`SketchDragBoundary`). */
+  /** Stages whose step accepted no move before no trial could be corrected (the frame is refused). */
+  constrainedStepStalledStops: number;
+  /** Row-derived branch invariants taken into constrained steps (`DragBranchInvariants`). */
   constrainedStepBoundaryInvariants: number;
   /** Hard-row hinge components replaced by their restating inequalities, summed over stages. */
   constrainedStepRestatedComponents: number;
+  /** Drag frame acceptances that ran the arc flip/collapse guard (`guardedArcFlippedOrCollapsed`). */
+  dragArcGuardEvaluations: number;
 }
 
 export let solverWorkTrace: SketchSolverWorkTrace | null = null;
@@ -86,8 +90,10 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     constrainedStepJacobianUnavailable: 0,
     constrainedStepStartNotCorrectable: 0,
     constrainedStepRowUnavailableStops: 0,
+    constrainedStepStalledStops: 0,
     constrainedStepBoundaryInvariants: 0,
     constrainedStepRestatedComponents: 0,
+    dragArcGuardEvaluations: 0,
   };
   gaussNewtonFallbackTrace = trace;
   solverWorkTrace = work;
