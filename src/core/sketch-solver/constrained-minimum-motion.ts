@@ -77,6 +77,13 @@ export interface ConstrainedStepProblem {
    * the move ends within `boundary` of it.
    */
   blocking?: readonly number[];
+  /**
+   * Stop before correcting a feasible trial back onto a blocking boundary.
+   * Opt-in for a caller that refuses the whole frame at that trial, rather
+   * than publishing the boundary move. The returned values are the last
+   * accepted iterate, not the trial that crossed the boundary.
+   */
+  stopOnBlockingTrial?: boolean;
   objective: readonly ConstrainedStepRow[];
 }
 
@@ -102,13 +109,16 @@ export type ConstrainedStepResult =
        * least one accepted move; the result is that last accepted iterate.
        * `blocked`: an accepted move reached a `blocking` inequality's
        * boundary; the result is that move.
+       * `blockingTrial`: the opt-in trial stop saw a corrected trial cross a
+       * blocking inequality; the result is the preceding accepted iterate.
        */
       stop:
         | "stationary"
         | "radius"
         | "maxIterations"
         | "rowUnavailable"
-        | "blocked";
+        | "blocked"
+        | "blockingTrial";
       stats: ConstrainedStepStats;
     }
   | {
@@ -554,6 +564,11 @@ export function* solveConstrainedMinimumMotionSteps(
               (yield* jumpedOver(index)))
           )
             entering.push(index);
+      if (
+        problem.stopOnBlockingTrial &&
+        entering.some((index) => blocking.has(index))
+      )
+        return { kind: "solved", values: current, stop: "blockingTrial", stats };
       if (entering.length > 0) {
         // An entering inequality: shorten the step to its (linearly
         // interpolated) boundary, which the corrector then lands on (see

@@ -23,8 +23,9 @@ import type {
  * one of `variables` (every one when omitted).
  *
  * The boundary policy "block": a drag stops at a boundary. The constrained
- * step refuses a frame whose step reached the boundary of a margin that was
- * clear of it at `previous` (`clearAtPrevious`), even if it slid off again:
+ * step refuses a frame as soon as a feasible corrected trial crosses a margin
+ * clear of its boundary at `previous` (`clearAtPrevious`), or an accepted
+ * move reaches it, even if it slid off again:
  * sliding along a collinear triple is a flip path, sliding along a length of
  * τ a fold path. A margin already on its boundary at `previous` does not
  * block, so a triple held there does not freeze the drag by itself. A
@@ -124,8 +125,8 @@ export function deriveDragBranchInvariants(
  * Null when the step is unavailable at this frame (counted in the work
  * trace), so the caller runs phases A and B. "refused" (the caller yields no
  * candidate, so no re-check can accept the frame):
- * - "boundaryReached": an accepted move held a margin that was clear of its
- *   boundary at `previous` (policy "block");
+ * - "boundaryReached": a feasible corrected trial crossed a margin clear of
+ *   its boundary at `previous`, or an accepted move reached it (policy "block");
  * - "stalled": the step accepted no move and stopped because no trial
  *   length could be corrected (stop "radius"); its values are the corrected
  *   start, which would read as solved without motion.
@@ -164,6 +165,10 @@ export function* solveConstrainedDragStage(input: {
       ),
     })),
     boundary: BRANCH_BOUNDARY_TOLERANCES * input.program.modelingTolerance,
+    // A corrected trial crossing a clear margin already decides this frame:
+    // block keeps the previous frame, not a boundary point. Do not spend
+    // further trials landing on a boundary whose result cannot be published.
+    stopOnBlockingTrial: true,
     blocking: clearAtPrevious.flatMap((clear, index) =>
       clear ? [restated.length + index] : [],
     ),
@@ -193,9 +198,12 @@ export function* solveConstrainedDragStage(input: {
   }
   if (result.kind !== "solved") return null;
   const stalled = result.stop === "radius" && result.stats.acceptedMoves === 0;
-  const boundaryReached = result.stop === "blocked";
+  const boundaryReached =
+    result.stop === "blocked" || result.stop === "blockingTrial";
   if (solverWorkTrace) {
     solverWorkTrace.constrainedStepBoundaryInvariants += margins.length;
+    if (result.stop === "blockingTrial")
+      solverWorkTrace.constrainedStepBoundaryTrialRefusals += 1;
     if (stalled) solverWorkTrace.constrainedStepStalledStops += 1;
     else if (boundaryReached)
       solverWorkTrace.constrainedStepBoundaryRefusals += 1;

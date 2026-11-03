@@ -69,6 +69,15 @@ test("a constrained frame whose step reaches a branch invariant is refused and t
       "premise: the step moved (the refusal is the invariant's)",
     ).toBe(0);
     expect(traced.work.constrainedStepBoundaryRefusals).toBeGreaterThan(0);
+    expect(
+      traced.work.constrainedStepIterations,
+      "a refused frame stops within the accepted frame's outer-iteration budget",
+    ).toBeLessThanOrEqual(5);
+    expect(
+      traced.work.constrainedStepNewtonIterations,
+      "a refused frame does not repeatedly correct trials onto an unpublished boundary",
+    ).toBeLessThanOrEqual(32);
+    expect(traced.work.constrainedStepBoundaryTrialRefusals).toBeGreaterThan(0);
     expect(session.values, "the accepted values are kept").toBe(values);
     expect(session.lastAcceptedSnapshot, "the accepted snapshot is kept").toBe(
       snapshot,

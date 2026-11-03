@@ -12,6 +12,7 @@ import {
   tangentSides,
 } from "./constrained-drag-branch.fixtures";
 import type { Point } from "./constrained-drag-branch.fixtures";
+import { traceSketchSolverForTest } from "./solve-tracing";
 
 // Logic lane, compiled drag session seam: the rounded-rectangle gestures of
 // the constrained drag step's branch rule (policy "block", invariants derived
@@ -25,7 +26,19 @@ test("R-1 under the constrained step: a fillet never collapses or flips, the for
   const trace: string[] = [];
   OUT_AND_BACK.forEach((step, index) => {
     const cursor = r1Cursor(step);
-    const result = preview(session, R1_GRABBED, cursor);
+    const { result, work } = traceSketchSolverForTest(() =>
+      preview(session, R1_GRABBED, cursor),
+    );
+    if (result.kind === "blocked") {
+      expect(
+        work.constrainedStepIterations,
+        `frame ${index + 1}: refusal costs no more outer iterations than an accepted frame`,
+      ).toBeLessThanOrEqual(5);
+      expect(
+        work.constrainedStepNewtonIterations,
+        `frame ${index + 1}: refusal does not repeatedly land on the boundary`,
+      ).toBeLessThanOrEqual(32);
+    }
     trace.push(`${step}:${result.kind}`);
     expect(
       onBranch(tangentSides(session), start),
@@ -59,7 +72,19 @@ test("forced collapse under the constrained step: no accepted frame collapses or
   const kinds: string[] = [];
   OUT_AND_BACK.forEach((step, index) => {
     const cursor = forcedCursor(step);
-    const result = preview(session, R1_GRABBED, cursor);
+    const { result, work } = traceSketchSolverForTest(() =>
+      preview(session, R1_GRABBED, cursor),
+    );
+    if (result.kind === "blocked") {
+      expect(
+        work.constrainedStepIterations,
+        `frame ${index + 1}: refusal costs no more outer iterations than an accepted frame`,
+      ).toBeLessThanOrEqual(5);
+      expect(
+        work.constrainedStepNewtonIterations,
+        `frame ${index + 1}: refusal does not repeatedly land on the boundary`,
+      ).toBeLessThanOrEqual(32);
+    }
     kinds.push(result.kind);
     expect(
       onBranch(tangentSides(session), start),
