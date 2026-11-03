@@ -1,5 +1,12 @@
 import { evaluateLoss, solveBfgsOver } from "./bfgs";
 import {
+  maxAbs,
+  minimumNormStep,
+  solveConstrainedMinimumMotionSteps,
+} from "./constrained-minimum-motion";
+import type { ConstrainedStepRow } from "./constrained-minimum-motion";
+import { BRANCH_BOUNDARY_TOLERANCES } from "./constrained-drag-stage";
+import {
   pointVariableIndices,
   uniqueSortedIndices,
 } from "./compile-components";
@@ -10,17 +17,18 @@ import {
   withFrozenVariables,
 } from "./mirror-axis-preference";
 import { rebuiltBlockedOffsets } from "./offset-requirements";
-import { DRAG_MINIMUM_MOTION_EPSILON } from "./solve-constants";
+import { BFGS_MIN_LOSS, DRAG_MINIMUM_MOTION_EPSILON } from "./solve-constants";
 import { finishSolve, immediateSolve } from "./solve-steps";
 import type { SolveSteps } from "./solve-steps";
 import type { SolvedSystemValues } from "./solve-strategies";
 import { solveSystemValues } from "./solve-strategies";
-import { cloneValues } from "./solver-geometry";
+import { cloneValues, uniformNorm } from "./solver-geometry";
 import {
   isAcceptableSolvedSnapshot,
   isAcceptableSolvedValues,
 } from "./start-session";
 import type {
+  ScalarConstraintRecord,
   SketchCompiledSolveComponent,
   SketchCompiledSolveProgram,
 } from "./system-types";
@@ -128,7 +136,231 @@ export function* solveWithRebuildRetrySteps<T>(input: {
 }
 
 /**
+ * The minimum-motion point of a batch solve: the nearest point to
+ * `startValues` (Euclidean, over `variables`) on the hard rows' solution
+ * set, by the equality-constrained minimum-motion step with the start as its
+ * only objective (the anchor's weight does not matter: it is the whole
+ * objective). An under-determined edit (a dimension change that a fillet's
+ * radius or a free point could absorb) then lands where the least geometry
+ * moves, as in a drag, instead of wherever the least-squares descent's first
+ * steps happen to leave it on the solution set. A hinge component that an
+ * explicit inequality restates is enforced as that inequality instead of as
+ * an equality. Where the step is unavailable (a row's Jacobian unavailable,
+ * or a start that cannot be corrected onto the rows, e.g. an inconsistent
+ * system) the start is returned unchanged and the solve is the plain one.
+ */
+function solveConstrainedMinimumMotionStart(
+  program: SketchCompiledSolveProgram,
+  startValues: Float64Array,
+  equations: readonly ScalarConstraintRecord[],
+  variables: readonly number[],
+): Float64Array {
+  const restated = program.system.inequalities.filter((inequality) =>
+    equations.some(
+      (row) =>
+        row.id === inequality.requirement?.id &&
+        row.hingeComponentIndices?.includes(
+          inequality.requirement.componentIndex,
+        ),
+    ),
+  );
+  const anchor = createMinimumMotionAnchorConstraint({
+    id: "constraint_batch_minimum_motion" as ConstraintId,
+    parameterCount: program.system.parameterCount,
+    anchorValues: startValues,
+    variableIndices: variables,
+    weight: 1,
+    parameterProjection: program.system.parameterProjection,
+  });
+  const equalities = equations.map((row) => ({
+    evaluate: (values: Float64Array) => row.evaluateComponentJacobian(values),
+    excludedComponents: restated.flatMap((inequality) =>
+      inequality.requirement!.id === row.id
+        ? [inequality.requirement!.componentIndex]
+        : [],
+    ),
+  }));
+  const result = finishSolve(
+    solveConstrainedMinimumMotionSteps({
+      start: startValues,
+      variables,
+      equalities,
+      // The restated hinges sit on their boundary at the start; the band is
+      // the same τ-based one the drag step uses, so it does not depend on
+      // where the geometry sits.
+      boundary: BRANCH_BOUNDARY_TOLERANCES * program.modelingTolerance,
+      inequalities: restated.map(
+        (inequality) => (values: Float64Array) => inequality.evaluate(values),
+      ),
+      objective: [
+        { evaluate: (values) => anchor.evaluateComponentJacobian(values) },
+      ],
+    }),
+  );
+  return result.kind === "solved"
+    ? polishedOntoRows(result.values, equalities, variables)
+    : startValues;
+}
+
+/**
+ * The most moving variables the constrained step takes; above it the batch
+ * start is the anchored descent. The step's dense linear algebra grows
+ * about cubically. One under-determined length edit on a connected line
+ * chain, whole solve, at 22 / 62 / 102 / 202 / 402 / 802 variables (load
+ * 1.3-1.7): plain descent 2.0 / 3.1 / 11 / 19 / 51 / 162 ms, anchored start
+ * 2.1 / 4.8 / 14 / 27 / 69 / 209 ms, constrained step 2.7 / 14 / 32 / 171 /
+ * 1138 / 8990 ms (at load 22-36, 102 variables: 62 / 63 / 358 ms; 802:
+ * 434 / 512 / 15400 ms). Up to 64 the step costs at most ~15 ms per edit;
+ * past it the cost runs away. cadara-p4r5.13 makes the step scale so this
+ * cap can go.
+ */
+const CONSTRAINED_START_MAX_VARIABLES = 64;
+
+/** The batch starts taken, as recorded by `traceBatchMinimumMotionStartsForTest`. */
+let batchMinimumMotionStartTrace: {
+  constrained: number;
+  anchored: number;
+} | null = null;
+
+/** Runs `run` and counts which minimum-motion start each batch solve took. */
+export function traceBatchMinimumMotionStartsForTest<T>(run: () => T) {
+  const previous = batchMinimumMotionStartTrace;
+  const starts = { constrained: 0, anchored: 0 };
+  batchMinimumMotionStartTrace = starts;
+  try {
+    return { result: run(), starts };
+  } finally {
+    batchMinimumMotionStartTrace = previous;
+  }
+}
+
+/**
+ * The minimum-motion start of a batch solve over `variables`: the
+ * constrained step up to `CONSTRAINED_START_MAX_VARIABLES`, else the
+ * least-squares descent on the hard rows plus a weak anchor at the start
+ * (the drag minimum-motion term). The anchored descent costs about one
+ * plain solve, but its anchor only biases the landing towards the start:
+ * it can stop about as far out as the plain descent (an edit of a 33-sided
+ * ring lands 2.7 % farther than the nearest solution, which the step
+ * reaches).
+ */
+function solveMinimumMotionStart(
+  program: SketchCompiledSolveProgram,
+  startValues: Float64Array,
+  equations: readonly ScalarConstraintRecord[],
+  variables: readonly number[],
+  frozen: ReadonlySet<number>,
+): Float64Array {
+  if (variables.length <= CONSTRAINED_START_MAX_VARIABLES) {
+    if (batchMinimumMotionStartTrace)
+      batchMinimumMotionStartTrace.constrained += 1;
+    return solveConstrainedMinimumMotionStart(
+      program,
+      startValues,
+      equations,
+      variables,
+    );
+  }
+  if (batchMinimumMotionStartTrace) batchMinimumMotionStartTrace.anchored += 1;
+  return solveBfgsOver(Float64Array.from(startValues), [
+    ...withFrozenVariables([...equations], frozen),
+    createMinimumMotionAnchorConstraint({
+      id: "constraint_batch_minimum_motion" as ConstraintId,
+      parameterCount: program.system.parameterCount,
+      anchorValues: startValues,
+      variableIndices: variables,
+      weight: DRAG_MINIMUM_MOTION_EPSILON,
+      parameterProjection: program.system.parameterProjection,
+    }),
+  ]).values;
+}
+
+/** At most this many polishing Newton steps (each one squares the residual). */
+const POLISH_NEWTON_ITERATIONS = 3;
+
+/**
+ * `values` after minimum-norm Newton steps on the equality components
+ * while their largest residual strictly decreases. The step stops its
+ * corrector at a feasibility tolerance (1e-12 relative), which leaves an
+ * authored radius 8 measuring 7.999999999997 and two fit points joined by
+ * a Coincident ~1e-12 apart (a zero-length span is what the degenerate-span
+ * diagnostic reads); the quadratic convergence of one or two more steps
+ * reaches the rounding floor, as the least-squares descent did. Each step
+ * moves the geometry by about the residual, so the minimum-motion point is
+ * kept.
+ */
+function polishedOntoRows(
+  values: Float64Array,
+  equalities: readonly ConstrainedStepRow[],
+  variables: readonly number[],
+): Float64Array {
+  const linearize = (at: Float64Array) => {
+    const residuals: number[] = [];
+    const rows: Float64Array[] = [];
+    for (const row of equalities) {
+      const jacobian = row.evaluate(at);
+      if (jacobian.unavailable) return null;
+      const excluded = new Set(row.excludedComponents);
+      jacobian.components.forEach((residual, component) => {
+        if (excluded.has(component)) return;
+        residuals.push(residual);
+        rows.push(
+          Float64Array.from(
+            variables,
+            (index) => jacobian.rows[component]![index]!,
+          ),
+        );
+      });
+    }
+    return residuals.every(Number.isFinite) &&
+      rows.every((row) => row.every(Number.isFinite))
+      ? { residuals: Float64Array.from(residuals), rows }
+      : null;
+  };
+  let scale = 1;
+  for (const index of variables)
+    scale = Math.max(scale, Math.abs(values[index]!));
+  // Residuals at the rounding floor of the coordinates are left alone: a
+  // step there only adds noise (an exact 0 coordinate would read ~1e-21).
+  const floor = Number.EPSILON * scale;
+  let current = values;
+  let linear = linearize(current);
+  for (
+    let iteration = 0;
+    linear &&
+    iteration < POLISH_NEWTON_ITERATIONS &&
+    maxAbs(linear.residuals) > floor;
+    iteration += 1
+  ) {
+    const step = minimumNormStep(
+      linear.rows,
+      linear.residuals,
+      variables.length,
+    );
+    const next = cloneValues(current);
+    variables.forEach((index, column) => {
+      next[index] -= step[column]!;
+    });
+    const nextLinear = linearize(next);
+    if (
+      !nextLinear ||
+      !(maxAbs(nextLinear.residuals) < maxAbs(linear.residuals))
+    )
+      break;
+    current = next;
+    linear = nextLinear;
+  }
+  return current;
+}
+
+/**
  * One batch solve of `program` from `startValues` (no rebuild handling).
+ *
+ * The descent starts from the minimum-motion point of the hard rows
+ * (`solveMinimumMotionStart`), so an accepted under-determined result is
+ * the minimum-motion one; from there the least-squares descent only
+ * polishes (or, where the constrained step was unavailable, solves from the
+ * start).
  *
  * T13e2 (B4): a rejected result is re-solved with the drag minimum-motion
  * term anchored at the start (`createMinimumMotionAnchorConstraint`,
@@ -179,20 +411,65 @@ export function solveProgramValues(
       perConstraint: state.perConstraint,
     };
   };
+  const equations = scope
+    ? scope.flatMap((component) =>
+        component.equationIndices.map(
+          (equationIndex) => program.system.scalarConstraints[equationIndex]!,
+        ),
+      )
+    : program.system.scalarConstraints;
+  const constraints = withFrozenVariables(equations, frozen);
+  // A start the descent would keep (its own stop test) stays bit-unchanged:
+  // its minimum-motion point is itself within the tolerances, and a solve
+  // of an unchanged sketch (Undo, reopen, Finish) must not move it.
+  const startState = evaluateLoss(startValues, constraints);
+  const startKept =
+    startState.loss < BFGS_MIN_LOSS || uniformNorm(startState.gradient) < 1e-8;
+  // Components share no variables or equations, so the step only takes the
+  // ones whose own start fails that test: a dimension edit in one profile
+  // does not pay a dense step over every other profile of the sketch.
+  const moving =
+    program.strategy === "bfgs" && !startKept
+      ? (scope ?? program.components).filter((component) => {
+          const state = evaluateLoss(
+            startValues,
+            component.equationIndices.map(
+              (equationIndex) =>
+                program.system.scalarConstraints[equationIndex]!,
+            ),
+          );
+          return !(
+            state.loss < BFGS_MIN_LOSS ||
+            component.variableIndices.every(
+              (index) =>
+                frozen.has(index) || Math.abs(state.gradient[index]!) < 1e-8,
+            )
+          );
+        })
+      : [];
+  const minimumMotionStart =
+    moving.length > 0
+      ? solveMinimumMotionStart(
+          program,
+          startValues,
+          moving.flatMap((component) =>
+            component.equationIndices.map(
+              (equationIndex) =>
+                program.system.scalarConstraints[equationIndex]!,
+            ),
+          ),
+          uniqueSortedIndices(
+            moving.flatMap((component) =>
+              component.variableIndices.filter((index) => !frozen.has(index)),
+            ),
+          ),
+          frozen,
+        )
+      : startValues;
   const solved = judged(
     solveSystemValues(
-      startValues,
-      withFrozenVariables(
-        scope
-          ? scope.flatMap((component) =>
-              component.equationIndices.map(
-                (equationIndex) =>
-                  program.system.scalarConstraints[equationIndex]!,
-              ),
-            )
-          : program.system.scalarConstraints,
-        frozen,
-      ),
+      minimumMotionStart,
+      constraints,
       program.strategy,
       (candidate) => isAcceptableSolvedValues(program, judged(candidate)),
     ),

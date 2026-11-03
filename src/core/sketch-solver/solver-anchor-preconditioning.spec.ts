@@ -4,6 +4,10 @@ import {
   literalResolvedDefinition,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
+import {
+  compileSketchSolveProgram,
+  preconditionValuesForPointAnchors,
+} from "./compile-program";
 import { solveSketchDefinitionCore } from "./solve-sketch";
 
 function line() {
@@ -14,8 +18,8 @@ function line() {
   return literalResolvedDefinition(fixture.definition());
 }
 
-function solve(definition: NumericSketchDefinition) {
-  return solveSketchDefinitionCore({
+function solveInput(definition: NumericSketchDefinition) {
+  return {
     definition,
     tolerances: {
       coincidence: 1e-3,
@@ -23,8 +27,12 @@ function solve(definition: NumericSketchDefinition) {
       minimumSegmentLength: 1e-3,
     },
     modelingTolerance: 1e-3,
-    partialSolvePolicy: "bestEffort",
-  }).solvedSnapshot;
+    partialSolvePolicy: "bestEffort" as const,
+  };
+}
+
+function solve(definition: NumericSketchDefinition) {
+  return solveSketchDefinitionCore(solveInput(definition)).solvedSnapshot;
 }
 
 function distance(
@@ -48,15 +56,34 @@ function distance(
 test("disagreeing axis-distance anchors keep the ordinary unconditioned solve", () => {
   const definition = line();
   const dimensions = [distance("a", 10), distance("b", 30)];
-  const solved = solve({
+  const anchored = {
     ...definition,
     dimensionIds: dimensions.map((dimension) => dimension.dimensionId),
     dimensions,
-  });
-  expect(solved.solvedPoints.map((point) => point.solvedPosition)).toEqual([
-    [9.999999995040753, 2],
-    [30.00000001962144, 6],
-  ]);
+  };
+  // The seam: disagreeing anchors translate nothing (a translation onto
+  // either anchor lands on the same minimum-motion solution below, so the
+  // solved positions alone cannot show it).
+  const program = compileSketchSolveProgram(solveInput(anchored));
+  expect(
+    Array.from(
+      preconditionValuesForPointAnchors(program, program.system.initialValues),
+    ),
+  ).toEqual(Array.from(program.system.initialValues));
+  const solved = solve(anchored);
+  // The minimum-motion solution: each point moves along x onto its own
+  // dimension and keeps its y (the least-squares descent stopped ~2e-8 off).
+  const expected = [
+    [10, 2],
+    [30, 6],
+  ];
+  solved.solvedPoints.forEach((point, index) =>
+    point.solvedPosition.forEach((coordinate, axis) =>
+      expect(Math.abs(coordinate - expected[index]![axis]!)).toBeLessThan(
+        1e-12,
+      ),
+    ),
+  );
   expect(solved.status.solveState).toBe("solved");
 });
 

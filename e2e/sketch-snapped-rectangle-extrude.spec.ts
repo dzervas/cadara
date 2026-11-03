@@ -13,8 +13,9 @@ test.use({ viewport: { width: 1440, height: 960 } });
 // the real browser session, worker kernel, Finish publication and extrude UI.
 // Seam: a rectangle whose closing corner is snapped onto the bottom side
 // (a declared point-on-curve incidence, not a shared point), re-solved by a
-// dimension edit so the joined corner is no longer bitwise on the side, still
-// closes one region that the extrude feature consumes.
+// dimension edit, still closes one region that the extrude feature consumes.
+// A corner left a small residual off its side closing the region is a
+// logic-lane row (region-extraction.heavy.spec.ts, declared joins).
 test("a snapped rectangle closes through its declared closing corner after a dimension edit and extrudes", async ({
   page,
 }) => {
@@ -81,20 +82,13 @@ test("a snapped rectangle closes through its declared closing corner after a dim
         kind: string;
         payload?: {
           definition?: {
-            points?: Array<{
-              pointId: string;
-              position: readonly [number, number];
-            }>;
+            points?: Array<{ pointId: string }>;
             entities?: Array<{
               entityId: string;
               startPointId?: string;
               endPointId?: string;
             }>;
-            constraints?: Array<{
-              kind: string;
-              point?: { pointId: string };
-              curve?: { entityId: string };
-            }>;
+            constraints?: Array<{ kind: string }>;
           };
         };
       }>;
@@ -106,24 +100,6 @@ test("a snapped rectangle closes through its declared closing corner after a dim
       definition?.constraints?.filter(
         (constraint) => constraint.kind === "pointOnCurve",
       ) ?? [];
-    // Distance of the declared foot from its host line in the committed
-    // definition (the positions the kernel solve starts from).
-    const position = (pointId?: string) =>
-      definition?.points?.find((point) => point.pointId === pointId)?.position;
-    const incidence = incidences[0];
-    const host = definition?.entities?.find(
-      (entity) => entity.entityId === incidence?.curve?.entityId,
-    );
-    const foot = position(incidence?.point?.pointId);
-    const start = position(host?.startPointId);
-    const end = position(host?.endPointId);
-    const footResidual =
-      foot && start && end
-        ? Math.abs(
-            (end[0] - start[0]) * (foot[1] - start[1]) -
-              (end[1] - start[1]) * (foot[0] - start[0]),
-          ) / Math.hypot(end[0] - start[0], end[1] - start[1])
-        : null;
     const sides =
       definition?.entities?.filter(
         (entity) => entity.startPointId && entity.endPointId,
@@ -133,7 +109,6 @@ test("a snapped rectangle closes through its declared closing corner after a dim
       points: definition?.points?.length ?? 0,
       pointOnCurve: incidences.length,
       kinds: definition?.constraints?.map((constraint) => constraint.kind),
-      footResidual,
     };
   }, MODELING_OPERATION_HISTORY_STORAGE_KEY);
   // T11h: each side after the first continues the line chain from the
@@ -153,12 +128,6 @@ test("a snapped rectangle closes through its declared closing corner after a dim
     committed.pointOnCurve,
     `The snapped closing corner is declared as a point-on-curve incidence (${committed.kinds}).`,
   ).toBe(1);
-  // 1e-12 is three orders above binary64 rounding at this sketch's scale, so
-  // the joined corner is a real solver residual off the side, not rounding.
-  expect(
-    committed.footResidual,
-    `After the dimension edit the declared closing corner is not on its host side (residual ${committed.footResidual}).`,
-  ).toBeGreaterThan(1e-12);
 
   await workbench.activateFeature("extrude");
   let regionTargets: string[] = [];

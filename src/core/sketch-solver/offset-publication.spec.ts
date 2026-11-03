@@ -406,11 +406,14 @@ test("T08b-g7b review R2: a requirement reaching a failed offset's output throug
 
 // [TECH] G16‴ (T08b-g7b re-review Q1): a failure that appears during the
 // solve and still holds at the end is reported `unsatisfied`, never
-// `blocked`. A +∞ start loss from an unrelated record (a second offset
-// whose seed arc starts on its centre) lets the line search accept the
-// jump of the circle seed into its collapse.
-test("T08b-g7b re-review Q1 ([TECH] G16‴): an offset that builds at the start and has failed at the end of the solve leaves the requirement on its output unsatisfied, never blocked (core solve and live session)", () => {
-  const definition = circleOffsetSketch({
+// `blocked`. An unrelated record (a second offset whose seed arc starts on
+// its centre) fails at the start, so the blocked set is not empty; the
+// circle offset builds at the start (seed 10, output 9) and must collapse
+// at the end (seed radius 0.5 held, output diameter 2 one unit inside it).
+const circleOffsetWithDegenerateArc = (
+  dimensions: Parameters<typeof circleOffsetSketch>[0]["dimensions"],
+) =>
+  circleOffsetSketch({
     circles: [
       ["seed", 10],
       ["output", 9],
@@ -420,7 +423,7 @@ test("T08b-g7b re-review Q1 ([TECH] G16‴): an offset that builds at the start 
       ["arc_start", [50, 0]],
       ["arc_end", [52, 0]],
     ],
-    dimensions: [["output", "diameter", 2]],
+    dimensions,
     offsets: [["derivation_offset_circle", "seed", "output"]],
     extra: {
       points: [],
@@ -456,6 +459,12 @@ test("T08b-g7b re-review Q1 ([TECH] G16‴): an offset that builds at the start 
       ] as unknown as SketchDefinition["derivedRelationships"],
     },
   });
+
+test("T08b-g7b re-review Q1 ([TECH] G16‴): an offset that builds at the start and has failed at the end of the solve leaves the requirement on its output unsatisfied, never blocked (core solve and live session)", () => {
+  const definition = circleOffsetWithDegenerateArc([
+    ["seed", "circleRadius", 0.5],
+    ["output", "diameter", 2],
+  ]);
   expect(
     offsetFailureIds(definition),
     "premise: only the degenerate offset fails at the start, so the circle offset is not in the blocked set",
@@ -479,13 +488,42 @@ test("T08b-g7b re-review Q1 ([TECH] G16‴): an offset that builds at the start 
     });
     expect(
       snapshot.diagnostics.map((diagnostic) => diagnostic.code),
-      `${label}: the unaccepted snapshot reports both relationships' failures and the negative solved radius`,
+      `${label}: the unaccepted snapshot reports both relationships' failures`,
     ).toEqual([
       "offset-arc-common-circle-unsatisfied",
-      // B12: the seed circle solved to a negative radius.
-      "invalid-solved-circle-radius",
       OFFSET_DIAGNOSTIC_CODES.arcCollapse,
       OFFSET_DIAGNOSTIC_CODES.arcCollapse,
+    ]);
+  }
+});
+
+// The same sketch with only the output diameter 2: the circle offset is consistent (seed
+// radius 2): the batch solve starts from the minimum-motion point on the
+// rows, so the +∞ start loss of the degenerate arc no longer lets a line
+// search jump the circle seed into its collapse (the least-squares descent
+// from the authored start did, reporting this sketch as collapsed).
+test("T08b-g7b re-review Q1: a consistent circle offset next to a degenerate one keeps its plan and its output dimension (core solve and live session)", () => {
+  const { core, live } = solveCoreAndLive(
+    circleOffsetWithDegenerateArc([["output", "diameter", 2]]),
+  );
+  for (const [label, snapshot] of [
+    ["core solve", core],
+    ["live solve", live],
+  ] as const) {
+    expect(planIds(snapshot), label).toEqual(["derivation_offset_circle"]);
+    expect(statusOf(snapshot, "dimension_output"), label).toBe("driving");
+    // Only the degenerate offset still fails, as authored: its arc's start
+    // sits on its centre, a start the descent keeps (no gradient), so its
+    // component is not moved by the minimum-motion start either.
+    expect(
+      snapshot.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.target?.kind === "entity" && diagnostic.target.entityId,
+      ]),
+      label,
+    ).toEqual([
+      ["offset-arc-common-circle-unsatisfied", "sketch_entity_degenerate"],
+      [OFFSET_DIAGNOSTIC_CODES.arcCollapse, "sketch_entity_degenerate"],
     ]);
   }
 });

@@ -403,27 +403,30 @@ const invalid = "truthful invalid";
 // Representative subset of the requalification: all three angular families,
 // 0/2%/20% noise, original x1..x10000 scales and the 10/16 m onset seeds.
 // No unreachable authored systems: the analytic witnesses below satisfy them.
-// This pins honest refusal, NOT a claim that GN now converges at every scale.
+// The batch solve starts from the minimum-motion point on the rows, whose
+// Newton corrector converges at every scale here; the least-squares descent
+// from the jittered start stopped short of the tolerances from 4 m (tight)
+// and 10 m (default) on, which these cells pinned as honest refusals.
 const cells = [
-  // scenario, scale, noise, seed, default outcome, tight outcome
-  ["rectangle", 1, 0.02, 1, solved, solved],
-  ["rectangle", 10, 0.2, 1, solved, solved],
-  ["rectangle", 100, 0.02, 1, solved, invalid],
-  ["rectangle", 250, 0.02, 4, invalid, invalid],
-  ["rectangle", 400, 0.02, 3, invalid, invalid],
-  ["rectangle", 1000, 0.2, 1, invalid, invalid],
-  ["rectangle", 10000, 0.02, 1, invalid, invalid],
-  ["rectangle", 10000, 0, 1, solved, solved],
-  ["triangle", 1, 0, 1, solved, solved],
-  ["triangle", 100, 0.2, 1, solved, solved],
-  ["triangle", 1000, 0.02, 1, solved, solved],
-  ["triangle", 10000, 0.02, 1, invalid, invalid],
-  ["mirrorL", 1, 0.02, 1, solved, solved],
-  ["mirrorL", 10000, 0.02, 1, invalid, invalid],
+  // scenario, scale, noise, seed: solved within tolerance under both policies
+  ["rectangle", 1, 0.02, 1],
+  ["rectangle", 10, 0.2, 1],
+  ["rectangle", 100, 0.02, 1],
+  ["rectangle", 250, 0.02, 4],
+  ["rectangle", 400, 0.02, 3],
+  ["rectangle", 1000, 0.2, 1],
+  ["rectangle", 10000, 0.02, 1],
+  ["rectangle", 10000, 0, 1],
+  ["triangle", 1, 0, 1],
+  ["triangle", 100, 0.2, 1],
+  ["triangle", 1000, 0.02, 1],
+  ["triangle", 10000, 0.02, 1],
+  ["mirrorL", 1, 0.02, 1],
+  ["mirrorL", 10000, 0.02, 1],
 ] as const;
 
-for (const [scenario, scale, noise, seed, ...expected] of cells) {
-  for (const [policyIndex, policy] of policies.entries()) {
+for (const [scenario, scale, noise, seed] of cells) {
+  for (const policy of policies) {
     const widthMeters =
       ((scenario === "rectangle" ? 40 : scenario === "triangle" ? 50 : 20) *
         scale) /
@@ -449,39 +452,16 @@ for (const [scenario, scale, noise, seed, ...expected] of cells) {
         policy,
         scenario,
       );
-      expect(outcome).toBe(expected[policyIndex]);
+      expect(outcome).toBe(solved);
       expect(batch.work.lossEvaluations).toBeGreaterThan(0);
-      if (outcome === invalid) {
-        expect(
-          batch.gaussNewtonFallbacks.some(
-            (row) => !row.skipped && row.iterations > 0,
-          ),
-          "a rejected BFGS candidate must attempt GN, even at low loss",
-        ).toBe(true);
-      }
       const program = compileSketchSolveProgram(input);
-      if (expected[policyIndex] === invalid) {
-        expect(() =>
-          createCompiledSketchSolveSession({
-            sessionId: "interactive_sketch_solve_scale",
-            program,
-          }),
-        ).toThrow("without an acceptable solved snapshot");
-        expect(
-          startCompiledSketchSolveSession({
-            sessionId: "interactive_sketch_solve_scale_drag",
-            program,
-          }).kind,
-        ).toBe("unacceptable");
-      } else {
-        const session = createCompiledSketchSolveSession({
-          sessionId: "interactive_sketch_solve_scale",
-          program,
-        });
-        expect(
-          classify(session.lastAcceptedSnapshot, scale, policy, scenario),
-        ).toBe(solved);
-      }
+      const session = createCompiledSketchSolveSession({
+        sessionId: "interactive_sketch_solve_scale",
+        program,
+      });
+      expect(
+        classify(session.lastAcceptedSnapshot, scale, policy, scenario),
+      ).toBe(solved);
       // Supply an analytic feasible previous state so a refused jittered start
       // never skips drag coverage. Only initialization uses this prior snapshot.
       let witnessDefinition = rectangle(scale, 0, 1);

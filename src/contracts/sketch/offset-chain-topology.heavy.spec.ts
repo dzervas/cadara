@@ -1649,6 +1649,34 @@ function samePointForTest(first: Point, second: Point) {
   return Object.is(first[0], second[0]) && Object.is(first[1], second[1]);
 }
 
+/**
+ * `definition` solved by the plain least-squares descent from the authored
+ * start (BFGS alone, without the minimum-motion start or the Gauss–Newton
+ * fallback of the batch solve), which stops with a Coincident satisfied
+ * within τ but its two points not bitwise equal. The minimum-motion batch
+ * edit closes a Coincident to the rounding floor, so the rows that certify
+ * a nonzero source gap build their gap with this one.
+ */
+function leastSquaresSolvedPair(definition: SketchDefinition): AcceptedPair {
+  const solved = solveSketchDefinitionCore({
+    definition: literalResolvedDefinition(definition),
+    tolerances: SKETCH_DIRECT_EDIT_TOLERANCES,
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort",
+    strategy: "bfgsWithoutFallback",
+  });
+  if (solved.status.solveState !== "solved")
+    throw new Error("the least-squares edit was not solved");
+  return {
+    definition: applySolvedSketchToDefinition(
+      definition,
+      solved.solvedSnapshot,
+      { modelingTolerance: 1e-3, documentVariables: [] },
+    ),
+    solvedSnapshot: solved.solvedSnapshot,
+  };
+}
+
 describe("declared multi-piece tube stability (L1b, bounded helper, not live)", () => {
   const TOLERANCE = 1e-3;
   const pieceCertifier = createCertifiedCubicTubeChain();
@@ -2078,6 +2106,9 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
       throw new Error(`${edit[1]} edit was not solver-accepted`);
     return solved as AcceptedPair;
   };
+  /** A native tool edit solved by least squares (`leastSquaresSolvedPair`), for the R_C nonzero-gap rows. */
+  const leastSquaresEdit = (...edit: Parameters<typeof commitTool>) =>
+    leastSquaresSolvedPair(commitTool(...edit));
   const connectivityOf = (
     definition: SketchDefinition,
     seedIds = definition.entities.map((entity) => entity.entityId),
@@ -2196,7 +2227,8 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
   /**
    * C1 matrix fixture: a line drawn toward/away from the join and a spline
    * drawn from it (endpoint-snap-inferred coincidence) or to it (Coincident
-   * tool). A native Distance length edit then re-solves to a nonzero gap.
+   * tool). A native Distance length edit then re-solves (least squares,
+   * `leastSquaresEdit`) to a nonzero gap.
    */
   const lineSplineGap = (
     bulge: number,
@@ -2218,11 +2250,11 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
     const splineJoin = splineEnds(spline)[splineFromJoin ? 0 : 1];
     const joined = splineFromJoin
       ? sketch([line, spline])
-      : acceptedEdit(sketch([line, spline]), "constraintCoincident", [
+      : leastSquaresEdit(sketch([line, spline]), "constraintCoincident", [
           ["point", lineJoin],
           ["point", splineJoin],
         ]).definition;
-    const pair = acceptedEdit(
+    const pair = leastSquaresEdit(
       joined,
       "dimensionDistance",
       [["entity", lineId(line)]],
@@ -2369,7 +2401,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         [0, 0],
       ],
     );
-    const joined = acceptedEdit(
+    const joined = leastSquaresEdit(
       sketch([line, spline]),
       "constraintCoincident",
       [
@@ -2377,7 +2409,7 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
         ["point", splineEnds(spline)[1]],
       ],
     );
-    const pair = acceptedEdit(
+    const pair = leastSquaresEdit(
       joined.definition,
       "dimensionDistance",
       [["entity", lineId(line)]],
@@ -2400,16 +2432,16 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
   test("R_C line↔line: length + horizontal + Coincident tool leaves a gap in both coordinates and verifies in both seed orders", () => {
     const first = drawLine([], [-1, 0], [0, 0]);
     const second = drawLine([first], [0.002, 0.001], [0.3, 1]);
-    const sized = acceptedEdit(
+    const sized = leastSquaresEdit(
       sketch([first, second]),
       "dimensionDistance",
       [["entity", lineId(first)]],
       1,
     );
-    const level = acceptedEdit(sized.definition, "constraintHorizontal", [
+    const level = leastSquaresEdit(sized.definition, "constraintHorizontal", [
       ["entity", lineId(first)],
     ]);
-    const pair = acceptedEdit(level.definition, "constraintCoincident", [
+    const pair = leastSquaresEdit(level.definition, "constraintCoincident", [
       ["point", lineEnds(first)[1]],
       ["point", lineEnds(second)[0]],
     ]);
@@ -2436,11 +2468,15 @@ describe("declared multi-piece tube stability (L1b, bounded helper, not live)", 
     const d = drawLine([a, b, c], [0, 1], [0.002, 0.001], {
       start: lineEnds(c)[1],
     });
-    const joined = acceptedEdit(sketch([a, b, c, d]), "constraintCoincident", [
-      ["point", lineEnds(d)[1]],
-      ["point", lineEnds(a)[0]],
-    ]);
-    const pair = acceptedEdit(
+    const joined = leastSquaresEdit(
+      sketch([a, b, c, d]),
+      "constraintCoincident",
+      [
+        ["point", lineEnds(d)[1]],
+        ["point", lineEnds(a)[0]],
+      ],
+    );
+    const pair = leastSquaresEdit(
       joined.definition,
       "dimensionDistance",
       [["entity", lineId(a)]],
@@ -4646,7 +4682,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
     ]);
     return harness.pairChain(acceptedEdit(definition), distance);
   };
-  /** Native snapped line → near-tangent spline, then a Distance edit on the line. */
+  /** Native snapped line → near-tangent spline, then a Distance edit on the line (least squares: the snapped join keeps a ≈ 1e-8 gap). */
   const lineSplineGap = (distance: number) => {
     const harness = harnesses.native;
     harness.resetSequence();
@@ -4661,7 +4697,7 @@ describe("T08b-d SEL: declared vertices, adoption, U1 absorption", () => {
       { start: harness.lineEnds(line)[1] },
     );
     return harness.pairChain(
-      acceptedEdit(
+      leastSquaresSolvedPair(
         commitTool(
           harness.sketch([line, spline]),
           "dimensionDistance",
@@ -7788,11 +7824,14 @@ describe("T08b-f seed arcs: native line/arc chains through the SEL (Offset relat
     // cadara-p4r5.2: the first-order tangency loss moves the solved seeds by
     // ≤ 5.0e-5 (was 1_326_776 / 355_775 / 505). With the end contacts first
     // order too they move ≤ 1.6e-5 more (end kinks 1e-2° → 7.5e-5°; was
-    // 1_168_501 / 312_270 / 487).
+    // 1_168_501 / 312_270 / 487). The minimum-motion batch solve meets the
+    // rows to the rounding floor where least squares stopped within τ: the
+    // solved points move ≤ 2.2e-7 (the dragged fillet centre; was
+    // 1_165_598 / 311_434 / 497).
     "rounded rect rotated 0.3, fillet centre dragged 1e-4 -0.01": {
-      operations: 1_165_598,
-      euclideanSteps: 311_434,
-      integerBits: 497,
+      operations: 746_850,
+      euclideanSteps: 197_091,
+      integerBits: 394,
     },
     "rect + 1 fillet 0.01": {
       operations: 93_682,

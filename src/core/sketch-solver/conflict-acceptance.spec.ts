@@ -6,9 +6,13 @@ import type {
   NumericSketchDefinition as SketchDefinition,
 } from "@/contracts/sketch/schema";
 import { compileSketchSolveProgram } from "./compile-program";
-import { createCompiledSketchSolveSession } from "./start-session";
+import {
+  createCompiledSketchSolveSession,
+  isAcceptableSolvedValues,
+} from "./start-session";
 import { solvePivotedCholeskyForTest } from "./normal-equations";
 import { solveSketchDefinitionCore } from "./solve-sketch";
+import { solveSystemValues } from "./solve-strategies";
 import { traceSketchSolverForTest } from "./solve-tracing";
 import {
   literalResolvedDefinition,
@@ -566,38 +570,43 @@ test("T13e2 C2 (review B-1): the fallback's pivoted Cholesky solves random full-
   }
 });
 
+// Two free lines 0.1 rad off parallel under a 1e-5 mm / 1e-6 rad policy:
+// BFGS from the authored start stops (loss < 1e-12) about 1.25e-6 rad off,
+// above the policy (the solver-core.spec rescue row).
+function tightPolicyParallelInput() {
+  const sketch = makeSketchFixture();
+  sketch.point("a0", 0, 0);
+  sketch.point("a1", 10, 0);
+  sketch.point("b0", 0, 5);
+  sketch.point("b1", 10 * Math.cos(0.1), 5 + 10 * Math.sin(0.1));
+  sketch.line("A", "a0", "a1");
+  sketch.line("B", "b0", "b1");
+  const definition = withRequirements(
+    literalResolvedDefinition(sketch.definition()),
+    [
+      constraint("parallel", {
+        kind: "parallel",
+        entityIds: [entity("A"), entity("B")],
+      }),
+    ],
+  );
+  return {
+    definition,
+    tolerances: {
+      coincidence: 1e-5,
+      angleRadians: 1e-6,
+      minimumSegmentLength: 1e-5,
+    },
+    modelingTolerance: 1e-3,
+    partialSolvePolicy: "bestEffort" as const,
+  };
+}
+
 test.each(["batch", "session"] as const)(
-  "T13e2 (review A-1/T2): a tight-policy rescue stops at its first accepted Gauss–Newton iterate instead of the 1000-iteration cap (%s)",
+  "T13e2 (review A-1/T2): two lines made parallel under a tight policy solve within it near the start; the minimum-motion start lands on the row, so no Gauss–Newton rescue runs (%s)",
   (path) => {
-    // Two free lines 0.1 rad off parallel under a 1e-5 mm / 1e-6 rad policy:
-    // BFGS stops (loss < 1e-12) about 1.25e-6 rad off, above the policy, and
-    // the fallback rescues it (the solver-core.spec rescue row).
-    const sketch = makeSketchFixture();
-    sketch.point("a0", 0, 0);
-    sketch.point("a1", 10, 0);
-    sketch.point("b0", 0, 5);
-    sketch.point("b1", 10 * Math.cos(0.1), 5 + 10 * Math.sin(0.1));
-    sketch.line("A", "a0", "a1");
-    sketch.line("B", "b0", "b1");
-    const definition = withRequirements(
-      literalResolvedDefinition(sketch.definition()),
-      [
-        constraint("parallel", {
-          kind: "parallel",
-          entityIds: [entity("A"), entity("B")],
-        }),
-      ],
-    );
-    const input = {
-      definition,
-      tolerances: {
-        coincidence: 1e-5,
-        angleRadians: 1e-6,
-        minimumSegmentLength: 1e-5,
-      },
-      modelingTolerance: 1e-3,
-      partialSolvePolicy: "bestEffort" as const,
-    };
+    const input = tightPolicyParallelInput();
+    const { definition } = input;
     // T2/M14: no accepted prior snapshot may mask a missing session fallback.
     const traced = traceSketchSolverForTest(() =>
       path === "batch"
@@ -631,16 +640,34 @@ test.each(["batch", "session"] as const)(
     // The local minimum-motion solution rotates each line about its midpoint
     // by ~0.05 rad, moving its endpoints ~0.25 mm, not into a distant basin.
     expect(largestMove(definition, traced.result)).toBeLessThan(0.3);
-    const [run] = traced.gaussNewtonFallbacks;
-    expect(run?.skipped, "premise: BFGS alone is not accepted").toBe(false);
-    expect(run!.bfgsLoss).toBeLessThan(1e-12);
-    expect(run!.startLoss, "the fallback continues from BFGS's result").toBe(
-      run!.bfgsLoss,
-    );
-    expect(run!.iterations).toBeGreaterThan(0);
-    expect(run!.iterations).toBeLessThan(1000);
+    expect(traced.gaussNewtonFallbacks.length).toBeGreaterThan(0);
+    expect(
+      traced.gaussNewtonFallbacks.every((run) => run.skipped),
+      "the descent from the minimum-motion start is accepted as is",
+    ).toBe(true);
   },
 );
+
+test("T13e2 (review A-1/T2): a tight-policy rescue from the authored start stops at its first accepted Gauss–Newton iterate instead of the 1000-iteration cap", () => {
+  const program = compileSketchSolveProgram(tightPolicyParallelInput());
+  const traced = traceSketchSolverForTest(() =>
+    solveSystemValues(
+      program.system.initialValues,
+      program.system.scalarConstraints,
+      "bfgs",
+      (candidate) => isAcceptableSolvedValues(program, candidate),
+    ),
+  );
+  expect(isAcceptableSolvedValues(program, traced.result)).toBe(true);
+  const [run] = traced.gaussNewtonFallbacks;
+  expect(run?.skipped, "premise: BFGS alone is not accepted").toBe(false);
+  expect(run!.bfgsLoss).toBeLessThan(1e-12);
+  expect(run!.startLoss, "the fallback continues from BFGS's result").toBe(
+    run!.bfgsLoss,
+  );
+  expect(run!.iterations).toBeGreaterThan(0);
+  expect(run!.iterations).toBeLessThan(1000);
+});
 
 // --- Review R-2: one far-basin row per B1 lever operand and per lever rule.
 // Each conflict is absorbed only by a tiny tilt of a line whose extension

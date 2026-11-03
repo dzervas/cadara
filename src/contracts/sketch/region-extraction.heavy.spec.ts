@@ -40,7 +40,14 @@ import type {
 } from "@/contracts/sketch/schema";
 import { regionBranchKey } from "@/contracts/sketch/region-identity";
 import { expectNoInternalIds } from "@/contracts/sketch/user-text.fixtures";
-import { solveSketchDefinitionCore } from "@/core/sketch-solver";
+import {
+  compileSketchSolveProgram,
+  solveSketchDefinitionCore,
+} from "@/core/sketch-solver";
+import { preconditionValuesForPointAnchors } from "@/core/sketch-solver/compile-program";
+import { solveProgramValues } from "@/core/sketch-solver/solve-program";
+import { solveSystemValues } from "@/core/sketch-solver/solve-strategies";
+import { isAcceptableSolvedValues } from "@/core/sketch-solver/start-session";
 import {
   applyOffsetPublications,
   publishSketchOffsets,
@@ -679,6 +686,34 @@ describe("region arrangement owner: declared joins and closure", () => {
       [0, Math.PI / 2],
     ]);
   });
+  // The snapped closing corner of a rectangle drawn with an overshooting
+  // first side (e2e/sketch-snapped-rectangle-extrude.spec.ts): a declared
+  // pointOnCurve incidence, not a shared point. A solve can leave it a
+  // residual off its host side (the least-squares descent did, and drag
+  // frames still do); within the tolerance it still closes one region.
+  test.each([0, 1e-12, 1e-9])(
+    "a rectangle closing through a declared pointOnCurve corner %s off its overshooting first side derives one region (the stub is pruned)",
+    async (residual) => {
+      const sketch = makeSketchFixture();
+      sketch.point("s", -0.5, 0);
+      sketch.point("b", 10, 0);
+      sketch.point("c", 10, 5);
+      sketch.point("d", 0, 5);
+      sketch.point("q", 0, residual);
+      sketch.line("first", "s", "b");
+      sketch.line("second", "b", "c");
+      sketch.line("third", "c", "d");
+      sketch.line("closing", "d", "q");
+      sketch.pointOnCurve("q", "first");
+      const result = await derive(sketch);
+      expect(result.diagnostics, `residual ${residual}`).toEqual([]);
+      expect(
+        result.regions.map((region) => boundaryEntities(region).sort()),
+        `residual ${residual}`,
+      ).toEqual([["closing", "first", "second", "third"]]);
+    },
+  );
+
   test("a satisfied pointOnCurve on a line's extension is no incidence with the segment (review probe E)", async () => {
     // The solver's line pointOnCurve is the infinite line: m1 lies on r_s0's
     // extension at t = 1.2, two units from the rectangle.
@@ -5903,35 +5938,21 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
     return { solveState: first.status.solveState, snapshot, publication };
   };
   /**
-   * Recorded cells that do not certify, by final code. The |d| = 0.5 limit
-   * cells (a ≈ 0.2° fillet-end kink left by a tangency residual quadratic in
-   * the kink angle) certify since both contacts' tangency is first order;
-   * every fillet-end kink is ≤ 4.3e-4°.
-   * Hexagon + 2 fillets 0.1 0.2 does not: the batch solve (least squares
-   * from the start values, no motion term) lands on fillet radius 0.052
-   * < d = 0.1, so the inward offset collapses the arc, which is the truthful
-   * verdict at that geometry. The radius is where BFGS's first steps leave
-   * it on an under-determined solution set, not a property of the rows: a
-   * minimum-motion solve of the same rows keeps r ≈ 0.106 and certifies.
-   * Before, the second-order end-contact row let r creep back to 0.105 while
-   * keeping a 0.31° kink.
+   * Recorded cells that do not certify, by final code: none. The |d| = 0.5
+   * limit cells (a ≈ 0.2° fillet-end kink left by a tangency residual
+   * quadratic in the kink angle) certify since both contacts' tangency is
+   * first order; every fillet-end kink is ≤ 4.3e-4°. Hexagon + 2 fillets
+   * 0.1 0.2 certifies since the batch solve is minimum motion (see the
+   * fillet-radius row below).
    */
-  const FAILURES = new Map<string, string>(
-    (["unhinted", "hinted"] as const).map((label) => [
-      `hexagon + 2 fillets 0.1 0.2 ${label}`,
-      "derived-offset-arc-collapse",
-    ]),
-  );
-  /** The region check's edit: Δ = 0.2, except where that cell is recorded above. */
-  const regionDelta = (row: string) =>
-    row === "hexagon + 2 fillets" ? 0.05 : 0.2;
+  const FAILURES = new Map<string, string>();
 
   test.each(
     EDITED_FILLET_ROWS.filter((row) => row !== "rect").map(
       (row) => [row] as const,
     ),
   )(
-    "%s with native fillets: every d × Δ cell solves and certifies, unhinted and hinted, except the recorded cells; at d = 0.1, Δ = 0.2 (hexagon: 0.05) every fillet arc bounds a region with the published offset",
+    "%s with native fillets: every d × Δ cell solves and certifies, unhinted and hinted, except the recorded cells; at d = 0.1, Δ = 0.2 every fillet arc bounds a region with the published offset",
     async (row) => {
       const { sketch, line } = editedFilletSketch(
         offsetArcHarness,
@@ -5966,11 +5987,7 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
           ] as const) {
             const cell = `${row} ${distance} ${delta} ${label}`;
             expect(result.solveState, cell).toBe("solved");
-            if (
-              distance === 0.1 &&
-              delta === regionDelta(row) &&
-              label === "hinted"
-            )
+            if (distance === 0.1 && delta === 0.2 && label === "hinted")
               regionCell = { edited, ...result };
             cells.set(
               cell,
@@ -6024,11 +6041,101 @@ describe("T08b-g7-F: tangent fillets carrying an offset certify after an edit (d
               ),
             ),
           ),
-          `${row} d = 0.1 Δ = ${regionDelta(row)}: fillet ${arc} bounds a region`,
+          `${row} d = 0.1 Δ = 0.2: fillet ${arc} bounds a region`,
         ).toBe(true);
     },
     600_000,
   );
+
+  test("hexagon + 2 fillets, a +0.2 edit of a line ending at a fillet: the batch solve is minimum motion, so the edited fillet keeps r ≈ 0.106 (least squares from the start left r ≈ 0.052 < d) and the d = 0.1 inward offset certifies", () => {
+    const { sketch, line } = editedFilletSketch(
+      offsetArcHarness,
+      "hexagon + 2 fillets",
+      "native",
+    );
+    const { pair } = offsetArcHarness.adapt(sketch, 0.1);
+    const edited = withLineLength(pair.definition, line, 0.2);
+    const result = round(edited);
+    expect(result.solveState).toBe("solved");
+    const position = new Map(
+      result.snapshot.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
+    );
+    const radii = sketch.seeds.flatMap((id) => {
+      const entity = edited.entities.find((item) => item.entityId === id);
+      if (entity?.kind !== "arc") return [];
+      const center = position.get(entity.centerPointId)!;
+      const start = position.get(entity.startPointId)!;
+      return [Math.hypot(start[0] - center[0], start[1] - center[1])];
+    });
+    // The nearest solution to the start shrinks the fillet at the edited
+    // line from 0.15 to ≈ 0.106 (a reference solve with an explicit motion
+    // term agrees, within 3e-3), above d = 0.1, and leaves the other at 0.15.
+    const [shrunk, kept] = [...radii].sort((a, b) => a - b);
+    expect(Math.abs(shrunk! - 0.106)).toBeLessThan(3e-3);
+    expect(shrunk).toBeGreaterThan(0.1);
+    expect(Math.abs(kept! - 0.15)).toBeLessThan(1e-9);
+    expect(result.publication?.status).toBe("certified");
+  });
+
+  test("every T08b-g7-F edit (native fillet rows × d × Δ): the accepted batch result moves the authority variables no more than the plain least-squares descent from the same start, and at least 1 % less on at least one cell", () => {
+    let fewer = 0;
+    for (const row of EDITED_FILLET_ROWS.filter((item) => item !== "rect")) {
+      const { sketch, line } = editedFilletSketch(
+        offsetArcHarness,
+        row,
+        "native",
+      );
+      for (const distance of TANGENT_FILLET_DISTANCES) {
+        const { pair } = offsetArcHarness.adapt(sketch, distance);
+        for (const delta of EDITED_FILLET_DELTAS) {
+          const program = compileSketchSolveProgram({
+            definition: literalResolvedDefinition(
+              withLineLength(pair.definition, line, delta),
+            ),
+            tolerances: TOLERANCES,
+            modelingTolerance: FIXTURE_TOLERANCE,
+            partialSolvePolicy: "bestEffort",
+          });
+          const start = preconditionValuesForPointAnchors(
+            program,
+            program.system.initialValues,
+          );
+          const motion = (values: Float64Array) =>
+            Math.hypot(
+              ...program.system.parameterProjection.authorityVariableIndices.map(
+                (index) => values[index]! - start[index]!,
+              ),
+            );
+          const accepted = solveProgramValues(program, start);
+          const plain = solveSystemValues(
+            start,
+            program.system.scalarConstraints,
+            "bfgs",
+            (candidate) => isAcceptableSolvedValues(program, candidate),
+          );
+          const cell = `${row} ${distance} ${delta}`;
+          expect(isAcceptableSolvedValues(program, accepted.solved), cell).toBe(
+            true,
+          );
+          // The plain descent stops once every requirement is within the
+          // document tolerance (1e-3), short of the Δ = 0.001 edits by up to
+          // 0.08 % of their motion; the minimum-motion result meets them.
+          expect(motion(accepted.solved.values), cell).toBeLessThanOrEqual(
+            motion(plain.values) * (1 + 1e-3),
+          );
+          if (motion(accepted.solved.values) < 0.99 * motion(plain.values))
+            fewer += 1;
+        }
+      }
+    }
+    expect(
+      fewer,
+      "under-determined cells where least squares moved more",
+    ).toBeGreaterThan(0);
+  });
 
   /**
    * Recorded slot cells that do not certify, by final code. cadara-p4r5.2:

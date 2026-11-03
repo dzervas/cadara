@@ -419,20 +419,29 @@ test("§3 E2E-3: dense constraints at a rectangle corner; hover preview, pinned 
     (await l1Chip.boundingBox())!,
   ];
   // Premise: the two labels' anchors coincide (placed at one point), so
-  // the layout had to move one chip off it; it took the first ring step to
-  // the right or left (same row). If a geometry change ever leaves the
-  // anchors apart the layout may pick another ring direction: that fails
-  // here, not as a misleading gap.
+  // the layout had to move one chip off it by one ring step: sideways (same
+  // row) or vertically (same column), whichever is free; where the
+  // rectangle's constrained lines land decides which (the batch solves of
+  // the constraint commits above are minimum motion). If a geometry change
+  // ever leaves the anchors apart, the chips share neither row nor column:
+  // that fails here, not as a misleading gap.
+  const sameRow = Math.abs(first!.y - second!.y) <= 1;
+  const sameColumn = Math.abs(first!.x - second!.x) <= 1;
   record("d8-layout", {
     bottom: first,
     l1: second,
-    direction:
-      first!.x < second!.x ? "l1 right of bottom" : "l1 left of bottom",
+    direction: sameRow
+      ? first!.x < second!.x
+        ? "l1 right of bottom"
+        : "l1 left of bottom"
+      : first!.y < second!.y
+        ? "l1 below bottom"
+        : "l1 above bottom",
   });
   expect(
-    Math.abs(first!.y - second!.y),
-    "premise: the two anchors coincide and the layout moved one chip sideways (same row)",
-  ).toBeLessThanOrEqual(1);
+    sameRow || sameColumn,
+    "premise: the two anchors coincide and the layout moved one chip one ring step (same row or same column)",
+  ).toBe(true);
   record("d8-separation-px", separation(first!, second!));
   expect(
     separation(first!, second!),
