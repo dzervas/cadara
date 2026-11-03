@@ -26,6 +26,7 @@ import type { SketchToolRuntimeState } from "@/core/sketch-tools/definition";
 import { inferPlacement } from "@/core/sketch-inference/placement-inference";
 import type { PlacementInference } from "@/core/sketch-inference/placement-inference";
 import { getSketchSessionDisplaySolvedSnapshot } from "./solved-snapshot";
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import {
   getSketchSessionSnapIntersections,
   hasAcceptedLiveSolveOfDefinition,
@@ -251,7 +252,7 @@ export function previewSketchPlacement(
           },
         }
       : {}),
-    definition: session.definition,
+    definition: getSketchSessionDisplayDefinition(session),
     projectedReferences: session.projectedReferences,
     lineStartPointId:
       index === 1

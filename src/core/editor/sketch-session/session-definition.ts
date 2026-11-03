@@ -27,6 +27,7 @@ import {
 } from "@/core/reference-image-calibration/export/references";
 import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
 import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
+import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";
 
 export const CONSTRAINED_DRAG_BLOCKED_MESSAGE =
   "Geometry is constrained and cannot move to that position.";
@@ -297,8 +298,16 @@ export function getSketchSessionDisplayDefinition(session: SketchSessionState) {
     definition: session.definition,
     ...getSketchSessionDerivationSettings(session),
   }).definition;
+  // Authoring may leave seed coordinates unchanged after a batch solve.
+  // Present the same accepted values as the region basis without writing them
+  // back into the authored definition (including its expressions and history).
+  const liveSolve = session.liveSolve;
+  const displayDefinition =
+    liveSolve?.accepted && liveSolve.sourceDefinition === session.definition
+      ? solvedPairDefinition(evaluatedDefinition, liveSolve.solvedSnapshot)
+      : evaluatedDefinition;
   return mergeReferenceImageAnchorReferences(
-    evaluatedDefinition,
+    displayDefinition,
     sketchId,
     getReferenceImageOperationOverrides(session),
   );

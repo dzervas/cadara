@@ -25,7 +25,7 @@ import { bindPlacementInferences } from "@/core/sketch-inference/placement-infer
 import type { PlacementInference } from "@/core/sketch-inference/placement-inference";
 import { keptSketchWithheldRegionText } from "./region-feedback";
 import type { SketchId } from "@/contracts/shared/ids";
-import { createConstraintId } from "./session-definition";
+import { createConstraintId, getSketchSessionDisplayDefinition } from "./session-definition";
 import { applySketchContribution } from "./definition-authoring";
 import { buildCommitRequest } from "./history";
 import { withLiveSolveBasis } from "./session-live-solve";
@@ -52,7 +52,7 @@ export function startSketchDraw(
     } satisfies SketchToolRuntimeState,
     point: startPoint,
     tangentSource: toolDefinition.structuralTangentSource
-      ? getTangentArcSourceDirection(session.definition, inference.tangentSourceEntityId ?? null, startPoint, getSketchSessionDisplaySolvedSnapshot(session))
+      ? getTangentArcSourceDirection(getSketchSessionDisplayDefinition(session), inference.tangentSourceEntityId ?? null, startPoint, getSketchSessionDisplaySolvedSnapshot(session))
       : null,
   });
   // A draft started from idle never continues a chain (review R-1).

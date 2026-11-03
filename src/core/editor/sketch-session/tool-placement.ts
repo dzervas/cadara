@@ -17,6 +17,7 @@ import type {
   SketchToolOverlayDescriptor,
 } from "@/core/sketch-tools/editor-schema";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 
 /**
  * Reconciles the armed drawing tool's draft with a restored definition
@@ -52,6 +53,7 @@ function reinferSketchToolPlacements(
 ): Partial<SketchSessionState> {
   const toolDefinition = getSketchToolDefinition(toolId);
   const solvedSnapshot = getSketchSessionSolvedSnapshot(session);
+  const displayDefinition = getSketchSessionDisplayDefinition(session);
   const recomputed = placements.map((placement, index) =>
     inferPlacement({
       toolId,
@@ -64,7 +66,7 @@ function reinferSketchToolPlacements(
             },
           }
         : {}),
-      definition: session.definition,
+      definition: displayDefinition,
       projectedReferences: session.projectedReferences,
       pointer: placement.rawPosition,
       solvedSnapshot,
@@ -81,7 +83,7 @@ function reinferSketchToolPlacements(
   // endpoint badge. Losing the source cancels the draft rather than authoring
   // a dangling tangent or reusing the removed curve's old direction.
   if (toolDefinition.structuralTangentSource) {
-    const source = recomputed[0] && getTangentArcSourceDirection(session.definition,
+    const source = recomputed[0] && getTangentArcSourceDirection(displayDefinition,
       recomputed[0].tangentSourceEntityId ?? null, recomputed[0].position, solvedSnapshot);
     if (!source) {
       const state: import("@/core/sketch-tools/definition").SketchToolRuntimeState = { status: "idle", pointerDownPoint: null, livePoint: null,
@@ -275,18 +277,19 @@ export function restageSketchToolChain(
 
   // The last committed segment's current end point (review A-1), else the
   // chain start.
+  const displayDefinition = getSketchSessionDisplayDefinition(session);
   const lastSegment = getCommittedSketchToolChainSegments(
     chain,
-    session.definition,
+    displayDefinition,
   ).at(-1);
-  const lastEntity = session.definition.entities.find(
+  const lastEntity = displayDefinition.entities.find(
     (entity) => entity.entityId === lastSegment?.entityId,
   );
   const anchorPointId =
     lastEntity?.kind === "lineSegment"
       ? lastEntity.endPointId
       : chain.start.pointId;
-  const anchorPoint = session.definition.points.find(
+  const anchorPoint = displayDefinition.points.find(
     (point) => point.pointId === anchorPointId,
   );
   const anchor = anchorPoint?.position ?? chain.start.position;
@@ -325,7 +328,7 @@ export function restageSketchToolChain(
             {
               toolId: session.activeTool,
               role: "point",
-              definition: session.definition,
+              definition: displayDefinition,
             },
             {
               candidate: null,

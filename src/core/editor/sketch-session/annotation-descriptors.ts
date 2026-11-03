@@ -20,6 +20,7 @@ import {
   createSketchConstraintRef,
   createSketchDimensionRef,
   createSketchEntityRef,
+  getSketchSessionDisplayDefinition,
 } from "./session-definition";
 import {
   getConstraintGlyphKind,
@@ -78,6 +79,7 @@ export function buildSketchAnnotationDescriptors(session: SketchSessionState): {
   descriptors: SketchAnnotationDescriptor[];
   solvedSnapshot: SolvedSketchSnapshot;
 } {
+  session = { ...session, definition: getSketchSessionDisplayDefinition(session) };
   const sketchId = session.sketchId ?? ("sketch_draft" as SketchId);
   const resolvedDimensionValues = resolveDimensionEffectiveValues(session);
   // T17o (T17g3 ADV-1, T14 T-16): the annotations read the session's live

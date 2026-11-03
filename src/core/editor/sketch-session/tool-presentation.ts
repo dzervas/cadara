@@ -11,6 +11,7 @@ import { isDrawingSketchTool, withConstructionFlag } from "./tool-authoring";
 import { buildCommittedDimensionOverlays } from "./dimension-overlays";
 import { getSketchToolDefinition } from "@/core/sketch-tools/registry";
 import { withPlacementPresentation } from "./tool-placement";
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 
 export function getToolRuntimeState(
   session: SketchSessionState,
@@ -155,14 +156,14 @@ export function getSketchToolPresentation(
     if (!session.activeEditTarget) {
       const overlays = buildCommittedDimensionOverlays(
         session,
-        session.definition,
+        getSketchSessionDisplayDefinition(session),
       );
       return overlays.length > 0 ? { prompts: [], overlays } : null;
     }
 
     const overlays = buildCommittedDimensionOverlays(
       session,
-      session.definition,
+      getSketchSessionDisplayDefinition(session),
     );
     return overlays.length > 0 ? { prompts: [], overlays } : null;
   }

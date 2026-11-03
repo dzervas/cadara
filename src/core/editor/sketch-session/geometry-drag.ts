@@ -26,7 +26,10 @@ import {
   startInteractiveSolveSessionForDrag,
   solveDragEdit,
 } from "./drag-solve";
-import { getSketchSessionDerivationSettings } from "./session-definition";
+import {
+  getSketchSessionDerivationSettings,
+  getSketchSessionDisplayDefinition,
+} from "./session-definition";
 import {
   describeSketchSessionUnsatisfiedRequirements,
   getSketchSessionInvalidFeedback,
@@ -61,10 +64,11 @@ export function beginSketchGeometryDrag(
   // Resolve the handle from the explicit parameter or from the PrimitiveRef +
   // definition, judged against the live solve (D9′: a failed mirror's copy
   // is not draggable).
+  const displayDefinition = getSketchSessionDisplayDefinition(session);
   const handle: SketchDragHandle | null =
     explicitHandle ??
     resolveHandleFromTarget(
-      session.definition,
+      displayDefinition,
       target,
       session.liveSolve?.solvedSnapshot ?? null,
     );
@@ -73,7 +77,7 @@ export function beginSketchGeometryDrag(
   }
 
   // Resolve the drag intent.
-  const intent = resolveSketchDragIntent(session.definition, handle);
+  const intent = resolveSketchDragIntent(displayDefinition, handle);
   if (!intent) {
     return session;
   }
@@ -95,7 +99,9 @@ export function beginSketchGeometryDrag(
   // Grabbing an automatic tangent's handle converts it to authored with the
   // visible (mean-arm) vector so the curve does not change at grab, then
   // recompiles the session. Cancel restores the original definition.
-  let workingDefinition = base.definition;
+  // The grab and solve start from visible geometry; preDragDefinition below
+  // retains the untouched authored state for cancellation and history.
+  let workingDefinition = displayDefinition;
   if (intent.kind === "tangentVector" && handle.kind === "tangentHandle") {
     const converted = prepareSketchTangentEditDefinition(
       workingDefinition,
@@ -229,7 +235,8 @@ function startDragWithIntent(
   }
   const interactiveSolveSession = started.session;
 
-  // If the definition was modified (auto→authored conversion), update it.
+  // Keep the visible solve seed and any tangent conversion local to the drag;
+  // cancellation restores the original authored definition below.
   const baseSession =
     workingDefinition !== session.definition
       ? { ...session, definition: workingDefinition }
