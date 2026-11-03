@@ -65,6 +65,20 @@ const anchor = row((x, y) => ({
   ],
 }));
 
+test("batch start correction enforces an inequality newly violated by Newton", () => {
+  const result = run({
+    start: Float64Array.from([1, 0]),
+    variables: [0, 1],
+    equalities: [row((x) => ({ components: [x + 1], rows: [[1, 0]] }))],
+    inequalities: [row((x) => ({ components: [x], rows: [[1, 0]] })).evaluate],
+    correctAllInequalities: true,
+    objective: [anchor],
+  });
+  expect(result.kind).toBe("unavailable");
+  if (result.kind !== "unavailable") return;
+  expect(result.reason).toBe("startNotCorrectable");
+});
+
 test("an unreachable goal ends on the constraint manifold at its constrained minimum", () => {
   const result = run({
     start: Float64Array.from([0, 1]),

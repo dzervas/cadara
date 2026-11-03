@@ -84,6 +84,9 @@ export interface ConstrainedStepProblem {
    * accepted iterate, not the trial that crossed the boundary.
    */
   stopOnBlockingTrial?: boolean;
+  /** Batch edits start off the equality manifold; their correction must also
+   * enforce inequalities newly violated by a Newton iterate. */
+  correctAllInequalities?: boolean;
   objective: readonly ConstrainedStepRow[];
 }
 
@@ -327,7 +330,9 @@ export function* solveConstrainedMinimumMotionSteps(
       // on its boundary at the Newton iterate (projection onto g ≥ 0); a
       // change of that set restarts the norm-decrease test.
       const enforced: number[] = [];
-      for (const index of active) {
+      for (const index of problem.correctAllInequalities
+        ? problem.inequalities.map((_, index) => index)
+        : active) {
         yield { kind: "raw", count: 1 };
         if (problem.inequalities[index]!(current).components[0]! < boundary)
           enforced.push(index);

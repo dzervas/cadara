@@ -6,6 +6,8 @@ import {
 } from "./constrained-minimum-motion";
 import type { ConstrainedStepRow } from "./constrained-minimum-motion";
 import { BRANCH_BOUNDARY_TOLERANCES } from "./constrained-drag-stage";
+import { chiralityMargin, deriveChiralityInvariants } from "./constrained-chirality";
+import type { ComponentJacobian } from "./automatic-differentiation";
 import {
   pointVariableIndices,
   uniqueSortedIndices,
@@ -147,13 +149,17 @@ export function* solveWithRebuildRetrySteps<T>(input: {
  * explicit inequality restates is enforced as that inequality instead of as
  * an equality. Where the step is unavailable (a row's Jacobian unavailable,
  * or a start that cannot be corrected onto the rows, e.g. an inconsistent
- * system) the start is returned unchanged and the solve is the plain one.
+ * system) the start is returned unchanged. A landing across an existing
+ * row-derived branch is retried with those signs as inequalities; the batch
+ * caller also checks the subsequent penalty descent and conflict fallback.
  */
 function solveConstrainedMinimumMotionStart(
   program: SketchCompiledSolveProgram,
   startValues: Float64Array,
   equations: readonly ScalarConstraintRecord[],
   variables: readonly number[],
+  margins: readonly ((values: Float64Array) => ComponentJacobian)[],
+  crossesBranch: (values: Float64Array) => boolean,
 ): Float64Array {
   if (batchMinimumMotionStartTrace)
     batchMinimumMotionStartTrace.constrained += 1;
@@ -182,26 +188,39 @@ function solveConstrainedMinimumMotionStart(
         : [],
     ),
   }));
-  const result = finishSolve(
-    solveConstrainedMinimumMotionSteps({
-      start: startValues,
-      variables,
-      equalities,
-      // The restated hinges sit on their boundary at the start; the band is
-      // the same τ-based one the drag step uses, so it does not depend on
-      // where the geometry sits.
-      boundary: BRANCH_BOUNDARY_TOLERANCES * program.modelingTolerance,
-      inequalities: restated.map(
-        (inequality) => (values: Float64Array) => inequality.evaluate(values),
-      ),
-      objective: [
-        { evaluate: (values) => anchor.evaluateComponentJacobian(values) },
-      ],
-    }),
-  );
-  return result.kind === "solved"
-    ? polishedOntoRows(result.values, equalities, variables)
-    : startValues;
+  const run = (preserveBranches: boolean) =>
+    finishSolve(
+      solveConstrainedMinimumMotionSteps({
+        start: startValues,
+        variables,
+        equalities,
+        // The restated hinges sit on their boundary at the start; the band is
+        // the same τ-based one the drag step uses, so it does not depend on
+        // where the geometry sits.
+        boundary: BRANCH_BOUNDARY_TOLERANCES * program.modelingTolerance,
+        correctAllInequalities: preserveBranches,
+        inequalities: [
+          ...restated.map(
+            (inequality) => (values: Float64Array) =>
+              inequality.evaluate(values),
+          ),
+          ...(preserveBranches ? margins : []),
+        ],
+        objective: [
+          { evaluate: (values) => anchor.evaluateComponentJacobian(values) },
+        ],
+      }),
+    );
+  // Keep a safe landing bit-for-bit: merely adding inactive inequalities can
+  // perturb the linear algebra at rounding precision. A crossing landing is
+  // retried with the branch margins in both correction and optimization.
+  let result = run(false);
+  if (result.kind === "solved" && crossesBranch(result.values))
+    result = run(true);
+  if (result.kind !== "solved" || crossesBranch(result.values))
+    return startValues;
+  const polished = polishedOntoRows(result.values, equalities, variables);
+  return crossesBranch(polished) ? result.values : polished;
 }
 
 /** The batch starts taken, as recorded by `traceBatchMinimumMotionStartsForTest`. */
@@ -394,25 +413,46 @@ export function solveProgramValues(
           );
         })
       : [];
+  const movingEquations = moving.flatMap((component) =>
+    component.equationIndices.map(
+      (equationIndex) => program.system.scalarConstraints[equationIndex]!,
+    ),
+  );
+  const movingVariables = uniqueSortedIndices(
+    moving.flatMap((component) =>
+      component.variableIndices.filter((index) => !frozen.has(index)),
+    ),
+  );
+  // A newly authored, unsatisfied row has no accepted branch yet. Preserve
+  // the orientations of the rows that already hold, allowing a batch edit to
+  // reach collinearity (unlike drag's policy of blocking before the boundary).
+  const margins = deriveChiralityInvariants(
+    program,
+    movingEquations.filter((row) =>
+      row.evaluateComponents(startValues).every(
+        (residual) => Math.abs(residual) <= program.modelingTolerance,
+      ),
+    ),
+    startValues,
+  ).map((invariant) => chiralityMargin(program, { ...invariant, floor: 0 }));
+  const crossesBranch = (values: Float64Array) =>
+    margins.some(
+      (margin) =>
+        !(margin(values).components[0]! >=
+          -BRANCH_BOUNDARY_TOLERANCES * program.modelingTolerance),
+    );
   const minimumMotionStart =
     moving.length > 0
       ? solveConstrainedMinimumMotionStart(
           program,
           startValues,
-          moving.flatMap((component) =>
-            component.equationIndices.map(
-              (equationIndex) =>
-                program.system.scalarConstraints[equationIndex]!,
-            ),
-          ),
-          uniqueSortedIndices(
-            moving.flatMap((component) =>
-              component.variableIndices.filter((index) => !frozen.has(index)),
-            ),
-          ),
+          movingEquations,
+          movingVariables,
+          margins,
+          crossesBranch,
         )
       : startValues;
-  const solved = judged(
+  let solved: SolvedSystemValues = judged(
     solveSystemValues(
       minimumMotionStart,
       constraints,
@@ -420,6 +460,20 @@ export function solveProgramValues(
       (candidate) => isAcceptableSolvedValues(program, judged(candidate)),
     ),
   );
+  // The penalty descent (including its conflict fallback) cannot restore a
+  // branch lost during an infeasible edit. Keep the branch-safe start and let
+  // the existing hard-row status report the conflict instead.
+  if (crossesBranch(solved.values)) {
+    const state = evaluateLoss(
+      minimumMotionStart,
+      program.system.scalarConstraints,
+    );
+    solved = {
+      values: cloneValues(minimumMotionStart),
+      loss: state.loss,
+      perConstraint: state.perConstraint,
+    };
+  }
   const plain = {
     solved,
     result: materializeSolveResult(program, solved.values, solved),
@@ -497,9 +551,12 @@ export function solveProgramValues(
     ],
     { variableIndices },
   ).values;
-  const state = evaluateLoss(anchoredValues, program.system.scalarConstraints);
+  const safeValues = crossesBranch(anchoredValues)
+    ? solved.values
+    : anchoredValues;
+  const state = evaluateLoss(safeValues, program.system.scalarConstraints);
   const anchored: SolvedSystemValues = {
-    values: anchoredValues,
+    values: safeValues,
     loss: state.loss,
     perConstraint: state.perConstraint,
   };
