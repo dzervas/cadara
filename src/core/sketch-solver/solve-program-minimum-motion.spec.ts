@@ -52,12 +52,9 @@ function editedRingProgram(sides: number) {
   });
 }
 
-test.each([
-  [30, "constrained"],
-  [40, "anchored"],
-] as const)(
-  "a %s-sided ring edit: the batch solve and the drag session start take the %s minimum-motion start (the constrained step only up to 64 moving variables), and the accepted result moves at least 1 % less than the plain least-squares descent",
-  (sides, path) => {
+test.each([30, 33, 40])(
+  "a %s-sided ring edit: the batch solve and the drag session start take the constrained minimum-motion start (including above 64 moving variables), and the accepted result moves at least 1 % less than the plain least-squares descent",
+  (sides) => {
     const program = editedRingProgram(sides);
     const start = preconditionValuesForPointAnchors(
       program,
@@ -67,8 +64,8 @@ test.each([
       solveProgramValues(program, start),
     );
     expect(batch.starts).toEqual({
-      constrained: path === "constrained" ? 1 : 0,
-      anchored: path === "anchored" ? 1 : 0,
+      constrained: 1,
+      anchored: 0,
     });
     expect(isAcceptableSolvedValues(program, batch.result.solved)).toBe(true);
     const motion = (values: Float64Array) =>
@@ -82,7 +79,7 @@ test.each([
       (candidate) => isAcceptableSolvedValues(program, candidate),
     );
     expect(isAcceptableSolvedValues(program, plain)).toBe(true);
-    // Measured (Node 24): 0.3022 vs 0.3060 at 30 sides, 0.3290 vs 0.3535
+    // Measured (Node 24): 0.3022 vs 0.3060 at 30 sides, 0.3289 vs 0.3535
     // at 40.
     expect(motion(batch.result.solved.values)).toBeLessThan(
       motion(plain.values) * 0.99,
@@ -96,7 +93,7 @@ test.each([
     expect(session.result.kind).toBe("started");
     expect(
       session.starts,
-      "the drag start solves through the same cap",
+      "the drag start uses the same minimum-motion solve",
     ).toEqual(batch.starts);
   },
 );

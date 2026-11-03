@@ -1,3 +1,10 @@
+import {
+  objectiveOperator,
+  operatorTangentStep,
+  rowSpaceSolver,
+  StepCurvature,
+} from "./constrained-step-operators";
+import { traceConstrainedStepOperations } from "./solve-tracing";
 import type { ComponentJacobian } from "./automatic-differentiation";
 
 /**
@@ -21,7 +28,10 @@ import type { ComponentJacobian } from "./automatic-differentiation";
  *   symmetric-rank-one (SR1) estimate of the rows' curvature Σλᵢ∇²cᵢ from
  *   the change of the analytic row Jacobians along accepted steps (λ the
  *   least-squares multipliers); W is dropped when the reduced model is not
- *   positive definite. The step is capped by a continuation radius that
+ *   positive definite. Large systems apply the same model and null-space
+ *   projection as operators (sparse row-Gram Cholesky, compact SR1, conjugate
+ *   gradients); small systems retain the dense reference solve. The step is
+ *   capped by a continuation radius that
  *   halves on a failed trial and doubles on a clean one. A trial is kept when its
  *   corrected point decreases ½‖f‖² (Armijo on the predicted decrease) and
  *   the corrector moved it at most half the predicted step.
@@ -106,6 +116,10 @@ export type ConstrainedStepResult =
       reason: "jacobianUnavailable" | "startNotCorrectable";
       stats: ConstrainedStepStats;
     };
+
+// Dense projection is cheaper on the small sketch cells; above this size
+// the operator path avoids forming n columns and factoring an n×n matrix.
+const DENSE_LINEAR_ALGEBRA_MAX_VARIABLES = 64;
 
 export const MAX_ITERATIONS = 200;
 
@@ -351,7 +365,11 @@ export function* solveConstrainedMinimumMotionSteps(
 
   let current = startCorrection.values;
   let radius = Number.POSITIVE_INFINITY;
-  let curvature = squareMatrix(size);
+  // Keep the dense reference for small systems, where it is cheaper and
+  // avoids perturbing the established small-sketch iteration path.
+  const operatorMode = size > DENSE_LINEAR_ALGEBRA_MAX_VARIABLES;
+  let curvature = squareMatrix(operatorMode ? 0 : size);
+  const compactCurvature = new StepCurvature();
   // A row that becomes unavailable mid-solve is never silent zero motion:
   // before the first accepted move the whole step is unavailable (the caller
   // runs its fallback); after it, the stop says so.
@@ -372,7 +390,16 @@ export function* solveConstrainedMinimumMotionSteps(
     if (objective.kind !== "ok" || !bounds) return unavailableStop();
     const merit = 0.5 * squaredNorm(objective.residuals);
     const gradient = transposeTimes(objective.rows, objective.residuals, size);
-    const gaussNewton = normalMatrix(objective.rows, size);
+    const gaussNewton = operatorMode ? [] : normalMatrix(objective.rows, size);
+    const objectiveModel = operatorMode
+      ? objectiveOperator(objective.rows, size)
+      : null;
+    const applyHessian = (vector: Float64Array) => {
+      if (!objectiveModel) return multiply(hessian, vector);
+      const result = objectiveModel.multiply(vector);
+      const extra = compactCurvature.multiply(vector);
+      return result.map((value, index) => value + extra[index]!);
+    };
     let hessian = addMatrices(gaussNewton, curvature);
     const active = violatedInequalities(bounds.values);
     let constraintRows: Float64Array[] = [];
@@ -384,12 +411,58 @@ export function* solveConstrainedMinimumMotionSteps(
       while (!direction) {
         const linear = yield* linearize(problem.equalities, active, current);
         if (linear.kind !== "ok") return unavailableStop();
-        let candidate = tangentStep(linear.rows, gradient, hessian, size);
+        const tangent = () => {
+          if (!objectiveModel)
+            return tangentStep(linear.rows, gradient, hessian, size);
+          traceConstrainedStepOperations("Projection", linear.rows.length * size);
+          let largestRow = 0;
+          const norms = linear.rows.map((row) => {
+            const norm = euclidean(row);
+            largestRow = Math.max(largestRow, norm);
+            return norm;
+          });
+          const normalized = linear.rows.flatMap((row, index) =>
+            norms[index]! > NOISE_ROW * largestRow
+              ? [row.map((value) => value / norms[index]!)]
+              : [],
+          );
+          const solver = rowSpaceSolver(normalized, size, REGULARISATION);
+          if (!solver || !(solver.projectionLeakageBound <= RANK_TOLERANCE)) {
+            // Damping cannot decide rank: nearly dependent rows retained by
+            // MGS must not become soft directions merely because n grew.
+            return tangentStep(
+              linear.rows,
+              gradient,
+              compactCurvature.addTo(normalMatrix(objective.rows, size)),
+              size,
+            );
+          }
+          // A second projection removes the regularisation leakage from the
+          // first (O(δ²)), so CG does not chase nearly-normal directions.
+          return operatorTangentStep(
+            (vector) => solver.project(solver.project(vector)),
+            gradient,
+            applyHessian,
+            Math.max(
+              compactCurvature.largestDiagonal(objectiveModel.diagonal),
+              1e-300,
+            ),
+            REGULARISATION,
+          );
+        };
+        let candidate = tangent();
         if (!candidate) {
           // The reduced model is not positive definite: drop W.
-          curvature = squareMatrix(size);
+          curvature = squareMatrix(operatorMode ? 0 : size);
+          compactCurvature.clear();
           hessian = gaussNewton;
-          candidate = tangentStep(linear.rows, gradient, hessian, size)!;
+          candidate = tangent();
+          // Singular objectives or numerically difficult row spaces retain
+          // the reference solve rather than silently producing zero motion.
+          if (!candidate) {
+            const dense = normalMatrix(objective.rows, size);
+            candidate = tangentStep(linear.rows, gradient, dense, size)!;
+          }
         }
         constraintRows = linear.rows;
         const leaving = bounds.rows.flatMap((row, index) =>
@@ -413,7 +486,7 @@ export function* solveConstrainedMinimumMotionSteps(
       const step = direction.map((entry) => entry * fraction);
       const predicted = -(
         dot(gradient, step) +
-        0.5 * dot(step, multiply(hessian, step))
+        0.5 * dot(step, applyHessian(step))
       );
       if (!(predicted > 1e-14 * merit))
         return { kind: "solved", values: current, stop: "stationary", stats };
@@ -528,23 +601,30 @@ export function* solveConstrainedMinimumMotionSteps(
           change[column] =
             corrected.values[variables[column]!]! -
             current[variables[column]!]!;
+        traceConstrainedStepOperations("Curvature", nextRows.rows.length * size);
         nextRows.rows.forEach((row, index) => {
           for (let column = 0; column < size; column += 1)
             y[column] +=
               (row[column]! - constraintRows[index]![column]!) * lambda[index]!;
         });
-        const residual = y.map(
-          (entry, index) => entry - dot(curvature[index]!, change),
-        );
+        if (!operatorMode)
+          traceConstrainedStepOperations("Curvature", 2 * size * size);
+        const curvatureChange = operatorMode
+          ? compactCurvature.multiply(change)
+          : multiply(curvature, change);
+        const residual = y.map((entry, index) => entry - curvatureChange[index]!);
         const denominator = dot(residual, change);
         if (
           Math.abs(denominator) >
           1e-8 * euclidean(residual) * euclidean(change)
-        )
-          for (let row = 0; row < size; row += 1)
-            for (let column = 0; column < size; column += 1)
-              curvature[row]![column] +=
-                (residual[row]! * residual[column]!) / denominator;
+        ) {
+          if (operatorMode) compactCurvature.update(residual, denominator);
+          else
+            for (let row = 0; row < size; row += 1)
+              for (let column = 0; column < size; column += 1)
+                curvature[row]![column] +=
+                  (residual[row]! * residual[column]!) / denominator;
+        }
       }
       current = corrected.values;
       radius = 2 * travelled;
@@ -580,7 +660,15 @@ export function minimumNormStep(
   residuals: Float64Array,
   size: number,
 ) {
+  if (size > DENSE_LINEAR_ALGEBRA_MAX_VARIABLES) {
+    const solver = rowSpaceSolver(rows, size, REGULARISATION);
+    if (solver) return solver.minimumNorm(residuals);
+  }
   const count = rows.length;
+  traceConstrainedStepOperations(
+    "Normal",
+    (count * (count + 1) * (rows[0]?.length ?? 0)) / 2,
+  );
   const gram = Array.from({ length: count }, () => new Float64Array(count));
   let largest = 0;
   for (let first = 0; first < count; first += 1)
@@ -614,12 +702,14 @@ export function tangentStep(
   const basis: Float64Array[] = [];
   // A row this far below the largest is rounding noise (an identically
   // satisfied row), not a direction: normalised it would remove a random one.
+  traceConstrainedStepOperations("Projection", 2 * rows.length * size);
   let largestRow = 0;
   for (const row of rows) largestRow = Math.max(largestRow, euclidean(row));
   for (const row of rows) {
     const norm = euclidean(row);
     if (!(norm > NOISE_ROW * largestRow)) continue;
     const vector = row.map((entry) => entry / norm);
+    traceConstrainedStepOperations("Projection", 4 * basis.length * size);
     for (let pass = 0; pass < 2; pass += 1)
       for (const unit of basis) {
         const projection = dot(unit, vector);
@@ -639,6 +729,10 @@ export function tangentStep(
     }
     return result;
   };
+  traceConstrainedStepOperations(
+    "Projection",
+    size * (size * size + 4 * basis.length * size),
+  );
   // PHP column by column: P·(H·(P·e_j)), and P symmetric.
   const projectedColumns = Array.from({ length: size }, (_, column) => {
     const unit = new Float64Array(size);
@@ -665,7 +759,15 @@ export function leastSquaresMultipliers(
   rows: readonly Float64Array[],
   gradient: Float64Array,
 ) {
+  if (gradient.length > DENSE_LINEAR_ALGEBRA_MAX_VARIABLES) {
+    const solver = rowSpaceSolver(rows, gradient.length, REGULARISATION);
+    if (solver) return solver.multipliers(gradient);
+  }
   const count = rows.length;
+  traceConstrainedStepOperations(
+    "Normal",
+    (count * (count + 1) * (rows[0]?.length ?? 0)) / 2,
+  );
   const gram = Array.from({ length: count }, () => new Float64Array(count));
   let largest = 0;
   for (let first = 0; first < count; first += 1)
@@ -697,6 +799,10 @@ export function addMatrices(
 /** Solves A·x = b for a symmetric positive definite A (Cholesky); null if A is not. */
 export function solveCholesky(matrix: Float64Array[], rhs: Float64Array) {
   const size = rhs.length;
+  traceConstrainedStepOperations(
+    "Factor",
+    (size * (size - 1) * (size + 1)) / 6 + size * (size - 1),
+  );
   const factor = matrix.map((row) => Float64Array.from(row));
   for (let column = 0; column < size; column += 1) {
     let pivot = factor[column]![column]!;
@@ -731,13 +837,16 @@ export function solveCholesky(matrix: Float64Array[], rhs: Float64Array) {
 
 export function normalMatrix(rows: readonly Float64Array[], size: number) {
   const matrix = Array.from({ length: size }, () => new Float64Array(size));
+  let operations = 0;
   for (const row of rows)
     for (let first = 0; first < size; first += 1) {
       const value = row[first]!;
       if (value === 0) continue;
+      operations += size;
       for (let second = 0; second < size; second += 1)
         matrix[first]![second] += value * row[second]!;
     }
+  traceConstrainedStepOperations("Normal", operations);
   return matrix;
 }
 
@@ -746,6 +855,7 @@ export function transposeTimes(
   vector: Float64Array,
   size: number,
 ) {
+  traceConstrainedStepOperations("Normal", rows.length * size);
   const result = new Float64Array(size);
   rows.forEach((row, index) => {
     for (let column = 0; column < size; column += 1)

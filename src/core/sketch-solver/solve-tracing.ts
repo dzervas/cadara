@@ -41,6 +41,11 @@ export interface SketchSolverWorkTrace {
   /** cadara-p4r5.2: drag stages that ran the constrained step (`SketchDragStep`). */
   constrainedStepStages: number;
   constrainedStepIterations: number;
+  /** Multiply/add pairs in the step's linear-algebra kernels; excludes row evaluation and vector bookkeeping. */
+  constrainedStepNormalOperations: number;
+  constrainedStepProjectionOperations: number;
+  constrainedStepFactorOperations: number;
+  constrainedStepCurvatureOperations: number;
   constrainedStepNewtonIterations: number;
   /** Stages whose step was unavailable (a row's Jacobian unavailable or non-finite). */
   constrainedStepJacobianUnavailable: number;
@@ -88,6 +93,10 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     componentResidualEvaluations: 0,
     constrainedStepStages: 0,
     constrainedStepIterations: 0,
+    constrainedStepNormalOperations: 0,
+    constrainedStepProjectionOperations: 0,
+    constrainedStepFactorOperations: 0,
+    constrainedStepCurvatureOperations: 0,
     constrainedStepNewtonIterations: 0,
     constrainedStepJacobianUnavailable: 0,
     constrainedStepStartNotCorrectable: 0,
@@ -106,4 +115,13 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     gaussNewtonFallbackTrace = previous;
     solverWorkTrace = previousWork;
   }
+}
+
+/** Count arithmetic where it is performed, including correctors and polishing. */
+export function traceConstrainedStepOperations(
+  piece: "Normal" | "Projection" | "Factor" | "Curvature",
+  count: number,
+) {
+  if (solverWorkTrace)
+    solverWorkTrace[`constrainedStep${piece}Operations`] += count;
 }

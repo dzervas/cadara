@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   solveConstrainedMinimumMotionSteps,
   type ConstrainedStepProblem,
+  type ConstrainedStepRow,
   type ConstrainedStepResult,
 } from "./constrained-minimum-motion";
 import type { ComponentJacobian } from "./automatic-differentiation";
@@ -464,3 +465,175 @@ test('dragStep "constrained": a hard row unavailable at the frame runs phases A/
   expect(trace.work.constrainedStepJacobianUnavailable).toBeGreaterThan(0);
   expect(trace.work.bfgsIterations).toBeGreaterThan(0);
 });
+
+test.each([1, 1e-6, 1e6])(
+  "a padded nonlinear problem with redundant rows keeps the dense step's constrained minimum at row scale %s",
+  (rowScale) => {
+    // Padding moves the same circle problem above the operator crossover.
+    // Independent anchored variables must not change its minimum or active set.
+    const reference = run({
+      start: Float64Array.from([0, 1]),
+      variables: [0, 1],
+      equalities: [circle],
+      inequalities: [],
+      objective: [goal, anchor],
+    });
+    const size = 80;
+    const pad = (source: ConstrainedStepProblem["objective"][number]) => ({
+      evaluate: (values: Float64Array): ComponentJacobian => {
+        const evaluated = source.evaluate(values);
+        return {
+          ...evaluated,
+          rows: evaluated.rows.map((sourceRow) => {
+            const padded = new Float64Array(size);
+            padded.set(sourceRow);
+            return padded;
+          }),
+        };
+      },
+    });
+    const paddedAnchor = {
+      evaluate: (values: Float64Array): ComponentJacobian => ({
+        components: Array.from(values.slice(2)),
+        rows: Array.from({ length: size - 2 }, (_, index) => {
+          const entry = new Float64Array(size);
+          entry[index + 2] = 1;
+          return entry;
+        }),
+      }),
+    };
+    const start = new Float64Array(size);
+    start[1] = 1;
+    const padded = run({
+      start,
+      variables: Array.from({ length: size }, (_, index) => index),
+      equalities: [1, rowScale].map((scaleBy) => ({
+        evaluate: (values: Float64Array): ComponentJacobian => {
+          const evaluated = pad(circle).evaluate(values);
+          return {
+            ...evaluated,
+            components: evaluated.components.map((value) => value * scaleBy),
+            rows: evaluated.rows.map((entry) =>
+              entry.map((value) => value * scaleBy),
+            ),
+          };
+        },
+      })),
+      inequalities: [],
+      objective: [pad(goal), pad(anchor), paddedAnchor],
+    });
+    expect(reference.kind).toBe("solved");
+    expect(padded.kind).toBe("solved");
+    if (reference.kind !== "solved" || padded.kind !== "solved") return;
+    expect(
+      Math.hypot(
+        ...padded.values.map(
+          (value, index) => value - (reference.values[index] ?? 0),
+        ),
+      ),
+    ).toBeLessThan(1e-7);
+    expect(padded.stats.iterations).toBeLessThanOrEqual(15);
+  },
+);
+
+function identityObjective(
+  target: Float64Array,
+  scaleBy = 1,
+): ConstrainedStepRow {
+  return {
+    evaluate: (values) => ({
+      components: Array.from(
+        values,
+        (value, index) => scaleBy * (value - target[index]!),
+      ),
+      rows: Array.from(values, (_, index) => {
+        const gradient = new Float64Array(values.length);
+        gradient[index] = scaleBy;
+        return gradient;
+      }),
+    }),
+  };
+}
+
+test.each([65, 80])(
+  "padding to %s variables preserves the dense rank decision on nearly dependent rows",
+  (size) => {
+    const solve = (count: number) => {
+      const target = new Float64Array(count);
+      target[1] = 1;
+      target[2] = 10;
+      return run({
+        start: new Float64Array(count),
+        variables: Array.from({ length: count }, (_, index) => index),
+        equalities: [
+          {
+            evaluate: (values) => {
+              const first = new Float64Array(count);
+              first[0] = 1;
+              const second = Float64Array.from(first);
+              second[1] = 1e-7;
+              return {
+                components: [values[0]!, values[0]! + 1e-7 * values[1]!],
+                rows: [first, second],
+              };
+            },
+          },
+        ],
+        inequalities: [],
+        objective: [identityObjective(target)],
+      });
+    };
+    const reference = solve(64);
+    const padded = solve(size);
+    expect(reference.kind).toBe("solved");
+    expect(padded.kind).toBe("solved");
+    if (reference.kind !== "solved" || padded.kind !== "solved") return;
+    expect(padded.stop).toBe("stationary");
+    expect(
+      Math.hypot(
+        ...padded.values.map(
+          (value, index) => value - (reference.values[index] ?? 0),
+        ),
+      ),
+    ).toBeLessThan(1e-8);
+    expect(padded.stats.iterations).toBeLessThanOrEqual(
+      reference.stats.iterations + 1,
+    );
+    expect(padded.stats.newtonIterations).toBeLessThanOrEqual(
+      reference.stats.newtonIterations + 1,
+    );
+  },
+);
+
+test.each([1e-8, 1, 1e8])(
+  "padding preserves the dense minimum at objective row scale %s",
+  (scaleBy) => {
+    const solve = (size: number) => {
+      const target = new Float64Array(size);
+      target[0] = 1;
+      return run({
+        start: new Float64Array(size),
+        variables: Array.from({ length: size }, (_, index) => index),
+        equalities: [],
+        inequalities: [],
+        objective: [identityObjective(target, scaleBy)],
+      });
+    };
+    const reference = solve(3);
+    const padded = solve(80);
+    expect(reference.kind).toBe("solved");
+    expect(padded.kind).toBe("solved");
+    if (reference.kind !== "solved" || padded.kind !== "solved") return;
+    expect(
+      Math.hypot(
+        ...padded.values.map(
+          (value, index) => value - (reference.values[index] ?? 0),
+        ),
+      ),
+    ).toBeLessThan(1e-8);
+    expect(padded.stats.acceptedMoves).toBeGreaterThan(0);
+    expect(padded.stats.iterations).toBeLessThanOrEqual(
+      reference.stats.iterations + 1,
+    );
+  },
+);

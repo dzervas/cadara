@@ -155,6 +155,8 @@ function solveConstrainedMinimumMotionStart(
   equations: readonly ScalarConstraintRecord[],
   variables: readonly number[],
 ): Float64Array {
+  if (batchMinimumMotionStartTrace)
+    batchMinimumMotionStartTrace.constrained += 1;
   const restated = program.system.inequalities.filter((inequality) =>
     equations.some(
       (row) =>
@@ -202,20 +204,6 @@ function solveConstrainedMinimumMotionStart(
     : startValues;
 }
 
-/**
- * The most moving variables the constrained step takes; above it the batch
- * start is the anchored descent. The step's dense linear algebra grows
- * about cubically. One under-determined length edit on a connected line
- * chain, whole solve, at 22 / 62 / 102 / 202 / 402 / 802 variables (load
- * 1.3-1.7): plain descent 2.0 / 3.1 / 11 / 19 / 51 / 162 ms, anchored start
- * 2.1 / 4.8 / 14 / 27 / 69 / 209 ms, constrained step 2.7 / 14 / 32 / 171 /
- * 1138 / 8990 ms (at load 22-36, 102 variables: 62 / 63 / 358 ms; 802:
- * 434 / 512 / 15400 ms). Up to 64 the step costs at most ~15 ms per edit;
- * past it the cost runs away. cadara-p4r5.13 makes the step scale so this
- * cap can go.
- */
-const CONSTRAINED_START_MAX_VARIABLES = 64;
-
 /** The batch starts taken, as recorded by `traceBatchMinimumMotionStartsForTest`. */
 let batchMinimumMotionStartTrace: {
   constrained: number;
@@ -232,47 +220,6 @@ export function traceBatchMinimumMotionStartsForTest<T>(run: () => T) {
   } finally {
     batchMinimumMotionStartTrace = previous;
   }
-}
-
-/**
- * The minimum-motion start of a batch solve over `variables`: the
- * constrained step up to `CONSTRAINED_START_MAX_VARIABLES`, else the
- * least-squares descent on the hard rows plus a weak anchor at the start
- * (the drag minimum-motion term). The anchored descent costs about one
- * plain solve, but its anchor only biases the landing towards the start:
- * it can stop about as far out as the plain descent (an edit of a 33-sided
- * ring lands 2.7 % farther than the nearest solution, which the step
- * reaches).
- */
-function solveMinimumMotionStart(
-  program: SketchCompiledSolveProgram,
-  startValues: Float64Array,
-  equations: readonly ScalarConstraintRecord[],
-  variables: readonly number[],
-  frozen: ReadonlySet<number>,
-): Float64Array {
-  if (variables.length <= CONSTRAINED_START_MAX_VARIABLES) {
-    if (batchMinimumMotionStartTrace)
-      batchMinimumMotionStartTrace.constrained += 1;
-    return solveConstrainedMinimumMotionStart(
-      program,
-      startValues,
-      equations,
-      variables,
-    );
-  }
-  if (batchMinimumMotionStartTrace) batchMinimumMotionStartTrace.anchored += 1;
-  return solveBfgsOver(Float64Array.from(startValues), [
-    ...withFrozenVariables([...equations], frozen),
-    createMinimumMotionAnchorConstraint({
-      id: "constraint_batch_minimum_motion" as ConstraintId,
-      parameterCount: program.system.parameterCount,
-      anchorValues: startValues,
-      variableIndices: variables,
-      weight: DRAG_MINIMUM_MOTION_EPSILON,
-      parameterProjection: program.system.parameterProjection,
-    }),
-  ]).values;
 }
 
 /** At most this many polishing Newton steps (each one squares the residual). */
@@ -357,8 +304,8 @@ function polishedOntoRows(
  * One batch solve of `program` from `startValues` (no rebuild handling).
  *
  * The descent starts from the minimum-motion point of the hard rows
- * (`solveMinimumMotionStart`), so an accepted under-determined result is
- * the minimum-motion one; from there the least-squares descent only
+ * (`solveConstrainedMinimumMotionStart`), so an accepted under-determined
+ * result is the minimum-motion one; from there the least-squares descent only
  * polishes (or, where the constrained step was unavailable, solves from the
  * start).
  *
@@ -449,7 +396,7 @@ export function solveProgramValues(
       : [];
   const minimumMotionStart =
     moving.length > 0
-      ? solveMinimumMotionStart(
+      ? solveConstrainedMinimumMotionStart(
           program,
           startValues,
           moving.flatMap((component) =>
@@ -463,7 +410,6 @@ export function solveProgramValues(
               component.variableIndices.filter((index) => !frozen.has(index)),
             ),
           ),
-          frozen,
         )
       : startValues;
   const solved = judged(
