@@ -119,6 +119,10 @@ test("email code signs in in place; wrong code is visible and retry succeeds", a
   await expect(
     page.getByRole("status").filter({ hasText: "Email sent to" }),
   ).toContainText(email);
+  // The server's resend cooldown drives the countdown on the Resend link.
+  await expect(
+    page.getByRole("button", { name: /^Resend in 0:\d\d$/ }),
+  ).toBeDisabled();
   let code = "";
   await expect
     .poll(() => {

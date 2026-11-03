@@ -11,6 +11,7 @@ export function createMemorySession(initial: Account | null = null) {
     },
     async requestMagicLink(email) {
       magicLinkRequests.push(email);
+      return { resendAfterSeconds: 0 };
     },
     async redeemEmailCode() {
       throw new Error("Email code sign-in requires an account service.");

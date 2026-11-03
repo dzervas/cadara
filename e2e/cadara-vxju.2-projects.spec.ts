@@ -63,9 +63,7 @@ test("a guest creates only Local projects, and the account cards' Sign in opens 
     .first()
     .click();
   // The gated action opens the shared sign-in modal.
-  const signInPanel = page
-    .getByRole("dialog")
-    .filter({ hasText: "Your local projects work without an account." });
+  const signInPanel = page.getByRole("dialog", { name: "Sign in to CADara" });
   await expect(dialog).toBeHidden();
   await expect(signInPanel).toBeVisible();
   await signInPanel.getByRole("button", { name: "Close sign in" }).click();

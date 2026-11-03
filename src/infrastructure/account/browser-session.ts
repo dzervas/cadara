@@ -62,13 +62,27 @@ export function createBrowserSession({
       };
     },
     async requestMagicLink(email) {
-      requireSuccess(
-        await client.signIn.magicLink({
-          email,
-          callbackURL: `${callbackURL}?accountSignedIn=1`,
-          errorCallbackURL: `${callbackURL}?accountError=link`,
-        }),
-      );
+      const result = await client.signIn.magicLink({
+        email,
+        callbackURL: `${callbackURL}?accountSignedIn=1`,
+        errorCallbackURL: `${callbackURL}?accountError=link`,
+      });
+      // A cooldown refusal still means the address holds a live code: the
+      // caller moves to the code step and waits the server's remaining time.
+      const cooldown = result.error as { retryAfterSeconds?: unknown } | null;
+      if (
+        result.error?.status === 429 &&
+        typeof cooldown?.retryAfterSeconds === "number"
+      )
+        return { resendAfterSeconds: cooldown.retryAfterSeconds };
+      requireSuccess(result);
+      const sent = result.data as { resendAfterSeconds?: unknown } | null;
+      return {
+        resendAfterSeconds:
+          typeof sent?.resendAfterSeconds === "number"
+            ? sent.resendAfterSeconds
+            : 0,
+      };
     },
     async redeemEmailCode(email, code) {
       requireSuccess(await client.signIn.emailOtp({ email, otp: code }));

@@ -31,6 +31,10 @@ export function useAccountSession(
   const [busy, setBusy] = useState(false);
   const [accountChecked, setAccountChecked] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  // Epoch ms at which the server will accept another sign-in email.
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(
+    null,
+  );
   const [passkeyRegistered, setPasskeyRegistered] = useState(false);
   const report = useCallback(
     (error: unknown, visibility: "user" | "developer" | "silent" = "user") => {
@@ -138,11 +142,13 @@ export function useAccountSession(
       }, false),
     busy,
     pendingEmail,
+    resendAvailableAt,
     passkeyRegistered,
     onMagicLink: (email: string) =>
       run(async () => {
-        await port.requestMagicLink(email);
+        const { resendAfterSeconds } = await port.requestMagicLink(email);
         setPendingEmail(email);
+        setResendAvailableAt(Date.now() + resendAfterSeconds * 1000);
       }),
     onChangeEmail: () => setPendingEmail(null),
     onVerifyCode: (code: string) =>

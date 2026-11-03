@@ -1,20 +1,121 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActionIcon,
   Button,
   Divider,
   FocusTrap,
-  Group,
-  Paper,
   Portal,
-  Stack,
   Text,
   TextInput,
+  UnstyledButton,
 } from "@mantine/core";
 import type { AccountPanelProps } from "./account-menu";
 import { WorkbenchIcon } from "@/components/ui/workbench-icon";
 
+const benefits = [
+  ["Sync", "Projects follow you to any browser."],
+  ["Share", "Invite people with a role, or share a link."],
+  ["Local stays local", "On-device projects never leave this machine."],
+] as const;
+
+function GoogleGlyph() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M16.5 10.2c0 3.7-2.6 6.3-6.4 6.3a6.5 6.5 0 1 1 4.4-11.3" />
+      <path d="M10.4 10.1h6" />
+    </svg>
+  );
+}
+
+function PasskeyGlyph() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="7.5" cy="6" r="3" />
+      <path d="M2.5 16.5v-.8A4.2 4.2 0 0 1 6.7 11.5h1.6" />
+      <circle cx="14" cy="11" r="2" />
+      <path d="M14 13v4.5m0-2h1.6" />
+    </svg>
+  );
+}
+
+function ProviderButton(props: {
+  icon: ReactNode;
+  disabled: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <UnstyledButton
+      fz={13}
+      px={12}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className="flex h-9 items-center gap-3 rounded-[8px] font-medium transition-colors hover:bg-white/5 disabled:opacity-40"
+      style={{ border: "1px solid var(--workbench-shell-border)" }}
+    >
+      <span style={{ color: "var(--workbench-shell-text-muted)" }}>
+        {props.icon}
+      </span>
+      {props.children}
+    </UnstyledButton>
+  );
+}
+
+/** Whole seconds until `at`, re-evaluated every second while positive. */
+function useSecondsUntil(at: number | null) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (at === null) return;
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= at) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [at]);
+  return at === null ? 0 : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+function TextLink(props: {
+  disabled?: boolean;
+  onClick: () => void;
+  children: string;
+}) {
+  return (
+    <UnstyledButton
+      fz={12}
+      disabled={props.disabled}
+      onClick={props.onClick}
+      className="transition-colors hover:text-[var(--workbench-shell-text)] disabled:opacity-40"
+      style={{ color: "var(--workbench-shell-text-muted)" }}
+    >
+      {props.children}
+    </UnstyledButton>
+  );
+}
+
 export interface SignInModalProps extends AccountPanelProps {
+  /** Epoch ms from which the server accepts another sign-in email. */
+  resendAvailableAt: number | null;
   onGuest(): void;
   onChangeEmail(): void;
   onVerifyCode(code: string): void;
@@ -26,6 +127,7 @@ export function SignInModal(props: SignInModalProps) {
   const [code, setCode] = useState("");
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   const [minimizing, setMinimizing] = useState(false);
+  const resendIn = useSecondsUntil(props.resendAvailableAt);
   const card = useRef<HTMLDivElement>(null);
   const previousFocus = useRef(document.activeElement);
   const autofill = useRef(props.onPasskeyAutofill);
@@ -70,7 +172,7 @@ export function SignInModal(props: SignInModalProps) {
     const dy =
       (target ? target.top + target.height / 2 : 32) -
       (from.top + from.height / 2);
-    const pill = `inset(${(from.height - 34) / 2}px ${(from.width - 150) / 2}px round 17px)`;
+    const pill = `inset(${(from.height - 34) / 2}px ${(from.width - 160) / 2}px round 17px)`;
     const animation = element.animate(
       [
         { clipPath: "inset(0px round 16px)", transform: "none", opacity: 1 },
@@ -131,219 +233,282 @@ export function SignInModal(props: SignInModalProps) {
         }}
       >
         <FocusTrap active innerRef={card}>
-          <Paper
+          {/* A plain div: Mantine Paper's own `display: block` outranks the
+              layered Tailwind `grid` utility and stacks the two columns. */}
+          <div
             role="dialog"
             aria-modal="true"
             aria-label="Sign in to CADara"
-            className="relative grid w-full max-w-[760px] grid-cols-1 overflow-hidden rounded-2xl sm:grid-cols-[300px_1fr]"
+            className="relative grid h-[452px] w-full max-w-[760px] grid-cols-[300px_1fr] overflow-hidden rounded-2xl"
             style={{
               background: "var(--workbench-shell-overlay-strong)",
-              border: "1px solid var(--workbench-shell-border)",
+              border: "1px solid var(--workbench-glass-border-strong)",
               boxShadow: "var(--workbench-panel-shadow)",
             }}
           >
-            <Stack
-              p="xl"
-              gap="xl"
-              style={{ background: "var(--workbench-shell-surface)" }}
+            {/* Left: what an account gives you; the sent email on the code step. */}
+            <div
+              className="flex flex-col justify-between p-7"
+              style={{
+                background: "var(--workbench-shell-surface)",
+                borderRight: "1px solid var(--workbench-glass-divider)",
+              }}
             >
-              <Group gap="sm">
-                <Text
-                  fw={700}
-                  aria-hidden="true"
-                  c="var(--workbench-spark-accent)"
-                >
-                  C
-                </Text>
-                <Text fw={600}>CADara</Text>
-              </Group>
-              {props.pendingEmail ? (
-                <Stack gap="sm">
-                  <Text size="sm" role="status">
-                    Email sent to {props.pendingEmail}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Your email holds a code and a link. Use either to sign in.
-                  </Text>
-                  <Button
-                    variant="subtle"
-                    size="compact-sm"
-                    disabled={props.busy}
-                    onClick={props.onChangeEmail}
-                  >
-                    Change email
-                  </Button>
-                  <Button
-                    variant="subtle"
-                    size="compact-sm"
-                    disabled={props.busy}
-                    onClick={() => props.onMagicLink(props.pendingEmail!)}
-                  >
-                    Resend email
-                  </Button>
-                </Stack>
-              ) : (
-                <Stack gap="lg">
-                  {[
-                    [
-                      "Sync your projects",
-                      "Pick up where you left off, on any device.",
-                    ],
-                    ["Share your work", "Send a link, not a file."],
-                    ["Collaborate", "Work together in the same project."],
-                  ].map(([title, body]) => (
-                    <div key={title}>
-                      <Text size="sm" fw={500}>
-                        {title}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {body}
-                      </Text>
-                    </div>
-                  ))}
-                </Stack>
-              )}
-              <Text size="xs" c="dimmed">
-                Your local projects work without an account.
-              </Text>
-            </Stack>
-            <Stack p="xl" gap="md" mih={420}>
-              <ActionIcon
-                aria-label="Close sign in"
-                variant="subtle"
-                className="absolute top-3 right-3"
-                onClick={dismiss}
-              >
-                <WorkbenchIcon name="close" size={14} />
-              </ActionIcon>
               <div>
-                <Text component="h2" fz={20} fw={600} mt="sm">
-                  {props.pendingEmail ? "Enter your code" : "Sign in to CADara"}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  Sync, share and collaborate
-                </Text>
+                <div className="flex items-center gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-[11px] font-bold"
+                    style={{
+                      background: "var(--workbench-spark-accent)",
+                      color: "var(--workbench-spark-accent-ink)",
+                      boxShadow: "var(--workbench-spark-logo-shadow)",
+                    }}
+                  >
+                    C
+                  </span>
+                  <span className="text-[13px] font-semibold tracking-tight">
+                    CADara
+                  </span>
+                </div>
+                {props.pendingEmail ? (
+                  <div className="mt-9">
+                    <div role="status">
+                      <div
+                        className="text-[11px] font-semibold tracking-[0.18em] uppercase"
+                        style={{ color: "var(--workbench-shell-text-dim)" }}
+                      >
+                        Email sent to
+                      </div>
+                      <div className="mt-2 text-[13px] font-medium break-all">
+                        {props.pendingEmail}
+                      </div>
+                    </div>
+                    <p
+                      className="mt-3 mb-0 text-[12px] leading-normal"
+                      style={{ color: "var(--workbench-shell-text-muted)" }}
+                    >
+                      It holds a code and a link. Either one signs this tab in;
+                      the link can be opened anywhere.
+                    </p>
+                    <div className="mt-5 flex flex-col items-start gap-1.5">
+                      <TextLink
+                        disabled={props.busy}
+                        onClick={props.onChangeEmail}
+                      >
+                        Change email
+                      </TextLink>
+                      <TextLink
+                        disabled={props.busy || resendIn > 0}
+                        onClick={() => props.onMagicLink(props.pendingEmail!)}
+                      >
+                        {resendIn > 0
+                          ? `Resend in 0:${`${resendIn}`.padStart(2, "0")}`
+                          : "Resend email"}
+                      </TextLink>
+                    </div>
+                  </div>
+                ) : (
+                  <ul className="m-0 mt-9 flex list-none flex-col gap-5 p-0">
+                    {benefits.map(([title, body]) => (
+                      <li key={title} className="flex gap-3">
+                        <span
+                          className="mt-[3px]"
+                          style={{ color: "var(--workbench-shell-text-dim)" }}
+                        >
+                          <WorkbenchIcon name="check" size={14} />
+                        </span>
+                        <span>
+                          <span className="block text-[13px] font-medium">
+                            {title}
+                          </span>
+                          <span
+                            className="block text-[12px] leading-normal"
+                            style={{
+                              color: "var(--workbench-shell-text-muted)",
+                            }}
+                          >
+                            {body}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
+              <div
+                className="font-mono text-[11px]"
+                style={{ color: "var(--workbench-shell-text-dim)" }}
+              >
+                Free · 1 GB · 5 private projects
+              </div>
+            </div>
+
+            {/* Right: the form. */}
+            <div className="relative flex flex-col px-9 pt-9 pb-6">
+              <div className="absolute top-3 right-3">
+                <ActionIcon
+                  aria-label="Close sign in"
+                  variant="subtle"
+                  color="workbench"
+                  size={26}
+                  onClick={dismiss}
+                >
+                  <WorkbenchIcon name="close" size={14} />
+                </ActionIcon>
+              </div>
+              <h2 className="m-0 text-[20px] leading-tight font-semibold">
+                {props.pendingEmail ? "Enter your code" : "Sign in to CADara"}
+              </h2>
+              <p
+                className="mt-1.5 mb-0 text-[13px]"
+                style={{ color: "var(--workbench-shell-text-muted)" }}
+              >
+                {props.pendingEmail
+                  ? "Six digits, valid for 5 minutes."
+                  : "Sync, share and collaborate"}
+              </p>
               {props.errorMessage && (
-                <Text size="xs" c="red" role="alert">
+                <Text size="xs" c="red" mt="sm" role="alert">
                   {props.errorMessage}
                 </Text>
               )}
               {props.offline && (
-                <Text size="xs" c="dimmed" role="status">
+                <Text size="xs" c="dimmed" mt="sm" role="status">
                   Account offline · unable to check your session.
                 </Text>
               )}
               {props.pendingEmail ? (
                 <form
+                  className="mt-6 flex flex-col gap-3"
                   onSubmit={(event) => {
                     event.preventDefault();
                     if (code.length === 6) props.onVerifyCode(code);
                   }}
                 >
-                  <Stack>
-                    <TextInput
-                      key="code"
-                      data-autofocus
-                      aria-label="Sign-in code"
-                      autoComplete="one-time-code"
-                      inputMode="numeric"
-                      value={code}
-                      onChange={(event) =>
-                        setCode(
-                          event.currentTarget.value
-                            .replace(/\D/g, "")
-                            .slice(0, 6),
-                        )
-                      }
-                      disabled={props.busy}
-                      styles={{
-                        input: {
-                          height: 52,
-                          fontFamily: "var(--mantine-font-family-monospace)",
-                          fontSize: 24,
-                          letterSpacing: ".5em",
-                          textAlign: "center",
-                        },
-                      }}
-                    />
-                    <Button
-                      type="submit"
-                      disabled={props.busy || code.length !== 6}
-                      loading={props.busy}
-                    >
-                      Verify and sign in
-                    </Button>
-                  </Stack>
+                  <TextInput
+                    key="code"
+                    data-autofocus
+                    aria-label="Sign-in code"
+                    autoComplete="one-time-code"
+                    inputMode="numeric"
+                    placeholder="000000"
+                    value={code}
+                    onChange={(event) =>
+                      setCode(
+                        event.currentTarget.value
+                          .replace(/\D/g, "")
+                          .slice(0, 6),
+                      )
+                    }
+                    disabled={props.busy}
+                    styles={{
+                      input: {
+                        height: 52,
+                        fontFamily: "var(--mantine-font-family-monospace)",
+                        fontSize: 24,
+                        letterSpacing: "0.55em",
+                        textAlign: "center",
+                        paddingLeft: "0.55em",
+                      },
+                    }}
+                  />
+                  <Button
+                    type="submit"
+                    fullWidth
+                    h={36}
+                    color="workbench.0"
+                    autoContrast
+                    disabled={props.busy || code.length !== 6}
+                    loading={props.busy}
+                  >
+                    Verify and sign in
+                  </Button>
                 </form>
               ) : (
                 <>
                   <form
+                    className="mt-6 flex gap-2"
                     onSubmit={(event) => {
                       event.preventDefault();
                       props.onMagicLink(email.trim());
                     }}
                   >
-                    <Group align="end" gap="xs" wrap="nowrap">
-                      <TextInput
-                        key="email"
-                        data-autofocus
-                        aria-label="Email"
-                        type="email"
-                        required
-                        autoComplete="username webauthn"
-                        placeholder="you@example.com"
-                        value={email}
-                        onChange={(event) =>
-                          setEmail(event.currentTarget.value)
-                        }
-                        disabled={props.busy}
-                        style={{ flex: 1 }}
-                      />
-                      <Button
-                        type="submit"
-                        disabled={props.busy || !email.trim()}
-                        loading={props.busy}
-                      >
-                        Continue
-                      </Button>
-                    </Group>
-                  </form>
-                  <Divider label="or" labelPosition="center" />
-                  <Button
-                    variant="default"
-                    disabled={props.busy}
-                    onClick={() => props.onSocial("github")}
-                  >
-                    Continue with GitHub
-                  </Button>
-                  <Button
-                    variant="default"
-                    disabled={props.busy}
-                    onClick={() => props.onSocial("google")}
-                  >
-                    Continue with Google
-                  </Button>
-                  {passkeyAvailable && (
-                    <Button
-                      variant="default"
+                    <TextInput
+                      key="email"
+                      data-autofocus
+                      className="flex-1"
+                      aria-label="Email"
+                      type="email"
+                      required
+                      autoComplete="username webauthn"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(event) => setEmail(event.currentTarget.value)}
                       disabled={props.busy}
-                      onClick={props.onPasskey}
+                      styles={{ input: { height: 36 } }}
+                    />
+                    <Button
+                      type="submit"
+                      h={36}
+                      color="workbench.0"
+                      autoContrast
+                      disabled={props.busy || !email.trim()}
+                      loading={props.busy}
                     >
-                      Sign in with passkey
+                      Continue
                     </Button>
-                  )}
+                  </form>
+                  <Divider
+                    my={20}
+                    label="or"
+                    labelPosition="center"
+                    color="var(--workbench-shell-divider)"
+                    styles={{
+                      label: {
+                        color: "var(--workbench-shell-text-dim)",
+                        fontSize: 11,
+                      },
+                    }}
+                  />
+                  <div className="flex flex-col gap-1.5">
+                    <ProviderButton
+                      icon={<WorkbenchIcon name="github" size={16} />}
+                      disabled={props.busy}
+                      onClick={() => props.onSocial("github")}
+                    >
+                      Continue with GitHub
+                    </ProviderButton>
+                    <ProviderButton
+                      icon={<GoogleGlyph />}
+                      disabled={props.busy}
+                      onClick={() => props.onSocial("google")}
+                    >
+                      Continue with Google
+                    </ProviderButton>
+                    {passkeyAvailable && (
+                      <ProviderButton
+                        icon={<PasskeyGlyph />}
+                        disabled={props.busy}
+                        onClick={props.onPasskey}
+                      >
+                        Sign in with passkey
+                      </ProviderButton>
+                    )}
+                  </div>
                 </>
               )}
-              <Button
-                variant="subtle"
-                size="compact-sm"
-                mt="auto"
-                onClick={dismiss}
-              >
-                Continue as guest →
-              </Button>
-            </Stack>
+              <div className="mt-auto flex justify-end">
+                <UnstyledButton
+                  fz={12}
+                  onClick={dismiss}
+                  className="transition-colors hover:text-[var(--workbench-shell-text-muted)]"
+                  style={{ color: "var(--workbench-shell-text-dim)" }}
+                >
+                  Continue as guest →
+                </UnstyledButton>
+              </div>
+            </div>
             {minimizing && (
               <div
                 className="absolute inset-0 grid place-items-center"
@@ -356,7 +521,7 @@ export function SignInModal(props: SignInModalProps) {
                 </Text>
               </div>
             )}
-          </Paper>
+          </div>
         </FocusTrap>
       </div>
     </Portal>

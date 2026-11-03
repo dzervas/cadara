@@ -6,16 +6,26 @@ function fakeAccountApi() {
   let signedIn = false;
   let invalidMe = false;
   let rejectLink = false;
+  let cooldownSeconds = 0;
   const requests: Request[] = [];
   const fetcher: typeof fetch = async (input, init) => {
     const request = new Request(input, init);
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/auth/sign-in/magic-link") {
+      if (cooldownSeconds > 0)
+        return Response.json(
+          {
+            message: "A sign-in email was just sent.",
+            code: "EMAIL_SIGN_IN_COOLDOWN",
+            retryAfterSeconds: cooldownSeconds,
+          },
+          { status: 429, headers: { "retry-after": `${cooldownSeconds}` } },
+        );
       return Response.json(
         rejectLink
           ? { message: "Link request rejected", code: "REJECTED" }
-          : { status: true },
+          : { status: true, resendAfterSeconds: 30 },
         { status: rejectLink ? 400 : 200 },
       );
     }
@@ -71,6 +81,9 @@ function fakeAccountApi() {
     rejectLink() {
       rejectLink = true;
     },
+    coolDown(seconds: number) {
+      cooldownSeconds = seconds;
+    },
   };
 }
 
@@ -82,7 +95,9 @@ test("magic link request is JSON with API credentials; completion hydrates ident
     fetcher: api.fetcher,
   });
   expect(await port.getAccount()).toBeNull();
-  await port.requestMagicLink("maker@example.test");
+  expect(await port.requestMagicLink("maker@example.test")).toEqual({
+    resendAfterSeconds: 30,
+  });
   const request = api.requests.find((entry) =>
     entry.url.endsWith("/sign-in/magic-link"),
   )!;
@@ -116,6 +131,19 @@ test("invalid account payloads and rejected links propagate to the caller", asyn
   await expect(port.requestMagicLink("maker@example.test")).rejects.toThrow(
     "Link request rejected",
   );
+});
+
+test("a resend refused by the cooldown is not an error: the address keeps its code and the server's wait is returned", async () => {
+  const api = fakeAccountApi();
+  const port = createBrowserSession({
+    apiOrigin: "http://localhost:8787",
+    callbackURL: "http://localhost:3000/app",
+    fetcher: api.fetcher,
+  });
+  api.coolDown(12);
+  expect(await port.requestMagicLink("maker@example.test")).toEqual({
+    resendAfterSeconds: 12,
+  });
 });
 
 test("email codes redeem with credentials in place and invalid codes propagate", async () => {
