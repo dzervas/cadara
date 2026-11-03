@@ -3,7 +3,9 @@ FROM oven/bun:1.4.3
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+# prepare builds dist/contracts for git-dependency consumers; it needs the
+# sources copied below and the dev server does not use its output.
+RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY . .
 

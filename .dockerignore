@@ -2,6 +2,7 @@
 .jj
 .codex
 .claude
+.fallow
 node_modules
 dist
 build
@@ -11,11 +12,13 @@ Dockerfile*
 npm-debug.log*
 bun-debug.log*
 *.log*
+*.cadara
+*.png
 coverage
 .env*
 .playwright-cli
 /test-results
-/test/fixtures/onshape-captures
+/test
 .pi
 .scratch
 .devenv
