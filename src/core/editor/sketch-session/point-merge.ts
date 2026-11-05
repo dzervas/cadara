@@ -1,3 +1,4 @@
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import type { SketchSessionState, SketchEditToolState } from "./types";
 import type { PrimitiveRef } from "@/core/editor/schema";
 import type { SketchPointId } from "@/contracts/shared/ids";
@@ -56,7 +57,7 @@ function getSketchMergePoint(
   session: SketchSessionState,
   pointId: SketchPointId,
 ) {
-  return session.definition.points.find((point) => point.pointId === pointId);
+  return getSketchSessionDisplayDefinition(session).points.find((point) => point.pointId === pointId);
 }
 
 /** The source→destination arrow (a preview polyline; no geometry is authored). */

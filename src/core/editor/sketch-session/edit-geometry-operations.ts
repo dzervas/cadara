@@ -1,3 +1,4 @@
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import type { SketchEditToolState, SketchSessionState } from "./types";
 import type { SketchEntityId, SketchId } from "@/contracts/shared/ids";
 import type { PrimitiveRef } from "@/core/editor/schema";
@@ -41,15 +42,36 @@ function getSketchCornerSlotResult(
   const gate = offsetEditInputGate(session, input.entityIds, `a ${getSketchEditToolDefinition(toolId).metadata.name} input`);
   if (gate) return refusedEditOperation(gate.message);
   const common = {
-    definition: session.definition,
+    definition: getSketchSessionDisplayDefinition(session),
     entityIds: input.entityIds,
     sequence: session.sequence + 1,
     factories: createSessionCommitFactories(session.sequence + 1, session.sketchId ?? ("sketch_draft" as SketchId)),
   };
   // cadara-h026.2: Fillet and Chamfer round every corner of their lines.
-  return input.kind === "slot"
+  const result = input.kind === "slot"
     ? createSketchSlotContribution({ ...common, width: input.value })
     : createSketchCornersMutation({ ...common, kind: input.kind, value: input.value });
+  if (!result.definition) return result;
+  // Corner edits add tangent points and retarget lines. Existing coordinates
+  // remain authored seeds, not copies of the transient display solve.
+  const authoredPoints = new Map(session.definition.points.map(point => [point.pointId, point]));
+  const authoredEntities = new Map(session.definition.entities.map(entity => [entity.entityId, entity]));
+  const displayEntities = new Map(common.definition.entities.map(entity => [entity.entityId, entity]));
+  return {
+    ...result,
+    definition: {
+      ...result.definition,
+      points: result.definition.points.map(point => {
+        const authored = authoredPoints.get(point.pointId);
+        return authored ? { ...point, position: authored.position } : point;
+      }),
+      entities: result.definition.entities.map(entity =>
+        entity === displayEntities.get(entity.entityId)
+          ? authoredEntities.get(entity.entityId) ?? entity
+          : entity,
+      ),
+    },
+  };
 }
 
 export function buildSketchGeometry(
@@ -72,7 +94,7 @@ function getSketchMirrorResult(
   if (gate) return refusedEditOperation(gate.message);
   const nextSequence = session.sequence + 1;
   return createSketchDerivedTransformContribution({
-    definition: session.definition, operatorKind: "mirror", entityIds,
+    definition: getSketchSessionDisplayDefinition(session), operatorKind: "mirror", entityIds,
     value: null, sequence: nextSequence,
     factories: createSessionCommitFactories(nextSequence, getSessionSketchId(session)),
     modelingTolerance: session.modelingTolerance, mirrorDatumAxis,
@@ -107,7 +129,7 @@ function getSketchDerivationResult(
   if (gate) return refusedEditOperation(gate.message);
   const sequence = session.sequence + 1;
   return createSketchDerivedTransformContribution({
-    definition: session.definition, operatorKind: kind, entityIds, value, sequence,
+    definition: getSketchSessionDisplayDefinition(session), operatorKind: kind, entityIds, value, sequence,
     factories: createSessionCommitFactories(sequence, getSessionSketchId(session)),
     modelingTolerance: session.modelingTolerance,
     documentVariables: session.documentVariables,

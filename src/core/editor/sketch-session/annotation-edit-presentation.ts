@@ -1,3 +1,4 @@
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import type {
   SketchSessionState,
   SketchAnnotationEditState,
@@ -516,7 +517,7 @@ export function getEditableAnnotationValue(
     if (relationship?.kind !== "offset") return null;
     const entityId =
       relationship.outputs[0]?.outputEntityId ?? relationship.seedEntityIds[0];
-    const point = entityId ? getEntityAnchor(session.definition, entityId) : null;
+    const point = entityId ? getEntityAnchor(getSketchSessionDisplayDefinition(session), entityId) : null;
     return {
       label: "Offset distance",
       value: relationship.distance,

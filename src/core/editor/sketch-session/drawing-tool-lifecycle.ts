@@ -1,3 +1,4 @@
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import type { SketchSessionState, SketchAuthoringToolId } from "./types";
 import type {
   SketchConstraintToolId,
@@ -61,7 +62,7 @@ export function beginSketchConstraintToolFromSelection(
   for (const target of selection) {
     const record = resolveSketchConstraintTarget(
       toolId,
-      session.definition,
+      getSketchSessionDisplayDefinition(session),
       target,
       session.projectedReferences,
     );

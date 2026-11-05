@@ -21,7 +21,7 @@ import { offsetEditInputGate } from "./offset-editing";
 import { solvedPairDefinition } from "@/contracts/sketch/offset-publication";
 import type { SketchDefinition } from "@/contracts/sketch/schema";
 import { evaluateAuthoredSketchDerivations } from "@/core/modeling/sketch-dimension-expressions";
-import { getSketchSessionDerivationSettings } from "./session-definition";
+import { getSketchSessionDisplayDefinition, getSketchSessionDerivationSettings } from "./session-definition";
 import { rebuildSessionForDefinition } from "./definition-authoring";
 import { clearActiveSketchTool } from "./drawing-tool-lifecycle";
 import { getSketchSessionInvalidFeedback } from "./session-feedback";
@@ -62,11 +62,12 @@ function getSketchMirrorConfirmAnchor(
   session: SketchSessionState,
   previewEntities: readonly SketchDraftEntity[],
 ) {
+  const definition = getSketchSessionDisplayDefinition(session);
   const positions = new Map(
-    session.definition.points.map((point) => [point.pointId, point.position]),
+    definition.points.map((point) => [point.pointId, point.position]),
   );
-  const lows = session.definition.points.map((point) => point.position[1]);
-  for (const entity of session.definition.entities) {
+  const lows = definition.points.map((point) => point.position[1]);
+  for (const entity of definition.entities) {
     if (entity.kind === "circle")
       lows.push(positions.get(entity.centerPointId)![1] - entity.radius);
     if (entity.kind === "arc") {

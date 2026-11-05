@@ -1,3 +1,4 @@
+import { getSketchSessionDisplayDefinition } from "./session-definition";
 import type { AuthoredSketchDerivationSettings } from "@/core/modeling/sketch-dimension-expressions";
 import {
   isAcceptedConstraintStatus,
@@ -412,7 +413,7 @@ export function updateSketchConstraintHover(
       ? null
       : resolveSketchConstraintTarget(
           authoring.toolId,
-          session.definition,
+          getSketchSessionDisplayDefinition(session),
           target,
           session.projectedReferences,
         );
@@ -468,7 +469,7 @@ export function authorSketchConstraintTarget(
 
   const resolved = resolveSketchConstraintTarget(
     authoring.toolId,
-    session.definition,
+    getSketchSessionDisplayDefinition(session),
     target,
     session.projectedReferences,
   );
@@ -880,7 +881,7 @@ export function authorSketchRequirement(
   session: SketchSessionState,
   input: import("@/contracts/semantic/schema").SemanticRequirementInput,
 ): SketchSessionState {
-  const selectedTargets = input.targets.map(target => resolveSketchConstraintTarget(input.tool, session.definition, target, session.projectedReferences));
+  const selectedTargets = input.targets.map(target => resolveSketchConstraintTarget(input.tool, getSketchSessionDisplayDefinition(session), target, session.projectedReferences));
   const definition = getSketchConstraintDefinition(input.tool);
   if (selectedTargets.some(target => target === null)
     || new Set(input.targets.map(getTargetKey)).size !== input.targets.length

@@ -1,8 +1,7 @@
+import { createFilletedHexagonSession } from "./filleted-hexagon-session.fixtures";
 import { expect, test } from "vitest";
-import { createLiteralAuthoredValue } from "@/contracts/modeling/authored-values";
 import { getSketchAnnotationDescriptors } from "./annotation-descriptors";
 import {
-  createNewSketchSession,
   beginSketchTool,
   startSketchDraw,
   acceptSketchDraw,
@@ -11,17 +10,9 @@ import {
   publishSketchLiveRegions,
 } from "./index";
 import {
-  createDimensionId,
   getSketchSessionDisplayDefinition,
   getSketchSessionDerivationSettings,
 } from "./session-definition";
-import { createSessionCommitFactories } from "./tool-authoring";
-import { enterSketchSession } from "@/core/editor/sketch-entry.fixtures";
-import {
-  createStandardPlaneDefinition,
-  OCC_KERNEL_SETTINGS,
-} from "@/core/modeling/opencascade-kernel-seed";
-import { createSketchFilletMutation } from "@/core/sketch-editing/operations";
 import { createSketchArrangementDeriver } from "@/contracts/sketch/region-extraction";
 import { createCertifiedNeutralCurveQueryCapabilityForTest } from "@/core/modeling/neutral-curve-certification/query";
 import { tessellateBoundaryLoop } from "@/contracts/sketch/region-boundary-curves";
@@ -33,64 +24,11 @@ import { createSketchActionOwnerFixture } from "@/application/editor/sketch-acti
 import type { SketchPoint } from "@/contracts/modeling/schema";
 import { stableJsonValue } from "@/contracts/modeling/authored-document-serialization";
 
-function filletedHexagon(equalSides = true) {
-  let session = enterSketchSession(
-    createNewSketchSession(
-      createStandardPlaneDefinition("xy"),
-      OCC_KERNEL_SETTINGS,
-    ),
-  );
-  session = startSketchDraw(
-    beginSketchTool(session, "inscribedPolygon"),
-    [0, 0],
-  );
-  session = beginSketchTool(acceptSketchDraw(session, [1, 0]), "line");
-  const circle = session.definition.entities.find((e) => e.kind === "circle")!;
-  const radiusId = createDimensionId(2, "circle-radius");
-  const constraints = session.definition.constraints.filter(
-    (c) => equalSides || c.kind !== "equalLength",
-  );
-  const sizedDefinition = {
-    ...session.definition,
-    constraints,
-    constraintIds: constraints.map((c) => c.constraintId),
-    dimensionIds: [...session.definition.dimensionIds, radiusId],
-    dimensions: [
-      ...session.definition.dimensions,
-      {
-        kind: "circleRadius" as const,
-        dimensionId: radiusId,
-        label: "Construction radius",
-        entityId: circle.entityId,
-        value: createLiteralAuthoredValue(1),
-      },
-    ],
-  };
-  session = withLiveSolveBasis(
-    { ...session, definition: sizedDefinition },
-    sizedDefinition,
-  );
-  const sides = session.definition.entities.filter(
-    (e) => e.kind === "lineSegment",
-  );
-  const mutation = createSketchFilletMutation({
-    definition: session.definition,
-    entityIds: sides.slice(0, 2).map((e) => e.entityId),
-    radius: 0.15,
-    sequence: 2,
-    factories: createSessionCommitFactories(2, "sketch_draft" as never),
-  });
-  expect(mutation.valid).toBe(true);
-  const definition = mutation.definition!;
-  session = withLiveSolveBasis({ ...session, definition }, definition);
-  expect(session.liveSolve!.accepted).toBe(true);
-  return session;
-}
 
 test.each([true, false])(
   "a filleted circle-constrained hexagon displays its solved region without rewriting authored geometry (equal sides: %s)",
   async (equalSides) => {
-    let session = filletedHexagon(equalSides);
+    let session = createFilletedHexagonSession(equalSides);
     const definition = session.definition;
     const authored = JSON.stringify(definition);
     const basis = getSketchSessionLiveRegionBasis(session)!;
@@ -193,7 +131,7 @@ test.each([true, false])(
   },
 );
 
-function displayedVertex(session: ReturnType<typeof filletedHexagon>) {
+function displayedVertex(session: ReturnType<typeof createFilletedHexagonSession>) {
   const side = session.definition.entities.find(
     (e) => e.kind === "lineSegment",
   )!;
@@ -213,7 +151,7 @@ function displayedVertex(session: ReturnType<typeof filletedHexagon>) {
 }
 
 test("placement and draft reconciliation join the displayed solved vertex at close zoom", () => {
-  const session = { ...filletedHexagon(), sketchUnitsPerPixel: 0.0001 };
+  const session = { ...createFilletedHexagonSession(), sketchUnitsPerPixel: 0.0001 };
   const { point, position } = displayedVertex(session);
   const inference = previewSketchPlacement(session, position)!;
   expect(inference.position).toEqual(position);
@@ -246,7 +184,7 @@ test("placement and draft reconciliation join the displayed solved vertex at clo
 });
 
 test("a tangent arc starts and reconciles along the displayed solved source", () => {
-  const polygon = { ...filletedHexagon(), sketchUnitsPerPixel: 0.0001 };
+  const polygon = { ...createFilletedHexagonSession(), sketchUnitsPerPixel: 0.0001 };
   const { point: corner } = displayedVertex(polygon);
   // Build the open source independently of the snapping path under test.
   const tail = acceptSketchDraw(startSketchDraw(polygon, [-2, -2]), [
@@ -312,7 +250,7 @@ test.each([
 ])(
   "a small drag preserves the visible grab offset $offset and Undo restores authored bytes",
   async ({ offset }) => {
-    const initial = { ...filletedHexagon(), sketchUnitsPerPixel: 0.0001 };
+    const initial = { ...createFilletedHexagonSession(), sketchUnitsPerPixel: 0.0001 };
     const { point, position } = displayedVertex(initial);
     const f = await createSketchActionOwnerFixture(initial);
     await f.settle();
