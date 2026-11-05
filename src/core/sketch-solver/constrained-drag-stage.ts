@@ -1,3 +1,4 @@
+import { constrainedStepRows } from "./constrained-step-rows";
 import type { ComponentJacobian } from "./automatic-differentiation";
 import {
   chiralityMargin,
@@ -144,47 +145,30 @@ export function* solveConstrainedDragStage(input: {
   | null
 > {
   const { margins, clearAtPrevious } = input.invariants;
-  const restated = input.program.system.inequalities.filter((inequality) =>
-    input.hardConstraints.some(
-      (row) =>
-        row.id === inequality.requirement?.id &&
-        row.hingeComponentIndices?.includes(
-          inequality.requirement.componentIndex,
-        ),
-    ),
+  const { equalities, inequalities } = constrainedStepRows(
+    input.program,
+    input.hardConstraints,
   );
   const result = yield* solveConstrainedMinimumMotionSteps({
     start: input.start,
     variables: input.variables,
-    equalities: input.hardConstraints.map((row) => ({
-      evaluate: (values) => row.evaluateComponentJacobian(values),
-      excludedComponents: restated.flatMap((inequality) =>
-        inequality.requirement!.id === row.id
-          ? [inequality.requirement!.componentIndex]
-          : [],
-      ),
-    })),
+    equalities,
     boundary: BRANCH_BOUNDARY_TOLERANCES * input.program.modelingTolerance,
     // A corrected trial crossing a clear margin already decides this frame:
     // block keeps the previous frame, not a boundary point. Do not spend
     // further trials landing on a boundary whose result cannot be published.
     stopOnBlockingTrial: true,
     blocking: clearAtPrevious.flatMap((clear, index) =>
-      clear ? [restated.length + index] : [],
+      clear ? [inequalities.length + index] : [],
     ),
-    inequalities: [
-      ...restated.map(
-        (inequality) => (values: Float64Array) => inequality.evaluate(values),
-      ),
-      ...margins,
-    ],
+    inequalities: [...inequalities, ...margins],
     objective: input.objective.map((row) => ({
       evaluate: (values: Float64Array) => row.evaluateComponentJacobian(values),
     })),
   });
   if (solverWorkTrace) {
     solverWorkTrace.constrainedStepStages += 1;
-    solverWorkTrace.constrainedStepRestatedComponents += restated.length;
+    solverWorkTrace.constrainedStepRestatedComponents += inequalities.length;
     if (result.kind === "solved" && result.stop === "rowUnavailable")
       solverWorkTrace.constrainedStepRowUnavailableStops += 1;
     solverWorkTrace.constrainedStepIterations += result.stats.iterations;

@@ -1,10 +1,10 @@
 import { evaluateLoss, solveBfgsOver } from "./bfgs";
 import {
-  maxAbs,
-  minimumNormStep,
+  correctConstrainedStep,
   solveConstrainedMinimumMotionSteps,
 } from "./constrained-minimum-motion";
 import type { ConstrainedStepRow } from "./constrained-minimum-motion";
+import { constrainedStepRows } from "./constrained-step-rows";
 import { BRANCH_BOUNDARY_TOLERANCES } from "./constrained-drag-stage";
 import { chiralityMargin, deriveChiralityInvariants } from "./constrained-chirality";
 import type { ComponentJacobian } from "./automatic-differentiation";
@@ -163,15 +163,7 @@ function solveConstrainedMinimumMotionStart(
 ): Float64Array {
   if (batchMinimumMotionStartTrace)
     batchMinimumMotionStartTrace.constrained += 1;
-  const restated = program.system.inequalities.filter((inequality) =>
-    equations.some(
-      (row) =>
-        row.id === inequality.requirement?.id &&
-        row.hingeComponentIndices?.includes(
-          inequality.requirement.componentIndex,
-        ),
-    ),
-  );
+  const { equalities, inequalities } = constrainedStepRows(program, equations);
   const anchor = createMinimumMotionAnchorConstraint({
     id: "constraint_batch_minimum_motion" as ConstraintId,
     parameterCount: program.system.parameterCount,
@@ -180,14 +172,6 @@ function solveConstrainedMinimumMotionStart(
     weight: 1,
     parameterProjection: program.system.parameterProjection,
   });
-  const equalities = equations.map((row) => ({
-    evaluate: (values: Float64Array) => row.evaluateComponentJacobian(values),
-    excludedComponents: restated.flatMap((inequality) =>
-      inequality.requirement!.id === row.id
-        ? [inequality.requirement!.componentIndex]
-        : [],
-    ),
-  }));
   const run = (preserveBranches: boolean) =>
     finishSolve(
       solveConstrainedMinimumMotionSteps({
@@ -200,10 +184,7 @@ function solveConstrainedMinimumMotionStart(
         boundary: BRANCH_BOUNDARY_TOLERANCES * program.modelingTolerance,
         correctAllInequalities: preserveBranches,
         inequalities: [
-          ...restated.map(
-            (inequality) => (values: Float64Array) =>
-              inequality.evaluate(values),
-          ),
+          ...inequalities,
           ...(preserveBranches ? margins : []),
         ],
         objective: [
@@ -241,9 +222,6 @@ export function traceBatchMinimumMotionStartsForTest<T>(run: () => T) {
   }
 }
 
-/** At most this many polishing Newton steps (each one squares the residual). */
-const POLISH_NEWTON_ITERATIONS = 3;
-
 /**
  * `values` after minimum-norm Newton steps on the equality components
  * while their largest residual strictly decreases. The step stops its
@@ -260,63 +238,19 @@ function polishedOntoRows(
   equalities: readonly ConstrainedStepRow[],
   variables: readonly number[],
 ): Float64Array {
-  const linearize = (at: Float64Array) => {
-    const residuals: number[] = [];
-    const rows: Float64Array[] = [];
-    for (const row of equalities) {
-      const jacobian = row.evaluate(at);
-      if (jacobian.unavailable) return null;
-      const excluded = new Set(row.excludedComponents);
-      jacobian.components.forEach((residual, component) => {
-        if (excluded.has(component)) return;
-        residuals.push(residual);
-        rows.push(
-          Float64Array.from(
-            variables,
-            (index) => jacobian.rows[component]![index]!,
-          ),
-        );
-      });
-    }
-    return residuals.every(Number.isFinite) &&
-      rows.every((row) => row.every(Number.isFinite))
-      ? { residuals: Float64Array.from(residuals), rows }
-      : null;
-  };
   let scale = 1;
   for (const index of variables)
     scale = Math.max(scale, Math.abs(values[index]!));
-  // Residuals at the rounding floor of the coordinates are left alone: a
-  // step there only adds noise (an exact 0 coordinate would read ~1e-21).
-  const floor = Number.EPSILON * scale;
-  let current = values;
-  let linear = linearize(current);
-  for (
-    let iteration = 0;
-    linear &&
-    iteration < POLISH_NEWTON_ITERATIONS &&
-    maxAbs(linear.residuals) > floor;
-    iteration += 1
-  ) {
-    const step = minimumNormStep(
-      linear.rows,
-      linear.residuals,
-      variables.length,
-    );
-    const next = cloneValues(current);
-    variables.forEach((index, column) => {
-      next[index] -= step[column]!;
-    });
-    const nextLinear = linearize(next);
-    if (
-      !nextLinear ||
-      !(maxAbs(nextLinear.residuals) < maxAbs(linear.residuals))
-    )
-      break;
-    current = next;
-    linear = nextLinear;
-  }
-  return current;
+  const corrected = finishSolve(
+    correctConstrainedStep(
+      { equalities, variables, inequalities: [], boundary: 0 },
+      values,
+      [],
+      scale,
+      { polish: true },
+    ),
+  );
+  return corrected.kind === "feasible" ? corrected.values : values;
 }
 
 /**

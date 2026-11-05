@@ -1,11 +1,13 @@
 import { expect, test } from "vitest";
 import {
+  correctConstrainedStep,
   solveConstrainedMinimumMotionSteps,
   type ConstrainedStepProblem,
   type ConstrainedStepRow,
   type ConstrainedStepResult,
 } from "./constrained-minimum-motion";
 import type { ComponentJacobian } from "./automatic-differentiation";
+import { finishSolve } from "./solve-steps";
 import { compileSketchSolveProgram } from "./compile-program";
 import { traceSketchSolverForTest } from "./solve-tracing";
 import { updateCompiledSketchSolveSession } from "./update-session";
@@ -64,6 +66,82 @@ const anchor = row((x, y) => ({
     [0, 1e-3],
   ],
 }));
+
+test("polish corrects below the step's feasibility tolerance but leaves coordinate-floor noise alone", () => {
+  const equalities = [row((x) => ({ components: [x], rows: [[1, 0]] }))];
+  const problem = { equalities, variables: [0], inequalities: [], boundary: 0 };
+  const values = Float64Array.from([1e-13, 4]);
+  const normal = finishSolve(correctConstrainedStep(problem, values, [], 1));
+  const polished = finishSolve(
+    correctConstrainedStep(problem, values, [], 1, { polish: true }),
+  );
+  expect(normal.kind).toBe("feasible");
+  expect(polished.kind).toBe("feasible");
+  if (normal.kind !== "feasible" || polished.kind !== "feasible") return;
+  expect(normal.values).toBe(values);
+  expect(Math.abs(polished.values[0]!)).toBeLessThan(Number.EPSILON);
+  expect(polished.values[1]).toBe(4);
+  const floor = Float64Array.from([Number.EPSILON / 2, 4]);
+  const kept = finishSolve(
+    correctConstrainedStep(problem, floor, [], 1, { polish: true }),
+  );
+  expect(kept.kind === "feasible" && kept.values).toBe(floor);
+});
+
+test("polish retains the last good point when Newton worsens the maximum residual or loses a row", () => {
+  for (const unavailable of [false, true]) {
+    const values = Float64Array.from([1, 0]);
+    const equality: ConstrainedStepRow = {
+      evaluate: (at) =>
+        at === values || !unavailable
+          ? { components: [at[0]!], rows: [Float64Array.from([-1, 0])] }
+          : {
+              components: [Number.NaN],
+              rows: [Float64Array.from([Number.NaN, 0])],
+              unavailable: [
+                { derivationId: "derivation_test", reason: "failed" },
+              ],
+            },
+    };
+    const result = finishSolve(
+      correctConstrainedStep(
+        {
+          equalities: [equality],
+          variables: [0],
+          inequalities: [],
+          boundary: 0,
+        },
+        values,
+        [],
+        1,
+        { polish: true },
+      ),
+    );
+    expect(result.kind === "feasible" && result.values).toBe(values);
+  }
+});
+
+test("polish bounds a slowly converging correction to three Newton updates", () => {
+  let evaluations = 0;
+  const equality = row((x) => {
+    evaluations += 1;
+    return { components: [x], rows: [[2, 0]] };
+  });
+  const result = finishSolve(
+    correctConstrainedStep(
+      { equalities: [equality], variables: [0], inequalities: [], boundary: 0 },
+      Float64Array.from([1, 0]),
+      [],
+      1,
+      { polish: true },
+    ),
+  );
+  expect(result.kind).toBe("feasible");
+  if (result.kind !== "feasible") return;
+  expect(result.values[0]).toBeGreaterThan(0);
+  expect(result.values[0]).toBeLessThan(1);
+  expect(evaluations).toBe(4); // Initial linearization plus three improving trials.
+});
 
 test("batch start correction enforces an inequality newly violated by Newton", () => {
   const result = run({

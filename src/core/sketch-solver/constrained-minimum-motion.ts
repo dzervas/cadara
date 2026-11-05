@@ -212,6 +212,188 @@ export type Linearization =
   | { kind: "unavailable" }
   | { kind: "nonFinite" };
 
+function* linearizeConstrainedStep(
+  problem: Pick<ConstrainedStepProblem, "variables" | "inequalities">,
+  rows: readonly ConstrainedStepRow[],
+  inequalities: readonly number[],
+  values: Float64Array,
+  polish = false,
+): Generator<ConstrainedStepWork, Linearization, void> {
+  const residuals: number[] = [];
+  const restricted: Float64Array[] = [];
+  let nonFinite = false;
+  let unavailable = false;
+  const append = (jacobian: ComponentJacobian, component: number) => {
+    const row = Float64Array.from(
+      problem.variables,
+      (index) => jacobian.rows[component]![index]!,
+    );
+    if (row.some((entry) => !Number.isFinite(entry))) {
+      if (!polish) return false;
+      unavailable = true;
+    }
+    const residual = jacobian.components[component]!;
+    if (!Number.isFinite(residual)) nonFinite = true;
+    residuals.push(residual);
+    restricted.push(row);
+    return true;
+  };
+  for (const row of rows) {
+    yield { kind: "raw", count: 1 };
+    const jacobian = row.evaluate(values);
+    if (jacobian.unavailable) return { kind: "unavailable" };
+    const excluded = new Set(row.excludedComponents ?? []);
+    for (
+      let component = 0;
+      component < jacobian.components.length;
+      component += 1
+    )
+      if (!excluded.has(component) && !append(jacobian, component))
+        return { kind: "unavailable" };
+  }
+  for (const index of inequalities) {
+    yield { kind: "raw", count: 1 };
+    const jacobian = problem.inequalities[index]!(values);
+    if (jacobian.unavailable || !append(jacobian, 0))
+      return { kind: "unavailable" };
+  }
+  return unavailable
+    ? { kind: "unavailable" }
+    : nonFinite
+      ? { kind: "nonFinite" }
+      : {
+          kind: "ok",
+          residuals: Float64Array.from(residuals),
+          rows: restricted,
+        };
+}
+
+/** At most three equality-only Newton steps reach the coordinate rounding floor. */
+const POLISH_NEWTON_ITERATIONS = 3;
+
+function correctedValues(
+  current: Float64Array,
+  linear: Extract<Linearization, { kind: "ok" }>,
+  variables: readonly number[],
+  polish: boolean,
+) {
+  const delta = minimumNormStep(
+    linear.rows,
+    linear.residuals,
+    variables.length,
+  );
+  const next = Float64Array.from(current);
+  for (let column = 0; column < variables.length; column += 1) {
+    // Preserve each caller's floating-point update, including signed zero.
+    if (polish) next[variables[column]!] -= delta[column]!;
+    else next[variables[column]!] += -1 * delta[column]!;
+  }
+  return next;
+}
+
+/** `held`: the active inequalities the corrector held at g = 0 on the way. */
+export type ConstrainedStepCorrection =
+  | { kind: "feasible"; values: Float64Array; held: ReadonlySet<number> }
+  | { kind: "unavailable" | "failed" };
+/**
+ * Minimum-norm Newton correction on the selected rows. Normal correction
+ * enforces active inequalities and tests L2 decrease at feasibility tolerances.
+ * Polish is equality-only: keep only strict maximum-residual improvements,
+ * stop at the coordinate rounding floor or after three steps, and retain the
+ * last good point if a row becomes unavailable. It does not report step stats.
+ */
+export function* correctConstrainedStep(
+  problem: Pick<
+    ConstrainedStepProblem,
+    | "variables"
+    | "equalities"
+    | "inequalities"
+    | "boundary"
+    | "correctAllInequalities"
+  >,
+  values: Float64Array,
+  active: readonly number[],
+  scale: number,
+  options: { polish?: boolean; onNewton?: () => void } = {},
+): Generator<ConstrainedStepWork, ConstrainedStepCorrection, void> {
+  const { boundary, variables } = problem;
+  let current = values;
+  if (options.polish) {
+    const held = new Set<number>();
+    const floor = Number.EPSILON * scale;
+    let linear = yield* linearizeConstrainedStep(
+      problem,
+      problem.equalities,
+      [],
+      current,
+      true,
+    );
+    for (
+      let iteration = 0;
+      linear.kind === "ok" &&
+      iteration < POLISH_NEWTON_ITERATIONS &&
+      maxAbs(linear.residuals) > floor;
+      iteration += 1
+    ) {
+      const next = correctedValues(current, linear, variables, true);
+      const nextLinear = yield* linearizeConstrainedStep(
+        problem,
+        problem.equalities,
+        [],
+        next,
+        true,
+      );
+      if (
+        nextLinear.kind !== "ok" ||
+        !(maxAbs(nextLinear.residuals) < maxAbs(linear.residuals))
+      )
+        break;
+      current = next;
+      linear = nextLinear;
+    }
+    return { kind: "feasible", values: current, held };
+  }
+  let previousNorm = Number.POSITIVE_INFINITY;
+  let enforcedKey = "";
+  const held = new Set<number>();
+  for (let iteration = 0; ; iteration += 1) {
+    // An active inequality is held at g = 0 only while it is violated or
+    // on its boundary at the Newton iterate (projection onto g ≥ 0); a
+    // change of that set restarts the norm-decrease test.
+    const enforced: number[] = [];
+    for (const index of problem.correctAllInequalities
+      ? problem.inequalities.map((_, index) => index)
+      : active) {
+      yield { kind: "raw", count: 1 };
+      if (problem.inequalities[index]!(current).components[0]! < boundary)
+        enforced.push(index);
+    }
+    if (enforced.join(",") !== enforcedKey)
+      previousNorm = Number.POSITIVE_INFINITY;
+    enforcedKey = enforced.join(",");
+    for (const index of enforced) held.add(index);
+    const linear = yield* linearizeConstrainedStep(
+      problem,
+      problem.equalities,
+      enforced,
+      current,
+    );
+    if (linear.kind === "unavailable") return { kind: "unavailable" };
+    if (linear.kind === "nonFinite") return { kind: "failed" };
+    const largest = maxAbs(linear.residuals);
+    if (largest <= FEASIBLE_TOLERANCE * scale)
+      return { kind: "feasible", values: current, held };
+    const norm = euclidean(linear.residuals);
+    if (!(norm < previousNorm) || iteration === MAX_NEWTON_ITERATIONS)
+      return largest <= FEASIBLE_STALL_TOLERANCE * scale
+        ? { kind: "feasible", values: current, held }
+        : { kind: "failed" };
+    previousNorm = norm;
+    options.onNewton?.();
+    current = correctedValues(current, linear, variables, false);
+  }
+}
+
 export function* solveConstrainedMinimumMotionSteps(
   problem: ConstrainedStepProblem,
 ): Generator<ConstrainedStepWork, ConstrainedStepResult, void> {
@@ -236,50 +418,6 @@ export function* solveConstrainedMinimumMotionSteps(
     for (let column = 0; column < size; column += 1)
       row[column] = full[variables[column]!]!;
     return row;
-  };
-  const linearize = function* (
-    rows: readonly ConstrainedStepRow[],
-    inequalities: readonly number[],
-    values: Float64Array,
-  ): Generator<ConstrainedStepWork, Linearization, void> {
-    const residuals: number[] = [];
-    const restricted: Float64Array[] = [];
-    let nonFinite = false;
-    const append = (jacobian: ComponentJacobian, component: number) => {
-      const row = restrict(jacobian, component);
-      if (row.some((entry) => !Number.isFinite(entry))) return false;
-      const residual = jacobian.components[component]!;
-      if (!Number.isFinite(residual)) nonFinite = true;
-      residuals.push(residual);
-      restricted.push(row);
-      return true;
-    };
-    for (const row of rows) {
-      yield { kind: "raw", count: 1 };
-      const jacobian = row.evaluate(values);
-      if (jacobian.unavailable) return { kind: "unavailable" };
-      const excluded = new Set(row.excludedComponents ?? []);
-      for (
-        let component = 0;
-        component < jacobian.components.length;
-        component += 1
-      )
-        if (!excluded.has(component) && !append(jacobian, component))
-          return { kind: "unavailable" };
-    }
-    for (const index of inequalities) {
-      yield { kind: "raw", count: 1 };
-      const jacobian = problem.inequalities[index]!(values);
-      if (jacobian.unavailable || !append(jacobian, 0))
-        return { kind: "unavailable" };
-    }
-    return nonFinite
-      ? { kind: "nonFinite" }
-      : {
-          kind: "ok",
-          residuals: Float64Array.from(residuals),
-          rows: restricted,
-        };
   };
   /** The inequalities' values and restricted gradients (null if any is unavailable). */
   const inequalityState = function* (
@@ -313,55 +451,21 @@ export function* solveConstrainedMinimumMotionSteps(
       next[variables[column]!] += scaleBy * delta[column]!;
     return next;
   };
-  /** `held`: the active inequalities the corrector held at g = 0 on the way. */
-  type Correction =
-    | { kind: "feasible"; values: Float64Array; held: ReadonlySet<number> }
-    | { kind: "unavailable" | "failed" };
-  const correct = function* (
-    values: Float64Array,
-    active: readonly number[],
-  ): Generator<ConstrainedStepWork, Correction, void> {
-    let current = values;
-    let previousNorm = Number.POSITIVE_INFINITY;
-    let enforcedKey = "";
-    const held = new Set<number>();
-    for (let iteration = 0; ; iteration += 1) {
-      // An active inequality is held at g = 0 only while it is violated or
-      // on its boundary at the Newton iterate (projection onto g ≥ 0); a
-      // change of that set restarts the norm-decrease test.
-      const enforced: number[] = [];
-      for (const index of problem.correctAllInequalities
-        ? problem.inequalities.map((_, index) => index)
-        : active) {
-        yield { kind: "raw", count: 1 };
-        if (problem.inequalities[index]!(current).components[0]! < boundary)
-          enforced.push(index);
-      }
-      if (enforced.join(",") !== enforcedKey)
-        previousNorm = Number.POSITIVE_INFINITY;
-      enforcedKey = enforced.join(",");
-      for (const index of enforced) held.add(index);
-      const linear = yield* linearize(problem.equalities, enforced, current);
-      if (linear.kind === "unavailable") return { kind: "unavailable" };
-      if (linear.kind === "nonFinite") return { kind: "failed" };
-      const largest = maxAbs(linear.residuals);
-      if (largest <= FEASIBLE_TOLERANCE * scale)
-        return { kind: "feasible", values: current, held };
-      const norm = euclidean(linear.residuals);
-      if (!(norm < previousNorm) || iteration === MAX_NEWTON_ITERATIONS)
-        return largest <= FEASIBLE_STALL_TOLERANCE * scale
-          ? { kind: "feasible", values: current, held }
-          : { kind: "failed" };
-      previousNorm = norm;
-      stats.newtonIterations += 1;
-      const delta = minimumNormStep(linear.rows, linear.residuals, size);
-      current = moved(current, delta, -1);
-    }
-  };
+  const correct = (values: Float64Array, active: readonly number[]) =>
+    correctConstrainedStep(problem, values, active, scale, {
+      onNewton: () => {
+        stats.newtonIterations += 1;
+      },
+    });
 
   // The start (the last accepted frame) is corrected onto the rows first.
   const startBounds = yield* inequalityState(problem.start);
-  const startObjective = yield* linearize(problem.objective, [], problem.start);
+  const startObjective = yield* linearizeConstrainedStep(
+    problem,
+    problem.objective,
+    [],
+    problem.start,
+  );
   if (!startBounds || startObjective.kind !== "ok")
     return { kind: "unavailable", reason: "jacobianUnavailable", stats };
   const startCorrection = yield* correct(
@@ -400,7 +504,12 @@ export function* solveConstrainedMinimumMotionSteps(
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
     yield { kind: "iteration", count: 1 };
     stats.iterations += 1;
-    const objective = yield* linearize(problem.objective, [], current);
+    const objective = yield* linearizeConstrainedStep(
+      problem,
+      problem.objective,
+      [],
+      current,
+    );
     const bounds = yield* inequalityState(current);
     if (objective.kind !== "ok" || !bounds) return unavailableStop();
     const merit = 0.5 * squaredNorm(objective.residuals);
@@ -424,12 +533,20 @@ export function* solveConstrainedMinimumMotionSteps(
       // An inequality on its boundary joins the active set when the step
       // would leave through it.
       while (!direction) {
-        const linear = yield* linearize(problem.equalities, active, current);
+        const linear = yield* linearizeConstrainedStep(
+          problem,
+          problem.equalities,
+          active,
+          current,
+        );
         if (linear.kind !== "ok") return unavailableStop();
         const tangent = () => {
           if (!objectiveModel)
             return tangentStep(linear.rows, gradient, hessian, size);
-          traceConstrainedStepOperations("Projection", linear.rows.length * size);
+          traceConstrainedStepOperations(
+            "Projection",
+            linear.rows.length * size,
+          );
           let largestRow = 0;
           const norms = linear.rows.map((row) => {
             const norm = euclidean(row);
@@ -573,7 +690,12 @@ export function* solveConstrainedMinimumMotionSteps(
         problem.stopOnBlockingTrial &&
         entering.some((index) => blocking.has(index))
       )
-        return { kind: "solved", values: current, stop: "blockingTrial", stats };
+        return {
+          kind: "solved",
+          values: current,
+          stop: "blockingTrial",
+          stats,
+        };
       if (entering.length > 0) {
         // An entering inequality: shorten the step to its (linearly
         // interpolated) boundary, which the corrector then lands on (see
@@ -594,7 +716,12 @@ export function* solveConstrainedMinimumMotionSteps(
         else direction = null;
         continue;
       }
-      const next = yield* linearize(problem.objective, [], corrected.values);
+      const next = yield* linearizeConstrainedStep(
+        problem,
+        problem.objective,
+        [],
+        corrected.values,
+      );
       if (next.kind !== "ok") rowUnavailable = true;
       const nextMerit =
         next.kind === "ok"
@@ -605,7 +732,8 @@ export function* solveConstrainedMinimumMotionSteps(
         continue;
       }
       // SR1 on W: s = the accepted move, y = (J₊ − J)ᵀλ on the same rows.
-      const nextRows = yield* linearize(
+      const nextRows = yield* linearizeConstrainedStep(
+        problem,
         problem.equalities,
         active,
         corrected.values,
@@ -621,7 +749,10 @@ export function* solveConstrainedMinimumMotionSteps(
           change[column] =
             corrected.values[variables[column]!]! -
             current[variables[column]!]!;
-        traceConstrainedStepOperations("Curvature", nextRows.rows.length * size);
+        traceConstrainedStepOperations(
+          "Curvature",
+          nextRows.rows.length * size,
+        );
         nextRows.rows.forEach((row, index) => {
           for (let column = 0; column < size; column += 1)
             y[column] +=
@@ -632,7 +763,9 @@ export function* solveConstrainedMinimumMotionSteps(
         const curvatureChange = operatorMode
           ? compactCurvature.multiply(change)
           : multiply(curvature, change);
-        const residual = y.map((entry, index) => entry - curvatureChange[index]!);
+        const residual = y.map(
+          (entry, index) => entry - curvatureChange[index]!,
+        );
         const denominator = dot(residual, change);
         if (
           Math.abs(denominator) >
