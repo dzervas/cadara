@@ -70,15 +70,32 @@ export async function projectedSketchMap(
   sketchId: string,
   known: readonly { pointId: string; position: Vec }[],
 ) {
+  // Calibration needs independent points, not a particular fit-point order.
+  // A collapse/recovery drag may legitimately leave adjacent fit points collinear.
+  let selected = known.slice(0, 3);
+  let largestArea = 0;
+  for (let first = 0; first < known.length - 2; first += 1)
+    for (let second = first + 1; second < known.length - 1; second += 1)
+      for (let third = second + 1; third < known.length; third += 1) {
+        const [a, b, c] = [known[first]!, known[second]!, known[third]!];
+        const area = Math.abs(
+          (b.position[0] - a.position[0]) * (c.position[1] - a.position[1]) -
+          (b.position[1] - a.position[1]) * (c.position[0] - a.position[0]),
+        );
+        if (area > largestArea) {
+          largestArea = area;
+          selected = [a, b, c];
+        }
+      }
   const page = workbench.page;
   const shift = await surfaceToCanvasShift(workbench);
   const screen = await page.evaluate(
     (ids) => ids.map((id) => window.__cadProjectToScreen?.(id) ?? null),
-    known.map((entry) => `${sketchId}.${entry.pointId}`),
+    selected.map((entry) => `${sketchId}.${entry.pointId}`),
   );
   if (screen.some((point) => point === null))
     throw new Error(`Unprojected points of ${sketchId}.`);
-  const [p0, p1, p2] = known.map((entry) => entry.position);
+  const [p0, p1, p2] = selected.map((entry) => entry.position);
   const [s0, s1, s2] = screen as CanvasPoint[];
   // Solve [s − s0] = J [p − p0] from two difference vectors.
   const a = [p1![0] - p0![0], p1![1] - p0![1]];

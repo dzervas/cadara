@@ -529,7 +529,7 @@ test("§2 E2E-2: a closed Line + 3-Point Arc + Spline outline; an uneven fit-poi
   const partMap = await projectedSketchMap(
     workbench,
     sketchId,
-    fit.slice(0, 3).map((pointId) => ({
+    fit.map((pointId) => ({
       pointId,
       position: positionOf(edit, pointId),
     })),

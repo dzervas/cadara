@@ -30,7 +30,7 @@ import type {
  * sliding along a collinear triple is a flip path, sliding along a length of
  * τ a fold path. A margin already on its boundary at `previous` does not
  * block, so a triple held there does not freeze the drag by itself. A
- * result reached without a step path (a projection, phases A and B, a
+ * result reached without a step path (a projection or a
  * re-check) shows only its end state, so the same rule reads it there:
  * `refuses(values)` holds when a margin is below its boundary (or not
  * finite), or when one clear of it at `previous` is on it at `values`, the
@@ -57,11 +57,34 @@ export function deriveDragBranchInvariants(
   // A validity row already violated (or not finite) at `previous` is not
   // enforced: the drag does not repair it.
   const read = variables && new Set(variables);
+  // Output validity belongs to the derivation domain (rebuild/hold/fail), not
+  // the drag's authored-geometry boundary. Read provenance, not entity kinds.
+  const derivedOutputs = new Set(
+    (program.definition.derivedRelationships ?? []).flatMap((relationship) => [
+      ...relationship.outputs.map((output) => output.outputEntityId),
+      ...(relationship.kind === "offset"
+        ? relationship.piecewiseCubicOutputs.map(
+            (output) => output.outputEntityId,
+          )
+        : []),
+    ]),
+  );
   const validity = program.system.inequalities.filter(
     (inequality) =>
       inequality.requirement === undefined &&
+      (inequality.entityId === null ||
+        !derivedOutputs.has(inequality.entityId)) &&
       (!read || inequality.variableIndices.some((index) => read.has(index))) &&
-      inequality.evaluate(previous).components[0]! >= 0,
+      inequality.evaluate(previous).components[0]! >= 0 &&
+      !inequality
+        .evaluate(previous)
+        .unavailable?.some(
+          (blocker) =>
+            blocker.reason === "failed" &&
+            program.system.parameterProjection.failedAtSolveStart(
+              blocker.derivationId,
+            ),
+        ),
   );
   const margins = [
     ...deriveChiralityInvariants(program, hardConstraints, previous).map(
@@ -113,8 +136,7 @@ export function deriveDragBranchInvariants(
 }
 
 /**
- * cadara-p4r5.2: one drag stage by the equality-constrained minimum-motion
- * step (`SketchDragStep` "constrained"), on row data only:
+ * One drag stage by the equality-constrained minimum-motion step, on row data only:
  * - equalities: every component of the stage's hard rows, except a component
  *   that an inequality restates (`hingeComponentIndices` with its
  *   `requirement`): that inequality is enforced instead (active set);
@@ -124,7 +146,8 @@ export function deriveDragBranchInvariants(
  *   `BRANCH_BOUNDARY_TOLERANCES` τ;
  * - objective: the drag goal rows and the minimum-motion anchor.
  * Null when the step is unavailable at this frame (counted in the work
- * trace), so the caller runs phases A and B. "refused" (the caller yields no
+ * trace). The caller refuses that frame, never retries a penalty solve.
+ * "refused" (the caller yields no
  * candidate, so no re-check can accept the frame):
  * - "boundaryReached": a feasible corrected trial crossed a margin clear of
  *   its boundary at `previous`, or an accepted move reached it (policy "block");
@@ -148,11 +171,33 @@ export function* solveConstrainedDragStage(input: {
   const { equalities, inequalities } = constrainedStepRows(
     input.program,
     input.hardConstraints,
+    input.start,
   );
+  const readJacobian = (
+    evaluate: (values: Float64Array) => ComponentJacobian,
+  ) => {
+    // The step owns immutable iterate arrays: corrections and trials allocate
+    // new arrays. Share repeated reads at an iterate only within this stage;
+    // a rebuild or another accepted frame must re-read its row domain.
+    const cache = new WeakMap<Float64Array, ComponentJacobian>();
+    return (values: Float64Array) => {
+      if (solverWorkTrace) solverWorkTrace.constrainedDragJacobianReads += 1;
+      const cached = cache.get(values);
+      if (cached) return cached;
+      if (solverWorkTrace)
+        solverWorkTrace.constrainedDragJacobianEvaluations += 1;
+      const jacobian = evaluate(values);
+      cache.set(values, jacobian);
+      return jacobian;
+    };
+  };
   const result = yield* solveConstrainedMinimumMotionSteps({
     start: input.start,
     variables: input.variables,
-    equalities,
+    equalities: equalities.map((row) => ({
+      ...row,
+      evaluate: readJacobian(row.evaluate),
+    })),
     boundary: BRANCH_BOUNDARY_TOLERANCES * input.program.modelingTolerance,
     // A corrected trial crossing a clear margin already decides this frame:
     // block keeps the previous frame, not a boundary point. Do not spend
@@ -161,9 +206,11 @@ export function* solveConstrainedDragStage(input: {
     blocking: clearAtPrevious.flatMap((clear, index) =>
       clear ? [inequalities.length + index] : [],
     ),
-    inequalities: [...inequalities, ...margins],
+    inequalities: [...inequalities, ...margins].map(readJacobian),
     objective: input.objective.map((row) => ({
-      evaluate: (values: Float64Array) => row.evaluateComponentJacobian(values),
+      evaluate: readJacobian((values: Float64Array) =>
+        row.evaluateComponentJacobian(values),
+      ),
     })),
   });
   if (solverWorkTrace) {

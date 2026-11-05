@@ -3,9 +3,9 @@ import { compileSketchSolveProgram } from "./compile-program";
 import { dragFrameRowsForTest } from "./solver-test-seams";
 import { updateCompiledSketchSolveSession } from "./update-session";
 import {
-  dragConditioningFixture,
-  startConditioningReplay,
-} from "./solver-drag-conditioning.fixtures";
+  dragReplayFixture,
+  startDragReplay,
+} from "./solver-drag-replay.fixtures";
 import {
   FIXTURE_SKETCH_ID,
   literalResolvedDefinition,
@@ -750,10 +750,10 @@ test("offset shell: a point-on-shell row's Jacobian includes the moving closest 
 });
 
 test("T18 drag fixture: every row's Jacobian matches central differences along the drag-small replay", () => {
-  const row = dragConditioningFixture.cases.find(
+  const row = dragReplayFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
-  const session = startConditioningReplay(row);
+  const session = startDragReplay(row);
   expectConformingJacobians(session.program, session.values);
   for (const [target, tolerance] of row.targets.slice(0, 6))
     updateCompiledSketchSolveSession(session, target, tolerance);
@@ -768,10 +768,10 @@ test("T18 drag fixture: every row's Jacobian matches central differences along t
 });
 
 test("T18 drag frames: target, translate, radius, tangent-vector, exact-zero, anchor and dragTarget rows match central differences", () => {
-  const row = dragConditioningFixture.cases.find(
+  const row = dragReplayFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
-  const { program, values } = startConditioningReplay(row);
+  const { program, values } = startDragReplay(row);
   const { system } = program;
   const [first, second] = [...system.pointRecords.values()];
   // A point-defined (offset seed) arc: its radius slot pulls back onto points.
@@ -858,10 +858,10 @@ test("T18 drag frames: target, translate, radius, tangent-vector, exact-zero, an
 });
 
 test("T18 fillet tangents: at both contacts of a point-defined arc the loss component 0 is the first-order oriented row", () => {
-  const row = dragConditioningFixture.cases.find(
+  const row = dragReplayFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
-  const { program, values } = startConditioningReplay(row);
+  const { program, values } = startDragReplay(row);
   const pair = (prefix: string) => {
     const oriented = program.system.orientedTangencies.find((record) =>
       record.requirementId.startsWith(prefix),

@@ -12,10 +12,8 @@ import {
   findProjectedGeometry,
   resolveSketchDatumPoint,
 } from "./projected-geometry";
-import { DEFAULT_SKETCH_DRAG_STEP } from "./solve-types";
 import type {
   SketchCoreValidationResult,
-  SketchDragStep,
   SketchSolveStrategy,
   SketchSolveTolerancePolicy,
 } from "./solve-types";
@@ -188,14 +186,6 @@ export function compileSketchSolveProgram(input: {
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy?: SketchSolveStrategy;
   /**
-   * cadara-p4r5.2: the drag frames' step (default "penalty", or the test-only
-   * environment override, see `SketchDragStep`). Not part of the
-   * compatibility key and not carried over when a session recompiles its
-   * program: a recompiled program takes the process default (only specs
-   * pass it explicitly).
-   */
-  dragStep?: SketchDragStep;
-  /**
    * T17c5: the point a drag moves. A spline whose only authored errors are
    * coincident spans at this point, not joined by Coincident constraints,
    * is judged at each solve's values (the drag may separate them).
@@ -266,9 +256,6 @@ export function compileSketchSolveProgram(input: {
     offsetPlans: input.offsetPlans,
     partialSolvePolicy: input.partialSolvePolicy,
     strategy,
-    ...((input.dragStep ?? DEFAULT_SKETCH_DRAG_STEP) === "constrained"
-      ? { dragStep: "constrained" as const }
-      : {}),
     diagnostics: derived.diagnostics,
     validation,
     degenerateSplineSpanRecovery,

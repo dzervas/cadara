@@ -4,7 +4,6 @@ import type {
   SolvedSketchSnapshot,
 } from "@/contracts/sketch/schema";
 import { compileSketchSolveProgram } from "./compile-program";
-import type { SketchDragStep } from "./solve-types";
 import { startCompiledSketchSolveSession } from "./start-session";
 import type { SketchCompiledSolveSession } from "./system-types";
 import { updateCompiledSketchSolveSession } from "./update-session";
@@ -308,7 +307,6 @@ export function tangentArc() {
 
 export function dragSession(
   definition: NumericSketchDefinition,
-  dragStep: SketchDragStep,
 ) {
   const started = startCompiledSketchSolveSession({
     sessionId: "interactive_sketch_solve_constrained_drag_branch",
@@ -321,7 +319,6 @@ export function dragSession(
       },
       modelingTolerance: TAU,
       partialSolvePolicy: "failOnConflict",
-      dragStep,
     }),
   });
   if (started.kind !== "started") throw new Error("premise: the sketch solves");

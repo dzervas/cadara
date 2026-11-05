@@ -30,16 +30,16 @@ export interface SketchSolverWorkTrace {
   gaussNewtonIterations: number;
   bfgsIterations: number;
   bfgsResets: number;
-  dragConditioningIterations: number;
-  /** Raw constraint-block evaluations, including every finite-difference probe. */
-  dragConditioningResidualEvaluations: number;
   lossEvaluations: number;
   lineSearches: number;
   lineSearchTrials: number;
   constrainednessClassifications: number;
   componentResidualEvaluations: number;
-  /** cadara-p4r5.2: drag stages that ran the constrained step (`SketchDragStep`). */
+  /** Drag stages that ran the constrained minimum-motion step. */
   constrainedStepStages: number;
+  /** Analytic row reads requested by drag steps, and reads actually evaluated. */
+  constrainedDragJacobianReads: number;
+  constrainedDragJacobianEvaluations: number;
   constrainedStepIterations: number;
   /** Multiply/add pairs in the step's linear-algebra kernels; excludes row evaluation and vector bookkeeping. */
   constrainedStepNormalOperations: number;
@@ -63,8 +63,6 @@ export interface SketchSolverWorkTrace {
   constrainedStepBoundaryInvariants: number;
   /** Hard-row hinge components replaced by their restating inequalities, summed over stages. */
   constrainedStepRestatedComponents: number;
-  /** Drag frame acceptances that ran the arc flip/collapse guard (`guardedArcFlippedOrCollapsed`). */
-  dragArcGuardEvaluations: number;
 }
 
 export let solverWorkTrace: SketchSolverWorkTrace | null = null;
@@ -86,14 +84,14 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     gaussNewtonIterations: 0,
     bfgsIterations: 0,
     bfgsResets: 0,
-    dragConditioningIterations: 0,
-    dragConditioningResidualEvaluations: 0,
     lossEvaluations: 0,
     lineSearches: 0,
     lineSearchTrials: 0,
     constrainednessClassifications: 0,
     componentResidualEvaluations: 0,
     constrainedStepStages: 0,
+    constrainedDragJacobianReads: 0,
+    constrainedDragJacobianEvaluations: 0,
     constrainedStepIterations: 0,
     constrainedStepNormalOperations: 0,
     constrainedStepProjectionOperations: 0,
@@ -108,7 +106,6 @@ export function traceSketchSolverForTest<T>(run: () => T): {
     constrainedStepBoundaryTrialRefusals: 0,
     constrainedStepBoundaryInvariants: 0,
     constrainedStepRestatedComponents: 0,
-    dragArcGuardEvaluations: 0,
   };
   gaussNewtonFallbackTrace = trace;
   solverWorkTrace = work;

@@ -135,18 +135,16 @@ export function lineSearchWolfe(
 
 /**
  * BFGS over `variableIndices` (every index by default); the other indices
- * keep their initial values and their gradient is not part of the stop test. T13a2 (c3): restricting to a set outside of
- * which every constraint's gradient is zero leaves the iterates unchanged
- * (the identity start keeps those coordinates decoupled), and
- * `initialInverseHessian` only changes the path: the objective, the stop
- * test and a reset to the identity on a failed line search are the same.
+ * keep their initial values and their gradient is not part of the stop test.
+ * Restricting to a set outside of which every constraint's gradient is zero
+ * leaves the iterates unchanged: the identity start keeps those coordinates
+ * decoupled.
  */
 export function solveBfgsOver(
   initialValues: Float64Array,
   constraints: ScalarConstraintRecord[],
   options: {
     variableIndices?: readonly number[];
-    initialInverseHessian?: Float64Array[] | null;
   } = {},
 ) {
   return finishSolve(solveBfgsOverSteps(initialValues, constraints, options));
@@ -157,7 +155,6 @@ export function* solveBfgsOverSteps(
   constraints: ScalarConstraintRecord[],
   options: {
     variableIndices?: readonly number[];
-    initialInverseHessian?: Float64Array[] | null;
   } = {},
 ) {
   const indices =
@@ -174,10 +171,7 @@ export function* solveBfgsOverSteps(
   let values = cloneValues(initialValues);
   let state = evaluateLoss(values, constraints);
   let gradient = restrict(state.gradient);
-  let inverseHessian =
-    options.initialInverseHessian?.length === dimension
-      ? options.initialInverseHessian.map((row) => cloneValues(row))
-      : identityMatrix(dimension);
+  let inverseHessian = identityMatrix(dimension);
   let recentlyReset = false;
 
   for (let iteration = 0; iteration < 1000; iteration += 1) {
@@ -237,7 +231,6 @@ export function* solveBfgsOverSteps(
     values,
     loss: state.loss,
     perConstraint: state.perConstraint,
-    inverseHessian,
   };
 }
 

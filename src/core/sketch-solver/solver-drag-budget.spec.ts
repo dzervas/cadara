@@ -1,26 +1,24 @@
+import { dragContinuations } from "./drag-continuations";
+import { DRAG_PREVIEW_RAW_BLOCKS } from "./solve-constants";
+import type { SolveSteps } from "./solve-steps";
+import type { SketchDraggedPointSolveResult } from "./solve-types";
 import { expect, test } from "vitest";
 import type { SolvedSketchSnapshot } from "@/contracts/sketch/schema";
-import { compileSketchSolveProgram } from "./compile-program";
-import { startCompiledSketchSolveSession } from "./start-session";
 import { traceSketchSolverForTest } from "./solve-tracing";
 import {
   updateCompiledSketchSolveSession,
   updateCompiledSketchSolveSessionFrame,
 } from "./update-session";
+import { suspendDragContinuation } from "./drag-continuation.fixtures";
 import { finishSolve } from "./solve-steps";
 import {
-  dragConditioningFixture,
-  startConditioningReplay,
+  dragReplayFixture,
+  startDragReplay,
   approvedFirstGoalGeometry,
   cubicCoordinateDelta,
   dragSnapshotGeometry,
   type ApprovedDragGeometry,
-} from "./solver-drag-conditioning.fixtures";
-import {
-  FIXTURE_TOLERANCE,
-  literalResolvedDefinition,
-  makeSketchFixture,
-} from "@/contracts/sketch/region-extraction.fixtures";
+} from "./solver-drag-replay.fixtures";
 // Logic lane: compiled drag sessions; no scheduler, DOM or timing assumptions.
 
 function expectApprovedGeometry(
@@ -62,7 +60,7 @@ function expectAuthored(snapshot: SolvedSketchSnapshot) {
   );
 }
 
-for (const row of dragConditioningFixture.cases) {
+for (const row of dragReplayFixture.cases) {
   if (row.scenario === "drag-small") continue;
   const baseline = approvedFirstGoalGeometry[row.scenario];
   const [goal] = row.targets[0]!;
@@ -72,9 +70,10 @@ for (const row of dragConditioningFixture.cases) {
       : goal;
 
   test(`${row.scenario}: identical goals progress privately and publish the uninterrupted accepted iterate`, () => {
-    const session = startConditioningReplay(row);
+    const session = startDragReplay(row);
+    suspendDragContinuation(session, goal);
     const initial = session.lastAcceptedSnapshot;
-    const uninterrupted = startConditioningReplay(row);
+    const uninterrupted = startDragReplay(row);
     const expectedPreview = finishSolve(
       updateCompiledSketchSolveSessionFrame(uninterrupted, goal, null),
     );
@@ -82,18 +81,8 @@ for (const row of dragConditioningFixture.cases) {
     let frames = 0;
     for (; frames < 80; frames += 1) {
       const trace = traceSketchSolverForTest(() =>
-        updateCompiledSketchSolveSession(
-          session,
-          frames === 0 ? goal : unchangedGoal,
-          null,
-        ),
+        updateCompiledSketchSolveSession(session, unchangedGoal, null),
       );
-      expect(
-        trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0),
-      ).toBeLessThanOrEqual(48);
-      expect(
-        trace.work.dragConditioningResidualEvaluations,
-      ).toBeLessThanOrEqual(2500);
       expectAuthored(trace.result.solvedSnapshot!);
       if (session.lastAcceptedSnapshot !== initial) break;
       expect(trace.result.solvedSnapshot).toBe(initial);
@@ -123,9 +112,14 @@ for (const row of dragConditioningFixture.cases) {
   });
 
   test(`${row.scenario}: release after the first exhausted budget flushes the private iterate`, () => {
-    const session = startConditioningReplay(row);
+    const session = startDragReplay(row);
+    suspendDragContinuation(session, goal);
     const initial = session.lastAcceptedSnapshot;
-    const preview = updateCompiledSketchSolveSession(session, goal, null);
+    const preview = updateCompiledSketchSolveSession(
+      session,
+      unchangedGoal,
+      null,
+    );
     expect(preview.solvedSnapshot).toBe(initial);
     const release = updateCompiledSketchSolveSession(
       session,
@@ -133,7 +127,7 @@ for (const row of dragConditioningFixture.cases) {
       1e-4,
     );
     expectAuthored(release.solvedSnapshot!);
-    const uninterrupted = startConditioningReplay(row);
+    const uninterrupted = startDragReplay(row);
     finishSolve(
       updateCompiledSketchSolveSessionFrame(uninterrupted, goal, null),
     );
@@ -150,61 +144,38 @@ for (const row of dragConditioningFixture.cases) {
   });
 }
 
-test("a Jacobian larger than one raw budget resumes its blocks; relative translation accumulates through substeps and release", () => {
-  const fixture = makeSketchFixture();
-  const pointIds = Array.from({ length: 34 }, (_, i) => fixture.point(`p${i}`, i, 0));
-  for (let i = 1; i < pointIds.length; i += 1) {
-    fixture.line(`l${i}`, `p${i - 1}`, `p${i}`);
-    fixture.lineLength(`l${i}`, 1);
-  }
-  const started = startCompiledSketchSolveSession({
-    sessionId: "interactive_sketch_solve_large_jacobian",
-    program: compileSketchSolveProgram({
-      definition: literalResolvedDefinition(fixture.definition()),
-      projectedReferences: [],
-      tolerances: { coincidence: 1e-6, angleRadians: 1e-6, minimumSegmentLength: 1e-6 },
-      modelingTolerance: FIXTURE_TOLERANCE,
-      partialSolvePolicy: "failOnConflict",
-    }),
-  });
-  expect(started.kind).toBe("started");
-  if (started.kind !== "started") return;
-  const session = started.session;
+test("raw row work exceeding one preview budget remains private and resumes before release", () => {
+  const row = dragReplayFixture.cases.find(
+    (entry) => entry.scenario === "drag-small",
+  )!;
+  const session = startDragReplay(row);
+  const [goal] = row.targets[0]!;
+  if (goal.kind !== "sketchTranslate") throw new Error("Translation fixture");
   const initial = session.lastAcceptedSnapshot;
-  const target = { kind: "sketchTranslate", pointIds, delta: [6, 3] } as const;
-  const first = traceSketchSolverForTest(() => updateCompiledSketchSolveSession(session, target, null));
-  expect(first.result.solvedSnapshot).toBe(initial);
-  expect(first.work.dragConditioningResidualEvaluations).toBe(2500);
-  // A second relative goal must be deferred, not substituted for the first.
-  const second = traceSketchSolverForTest(() => updateCompiledSketchSolveSession(session, { ...target, delta: [2, 1] }, null));
-  expect(second.work.dragConditioningResidualEvaluations).toBeLessThanOrEqual(2500);
-  expectAuthored(second.result.solvedSnapshot!);
-  let frames = 0;
-  while (session.lastAcceptedSnapshot === initial && frames < 100) {
-    const trace = traceSketchSolverForTest(() => updateCompiledSketchSolveSession(session, { ...target, delta: [0, 0] }, null));
-    expect(trace.work.dragConditioningResidualEvaluations).toBeLessThanOrEqual(2500);
-    expect(trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0)).toBeLessThanOrEqual(48);
-    expectAuthored(trace.result.solvedSnapshot!);
-    frames += 1;
+  let evaluated = 0;
+  function* steps(): SolveSteps<SketchDraggedPointSolveResult> {
+    yield { kind: "raw", count: DRAG_PREVIEW_RAW_BLOCKS };
+    evaluated += DRAG_PREVIEW_RAW_BLOCKS;
+    yield { kind: "raw", count: 1 };
+    evaluated += 1;
+    return yield* updateCompiledSketchSolveSessionFrame(session, goal, null);
   }
-  expect(frames).toBeLessThan(100);
+  const work = steps();
+  dragContinuations.set(session, {
+    target: goal,
+    steps: work,
+    next: work.next(),
+  });
+  const pending = updateCompiledSketchSolveSession(session, goal, null);
+  expect(pending.kind).toBe("pending");
+  expect(evaluated).toBe(DRAG_PREVIEW_RAW_BLOCKS);
+  expect(pending.solvedSnapshot).toBe(initial);
+  const released = updateCompiledSketchSolveSession(
+    session,
+    { ...goal, delta: [0, 0] },
+    1e-4,
+  );
+  expect(evaluated).toBe(DRAG_PREVIEW_RAW_BLOCKS + 1);
+  expect(released.kind).toBe("solved");
   expect(session.lastAcceptedSnapshot).not.toBe(initial);
-  const released = updateCompiledSketchSolveSession(session, { ...target, delta: [1, 2] }, 1e-6);
-  expectAuthored(released.solvedSnapshot!);
-  for (const [i, id] of pointIds.entries()) {
-    const position = released.solvedSnapshot!.solvedPoints.find((p) => p.pointId === id)!.solvedPosition;
-    expect(position[0]).toBeCloseTo(i + 9, 5);
-    expect(position[1]).toBeCloseTo(6, 5);
-  }
-  // A release at the accepted target drops the private, different preview goal
-  // and pins the reachable cursor exactly rather than publishing the private
-  // intermediate.
-  const pointId = pointIds.at(-1)!;
-  const acceptedGoal = { kind: "sketchPoint", pointId, position: [42, 6] } as const;
-  const accepted = updateCompiledSketchSolveSession(session, acceptedGoal, 1e-6);
-  const pending = updateCompiledSketchSolveSession(session, { ...acceptedGoal, position: [45, 8] }, null);
-  expect(pending.solvedSnapshot).toBe(accepted.solvedSnapshot);
-  const pointRelease = updateCompiledSketchSolveSession(session, acceptedGoal, 1e-6);
-  expectAuthored(pointRelease.solvedSnapshot!);
-  expect(pointRelease.solvedSnapshot!.solvedPoints.find((p) => p.pointId === pointId)!.solvedPosition).toEqual(acceptedGoal.position);
 });

@@ -29,7 +29,7 @@ type CapturedDragCase = {
 // Captured through the real EditorEventLoop, including its published offset
 // plans. One shared definition replaces three duplicate native-document loads.
 // These are trusted, checked-in numeric fixture values, not transport input.
-export const dragConditioningFixture = captured as unknown as {
+export const dragReplayFixture = captured as unknown as {
   compile: CompileInput;
   priorSolvedSnapshot: Parameters<
     typeof startCompiledSketchSolveSession
@@ -38,25 +38,23 @@ export const dragConditioningFixture = captured as unknown as {
   cases: CapturedDragCase[];
 };
 
-export function startConditioningReplay(
+export function startDragReplay(
   row: CapturedDragCase,
-  compileOverrides: Pick<CompileInput, "dragStep"> = {},
 ) {
   const started = startCompiledSketchSolveSession({
-    sessionId: "interactive_sketch_solve_conditioning_replay",
+    sessionId: "interactive_sketch_solve_drag_replay",
     program: compileSketchSolveProgram({
-      ...dragConditioningFixture.compile,
+      ...dragReplayFixture.compile,
       ...row.compileOptions,
-      ...compileOverrides,
     }),
-    priorSolvedSnapshot: dragConditioningFixture.priorSolvedSnapshot,
+    priorSolvedSnapshot: dragReplayFixture.priorSolvedSnapshot,
   });
   if (started.kind !== "started")
     throw new Error("Captured drag must initialize");
   // Snapshot materialization differs by up to 4.4e-16. Restore the exact native
   // starting values so a long BFGS trajectory and the small-delta approval are
   // independent of a second snapshot round trip.
-  started.session.values.set(dragConditioningFixture.initialValues);
+  started.session.values.set(dragReplayFixture.initialValues);
   return started.session;
 }
 
@@ -73,6 +71,11 @@ export type ApprovedDragGeometry = {
   splines: { entityId: SketchEntityId; poles: SketchPoint2D[][] }[];
 };
 
+// Constrained minimum-motion approval: every preview has smaller hard loss
+// and motion than the penalty trajectory, on the same branch. The tiny relative
+// release delta is honoured rather than dropped by the penalty stop threshold.
+// The final cubic's accumulated same-branch change from the original capture
+// is 0.012275 (penalty 0.009745); approval accuracy is unchanged.
 // Trusted numeric capture, like the shared native-document fixture above.
 const smallDragApproval = smallGeometry as unknown as {
   fixed: ApprovedDragGeometry;

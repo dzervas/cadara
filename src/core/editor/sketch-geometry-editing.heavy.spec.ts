@@ -1,3 +1,4 @@
+import { suspendDragContinuation } from "@/core/sketch-solver/drag-continuation.fixtures";
 import {
   readRenderMeshPoints,
   readRenderMeshTriangle,
@@ -6727,6 +6728,7 @@ test("a pending drag preview holds geometry and feedback without recording accep
   const { session, grabbed } = roundedRectangleForT13a2Review();
   const started = beginSketchGeometryDrag(session, grabbed.target, grabbed.position);
   const cursor: [number, number] = [grabbed.position[0] + 1 / 16, grabbed.position[1] + 0.6 / 16];
+  suspendDragContinuation(started.activeDrag!.interactiveSolveSession!);
   const pending = updateSketchGeometryDragPreview(started, cursor);
   expect(pending.definition, "pending is not a newly accepted definition").toBe(started.definition);
   expect(pending.activeDrag?.acceptedFrame, "unfinished work is not acceptance").toBeUndefined();
@@ -6740,7 +6742,9 @@ test("a pending drag preview holds geometry and feedback without recording accep
   expect(resolved.activeDrag?.acceptedFrame).toBe(true);
   const point = resolved.definition.points.find((p) => p.pointId === grabbed.pointId)!;
   expect(Math.hypot(point.position[0] - cursor[0], point.position[1] - cursor[1])).toBeLessThan(1e-3);
-  const freshlyPending = updateSketchGeometryDragPreview(beginSketchGeometryDrag(session, grabbed.target, grabbed.position), cursor);
+  const fresh = beginSketchGeometryDrag(session, grabbed.target, grabbed.position);
+  suspendDragContinuation(fresh.activeDrag!.interactiveSolveSession!);
+  const freshlyPending = updateSketchGeometryDragPreview(fresh, cursor);
   const released = finishSketchGeometryDrag(freshlyPending, cursor);
   expect(released.activeDrag).toBeNull();
   const releasedPoint = released.definition.points.find((p) => p.pointId === grabbed.pointId)!;
@@ -6756,6 +6760,7 @@ test("resuming the same pending body cursor does not accumulate its displayed-re
   const started = beginSketchGeometryDrag(session, line.target, first.position);
   expect(started.activeDrag?.intent.kind).toBe("translate");
   const cursor: [number, number] = [first.position[0] + 1 / 16, first.position[1] + 0.6 / 16];
+  suspendDragContinuation(started.activeDrag!.interactiveSolveSession!, undefined, 3);
   let pending = updateSketchGeometryDragPreview(started, cursor);
   expect(pending.activeDrag?.pendingSolve).toBe(true);
   pending = updateSketchGeometryDragPreview(pending, cursor);
@@ -6779,6 +6784,7 @@ test("a pending return from a refused fillet cursor keeps its existing cue until
     dragging = updateSketchGeometryDrag(dragging, cursorAt(step));
   expect(dragging.activeDrag?.status).toBe("blocked");
   expect(dragging.activeDrag?.feedback?.kind).toBe("failed");
+  suspendDragContinuation(dragging.activeDrag!.interactiveSolveSession!);
   const pending = updateSketchGeometryDragPreview(dragging, cursorAt(8));
   expect(pending.activeDrag?.pendingSolve).toBe(true);
   expect(pending.definition).toBe(dragging.definition);

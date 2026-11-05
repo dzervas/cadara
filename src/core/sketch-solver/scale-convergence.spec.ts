@@ -528,7 +528,9 @@ for (const [scenario, scale, noise, seed] of cells) {
         if (scenario === "mirrorL" && frame === 1)
           expect(dragOutcome).toBe(solved);
         else if (scenario !== "mirrorL" && scale === 10000)
-          expect(dragOutcome).toBe(invalid);
+          // The hard-row corrector retains lengths/angles at this scale; the
+          // penalty drag stopped with measurable residuals here.
+          expect(dragOutcome).toBe(solved);
       }
     });
   }

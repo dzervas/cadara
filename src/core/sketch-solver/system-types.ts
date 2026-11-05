@@ -1,6 +1,5 @@
 import type { ComponentJacobian } from "./automatic-differentiation";
 import type { DegenerateSplineSpanRecovery } from "./degenerate-spline-recovery";
-import type { SketchDragCurvature } from "./drag-candidates";
 import type {
   SketchCoreValidationResult,
   SketchDraggedPointTarget,
@@ -70,7 +69,7 @@ export type ScalarConstraintRecord = {
    * cadara-p4r5.1: `evaluateComponents` with its analytic first-order
    * Jacobian (a piecewise component differentiates the branch active at
    * `values`). `evaluate` keeps the loss path; only the constrained drag
-   * step (`SketchDragStep`, cadara-p4r5.2) reads it.
+   * step reads it.
    */
   evaluateComponentJacobian(values: Float64Array): ComponentJacobian;
   /**
@@ -180,7 +179,7 @@ export type BuildSystemResult = {
   shellSourceVariables: ReadonlyMap<SketchEntityId, readonly number[]>;
   /**
    * cadara-p4r5.1: explicit inequalities g(x) ≥ 0. Only the constrained drag
-   * step (`SketchDragStep` "constrained") enforces them; no other solve reads
+   * step enforces them; no other solve reads
    * them.
    */
   inequalities: readonly SolverInequalityRecord[];
@@ -285,11 +284,6 @@ export interface SketchCompiledSolveProgram {
   offsetPlans: readonly SolvedOffsetFramePlanRecord[] | undefined;
   partialSolvePolicy: SolverPartialSolvePolicy;
   strategy: SketchSolveStrategy;
-  /**
-   * cadara-p4r5.2: set (to "constrained") only when the drag step is not the
-   * default "penalty" (`SketchDragStep`).
-   */
-  dragStep?: "constrained";
   diagnostics: readonly SketchSolveDiagnostic[];
   validation: SketchCoreValidationResult;
   /**
@@ -309,8 +303,6 @@ export interface SketchCompiledSolveSession {
   lastAcceptedSnapshot: SolvedSketchSnapshot;
   disposed: boolean;
   warmStarted: boolean;
-  /** T13a2 (c3): the last accepted drag frame's curvature estimate. */
-  dragCurvature?: SketchDragCurvature;
   /** T13a2 (review R-1): the last accepted point-drag frame's target. */
   lastPointDragTarget?: SketchDraggedPointTarget;
 }

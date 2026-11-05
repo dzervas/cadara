@@ -4,9 +4,9 @@ import { updateCompiledSketchSolveSession } from "./update-session";
 import {
   approvedSmallDragFrames,
   cubicCoordinateDelta,
-  dragConditioningFixture,
-  startConditioningReplay,
-} from "./solver-drag-conditioning.fixtures";
+  dragReplayFixture,
+  startDragReplay,
+} from "./solver-drag-replay.fixtures";
 // Logic lane, heavy tier: twenty real interactive frames per captured T18 drag.
 // The fast companion pins the first-frame work and reachable exact release.
 
@@ -43,10 +43,9 @@ test("release-coordinate bounds include interior cubic extrema, not only fit poi
   ).toBe(0.01);
 });
 
-for (const row of dragConditioningFixture.cases) {
+for (const row of dragReplayFixture.cases) {
   test(`${row.scenario}: authored requirements, release geometry and small-delta approval survive the full replay`, () => {
-    const session = startConditioningReplay(row);
-    let moveIterations = 0;
+    const session = startDragReplay(row);
     let publishedFrames = 0;
     for (const [frame, [target, tolerance]] of row.targets.entries()) {
       const previous = session.lastAcceptedSnapshot;
@@ -72,22 +71,6 @@ for (const row of dragConditioningFixture.cases) {
       // cadara-9sz tracks why the corner's later targets are refused. This
       // performance change must not relabel them solved or publish bad values.
       if (result.kind === "blocked") expect(snapshot).toBe(previous);
-      if (frame < row.targets.length - 1) {
-        moveIterations += trace.work.bfgsIterations;
-        expect(
-          trace.work.bfgsIterations + (trace.work.gaussNewtonIterations ?? 0),
-          `frame ${frame}: shared iterative budget`,
-        ).toBeLessThanOrEqual(48);
-        expect(
-          trace.work.dragConditioningResidualEvaluations,
-          `frame ${frame}: raw GN budget`,
-        ).toBeLessThanOrEqual(2500);
-        // Wolfe has at most 15 trials per BFGS/conditioning step; fallback
-        // damping has at most 12. These searches cannot escape the work cap.
-        expect(trace.work.lineSearchTrials).toBeLessThanOrEqual(
-          15 * (48 + trace.work.dragConditioningIterations),
-        );
-      }
       if (row.scenario === "drag-small") {
         const approved = approvedSmallDragFrames[frame]!;
         expect(snapshot.solvedPoints).toHaveLength(approved.points.length);
@@ -99,7 +82,7 @@ for (const row of dragConditioningFixture.cases) {
             Math.hypot(point[0] - x, point[1] - y),
             `frame ${frame}: approved point ${id}`,
           ).toBeLessThanOrEqual(
-            dragConditioningFixture.compile.modelingTolerance,
+            dragReplayFixture.compile.modelingTolerance,
           );
         }
         const splines = snapshot.solvedEntities.filter(
@@ -119,18 +102,13 @@ for (const row of dragConditioningFixture.cases) {
               ),
               `frame ${frame}: approved spline ${before.entityId} span ${index}`,
             ).toBeLessThanOrEqual(
-              dragConditioningFixture.compile.modelingTolerance / Math.SQRT2,
+              dragReplayFixture.compile.modelingTolerance / Math.SQRT2,
             );
         }
-        expect(trace.work.dragConditioningIterations).toBe(0);
-        expect(trace.work.dragConditioningResidualEvaluations).toBe(0);
       }
     }
     if (row.scenario !== "drag-small") {
       if (row.scenario === "drag-corner") expect(publishedFrames).toBe(1);
-      expect(moveIterations / 20).toBeLessThanOrEqual(
-        row.scenario === "drag-large" ? 90 : 240,
-      );
       const snapshot = session.lastAcceptedSnapshot;
       const points = new Map(
         snapshot.solvedPoints.map((p) => [p.pointId, p.solvedPosition]),

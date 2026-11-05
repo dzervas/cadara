@@ -41,7 +41,7 @@ export function exactZeroTangentFrame(
   const values = cloneValues(frame.values);
   for (const index of resolved.draggedVariableIndices) values[index] = 0;
   const zeroed = reevaluateDraggedPointCandidate(session, values);
-  return zeroed.accepted ? { ...zeroed, curvature: frame.curvature } : frame;
+  return zeroed.accepted ? zeroed : frame;
 }
 
 export function dragTargetDiagnosticTarget(

@@ -36,12 +36,7 @@ export type DraggedPointCandidate = {
   accepted: boolean;
   values: Float64Array;
   materialized: SketchCoreSolveResult;
-  /** T13a2 (c3): phase A's curvature estimate, kept when the frame is accepted. */
-  curvature?: SketchDragCurvature;
 };
-
-/** T13a2 (c3): a BFGS inverse Hessian over one drag problem's variables. */
-export type SketchDragCurvature = { key: string; inverseHessian: Float64Array[] };
 
 /** [TECH] G16⁗: a drag frame's candidate re-materialized and re-judged at `values`. */
 export function reevaluateDraggedPointCandidate(
@@ -65,9 +60,8 @@ export function reevaluateDraggedPointCandidate(
  * state is the last accepted frame (`session.values`): its blocked set is
  * decided there, with one re-solve (from the frame's end values) when a
  * blocked offset builds at the end. `interactive` is a session update's
- * frame (not a DOF probe): a preview frame (`null` tolerance) reuses the
- * curvature (T13a2 c3), a frame with a tolerance (the release, a single
- * solver call) runs the exact-reach step (d1) instead. The session is not
+ * frame (not a DOF probe): a frame with a tolerance (release or a single
+ * solver call) runs the exact-reach step. The session is not
  * mutated.
  */
 export function solveDraggedPointFrameWithRebuild(input: {
@@ -95,7 +89,6 @@ export function* solveDraggedPointFrameWithRebuildSteps(input: {
         component,
         dragTarget,
         exactReachTolerance: interactive?.targetTolerance ?? undefined,
-        reuseCurvature: interactive?.targetTolerance === null,
         repeatsAcceptedFrame:
           interactive !== undefined &&
           session.lastPointDragTarget?.pointId === dragTarget.pointId &&
@@ -138,11 +131,9 @@ export function acceptDraggedPointCandidate(
   session: SketchCompiledSolveSession,
   values: Float64Array,
   materialized: SketchCoreSolveResult,
-  curvature?: SketchDragCurvature,
 ): SketchDraggedPointSolveResult {
   session.values = heldDrivenValues(session.program, values);
   session.lastAcceptedSnapshot = materialized.solvedSnapshot;
-  session.dragCurvature = curvature;
   session.lastPointDragTarget = undefined;
   return {
     kind: "solved",

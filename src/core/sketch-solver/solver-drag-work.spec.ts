@@ -6,24 +6,18 @@ import { traceSketchSolverForTest } from "./solve-tracing";
 import type { SketchSolverWorkTrace } from "./solve-tracing";
 import type { SketchDragTarget } from "./solve-types";
 import {
-  dragConditioningFixture,
-  startConditioningReplay,
-} from "./solver-drag-conditioning.fixtures";
+  dragReplayFixture,
+  startDragReplay,
+} from "./solver-drag-replay.fixtures";
+import { suspendDragContinuation } from "./drag-continuation.fixtures";
 import { updateCompiledSketchSolveSession } from "./update-session";
 import {
   FIXTURE_TOLERANCE,
   literalResolvedDefinition,
   makeSketchFixture,
 } from "@/contracts/sketch/region-extraction.fixtures";
-// cadara-b3k.26, logic lane, solver-core drag-session seam
-// (`compileSketchSolveProgram`, `startCompiledSketchSolveSession`,
-// `updateCompiledSketchSolveSession`) observed through the
-// `traceSketchSolverForTest` work counters: a drag frame's loss evaluations
-// are its line-search trials plus the few evaluations outside Wolfe searches
-// (solver starts and candidate judging), never one more per iteration. Before
-// the fix every Wolfe line search re-evaluated the loss at its start point,
-// which the caller already held: 39% of all evaluations in the T18 drag
-// profile (evidence in bead cadara-b3k.26).
+// Logic lane: release work, goal supersession and refused-verdict reuse at
+// the compiled-session continuation seam.
 
 const TOLERANCES = {
   coincidence: 1e-3,
@@ -48,46 +42,6 @@ function definition() {
   return literalResolvedDefinition(fixture.definition());
 }
 
-test("a far drag frame evaluates the loss once per line-search trial plus a few outside the searches, never once more per line search", () => {
-  const started = startCompiledSketchSolveSession({
-    sessionId: "interactive_sketch_solve_b3k26",
-    program: compileSketchSolveProgram({
-      definition: definition(),
-      projectedReferences: [],
-      tolerances: TOLERANCES,
-      modelingTolerance: FIXTURE_TOLERANCE,
-      partialSolvePolicy: "failOnConflict",
-    }),
-  });
-  expect(started.kind).toBe("started");
-  if (started.kind !== "started") return;
-
-  const traced = traceSketchSolverForTest(() =>
-    updateCompiledSketchSolveSession(
-      started.session,
-      { kind: "sketchPoint", pointId: id("d"), position: [6, 3] },
-      1e-4,
-    ),
-  );
-  expect(traced.result.kind, "the far frame still solves").toBe("solved");
-  const { lossEvaluations, lineSearches, lineSearchTrials } = traced.work;
-  expect(
-    lineSearches,
-    "the frame is a real replay with many iterations, not a trivial one",
-  ).toBeGreaterThanOrEqual(20);
-  // The start-point loss belongs to the caller: the evaluations outside the
-  // trials are a handful however many iterations ran. For this fixture the
-  // √18 drag runs as two accepted substeps: four original outside-search
-  // evaluations plus the conditioning predicate and warm-up start each. The
-  // numerical raw-component probes have their own explicit work counter.
-  const outsideSearches = lossEvaluations - lineSearchTrials;
-  expect(
-    outsideSearches,
-    `${lossEvaluations} loss evaluations for ${lineSearchTrials} trials over ${lineSearches} line searches: a line search must not re-evaluate its start`,
-  ).toBeLessThan(lineSearches);
-  expect(outsideSearches).toBeLessThanOrEqual(12);
-});
-
 // Release work at the same seam: a release does not re-solve work the
 // session already knows is obsolete (an older absolute cursor goal still in
 // flight) or already refused (the same goal from the same accepted state).
@@ -107,12 +61,14 @@ function startDragWorkSession(sessionId: `interactive_sketch_solve_${string}`) {
 }
 
 const solveIterations = (work: SketchSolverWorkTrace) =>
+  work.constrainedStepIterations + work.constrainedStepNewtonIterations +
   work.bfgsIterations + work.gaussNewtonIterations;
 
 test("a release at a new cursor drops the obsolete in-flight point goal: it costs no more than the release goal alone and reaches the cursor exactly", () => {
   const session = startDragWorkSession(
     "interactive_sketch_solve_drop_point_goal",
   );
+  suspendDragContinuation(session, { kind: "sketchPoint", pointId: id("d"), position: [2, 2] });
   const initial = session.lastAcceptedSnapshot;
   const preview = updateCompiledSketchSolveSession(
     session,
@@ -160,10 +116,10 @@ test("a release at a new cursor drops the obsolete in-flight point goal: it cost
 
 test("a release at the goal the last preview refused returns that verdict without solving it again", () => {
   // The k5d two-target corner replay: the second corner goal is refused.
-  const corner = dragConditioningFixture.cases.find(
+  const corner = dragReplayFixture.cases.find(
     (row) => row.scenario === "drag-corner",
   )!;
-  const session = startConditioningReplay(corner);
+  const session = startDragReplay(corner);
   const settle = (goal: SketchDragTarget) => {
     let result = updateCompiledSketchSolveSession(session, goal, null);
     for (let calls = 0; result.kind === "pending" && calls < 40; calls += 1)
@@ -190,10 +146,10 @@ test("a release at the goal the last preview refused returns that verdict withou
 // stored refusal was solved from values that are no longer current, so a
 // later release at that goal must solve it again.
 test("a refused verdict is not reused once a later frame was accepted", () => {
-  const corner = dragConditioningFixture.cases.find(
+  const corner = dragReplayFixture.cases.find(
     (row) => row.scenario === "drag-corner",
   )!;
-  const session = startConditioningReplay(corner);
+  const session = startDragReplay(corner);
   let settled = updateCompiledSketchSolveSession(
     session,
     corner.targets[0]![0]!,
@@ -208,6 +164,7 @@ test("a refused verdict is not reused once a later frame was accepted", () => {
   expect(settled.kind).toBe("solved");
   const refusedGoal = corner.targets[1]![0]!;
   if (refusedGoal.kind !== "sketchPoint") throw new Error("point target");
+  suspendDragContinuation(session, refusedGoal);
   expect(
     updateCompiledSketchSolveSession(session, refusedGoal, null).kind,
   ).toBe("pending");
@@ -229,5 +186,5 @@ test("a refused verdict is not reused once a later frame was accepted", () => {
   const released = traceSketchSolverForTest(() =>
     updateCompiledSketchSolveSession(session, refusedGoal, 1e-4),
   );
-  expect(released.work.lossEvaluations).toBeGreaterThan(0);
+  expect(released.work.constrainedStepStages).toBeGreaterThan(0);
 });

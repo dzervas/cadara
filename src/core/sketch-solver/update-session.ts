@@ -43,10 +43,8 @@ import type { SketchCompiledSolveSession } from "./system-types";
 /**
  * One drag update. `targetTolerance` is the exact-reach (T13a2 d1)
  * tolerance of a point drag. `null` marks an interactive preview frame: it
- * skips the exact-reach step and reuses the previous frame's curvature
- * (c3). A frame with a tolerance (the release frame, a single solver call)
- * starts from the identity curvature and runs the exact-reach step, so the
- * committed state carries no reuse path dependence (review R-1/R-3).
+ * skips the exact-reach step. A frame with a tolerance (release or a single
+ * solver call) runs that projection after the constrained frame.
  * Exception: a release that repeats a goal already refused from the same
  * accepted values returns that refusal, even when a preview computed it. A
  * refusal publishes nothing, so the committed state is still the last
@@ -274,7 +272,6 @@ export function* updateCompiledSketchSolveSessionFrame(
           session,
           frame.values,
           frame.materialized,
-          frame.curvature,
         );
         session.lastPointDragTarget = stepTarget;
         lastAccepted = frame.materialized;
@@ -304,7 +301,6 @@ export function* updateCompiledSketchSolveSessionFrame(
       session,
       resolved,
       constraintLabel: dragTargetLabel(dragTarget),
-      reuseCurvature: targetTolerance === null,
     });
     const frame =
       stepTarget.kind === "sketchTangentVector" && stepTarget.exactZero
@@ -315,7 +311,6 @@ export function* updateCompiledSketchSolveSessionFrame(
         session,
         frame.values,
         frame.materialized,
-        frame.curvature,
       );
       lastAccepted = frame.materialized;
       continue;

@@ -29,7 +29,6 @@ import {
   materializeDraggedPointCandidate,
   reevaluateDraggedPointCandidate,
 } from "./drag-candidates";
-import type { SketchDragStep } from "./solve-types";
 import { traceSketchSolverForTest } from "./solve-tracing";
 import type { ScalarConstraintRecord } from "./system-types";
 import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
@@ -41,7 +40,7 @@ import { isAcceptedConstraintStatus } from "@/contracts/sketch/schema";
 // constrained-drag-branch.heavy.spec.ts.
 
 test("a constrained frame whose step reaches a branch invariant is refused and the session keeps the last accepted values", () => {
-  const session = dragSession(roundedRectangle(), "constrained");
+  const session = dragSession(roundedRectangle());
   for (let step = 1; step <= 16; step += 1) {
     const values = session.values;
     const snapshot = session.lastAcceptedSnapshot;
@@ -93,7 +92,7 @@ test("the exact-reach release under the constrained step cannot cross a branch i
   // image across the line: the step finds no same-branch motion toward it
   // (accepted where it is), and the release's projection with the centre
   // pinned at the cursor is satisfied only by the mirrored branch.
-  const session = dragSession(tangentArc(), "constrained");
+  const session = dragSession(tangentArc());
   const start = tangentSides(session);
   const centre = pid("c");
   const traced = traceSketchSolverForTest(() =>
@@ -120,24 +119,8 @@ test("the exact-reach release under the constrained step cannot cross a branch i
   ).toBeLessThan(1e-9);
 });
 
-test("the arc flip guard decides drag acceptance only without the constrained step", () => {
-  const guardEvaluations = (dragStep: SketchDragStep) => {
-    const session = dragSession(roundedRectangle(), dragStep);
-    return traceSketchSolverForTest(() => {
-      for (let step = 1; step <= 3; step += 1)
-        preview(session, R1_GRABBED, r1Cursor(step));
-      return release(session, R1_GRABBED, r1Cursor(3));
-    }).work.dragArcGuardEvaluations;
-  };
-  expect(
-    guardEvaluations("penalty"),
-    "premise: the counter sees the guard",
-  ).toBeGreaterThan(0);
-  expect(guardEvaluations("constrained")).toBe(0);
-});
-
 test("slot resize under the constrained step: the straight sides never reverse, and dragging back restores the slot", () => {
-  const session = dragSession(slot(), "constrained");
+  const session = dragSession(slot());
   const endArc = [pid("e"), pid("le"), pid("re")];
   const sideLengths = () => {
     const at = (name: string) =>
@@ -168,7 +151,7 @@ test("under the constrained step every re-check of a candidate refuses values of
   // tangent) re-judge values through the frame acceptance alone. The
   // mirrored tangent arc satisfies every authored row; only the branch
   // invariant of the accepted frame refuses it.
-  const session = dragSession(tangentArc(), "constrained");
+  const session = dragSession(tangentArc());
   const centre = session.program.system.pointRecords.get(pid("c"))!;
   const pinned = Float64Array.from(session.values);
   pinned[centre.baseIndex] = 1;
@@ -204,7 +187,7 @@ test("under the constrained step every re-check of a candidate refuses values of
 test("under the constrained step a re-check refuses values that end on a validity boundary clear at the accepted frame, the end-state view of reaching it", () => {
   // A result with no step path (a projection, a re-check) shows only where
   // it ends: a segment that ends at length τ reached its boundary.
-  const session = dragSession(swingingSegment(), "constrained");
+  const session = dragSession(swingingSegment());
   const free = session.program.system.pointRecords.get(pid("p"))!;
   const endingAt = (x: number, y: number) => {
     const values = Float64Array.from(session.values);
@@ -224,7 +207,7 @@ test("a straight move from a candidate is refused when a validity margin dips be
   // The exact-reach projection's reading (`refusesMove`): the chamfer's lower
   // end moved straight past its fixed upper end folds the chamfer through
   // zero length; a move beside the fixed end does not.
-  const session = dragSession(chamferedRectangle(), "constrained");
+  const session = dragSession(chamferedRectangle());
   const invariants = deriveDragBranchInvariants(
     session.program,
     session.program.system.scalarConstraints,
@@ -251,7 +234,7 @@ test("a straight move from a candidate is refused when a validity margin dips be
 test("a constrained step that accepts no move yields no candidate: the frame is refused, not solved without motion", () => {
   // The tangency row gains a component satisfied only at the accepted values
   // with no gradient to correct along, so every trial of the step fails.
-  const session = dragSession(tangentArc(), "constrained");
+  const session = dragSession(tangentArc());
   const accepted = Float64Array.from(session.values);
   const atAccepted = (values: Float64Array) =>
     values.every((value, index) => value === accepted[index]);
@@ -297,7 +280,7 @@ test("chamfer fold under the constrained step: the drag stops at the chamfer's l
   // Past (2, 0.3) the chamfer could only fold back; the step can get there
   // by sliding its free end round the fixed one at length τ (the length row
   // holds the whole way), so the step's path, not its end, decides.
-  const session = dragSession(chamferedRectangle(), "constrained");
+  const session = dragSession(chamferedRectangle());
   const [ca, cb] = [pid("ca"), pid("cb")];
   const along = () => {
     const a = positionOf(session.lastAcceptedSnapshot, ca);
@@ -343,7 +326,7 @@ test("chamfer fold under the constrained step: the drag stops at the chamfer's l
 test("a segment swung round its fixed end in large frames, never near zero length, is accepted every frame", () => {
   // Each frame turns the free end by 120°: the minimum-motion path is the
   // chord, at least 0.5 from the fixed end, so no boundary is reached.
-  const session = dragSession(swingingSegment(), "constrained");
+  const session = dragSession(swingingSegment());
   for (let frame = 1; frame <= 6; frame += 1) {
     const angle = (frame * 2 * Math.PI) / 3;
     const cursor: Point = [Math.cos(angle), Math.sin(angle)];
@@ -359,7 +342,7 @@ test("a segment swung round its fixed end in large frames, never near zero lengt
 
 test("validity margins (segment length, radius ≥ τ): each analytic gradient matches central differences", () => {
   for (const definition of [chamferedRectangle(), tangentArc()]) {
-    const session = dragSession(definition, "constrained");
+    const session = dragSession(definition);
     const validity = session.program.system.inequalities.filter(
       (inequality) => inequality.requirement === undefined,
     );

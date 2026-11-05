@@ -8,13 +8,12 @@ import {
 } from "./constrained-minimum-motion";
 import type { ComponentJacobian } from "./automatic-differentiation";
 import { finishSolve } from "./solve-steps";
-import { compileSketchSolveProgram } from "./compile-program";
 import { traceSketchSolverForTest } from "./solve-tracing";
 import { updateCompiledSketchSolveSession } from "./update-session";
 import {
-  dragConditioningFixture,
-  startConditioningReplay,
-} from "./solver-drag-conditioning.fixtures";
+  dragReplayFixture,
+  startDragReplay,
+} from "./solver-drag-replay.fixtures";
 // Logic lane: the cadara-p4r5.2 equality-constrained minimum-motion step over
 // plain row data (no geometry): it lands on the rows, keeps an inequality,
 // and reports an unavailable Jacobian instead of moving nothing.
@@ -402,12 +401,11 @@ test("redundant rows (a duplicated equality) are solved through the regularised 
   ).toBeLessThan(1e-12 * 1.2 + 1e-15);
 });
 
-test('dragStep "constrained": a T18 drag-small frame runs the step instead of phases A/B and is accepted with every authored requirement satisfied', () => {
-  const row = dragConditioningFixture.cases.find(
+test('the production T18 drag-small frame runs the constrained step and is accepted with every authored requirement satisfied', () => {
+  const row = dragReplayFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
-  const session = startConditioningReplay(row, { dragStep: "constrained" });
-  expect(session.program.dragStep).toBe("constrained");
+  const session = startDragReplay(row);
   const [target, tolerance] = row.targets[0]!;
   const trace = traceSketchSolverForTest(() =>
     updateCompiledSketchSolveSession(session, target, tolerance),
@@ -422,21 +420,15 @@ test('dragStep "constrained": a T18 drag-small frame runs the step instead of ph
   ).toBe(true);
   expect(trace.work.constrainedStepStages).toBeGreaterThan(0);
   expect(trace.work.constrainedStepIterations).toBeGreaterThan(0);
+  expect(trace.work.constrainedDragJacobianEvaluations).toBeGreaterThan(0);
+  expect(trace.work.constrainedDragJacobianEvaluations).toBeLessThan(
+    trace.work.constrainedDragJacobianReads,
+  );
   expect(
     trace.work.constrainedStepJacobianUnavailable +
       trace.work.constrainedStepStartNotCorrectable,
   ).toBe(0);
   expect(trace.work.bfgsIterations + trace.work.gaussNewtonIterations).toBe(0);
-});
-
-test("without the option (and without the test-only environment override) a program keeps the penalty drag step", () => {
-  const program = compileSketchSolveProgram({
-    ...dragConditioningFixture.compile,
-  });
-  expect(
-    "dragStep" in program,
-    "CADARA_SKETCH_DRAG_CONSTRAINED_STEP must not be set for this lane",
-  ).toBe(false);
 });
 
 test("a row of rounding noise (an identically satisfied component) does not remove a tangent direction", () => {
@@ -520,18 +512,18 @@ test("a row that becomes unavailable after the start (before any accepted move) 
   });
 });
 
-test('dragStep "constrained": a hard row unavailable at the frame runs phases A/B instead (counted), and the T18 step restates hinge components as inequalities', () => {
-  const row = dragConditioningFixture.cases.find(
+test('an active hard row unavailable at the frame is refused and keeps the accepted state, and the T18 step restates hinge components as inequalities', () => {
+  const row = dragReplayFixture.cases.find(
     (candidate) => candidate.scenario === "drag-small",
   )!;
   const [target, tolerance] = row.targets[0]!;
-  const regular = startConditioningReplay(row, { dragStep: "constrained" });
+  const regular = startDragReplay(row);
   const stepped = traceSketchSolverForTest(() =>
     updateCompiledSketchSolveSession(regular, target, tolerance),
   );
   expect(stepped.work.constrainedStepRestatedComponents).toBeGreaterThan(0);
 
-  const session = startConditioningReplay(row, { dragStep: "constrained" });
+  const session = startDragReplay(row);
   // One hard row reports an unavailable Jacobian (as a failed derived
   // relationship's row does); its loss path is untouched.
   const rows = session.program.system.scalarConstraints;
@@ -550,12 +542,16 @@ test('dragStep "constrained": a hard row unavailable at the frame runs phases A/
       };
     },
   };
+  const values = session.values;
+  const snapshot = session.lastAcceptedSnapshot;
   const trace = traceSketchSolverForTest(() =>
     updateCompiledSketchSolveSession(session, target, tolerance),
   );
-  expect(trace.result.kind).toBe("solved");
+  expect(trace.result).toMatchObject({ kind: "blocked", reason: "nonConvergent" });
+  expect(session.values).toBe(values);
+  expect(session.lastAcceptedSnapshot).toBe(snapshot);
   expect(trace.work.constrainedStepJacobianUnavailable).toBeGreaterThan(0);
-  expect(trace.work.bfgsIterations).toBeGreaterThan(0);
+  expect(trace.work.bfgsIterations).toBe(0);
 });
 
 test.each([1, 1e-6, 1e6])(

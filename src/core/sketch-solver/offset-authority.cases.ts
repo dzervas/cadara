@@ -773,13 +773,34 @@ export async function testOffsetArcScalarStateFollowsDefiningPoints() {
       pointId: points[2]!.pointId,
       position: invalidDragEnd,
     });
-    expect(dragged.kind).toBe("blocked");
-    expect(dragged.diagnostics).toContainEqual(
-      expect.objectContaining({
-        code: "offset-arc-common-circle-unsatisfied",
-        severity: "error",
-      }),
+    // The constrained corrector repairs the corrupted common-circle start;
+    // the penalty solve previously stopped below its absolute loss threshold.
+    expect(dragged.kind).toBe("solved");
+    expect(
+      dragged.diagnostics.some(
+        (entry) => entry.code === "offset-arc-common-circle-unsatisfied",
+      ),
+    ).toBe(false);
+    const corrected = new Map(
+      dragged.solvedSnapshot!.solvedPoints.map((point) => [
+        point.pointId,
+        point.solvedPosition,
+      ]),
     );
-    expect(dragged.solvedSnapshot).toBe(acceptedBeforeDrag);
-    expect(dragSession.lastAcceptedSnapshot).toBe(acceptedBeforeDrag);
+    const correctedCenter = corrected.get(points[0]!.pointId)!;
+    const correctedStart = corrected.get(points[1]!.pointId)!;
+    const correctedEnd = corrected.get(points[2]!.pointId)!;
+    expect(
+      Math.abs(
+        Math.hypot(
+          correctedStart[0] - correctedCenter[0],
+          correctedStart[1] - correctedCenter[1],
+        ) -
+          Math.hypot(
+            correctedEnd[0] - correctedCenter[0],
+            correctedEnd[1] - correctedCenter[1],
+          ),
+      ),
+    ).toBeLessThan(tolerances.coincidence);
+    expect(dragSession.lastAcceptedSnapshot).toBe(dragged.solvedSnapshot);
   }

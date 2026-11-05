@@ -20,7 +20,7 @@ import { traceSketchSolverForTest } from "./solve-tracing";
 // several seconds per gesture.
 
 test("R-1 under the constrained step: a fillet never collapses or flips, the forward drag is refused before it would, and the drag back follows the cursor", () => {
-  const session = dragSession(roundedRectangle(), "constrained");
+  const session = dragSession(roundedRectangle());
   const start = tangentSides(session);
   let lastAcceptedForward = 0;
   const trace: string[] = [];
@@ -66,7 +66,7 @@ test("R-1 under the constrained step: a fillet never collapses or flips, the for
 test("forced collapse under the constrained step: no accepted frame collapses or flips a fillet, a frame before the forced boundary is refused, and the drag back follows the cursor", () => {
   // Every point at y ≥ 0.5 fixed: past y ≈ 0.6 only the mirrored fillets
   // solve, so the forward drag must be refused there.
-  const session = dragSession(roundedRectangle(true), "constrained");
+  const session = dragSession(roundedRectangle(true));
   const start = tangentSides(session);
   let lastAcceptedForward = 0;
   const kinds: string[] = [];
@@ -110,7 +110,7 @@ test("forced collapse under the constrained step: no accepted frame collapses or
 
 test("R-1 under the constrained step does not depend on where the sketch sits: translated by (1e4, 1e4) every frame has the same verdict", () => {
   const verdicts = (origin: Point) => {
-    const session = dragSession(roundedRectangle(false, origin), "constrained");
+    const session = dragSession(roundedRectangle(false, origin));
     const grabbed = session.program.definition.points.find(
       (point) => point.pointId === R1_GRABBED,
     )!.position;

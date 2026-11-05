@@ -1,20 +1,11 @@
-import {
-  evaluateLoss,
-  lineSearchWolfe,
-  multiplyMatrixVector,
-  solveBfgsOver,
-  solveBfgsOverSteps,
-} from "./bfgs";
+import { solveBfgsOver } from "./bfgs";
 import { pointVariableIndices } from "./compile-components";
 import {
   deriveDragBranchInvariants,
   solveConstrainedDragStage,
   type DragBranchInvariants,
 } from "./constrained-drag-stage";
-import type {
-  DraggedPointCandidate,
-  SketchDragCurvature,
-} from "./drag-candidates";
+import type { DraggedPointCandidate } from "./drag-candidates";
 import { reevaluateDraggedPointCandidate } from "./drag-candidates";
 import { createDragTargetConstraint } from "./drag-target-constraints";
 import { resolveDragTargetFrame } from "./drag-target-frame";
@@ -22,27 +13,15 @@ import { createMinimumMotionAnchorConstraint } from "./minimum-motion-anchor";
 import {
   dragFrozenAxisVariables,
   NO_FROZEN_VARIABLES,
-  withFrozenVariables,
 } from "./mirror-axis-preference";
 import {
-  addDiagonal,
-  solvePivotedCholesky,
-  sparseNormalMatrix,
-  transpose,
-} from "./normal-equations";
-import {
-  DRAG_CONDITIONING_MAX_ITERATIONS,
-  DRAG_CONDITIONING_TARGET_LOSS,
   DRAG_MINIMUM_MOTION_EPSILON,
-  DRAG_PREVIEW_RAW_BLOCKS,
   DRAG_TARGET_WEIGHT,
 } from "./solve-constants";
 import { solveWithRebuildRetrySteps } from "./solve-program";
-import type { SolveSteps, SolveWork } from "./solve-steps";
-import { solveSystemValuesSteps } from "./solve-strategies";
-import { solverWorkTrace } from "./solve-tracing";
+import type { SolveSteps } from "./solve-steps";
 import type { SketchDraggedPointTarget } from "./solve-types";
-import { cloneValues, zeroVector } from "./solver-geometry";
+import { cloneValues } from "./solver-geometry";
 import type {
   ScalarConstraintRecord,
   SketchCompiledSolveComponent,
@@ -52,48 +31,10 @@ import type {
 import type { ConstraintId } from "@/contracts/shared/ids";
 import type { SketchPoint2D } from "@/contracts/sketch/schema";
 
-// D1/D2/D4: solve a single continuous drag frame for one cursor position.
-//
-// Phase A minimizes the hard constraints together with the soft drag objective
-// and the uniform minimum-motion term (anchored to the previous accepted frame).
-// If the hard constraints are satisfied, the frame is accepted directly (this is
-// the feasible/reachable case, including rigid translation).
-//
-// Phase B (the sliding case) projects the phase-A candidate back onto the
-// hard-constraint manifold by minimizing displacement FROM the phase-A position,
-// with no drag term. This settles the dragged point at the closest feasible
-// position instead of returning a compromise that violates authored constraints.
-// Neither phase seeds or accepts reflected/discontinuous branches (D4): the frame
-// is solved purely by continuous iteration from the previous accepted values.
-//
-// T13a2, with the BFGS strategy:
-// - c2: phase A runs BFGS without the Gauss–Newton fallback. Phase A's loss
-//   includes the soft cursor and anchor terms, so a converged frame can sit
-//   above SOLVED_LOSS_THRESHOLD and wrongly trigger the fallback; acceptance
-//   and phase B (which keeps the fallback, hard constraints only) judge it.
-// - c3: phase A solves only the component's (authority) variables. Every
-//   phase-A term's gradient is supported there: the component is the union
-//   of its equations' projected supports, and an offset/derived output is
-//   projected onto its seeds' authority variables, so relationships seeded in
-//   the component are solved with it. Outside it the gradient is zero, so
-//   the iterates equal the full solve's, and other components keep their
-//   previous values (only `affectedVariables` are copied back, as before):
-//   the restriction is bit-identical to the full solve. An interactive
-//   preview frame also reuses the previous accepted frame's inverse
-//   Hessian for the same drag problem (25–30 % faster frames). That keeps
-//   the objective, stop test and acceptance but changes the path, and with
-//   the 1e-6 anchor under the 1e-8 gradient stop the accepted frame moves
-//   by O(1e-3) on fillet/offset outlines (path dependence within the
-//   existing stop accuracy; accepted under D1 by the orchestrator). The
-//   release frame starts from the identity, so the committed state does
-//   not depend on the reuse path.
-// - d1: when a session update with a reach tolerance (the release frame of
-//   an editor drag, or a single solver call) has an accepted frame that
-//   leaves the dragged point off the cursor (T17c6: any nonzero lag; a
-//   driven mirror-output target: farther than `targetTolerance`), the point
-//   is pinned at the cursor and the other component variables are
-//   projected onto the hard constraints from that frame; the result
-//   replaces the frame only if the frame acceptance accepts it.
+// A frame minimizes cursor error and previous-frame motion subject to hard
+// rows and row-derived branch/validity margins. A refused or unavailable step
+// publishes nothing. Point release may project to the exact cursor, but uses
+// the same acceptance and reads branch margins along that projection.
 
 export const mirrorOutputVariablesByProgram = new WeakMap<
   SketchCompiledSolveProgram,
@@ -144,8 +85,6 @@ export type DragFrameInput = {
     targetTolerance: number;
     pin: ScalarConstraintRecord;
   };
-  /** T13a2 (c3): reuse the session's curvature for this drag problem. */
-  reuseCurvature?: boolean;
   /**
    * T13a2 (review R-1): the target is the last accepted frame's; that frame
    * is this frame's solution (a re-solve only re-walks the path), so only
@@ -184,13 +123,7 @@ export function* solveDragFrameGeneral(
   return yield* solveDragFrameStage(input, NO_FROZEN_VARIABLES);
 }
 
-/**
- * One stage of a drag frame: the T12b/T13a2 frame solve over the
- * component's variables minus `frozen` (phases A and B and the d1 step).
- * T13a2 (c3) curvature is keyed by the frozen set too, so a stage reuses
- * only its own stage's inverse Hessian (a different variable set or
- * objective restarts from the identity).
- */
+/** One constrained stage over the component's authority variables minus frozen axes. */
 export function* solveDragFrameStage(
   input: DragFrameInput,
   frozen: ReadonlySet<number>,
@@ -212,7 +145,6 @@ export function* solveDragFrameStage(
     frozen.size === 0
       ? affectedVariables
       : affectedVariables.filter((index) => !frozen.has(index));
-  const solvedHardConstraints = withFrozenVariables(hardConstraints, frozen);
   const draggedSet = new Set(input.draggedVariableIndices);
   const nonDraggedVariableIndices = solvedVariables.filter(
     (index) => !draggedSet.has(index),
@@ -240,7 +172,6 @@ export function* solveDragFrameStage(
       solvedVariables,
     ));
   const projectedAcross = (from: Float64Array, to: Float64Array) =>
-    program.dragStep === "constrained" &&
     frameInvariants().refusesMove(from, to);
   const exactReach = (candidate: DraggedPointCandidate) => {
     if (!bfgs || !input.exactReach || !candidate.accepted) return candidate;
@@ -275,7 +206,7 @@ export function* solveDragFrameStage(
       return reached.accepted &&
         !projectedAcross(candidate.values, reached.values) &&
         lagOf(reached.values) <= targetTolerance
-        ? { ...reached, curvature: candidate.curvature }
+        ? reached
         : candidate;
     }
     const affected = new Set(affectedVariables);
@@ -303,197 +234,38 @@ export function* solveDragFrameStage(
     const reached = judge(candidateOf(projected.values));
     return reached.accepted &&
       !projectedAcross(candidate.values, reached.values)
-      ? { ...reached, curvature: candidate.curvature }
+      ? reached
       : candidate;
   };
 
   if (input.repeatsAcceptedFrame && input.startValues === undefined) {
     return exactReach({
       ...judge(cloneValues(session.values)),
-      curvature: session.dragCurvature,
     });
   }
 
-  // cadara-p4r5.2: the constrained step replaces phases A and B; where it is
-  // unavailable at this frame, they run as without it.
-  if (program.dragStep === "constrained") {
-    const constrained = yield* solveConstrainedDragStage({
-      program,
-      hardConstraints,
-      objective: [
-        ...input.dragConstraints,
-        createMinimumMotionAnchorConstraint({
-          id: `constraint_drag_minimum_motion_${input.constraintLabel}` as ConstraintId,
-          parameterCount,
-          anchorValues: previousFrame,
-          variableIndices: nonDraggedVariableIndices,
-          weight: DRAG_MINIMUM_MOTION_EPSILON,
-          parameterProjection: program.system.parameterProjection,
-        }),
-      ],
-      start: input.startValues ?? session.values,
-      invariants: frameInvariants(),
-      variables: solvedVariables,
-    });
-    // A refused step (it reached a boundary, or could not move) yields no
-    // candidate, so no re-check of its values can accept the frame.
-    if (constrained?.kind === "refused") return null;
-    if (constrained) return exactReach(judge(candidateOf(constrained.values)));
-  }
-
-  // Phase A: hard constraints + soft cursor target + uniform minimum motion.
-  const phaseAConstraints: ScalarConstraintRecord[] = [
-    ...hardConstraints,
-    ...input.dragConstraints,
-    createMinimumMotionAnchorConstraint({
-      id: `constraint_drag_minimum_motion_${input.constraintLabel}` as ConstraintId,
-      parameterCount,
-      anchorValues: previousFrame,
-      variableIndices: nonDraggedVariableIndices,
-      weight: DRAG_MINIMUM_MOTION_EPSILON,
-      parameterProjection: program.system.parameterProjection,
-    }),
-  ];
-  const curvatureKey = `${input.constraintLabel}|${component?.componentId ?? "all"}|${input.draggedVariableIndices.join(",")}${frozen.size === 0 ? "" : `|frozen:${[...frozen].join(",")}`}`;
-  const reuse =
-    input.reuseCurvature === true && input.startValues === undefined;
-  let curvature: SketchDragCurvature | undefined;
-  let solvedA: Float64Array;
-  if (bfgs) {
-    const start = input.startValues ?? session.values;
-    // A recovery gesture starts outside the spline's regular domain (two fit
-    // points coincide). Keep its existing BFGS/minimum-motion trajectory for
-    // the whole gesture, including after the first separating frame: numerical
-    // conditioning there changes untouched join residuals and downstream
-    // topology/projection behavior. This optimization is for regular drags.
-    const condition =
-      program.degenerateSplineSpanRecovery.splineIds.size === 0 &&
-      evaluateLoss(start, input.dragConstraints).loss >
-      DRAG_CONDITIONING_TARGET_LOSS;
-    const conditionedStart = condition
-      ? yield* conditionDragStart(start, phaseAConstraints, solvedVariables)
-      : start;
-    const solved = yield* solveBfgsOverSteps(
-      cloneValues(conditionedStart),
-      phaseAConstraints,
-      {
-        variableIndices: solvedVariables,
-        initialInverseHessian:
-          reuse && !condition && session.dragCurvature?.key === curvatureKey
-            ? session.dragCurvature.inverseHessian
-            : null,
-      },
-    );
-    solvedA = solved.values;
-    curvature = reuse
-      ? { key: curvatureKey, inverseHessian: solved.inverseHessian }
-      : undefined;
-  } else {
-    solvedA = (
-      yield* solveSystemValuesSteps(
-        cloneValues(input.startValues ?? session.values),
-        withFrozenVariables(phaseAConstraints, frozen),
-        program.strategy,
-      )
-    ).values;
-  }
-  const candidateA = judge(candidateOf(solvedA));
-  if (candidateA.accepted) {
-    return exactReach({ ...candidateA, curvature });
-  }
-
-  // Phase B: project the phase-A candidate onto the hard-constraint manifold.
-  const phaseBConstraints: ScalarConstraintRecord[] = [
-    ...solvedHardConstraints,
-  ];
-  const solvedB = yield* solveSystemValuesSteps(
-    cloneValues(candidateA.values),
-    phaseBConstraints,
-    program.strategy,
-  );
-  return exactReach({ ...judge(candidateOf(solvedB.values)), curvature });
-}
-
-/**
- * cadara-b3k.35: the hard rows, soft target and minimum-motion anchor span very
- * different scales. A few Gauss–Newton steps on their RAW residual components
- * condition the far part of a move before BFGS polishes the same objective.
- * Differentiating the squared losses instead would lose rank near satisfaction.
- *
- * Only the stage's solved variables move (including its frozen-axis policy).
- * Wolfe requires a decrease in the existing objective; failure keeps the last
- * iterate. This is not acceptance: the normal hard-row judge, phase B and exact
- * release still run. The anchor remains the previous ACCEPTED frame throughout.
- * Every finite-difference block evaluation is traced, not hidden behind the
- * reduced BFGS iteration count. Small targets never enter this path.
- */
-export function* conditionDragStart(
-  values: Float64Array,
-  constraints: ScalarConstraintRecord[],
-  indices: readonly number[],
-) {
-  const evaluate = function* (
-    at: Float64Array,
-    split: boolean,
-  ): SolveSteps<number[]> {
-    const residuals: number[] = [];
-    for (const constraint of constraints) {
-      if (split) yield { kind: "raw", count: 1 };
-      if (solverWorkTrace)
-        solverWorkTrace.dragConditioningResidualEvaluations += 1;
-      residuals.push(...constraint.evaluateComponents(at));
-    }
-    return residuals;
-  };
-  let current = cloneValues(values);
-  let state = evaluateLoss(current, constraints);
-  for (
-    let iteration = 0;
-    iteration < DRAG_CONDITIONING_MAX_ITERATIONS;
-    iteration += 1
-  ) {
-    const blocks = (1 + 2 * indices.length) * constraints.length;
-    // Keep ordinary Jacobians atomic (the measured T18 scheduling policy), but
-    // split oversized ones by block so a single Jacobian cannot starve forever.
-    const split = blocks > DRAG_PREVIEW_RAW_BLOCKS;
-    if (!split) yield { kind: "raw", count: blocks } satisfies SolveWork;
-    // Do not borrow BFGS's loose absolute loss/gradient stop: on a soft target
-    // it can leave cursor lag (mirror previews pin this). Failed Wolfe progress
-    // or the short iteration bound ends conditioning; BFGS still polishes.
-    if (solverWorkTrace) solverWorkTrace.dragConditioningIterations += 1;
-    const residuals = yield* evaluate(current, split);
-    const jacobian = residuals.map(() => zeroVector(indices.length));
-    for (let column = 0; column < indices.length; column += 1) {
-      const index = indices[column]!;
-      const plus = cloneValues(current);
-      const minus = cloneValues(current);
-      const step =
-        Math.cbrt(Number.EPSILON) * Math.max(1, Math.abs(current[index]!));
-      plus[index] += step;
-      minus[index] -= step;
-      const next = yield* evaluate(plus, split);
-      const previous = yield* evaluate(minus, split);
-      for (let row = 0; row < residuals.length; row += 1)
-        jacobian[row]![column] = (next[row]! - previous[row]!) / (2 * step);
-    }
-    const normal = addDiagonal(
-      sparseNormalMatrix(jacobian, indices.length),
-      1e-8,
-    );
-    const rhs = multiplyMatrixVector(
-      transpose(jacobian),
-      Float64Array.from(residuals),
-    );
-    const delta = solvePivotedCholesky(normal, rhs, 1e-12);
-    const direction = zeroVector(values.length);
-    for (let index = 0; index < indices.length; index += 1)
-      direction[indices[index]!] = -delta[index]!;
-    const next = lineSearchWolfe(current, direction, state, constraints);
-    if (!next) break;
-    current = next.nextValues;
-    state = next.next;
-  }
-  return current;
+  const constrained = yield* solveConstrainedDragStage({
+    program,
+    hardConstraints,
+    objective: [
+      ...input.dragConstraints,
+      createMinimumMotionAnchorConstraint({
+        id: `constraint_drag_minimum_motion_${input.constraintLabel}` as ConstraintId,
+        parameterCount,
+        anchorValues: previousFrame,
+        variableIndices: nonDraggedVariableIndices,
+        weight: DRAG_MINIMUM_MOTION_EPSILON,
+        parameterProjection: program.system.parameterProjection,
+      }),
+    ],
+    start: input.startValues ?? session.values,
+    invariants: frameInvariants(),
+    variables: solvedVariables,
+  });
+  // A refused step (it reached a boundary, or could not move) yields no
+  // candidate, so no re-check of its values can accept the frame.
+  if (!constrained || constrained.kind === "refused") return null;
+  return exactReach(judge(candidateOf(constrained.values)));
 }
 
 export function* solveDraggedPointFrame(input: {
@@ -502,7 +274,6 @@ export function* solveDraggedPointFrame(input: {
   dragTarget: SketchDraggedPointTarget;
   startValues?: Float64Array;
   exactReachTolerance?: number;
-  reuseCurvature?: boolean;
   repeatsAcceptedFrame?: boolean;
 }): SolveSteps<DraggedPointCandidate | null> {
   const { session, component, dragTarget } = input;
@@ -537,7 +308,6 @@ export function* solveDraggedPointFrame(input: {
               dragTarget,
             )!,
           },
-    reuseCurvature: input.reuseCurvature,
     repeatsAcceptedFrame: input.repeatsAcceptedFrame,
   });
 }
@@ -549,7 +319,6 @@ export function* solveDragFrameGeneralWithRebuild(input: {
   session: SketchCompiledSolveSession;
   resolved: NonNullable<ReturnType<typeof resolveDragTargetFrame>>;
   constraintLabel: string;
-  reuseCurvature: boolean;
 }): SolveSteps<DraggedPointCandidate | null> {
   const { session, resolved, constraintLabel } = input;
   return yield* solveWithRebuildRetrySteps<DraggedPointCandidate | null>({
@@ -562,7 +331,6 @@ export function* solveDragFrameGeneralWithRebuild(input: {
         dragConstraints: resolved.constraints,
         draggedVariableIndices: resolved.draggedVariableIndices,
         constraintLabel,
-        reuseCurvature: input.reuseCurvature,
       }),
     retry: (from) =>
       solveDragFrameGeneral({

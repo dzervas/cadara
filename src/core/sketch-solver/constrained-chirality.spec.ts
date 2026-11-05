@@ -5,23 +5,23 @@ import {
   chiralityMargin,
   deriveChiralityInvariants,
 } from "./constrained-chirality";
-import { guardedArcQuantities } from "./drag-acceptance";
+import { guardedArcQuantities } from "./drag-branch-observations.fixtures";
 import {
-  dragConditioningFixture,
-  startConditioningReplay,
-} from "./solver-drag-conditioning.fixtures";
+  dragReplayFixture,
+  startDragReplay,
+} from "./solver-drag-replay.fixtures";
 import { createCompiledSketchSolveSession } from "./start-session";
 import { updateCompiledSketchSolveSession } from "./update-session";
 
 // Logic lane: compiled drag sessions and row data; no scheduler or DOM.
 
-const corner = dragConditioningFixture.cases.find(
+const corner = dragReplayFixture.cases.find(
   (row) => row.scenario === "drag-corner",
 )!;
 
 /** The k5d two-target corner: settle target 0, then target 1 (both drag the bottom-left corner). */
-function secondPreview(dragStep: "penalty" | "constrained") {
-  const session = startConditioningReplay(corner, { dragStep });
+function secondPreview() {
+  const session = startDragReplay(corner);
   const settle = (target: (typeof corner.targets)[number][0]) => {
     let kind = "pending";
     for (let calls = 0; kind === "pending" && calls < 40; calls += 1)
@@ -54,8 +54,7 @@ function secondPreview(dragStep: "penalty" | "constrained") {
 }
 
 test("the constrained step: the k5d second corner preview either moves the dragged corner on the accepted branch or is refused, never solved without motion", () => {
-  expect(secondPreview("penalty").kind).toBe("blocked");
-  const constrained = secondPreview("constrained");
+  const constrained = secondPreview();
   expect(
     constrained.after.sides.map(([key, side]) => [key, Math.sign(side)]),
     "Fillet 17 keeps its sides",
@@ -80,7 +79,7 @@ test("the constrained step: the k5d second corner preview either moves the dragg
 });
 
 test("row-derived invariants: each margin is nonnegative where derived and its analytic gradient matches central differences", () => {
-  const session = startConditioningReplay(corner, { dragStep: "constrained" });
+  const session = startDragReplay(corner);
   const invariants = deriveChiralityInvariants(
     session.program,
     session.program.system.scalarConstraints,

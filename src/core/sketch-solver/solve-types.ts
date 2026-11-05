@@ -30,33 +30,6 @@ export type SketchSolveStrategy =
   | "gaussNewton"
   | "levenbergMarquardt";
 
-/**
- * cadara-p4r5.2: how a drag frame stage moves the geometry (default
- * "penalty"):
- * - "penalty": phases A and B (hard rows, soft goal and minimum-motion anchor
- *   in one BFGS objective, then a hard-row projection when A is refused);
- * - "constrained": the equality-constrained minimum-motion step
- *   (`solveConstrainedMinimumMotionSteps`: the goal and the anchor minimised
- *   subject to the hard rows), with phases A and B only for a frame where
- *   that step is unavailable. The row-derived branch invariants
- *   (`deriveChiralityInvariants`) and the row layer's validity inequalities,
- *   not the entity flip/collapse guard, keep it on the accepted branch: a
- *   frame whose step reaches one is refused ("block": the drag stops at the
- *   boundary). Experimental; measured on the k5d study harness.
- * Test-only override: `CADARA_SKETCH_DRAG_CONSTRAINED_STEP=1` in the process
- * environment (read once at module load) makes "constrained" the default of
- * every compiled program; the study harness has no other way to set it.
- * Any Node/Bun process honours it (the CLI too; browsers have no
- * `process`); remove it when the flag is promoted or dropped.
- */
-export type SketchDragStep = "penalty" | "constrained";
-
-export const DEFAULT_SKETCH_DRAG_STEP: SketchDragStep =
-  (globalThis as { process?: { env?: Record<string, string | undefined> } })
-    .process?.env?.CADARA_SKETCH_DRAG_CONSTRAINED_STEP === "1"
-    ? "constrained"
-    : "penalty";
-
 export interface SketchDraggedPointTarget {
   kind: "sketchPoint";
   pointId: SketchPointId;
